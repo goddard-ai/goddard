@@ -3,7 +3,7 @@
 //! built with its address, then the accept loop takes an `Arc<Inner>` — no
 //! cycle.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -37,13 +37,19 @@ pub struct Inner {
     pub data_dir: PathBuf,
     proxy_address: SocketAddr,
     proxy_token: String,
+    scoped_tokens: Mutex<HashMap<String, (Uuid, Vec<String>)>>,
     http_mcp_capable_providers: Mutex<HashSet<ProviderKind>>,
     http_mcp_capability_path: PathBuf,
 }
 
 impl Inner {
-    pub fn proxy_token(&self) -> &str {
-        &self.proxy_token
+    pub fn permits(&self, token: &str, integration: &str) -> bool {
+        token == self.proxy_token
+            || self
+                .scoped_tokens
+                .lock()
+                .get(token)
+                .is_some_and(|(_, grants)| grants.iter().any(|id| id == integration))
     }
 
     /// Resolve `/mcp/<id>` to its upstream URL and credential header.
@@ -97,6 +103,7 @@ impl IntegrationService {
             data_dir,
             proxy_address: listener.local_addr()?,
             proxy_token: token,
+            scoped_tokens: Mutex::new(HashMap::new()),
             http_mcp_capable_providers: Mutex::new(http_mcp_capable_providers),
             http_mcp_capability_path,
         });
@@ -154,6 +161,39 @@ impl IntegrationService {
                 )
             })
             .collect()
+    }
+
+    pub(crate) fn scoped_mcp_servers(&self, task: Uuid, grants: &[String]) -> Vec<McpServerSpec> {
+        let settings = self.inner.settings.get();
+        if !settings.integrations_enabled {
+            return Vec::new();
+        }
+        self.revoke_task(task);
+        let token = format!("gms{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        self.inner
+            .scoped_tokens
+            .lock()
+            .insert(token.clone(), (task, grants.to_vec()));
+        // Override every managed entry, including denied ones inherited from
+        // provider files. The proxy denies endpoints outside this token's grants.
+        settings
+            .integrations
+            .iter()
+            .map(|setting| {
+                McpServerSpec::http(
+                    super::server_name(&setting.id),
+                    self.endpoint_url(&setting.id),
+                    token.clone(),
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn revoke_task(&self, task: Uuid) {
+        self.inner
+            .scoped_tokens
+            .lock()
+            .retain(|_, (owner, _)| *owner != task);
     }
 
     pub(crate) fn http_mcp_supported(&self, provider: ProviderKind) -> bool {
@@ -353,4 +393,36 @@ fn load_http_mcp_capable_providers(path: &Path) -> HashSet<ProviderKind> {
         .copied()
         .filter(|provider| super::deliver::uses_acp(*provider) && ids.contains(provider.id()))
         .collect()
+}
+
+#[cfg(test)]
+mod boss_tests {
+    use super::*;
+
+    #[test]
+    fn boss_scoped_mcp_credentials_limit_endpoints_and_expire() {
+        let root = std::env::temp_dir().join(format!("boss-mcp-{}", Uuid::new_v4()));
+        let settings = Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap());
+        let mut document = settings.get();
+        document.integrations_enabled = true;
+        settings.replace(document).unwrap();
+        let service = IntegrationService::new(settings, root.clone()).unwrap();
+        let task = Uuid::new_v4();
+        service.scoped_mcp_servers(task, &["linear".into()]);
+        let token = service
+            .inner
+            .scoped_tokens
+            .lock()
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        assert!(service.inner.permits(&token, "linear"));
+        assert!(!service.inner.permits(&token, "github"));
+        assert!(!service.inner.permits("unknown", "linear"));
+        assert!(service.inner.permits(service.proxy_token(), "github"));
+        service.revoke_task(task);
+        assert!(!service.inner.permits(&token, "linear"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

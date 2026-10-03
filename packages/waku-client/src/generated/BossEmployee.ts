@@ -6,4 +6,4 @@ export type BossEmployee = { sessionId: string, supervisorId: string, identity: 
 /**
  * The grants assigned when this employee was summoned.
  */
-permissions: PersonaPermissions, expired: boolean, };
+permissions: PersonaPermissions, knowledgeFiles: Array<string>, expired: boolean, };

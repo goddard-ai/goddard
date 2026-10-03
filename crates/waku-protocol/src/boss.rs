@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::model::{AgentSession, ProviderKind, RuntimeMode};
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossIdentity {
@@ -41,6 +43,8 @@ pub struct BossEmployee {
     pub persona_id: Uuid,
     /// The grants assigned when this employee was summoned.
     pub permissions: PersonaPermissions,
+    #[serde(default)]
+    pub knowledge_files: Vec<String>,
     pub expired: bool,
 }
 
@@ -70,12 +74,50 @@ pub struct BossFile {
 )]
 pub enum BossOperation {
     View,
-    Rename { name: String },
-    UpsertPersona { persona: BossPersona },
-    ListFiles { path: String },
-    ReadFile { path: String },
-    WriteFile { path: String, content: String },
-    CreateFolder { path: String },
+    Open {
+        project_id: Uuid,
+        provider: ProviderKind,
+        model: Option<String>,
+        mode: RuntimeMode,
+    },
+    Summon {
+        persona_id: Uuid,
+        name: String,
+        prompt: String,
+        project: String,
+        #[serde(default)]
+        provider: Option<ProviderKind>,
+        #[serde(default)]
+        model: Option<String>,
+    },
+    Control {
+        session_id: Uuid,
+        action: EmployeeControl,
+    },
+    Transcript {
+        session_id: Uuid,
+        #[serde(default)]
+        turn: Option<usize>,
+    },
+    Rename {
+        name: String,
+    },
+    UpsertPersona {
+        persona: BossPersona,
+    },
+    ListFiles {
+        path: String,
+    },
+    ReadFile {
+        path: String,
+    },
+    WriteFile {
+        path: String,
+        content: String,
+    },
+    CreateFolder {
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -85,8 +127,32 @@ pub enum BossOperation {
     rename_all_fields = "camelCase"
 )]
 pub enum BossResult {
-    State { state: BossState },
-    Files { files: Vec<BossFile> },
-    File { path: String, content: String },
+    State {
+        state: BossState,
+    },
+    Files {
+        files: Vec<BossFile>,
+    },
+    File {
+        path: String,
+        content: String,
+    },
     Saved,
+    Session {
+        session: Box<AgentSession>,
+    },
+    Summoned {
+        session_id: Uuid,
+    },
+    Transcript {
+        transcript: crate::model::AgentSessionTranscript,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum EmployeeControl {
+    Prompt { prompt: String },
+    Steer { prompt: String },
+    Stop,
 }

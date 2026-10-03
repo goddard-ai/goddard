@@ -7,7 +7,8 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
-    BossFile, BossIdentity, BossOperation, BossPersona, BossResult, BossState, PersonaPermissions,
+    BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossResult, BossState,
+    PersonaPermissions,
 };
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -16,6 +17,10 @@ pub struct BossService {
     root: PathBuf,
     state: Mutex<BossState>,
     notifier: Mutex<Option<crate::share::TaskNotifier>>,
+    pub(crate) operation_lock: Mutex<()>,
+    backend: Mutex<std::sync::Weak<crate::daemon::WakuBackend>>,
+    interrupted: Mutex<Vec<Uuid>>,
+    injected: Mutex<std::collections::HashSet<Uuid>>,
 }
 
 impl BossService {
@@ -31,8 +36,19 @@ impl BossService {
         };
         let service = Self {
             root,
+            interrupted: Mutex::new(
+                state
+                    .employees
+                    .iter()
+                    .filter(|entry| !entry.expired)
+                    .map(|entry| entry.session_id)
+                    .collect(),
+            ),
             state: Mutex::new(state),
             notifier: Mutex::new(None),
+            operation_lock: Mutex::new(()),
+            backend: Mutex::new(std::sync::Weak::new()),
+            injected: Mutex::new(std::collections::HashSet::new()),
         };
         service.save(&service.state.lock())?;
         Ok(service)
@@ -58,6 +74,232 @@ impl BossService {
             .any(|employee| employee.session_id == session)
     }
 
+    pub fn is_managed(&self, session: Uuid) -> bool {
+        self.is_boss(session) || self.is_employee(session)
+    }
+
+    pub fn employee(&self, session: Uuid) -> Option<BossEmployee> {
+        self.state
+            .lock()
+            .employees
+            .iter()
+            .find(|entry| entry.session_id == session)
+            .cloned()
+    }
+
+    pub fn require_active(&self, session: Uuid) -> anyhow::Result<()> {
+        if self.employee(session).is_some_and(|entry| entry.expired) {
+            bail!("employee has expired; summon a new employee for another job");
+        }
+        Ok(())
+    }
+
+    pub fn require_control(&self, caller: Option<Uuid>, target: Uuid) -> anyhow::Result<()> {
+        let employee = self
+            .employee(target)
+            .ok_or_else(|| anyhow!("not a Boss employee"))?;
+        if caller.is_some_and(|caller| !self.is_boss(caller) && employee.supervisor_id != caller) {
+            bail!("only the boss or this employee's supervisor can control it");
+        }
+        if let Some(caller) = caller {
+            self.require_active(caller)?;
+        }
+        Ok(())
+    }
+
+    pub fn authorize_transcript(&self, caller: Option<Uuid>, target: Uuid) -> anyhow::Result<()> {
+        let Some(caller) = caller else {
+            return Ok(());
+        };
+        if caller == target || self.is_boss(caller) {
+            return Ok(());
+        }
+        let state = self.document();
+        let mut current = target;
+        for _ in 0..state.employees.len() {
+            let Some(employee) = state
+                .employees
+                .iter()
+                .find(|entry| entry.session_id == current)
+            else {
+                break;
+            };
+            if employee.supervisor_id == caller {
+                return Ok(());
+            }
+            current = employee.supervisor_id;
+        }
+        bail!("persona does not grant access to this transcript")
+    }
+
+    pub fn prepare_employee(
+        &self,
+        caller: Uuid,
+        persona_id: Uuid,
+        name: String,
+    ) -> anyhow::Result<BossEmployee> {
+        validate_name(&name)?;
+        let state = self.document();
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == persona_id)
+            .ok_or_else(|| anyhow!("unknown persona"))?;
+        let mut permissions = persona.permissions.clone();
+        let mut knowledge_files = persona.knowledge_files.clone();
+        let name = if state.session_id != Some(caller) {
+            let parent = state
+                .employees
+                .iter()
+                .find(|entry| entry.session_id == caller)
+                .ok_or_else(|| {
+                    anyhow!("only the boss or a permitted employee can summon employees")
+                })?;
+            if parent.expired || !parent.permissions.summon_employees {
+                bail!("this persona cannot summon employees");
+            }
+            if parent.persona_id != persona_id {
+                bail!("employees inherit their supervisor's boss-assigned persona");
+            }
+            permissions.memory_folders.retain(|folder| {
+                parent
+                    .permissions
+                    .memory_folders
+                    .iter()
+                    .any(|grant| Path::new(folder).starts_with(grant))
+            });
+            permissions
+                .integration_ids
+                .retain(|id| parent.permissions.integration_ids.contains(id));
+            permissions.summon_employees &= parent.permissions.summon_employees;
+            permissions.computer_use &= parent.permissions.computer_use;
+            knowledge_files.retain(|path| self.authorize_file(Some(caller), path, false).is_ok());
+            format!("{} helper", parent.identity.name)
+        } else {
+            name.trim().to_owned()
+        };
+        let id = Uuid::new_v4();
+        Ok(BossEmployee {
+            session_id: id,
+            supervisor_id: caller,
+            identity: BossIdentity {
+                id,
+                name,
+                avatar_seed: id.to_string(),
+            },
+            persona_id,
+            permissions,
+            knowledge_files,
+            expired: false,
+        })
+    }
+
+    pub fn workspace(&self, session: Uuid) -> anyhow::Result<PathBuf> {
+        let path = if self.is_boss(session) {
+            self.root.join("files")
+        } else {
+            self.root.join("workspaces").join(session.to_string())
+        };
+        fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    pub fn reset_context(&self, session: Uuid) {
+        self.injected.lock().remove(&session);
+    }
+
+    pub fn prompt_with_context(&self, session: Uuid, prompt: String) -> String {
+        if !self.is_managed(session) || !self.injected.lock().insert(session) {
+            return prompt;
+        }
+        let state = self.document();
+        let employee = state
+            .employees
+            .iter()
+            .find(|entry| entry.session_id == session);
+        let persona_id = employee
+            .map(|entry| entry.persona_id)
+            .unwrap_or(state.persona_id);
+        let Some(persona) = state.personas.iter().find(|entry| entry.id == persona_id) else {
+            return prompt;
+        };
+        let role = if let Some(employee) = employee {
+            format!(
+                "You are employee {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire.",
+                employee.identity.name,
+                employee.supervisor_id,
+                serde_json::to_string(&employee.permissions).unwrap_or_default(),
+                employee.knowledge_files.join(", ")
+            )
+        } else {
+            format!(
+                "You are {}, the boss for this daemon. Prefer to summon employees promptly for execution so you remain available to the human. You control personas and all employees. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, upsertPersona, listFiles, readFile, writeFile, createFolder, rename. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Do not wait synchronously for employees: return to the human; their indexed results will arrive. There are no managers.",
+                state.identity.name,
+                state.persona_id,
+                self.root.join("files").display()
+            )
+        };
+        format!(
+            "<boss-persona>\n{}\n\n{}\n</boss-persona>\n\n{prompt}",
+            persona.markdown, role
+        )
+    }
+
+    pub fn bind_backend(&self, backend: &std::sync::Arc<crate::daemon::WakuBackend>) {
+        *self.backend.lock() = std::sync::Arc::downgrade(backend);
+    }
+
+    pub fn recover_interrupted(&self) {
+        let ids = std::mem::take(&mut *self.interrupted.lock());
+        if ids.is_empty() {
+            return;
+        }
+        if let Some(backend) = self.backend.lock().upgrade() {
+            let _ = std::thread::Builder::new()
+                .name("boss-recover-employees".into())
+                .spawn(move || {
+                    for id in ids {
+                        if let Err(error) = backend.finish_boss_employee(id) {
+                            eprintln!("could not recover interrupted employee {id}: {error:#}");
+                        }
+                    }
+                });
+        }
+    }
+
+    pub fn note_settled(&self, session: Uuid) {
+        if !self.employee(session).is_some_and(|entry| !entry.expired) {
+            return;
+        }
+        if let Some(backend) = self.backend.lock().upgrade() {
+            // Never join or shut down a driver from its own forwarder.
+            let _ = std::thread::Builder::new()
+                .name("boss-employee-finish".into())
+                .spawn(move || {
+                    if let Err(error) = backend.finish_boss_employee(session) {
+                        eprintln!("could not settle Boss employee {session}: {error:#}");
+                    }
+                });
+        }
+    }
+
+    pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
+        let mut employee = None;
+        self.update(|state| {
+            if let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session && !entry.expired)
+            {
+                entry.expired = true;
+                employee = Some(entry.clone());
+            }
+            Ok(())
+        })?;
+        self.reset_context(session);
+        Ok(employee)
+    }
+
     fn require_owner(&self, caller: Option<Uuid>) -> anyhow::Result<()> {
         if caller.is_some_and(|id| !self.is_boss(id)) {
             bail!("only the boss or a human can change personas and Boss files");
@@ -71,6 +313,12 @@ impl BossService {
         operation: BossOperation,
     ) -> anyhow::Result<BossResult> {
         match operation {
+            BossOperation::Open { .. }
+            | BossOperation::Summon { .. }
+            | BossOperation::Control { .. }
+            | BossOperation::Transcript { .. } => {
+                bail!("runtime operation requires daemon dispatch")
+            }
             BossOperation::View => {
                 let mut state = self.document();
                 if let Some(caller) = caller.filter(|id| !self.is_boss(*id)) {
@@ -251,7 +499,7 @@ impl BossService {
             .iter()
             .map(|folder| format!("memory/{folder}"))
             .any(|folder| path == folder || path.starts_with(&format!("{folder}/")))
-            || persona.knowledge_files.iter().any(|file| file == path)
+            || employee.knowledge_files.iter().any(|file| file == path)
             || path == format!("personas/{}/PERSONA.md", persona.id);
         // Directory discovery reveals only ancestors of a granted file/folder.
         let ancestor = directory
@@ -261,7 +509,7 @@ impl BossService {
                     .memory_folders
                     .iter()
                     .map(|folder| format!("memory/{folder}"))
-                    .chain(persona.knowledge_files.iter().cloned())
+                    .chain(employee.knowledge_files.iter().cloned())
                     .any(|file| file.starts_with(&format!("{path}/"))));
         if !permitted && !ancestor {
             bail!("persona does not grant access to this Boss file");
@@ -402,6 +650,7 @@ mod tests {
                         memory_folders: vec!["work".into()],
                         ..Default::default()
                     },
+                    knowledge_files: Vec::new(),
                     expired: false,
                 });
                 Ok(())
@@ -487,6 +736,82 @@ mod tests {
                 )
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn delegation_cannot_expand_grants_and_expired_employees_cannot_delegate() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        let persona = service.document().personas[1].id;
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                let persona = state
+                    .personas
+                    .iter_mut()
+                    .find(|entry| entry.id == persona)
+                    .unwrap();
+                persona.permissions.memory_folders = vec!["work".into()];
+                persona.permissions.summon_employees = true;
+                Ok(())
+            })
+            .unwrap();
+        let parent = service
+            .prepare_employee(boss, persona, "Release".into())
+            .unwrap();
+        let parent_id = parent.session_id;
+        service
+            .update(|state| {
+                state.employees.push(parent);
+                Ok(())
+            })
+            .unwrap();
+        service
+            .update(|state| {
+                let persona = state
+                    .personas
+                    .iter_mut()
+                    .find(|entry| entry.id == persona)
+                    .unwrap();
+                persona.permissions.memory_folders.push("private".into());
+                persona.permissions.computer_use = true;
+                persona.permissions.integration_ids.push("linear".into());
+                Ok(())
+            })
+            .unwrap();
+        let child = service
+            .prepare_employee(parent_id, persona, "Child".into())
+            .unwrap();
+        assert_eq!(child.permissions.memory_folders, vec!["work"]);
+        assert!(!child.permissions.computer_use);
+        assert!(child.permissions.integration_ids.is_empty());
+        let child_id = child.session_id;
+        service
+            .update(|state| {
+                state.employees.push(child);
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            service
+                .authorize_transcript(Some(parent_id), child_id)
+                .is_ok()
+        );
+        assert!(service.authorize_transcript(Some(child_id), boss).is_err());
+        assert!(
+            service
+                .authorize_transcript(Some(Uuid::new_v4()), child_id)
+                .is_err()
+        );
+        assert!(service.expire(parent_id).unwrap().is_some());
+        assert!(service.expire(parent_id).unwrap().is_none());
+        assert!(
+            service
+                .prepare_employee(parent_id, persona, "Again".into())
+                .is_err()
+        );
+        assert!(service.require_active(parent_id).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

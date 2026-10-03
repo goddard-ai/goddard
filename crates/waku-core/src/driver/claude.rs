@@ -226,8 +226,14 @@ impl ClaudeDriver {
         )?;
 
         let mut system_appendix: Vec<String> = Vec::new();
-        if let Some(runtime) = &computer_use {
-            let config_path = runtime.config.process_directory.join("claude-mcp.json");
+        let mcp_directory = computer_use
+            .as_ref()
+            .map(|runtime| &runtime.config.process_directory)
+            .or_else(|| agent.as_ref().map(|agent| &agent.shim_directory));
+        if !mcp_servers.is_empty()
+            && let Some(directory) = mcp_directory
+        {
+            let config_path = directory.join("claude-mcp.json");
             std::fs::write(
                 &config_path,
                 serde_json::to_vec(&json!({
@@ -235,6 +241,8 @@ impl ClaudeDriver {
                 }))?,
             )?;
             command.args(["--mcp-config", &config_path.to_string_lossy()]);
+        }
+        if let Some(runtime) = &computer_use {
             system_appendix.push(super::computer_use::hint(&runtime.config.skill_path));
         }
         if let Some(agent) = &agent {

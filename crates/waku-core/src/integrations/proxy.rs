@@ -193,15 +193,6 @@ fn read_line(stream: &mut TcpStream, buffered: &mut Vec<u8>) -> anyhow::Result<S
 }
 
 fn handle(stream: &mut TcpStream, request: Request, inner: &Arc<Inner>) -> anyhow::Result<()> {
-    let authorized = request
-        .headers
-        .iter()
-        .find(|(n, _)| n.eq_ignore_ascii_case("authorization"))
-        .is_some_and(|(_, v)| v == &format!("Bearer {}", inner.proxy_token()));
-    if !authorized {
-        write_simple(stream, 401, "missing or invalid proxy token");
-        return Ok(());
-    }
     let id = request
         .path
         .strip_prefix("/mcp/")
@@ -211,6 +202,17 @@ fn handle(stream: &mut TcpStream, request: Request, inner: &Arc<Inner>) -> anyho
         write_simple(stream, 404, "unknown integration endpoint");
         return Ok(());
     };
+
+    let authorized = request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        .and_then(|(_, value)| value.strip_prefix("Bearer "))
+        .is_some_and(|token| inner.permits(token, &id));
+    if !authorized {
+        write_simple(stream, 401, "missing token or integration not granted");
+        return Ok(());
+    }
 
     match inner.upstream(&id) {
         Ok(Some(upstream)) => relay(stream, request, upstream, inner),

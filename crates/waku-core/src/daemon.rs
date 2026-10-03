@@ -753,6 +753,7 @@ impl WakuBackend {
     /// left open, then tick. Called once by the daemon executable before it
     /// starts serving — the service needs the backend's `Arc` for dispatch.
     pub fn start_automations(self: &Arc<Self>) {
+        self.boss.bind_backend(self);
         self.automations.start(self);
         self.auto_prompts.start(self);
     }
@@ -1575,6 +1576,7 @@ impl Backend for WakuBackend {
 
     fn set_event_source(&self, events: EventSink) {
         *self.event_source.lock() = events.clone();
+        self.boss.recover_interrupted();
         self.automations.set_event_source(events.clone());
         self.auto_prompts.set_event_source(events.clone());
         // The reaper starts with the event hub: retiring a runtime needs a
@@ -1719,7 +1721,7 @@ impl Backend for WakuBackend {
         let runtime_id = request.runtime_id;
         match request.command {
             Command::Boss { operation } => Ok(ResponsePayload::Boss {
-                result: self.boss.handle(agent, operation)?,
+                result: self.handle_boss_operation(agent, operation, &events)?,
             }),
             Command::ClaimManagedGoalTurn { goal_id, turn_id } => {
                 let mut claims = self.managed_goal_claims.lock();
@@ -2348,7 +2350,10 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == session_id)
                     {
-                        if !session.detail_loaded {
+                        if self.boss.is_managed(session_id) {
+                            merge_stale_session_metadata(existing, session);
+                            true
+                        } else if !session.detail_loaded {
                             merge_session_list_columns(
                                 existing,
                                 session,
@@ -3257,13 +3262,23 @@ impl Backend for WakuBackend {
                     // the only record of the prompt — a follower that only
                     // knew the provider's `turnStarted` used to persist a
                     // projection without it, erasing the message for everyone.
-                    events.send(event_to_wire(DriverEvent::PromptSubmitted {
+                    self.boss.require_active(session_id)?;
+                    let submitted = DriverEvent::PromptSubmitted {
                         message: prompt.clone(),
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
                         message_id: message_id.unwrap_or_else(Uuid::new_v4),
                         sent_by_task: None,
                         hidden: *hidden,
-                    })?)?;
+                    };
+                    if self.boss.is_managed(session_id) {
+                        record_boss_event(
+                            &self.task_state,
+                            &self.task_store,
+                            session_id,
+                            &submitted,
+                        )?;
+                    }
+                    events.send(event_to_wire(submitted)?)?;
                 }
                 let mut command = command;
                 if let Command::Prompt { prompt, hidden, .. } = &mut command
@@ -3275,6 +3290,9 @@ impl Backend for WakuBackend {
                         // clean — and the session's context blocks follow as
                         // a hidden steer.
                         let task = prompt.clone();
+                        *prompt = self
+                            .boss
+                            .prompt_with_context(session_id, std::mem::take(prompt));
                         let result = handle_driver_command(&driver, command);
                         self.steer_first_prompt_context(session_id, &task, &driver, &events);
                         return result;
@@ -3293,7 +3311,12 @@ impl Backend for WakuBackend {
                         // accept echo to wait on.
                         self.agent.mark_parent_index_prepended(session_id);
                     }
-                    *prompt = self.memory.prompt_with_memory(session_id, prompt);
+                    *prompt = if self.boss.is_managed(session_id) {
+                        self.boss
+                            .prompt_with_context(session_id, std::mem::take(prompt))
+                    } else {
+                        self.memory.prompt_with_memory(session_id, prompt)
+                    };
                 }
                 if let Command::Steer {
                     prompt,
@@ -4360,6 +4383,9 @@ impl WakuBackend {
     ) -> anyhow::Result<ResponsePayload> {
         let caller =
             agent.ok_or_else(|| anyhow!("agent rename requires a scoped task credential"))?;
+        if self.boss.is_managed(caller) {
+            bail!("Boss identity names are controlled through Boss operations");
+        }
         if title.trim().is_empty() {
             bail!("a task title cannot be empty");
         }
@@ -4457,6 +4483,9 @@ impl WakuBackend {
     /// for scoped credentials — a client holding the master token already has
     /// full `updateSettings` access, so the flag must not gate it.
     fn require_agent_settings(&self, agent: Option<Uuid>) -> anyhow::Result<()> {
+        if agent.is_some_and(|id| self.boss.is_managed(id)) {
+            bail!("Boss roles cannot change daemon settings");
+        }
         if agent.is_some() && !self.settings.get().agent_settings_enabled {
             bail!("agent settings commands are disabled on this daemon");
         }
@@ -4544,6 +4573,17 @@ impl WakuBackend {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
         let mut options = options;
+        self.boss.require_active(session_id)?;
+        let managed = self.boss.is_managed(session_id);
+        if managed {
+            options.cwd = self.boss.workspace(session_id)?;
+            self.boss.reset_context(session_id);
+            options.read_own_transcript = true;
+            options.computer_use_enabled &= self
+                .boss
+                .employee(session_id)
+                .is_some_and(|employee| employee.permissions.computer_use);
+        }
         // A projectless workspace is daemon-owned scratch state: its
         // directory can vanish between draft creation and the first prompt —
         // emptied trash, an archive sweep, a client that provisioned it on a
@@ -4596,9 +4636,15 @@ impl WakuBackend {
         // The native helper and the REPL approval channel live on this host.
         // A cloud process or sandbox guest cannot reach either one directly.
         options.computer_use_enabled &= !cloud_launch && !environment.is_sandbox();
+        if managed && cloud_launch {
+            bail!("Boss roles require a provider runtime that can reach this daemon");
+        }
         if !cloud_launch {
             match self.agent_launch_env(session_id) {
                 Ok(launch) => options.agent = Some(launch),
+                Err(error) if managed => {
+                    return Err(error.context("Boss requires its scoped agent surface"));
+                }
                 Err(error) => eprintln!(
                     "goddard-daemon: agent surface unavailable for session {session_id}: {error:#}"
                 ),
@@ -4609,7 +4655,7 @@ impl WakuBackend {
         // routing and subagents share one user-editable map. Do not hand a
         // no-op driver the roster: that makes an enabled experiment look
         // successful while the provider silently ignores it.
-        if !cloud_launch && daemon_settings.subagents_enabled {
+        if !managed && !cloud_launch && daemon_settings.subagents_enabled {
             match crate::subagents::support_for(provider) {
                 crate::subagents::SupportLevel::Unsupported => {
                     if let Ok(wire) = event_to_wire(DriverEvent::localized_error(localized!(
@@ -4650,7 +4696,23 @@ impl WakuBackend {
         }
         // Connected integrations keep their provider-neutral MCP descriptions.
         // Computer Use is owned separately by the task-scoped CLI service.
-        options.mcp_servers = if cloud_launch {
+        options.mcp_servers = if managed {
+            let grants = self
+                .boss
+                .employee(session_id)
+                .map(|employee| employee.permissions.integration_ids)
+                .unwrap_or_default();
+            if crate::integrations::deliver::uses_acp(provider)
+                && !self.integrations.http_mcp_supported(provider)
+                && daemon_settings.integrations_enabled
+                && !daemon_settings.integrations.is_empty()
+            {
+                bail!(
+                    "this provider cannot yet enforce persona-scoped MCP access; choose a provider with session MCP support"
+                );
+            }
+            self.integrations.scoped_mcp_servers(session_id, &grants)
+        } else if cloud_launch {
             Vec::new()
         } else {
             self.integrations.launch_mcp_servers(provider)
@@ -4757,6 +4819,7 @@ impl WakuBackend {
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
         let automations = self.automations.clone();
+        let boss = self.boss.clone();
         let auto_prompts = self.auto_prompts.clone();
         let memory = self.memory.clone();
         let repo_maps = self.repo_maps.clone();
@@ -4774,6 +4837,7 @@ impl WakuBackend {
                     task_store,
                     sessions,
                     automations,
+                    boss,
                     auto_prompts,
                     memory,
                     repo_maps,
@@ -4818,8 +4882,8 @@ impl WakuBackend {
             daemon_address,
             cli_path,
             shim_directory,
-            task_tools: settings.agent_tools_enabled,
-            settings_writes: settings.agent_settings_enabled,
+            task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
+            settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
         })
     }
 
@@ -4944,6 +5008,9 @@ impl WakuBackend {
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
         self.require_agent_tools()?;
+        if sender.is_some_and(|id| self.boss.is_managed(id)) {
+            bail!("Boss roles summon employees through `goddard-agent boss`, not `create`");
+        }
         let session_id = self.create_agent_task(
             sender,
             selection,
@@ -4971,6 +5038,29 @@ impl WakuBackend {
         base_branch: Option<String>,
         prompt: String,
         events: &EventSink,
+    ) -> anyhow::Result<Uuid> {
+        self.create_agent_task_inner(
+            sender,
+            selection,
+            project,
+            workspace,
+            base_branch,
+            prompt,
+            events,
+            None,
+        )
+    }
+
+    fn create_agent_task_inner(
+        &self,
+        sender: Option<Uuid>,
+        selection: AgentCreateSelection,
+        project: PathBuf,
+        workspace: AgentWorkspace,
+        base_branch: Option<String>,
+        prompt: String,
+        events: &EventSink,
+        employee: Option<waku_protocol::boss::BossEmployee>,
     ) -> anyhow::Result<Uuid> {
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
@@ -5149,6 +5239,14 @@ impl WakuBackend {
                 }
             }
         };
+        if let Some(employee) = employee {
+            session.id = employee.session_id;
+            session.set_title(&employee.identity.name);
+            self.boss.update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })?;
+        }
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
@@ -5174,11 +5272,15 @@ impl WakuBackend {
             // The prompt reaches the provider exactly as typed — title
             // generation and first-prompt echoes stay clean — and the
             // session's context blocks follow as a hidden steer.
-            driver.prompt(prompt.clone());
+            driver.prompt(self.boss.prompt_with_context(session_id, prompt.clone()));
             self.steer_first_prompt_context(session_id, &prompt, &driver, &sink);
         } else {
             let prompt = self.prepend_agent_surface(session_id, &driver, prompt);
-            let prompt = self.memory.prompt_with_memory(session_id, &prompt);
+            let prompt = if self.boss.is_managed(session_id) {
+                self.boss.prompt_with_context(session_id, prompt)
+            } else {
+                self.memory.prompt_with_memory(session_id, &prompt)
+            };
             driver.prompt(prompt);
         }
         Ok(session_id)
@@ -5201,7 +5303,9 @@ impl WakuBackend {
         if self.agent.context_steer_pending(session_id) {
             return;
         }
-        let memory = self.memory.context_block(session_id, task);
+        let memory = (!self.boss.is_managed(session_id))
+            .then(|| self.memory.context_block(session_id, task))
+            .flatten();
         let parent_index = self.side_chat_parent_block(session_id);
         let computer_use_available = self
             .sessions
@@ -5373,6 +5477,259 @@ impl WakuBackend {
         state.sessions[index].quarantined
     }
 
+    fn handle_boss_operation(
+        &self,
+        caller: Option<Uuid>,
+        operation: waku_protocol::boss::BossOperation,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
+        match operation {
+            BossOperation::Open {
+                project_id,
+                provider,
+                model,
+                mode,
+            } => {
+                if caller.is_some() {
+                    bail!("only the human can open the boss");
+                }
+                let _lock = self.boss.operation_lock.lock();
+                let boss = self.boss.document();
+                let mut state = self.task_state.lock();
+                if let Some(id) = boss.session_id {
+                    if let Some(session) =
+                        state.sessions.iter_mut().find(|session| session.id == id)
+                    {
+                        self.task_store.hydrate(session)?;
+                        return Ok(BossResult::Session {
+                            session: Box::new(session.clone()),
+                        });
+                    }
+                }
+                if !state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id)
+                {
+                    bail!("unknown project for boss chat");
+                }
+                let mut session = AgentSession::new(project_id, provider);
+                session.model = model;
+                session.runtime_mode = mode;
+                session.title = boss.identity.name;
+                session.agent_rename_allowed = false;
+                let id = session.id;
+                state.push_session(session.clone());
+                self.task_store.save(&mut state)?;
+                drop(state);
+                self.boss.update(|state| {
+                    state.session_id = Some(id);
+                    Ok(())
+                })?;
+                Ok(BossResult::Session {
+                    session: Box::new(session),
+                })
+            }
+            BossOperation::Summon {
+                persona_id,
+                name,
+                prompt,
+                project,
+                provider,
+                model,
+            } => {
+                let _lock = self.boss.operation_lock.lock();
+                let supervisor = caller
+                    .or(self.boss.document().session_id)
+                    .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
+                let employee = self.boss.prepare_employee(supervisor, persona_id, name)?;
+                let id = employee.session_id;
+                let selection = AgentCreateSelection {
+                    provider,
+                    model,
+                    title: Some(employee.identity.name.clone()),
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                };
+                let prompt = format!(
+                    "Assigned project: {project}\nWork in that project, not your private agent harness directory.\n\n{prompt}"
+                );
+                match self.create_agent_task_inner(
+                    Some(supervisor),
+                    selection,
+                    PathBuf::from(project),
+                    AgentWorkspace::Local,
+                    None,
+                    prompt,
+                    events,
+                    Some(employee),
+                ) {
+                    Ok(session_id) => Ok(BossResult::Summoned { session_id }),
+                    Err(error) => {
+                        // A failed launch may already have persisted a task.
+                        if self.boss.is_employee(id) {
+                            record_boss_event(
+                                &self.task_state,
+                                &self.task_store,
+                                id,
+                                &DriverEvent::Error(format!("Employee launch failed: {error:#}")),
+                            )?;
+                            self.finish_boss_employee(id)?;
+                        }
+                        Err(error)
+                    }
+                }
+            }
+            BossOperation::Control { session_id, action } => {
+                self.boss.require_control(caller, session_id)?;
+                self.boss.require_active(session_id)?;
+                match action {
+                    EmployeeControl::Prompt { prompt } => {
+                        if prompt.trim().is_empty() {
+                            bail!("employee prompts cannot be empty");
+                        }
+                        self.queue_agent_prompt(session_id, prompt, caller, events)?;
+                    }
+                    EmployeeControl::Steer { prompt } => {
+                        if prompt.trim().is_empty() {
+                            bail!("employee prompts cannot be empty");
+                        }
+                        let driver = self
+                            .sessions
+                            .lock()
+                            .get(&session_id)
+                            .map(|entry| entry.driver.clone())
+                            .ok_or_else(|| anyhow!("employee has no running runtime"))?;
+                        if !driver.supports_steer() || !self.agent.has_open_turn(session_id) {
+                            bail!("employee has no steerable running turn");
+                        }
+                        let transport =
+                            agent_prompt_envelope(&self.task_state, session_id, caller, &prompt);
+                        self.agent.record_pending_steer(
+                            session_id,
+                            crate::agent::AgentPrompt {
+                                prompt: prompt.clone(),
+                                transport: transport.clone(),
+                                sender: caller,
+                                queued_id: None,
+                                context: None,
+                                hidden: false,
+                            },
+                        );
+                        driver.steer(transport.unwrap_or(prompt));
+                    }
+                    EmployeeControl::Stop => {
+                        record_boss_event(
+                            &self.task_state,
+                            &self.task_store,
+                            session_id,
+                            &DriverEvent::TurnFinished {
+                                success: false,
+                                summary: Some("Stopped by supervisor".into()),
+                                summary_i18n: None,
+                            },
+                        )?;
+                        self.finish_boss_employee(session_id)?;
+                    }
+                }
+                Ok(BossResult::Saved)
+            }
+            BossOperation::Transcript { session_id, turn } => {
+                self.boss.authorize_transcript(caller, session_id)?;
+                let result = self.agent_read_session(caller, Some(session_id), None, None, turn)?;
+                let ResponsePayload::AgentSessionTranscript { transcript } = result else {
+                    unreachable!()
+                };
+                Ok(BossResult::Transcript { transcript })
+            }
+            operation => {
+                let rename = matches!(operation, BossOperation::Rename { .. });
+                let result = self.boss.handle(caller, operation)?;
+                if rename {
+                    let boss = self.boss.document();
+                    let mut state = self.task_state.lock();
+                    if let Some(session) = state
+                        .sessions
+                        .iter_mut()
+                        .find(|session| Some(session.id) == boss.session_id)
+                    {
+                        session.title = boss.identity.name;
+                        let id = session.id;
+                        state.mark_session_dirty(id);
+                        self.task_store.save(&mut state)?;
+                    }
+                }
+                Ok(result)
+            }
+        }
+    }
+
+    pub(crate) fn finish_boss_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let Some(employee) = self.boss.expire(session_id)? else {
+            return Ok(());
+        };
+        self.integrations.revoke_task(session_id);
+        self.agent.clear_session(session_id);
+        let removed = self.sessions.lock().remove(&session_id);
+        if let Some(entry) = &removed {
+            entry.driver.begin_shutdown();
+            self.event_source
+                .lock()
+                .for_session(session_id, entry.runtime_id)
+                .end_session_runtime();
+        }
+        drop_detached(removed);
+        let index = {
+            let mut state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            self.task_store.hydrate(session)?;
+            if session.active_turn_id().is_some() {
+                session.finish_active_turn(TurnStatus::Interrupted);
+            }
+            if session.status != SessionStatus::Failed {
+                session.status = SessionStatus::Idle;
+            }
+            session.queued_messages.clear();
+            let index = session.transcript_index();
+            state.mark_session_dirty(session_id);
+            self.task_store.save(&mut state)?;
+            index
+        };
+        let mut body = String::new();
+        for (turn, cues) in index {
+            if let Some(turn) = turn {
+                body.push_str(&format!("Turn {turn}:\n"));
+            }
+            for cue in cues {
+                body.push_str(&format!("  {cue}\n"));
+            }
+        }
+        let supervisor = if self
+            .boss
+            .employee(employee.supervisor_id)
+            .is_some_and(|entry| entry.expired)
+        {
+            self.boss.document().session_id
+        } else {
+            Some(employee.supervisor_id)
+        };
+        if let Some(supervisor) = supervisor {
+            let prompt = format!(
+                "Employee {} ({session_id}) has finished and expired. Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
+                employee.identity.name
+            );
+            let events = self.event_source.lock().clone();
+            self.queue_agent_prompt(supervisor, prompt, Some(session_id), &events)?;
+        }
+        Ok(())
+    }
+
     /// `agent prompt`: deliver a message to an existing task, by Waku task
     /// id or provider-native thread id. Queue mode holds the prompt in a
     /// daemon-side per-session queue until the target is idle; steer mode
@@ -5392,6 +5749,10 @@ impl WakuBackend {
             bail!("agent prompts require a prompt");
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
+            self.boss.require_control(sender, target)?;
+            self.boss.require_active(target)?;
+        }
         if self.session_quarantined(target) {
             bail!("received files are quarantined until trusted");
         }
@@ -5550,6 +5911,7 @@ impl WakuBackend {
                 &self.auto_prompts,
                 &self.task_state,
                 &self.task_store,
+                &self.boss,
             )?;
         }
         Ok(())
@@ -5635,6 +5997,9 @@ impl WakuBackend {
             }
             _ => self.resolve_agent_target(task_id, thread_id, provider)?,
         };
+        if self.boss.is_managed(target) || agent.is_some_and(|id| self.boss.is_managed(id)) {
+            self.boss.authorize_transcript(agent, target)?;
+        }
         let in_scope = agent.is_some_and(|caller| {
             caller == target
                 || self
@@ -5646,7 +6011,7 @@ impl WakuBackend {
                     .and_then(|session| session.side_chat_of)
                     == Some(target)
         });
-        if !in_scope {
+        if !in_scope && !agent.is_some_and(|id| self.boss.is_managed(id)) {
             self.require_agent_tools()?;
         }
         let mut state = self.task_state.lock();
@@ -5694,6 +6059,11 @@ impl WakuBackend {
             .find(|session| session.id == caller)
             .map(|session| session.project_id)
             .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+        if self.boss.is_employee(caller) {
+            bail!(
+                "employees retrieve authorized transcripts through the Boss transcript operation"
+            );
+        }
         let matches = self.search_session_messages(
             query,
             AGENT_SEARCH_DEFAULT_LIMIT,
@@ -6718,6 +7088,181 @@ fn spawn_repo_map_refresh(repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>, root: Pat
 /// queue in submission order, a `steerAccepted` echo is annotated with the
 /// sending task, and a dead runtime drops its credential and registry entry
 /// with it.
+/// Managed chats must remain readable without a connected UI. Streaming deltas
+/// update the resident projection; durable writes occur at semantic boundaries.
+fn record_boss_event(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    event: &DriverEvent,
+) -> anyhow::Result<()> {
+    use crate::model::{ActivityItem, MessageRole, ReasoningBlock, TranscriptBlock};
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|entry| entry.id == session_id)
+    else {
+        return Ok(());
+    };
+    task_store.hydrate(session)?;
+    let mut activity = None;
+    match event {
+        DriverEvent::PromptSubmitted {
+            message,
+            turn_id,
+            message_id,
+            sent_by_task,
+            hidden,
+        } => {
+            session.adopt_submitted_prompt(message, *turn_id, *message_id, *sent_by_task, *hidden);
+        }
+        DriverEvent::TurnStarted => {
+            if session.active_turn_id().is_none() {
+                session.begin_provider_turn();
+            }
+            session.mark_active_turn_provider_started();
+            session.status = SessionStatus::Working;
+        }
+        DriverEvent::TurnParked => session.status = SessionStatus::Background,
+        DriverEvent::TextDelta(text) => {
+            let turn = session.active_turn_id();
+            let boundary = session.transcript_blocks.last().is_some_and(|block| {
+                block.turn_id == turn && block.after_message == session.messages.len()
+            });
+            if !boundary
+                && session.messages.last().is_some_and(|message| {
+                    message.role == MessageRole::Assistant && message.turn_id == turn
+                })
+            {
+                session.messages.last_mut().unwrap().content.push_str(text);
+            } else {
+                session.push_message(MessageRole::Assistant, text);
+            }
+        }
+        DriverEvent::ReasoningDelta(text) => {
+            let turn = session.active_turn_id();
+            let reasoning = session
+                .transcript_blocks
+                .last_mut()
+                .filter(|block| {
+                    block.turn_id == turn && block.after_message == session.messages.len()
+                })
+                .and_then(|block| block.activities.last_mut())
+                .and_then(|item| item.reasoning.as_mut());
+            if let Some(reasoning) = reasoning {
+                reasoning.content.push_str(text);
+            } else {
+                activity = Some(ActivityItem::from_reasoning(
+                    ReasoningBlock {
+                        content: text.clone(),
+                        started_at_ms: crate::model::unix_time() * 1000,
+                        finished_at_ms: 0,
+                    },
+                    false,
+                ));
+            }
+        }
+        DriverEvent::Activity {
+            id,
+            kind,
+            title,
+            detail,
+            complete,
+        } => {
+            activity = Some(ActivityItem::new(
+                id.clone(),
+                *kind,
+                title,
+                detail.clone(),
+                *complete,
+            ));
+        }
+        DriverEvent::RichActivity(item) => activity = Some(item.clone()),
+        DriverEvent::Permission { .. } | DriverEvent::UserInputRequested { .. } => {
+            session.status = SessionStatus::Waiting
+        }
+        DriverEvent::TurnFinished {
+            success, summary, ..
+        } => {
+            session.finish_active_turn(if *success {
+                TurnStatus::Completed
+            } else {
+                TurnStatus::Failed
+            });
+            session.status = if *success {
+                SessionStatus::Idle
+            } else {
+                SessionStatus::Failed
+            };
+            if let Some(summary) = summary.as_ref().filter(|_| !*success) {
+                session.push_message(MessageRole::System, summary);
+            }
+            for block in &mut session.transcript_blocks {
+                for item in &mut block.activities {
+                    item.complete = true;
+                    if let Some(reasoning) = &mut item.reasoning {
+                        reasoning.finished_at_ms = crate::model::unix_time() * 1000;
+                    }
+                }
+            }
+        }
+        DriverEvent::Error(message) | DriverEvent::LocalizedError { message, .. } => {
+            session.push_message(MessageRole::System, message);
+            session.status = SessionStatus::Failed;
+        }
+        DriverEvent::ProcessExited => {
+            if session.active_turn_id().is_some() {
+                session.finish_active_turn(TurnStatus::Interrupted);
+            }
+            if session.status.is_busy() {
+                session.status = SessionStatus::Failed;
+            }
+        }
+        _ => return Ok(()),
+    }
+    if let Some(mut item) = activity {
+        let turn = session.active_turn_id();
+        let existing = item.source_id.as_ref().and_then(|id| {
+            session
+                .transcript_blocks
+                .iter_mut()
+                .filter(|block| block.turn_id == turn)
+                .flat_map(|block| &mut block.activities)
+                .find(|stored| stored.source_id.as_ref() == Some(id))
+        });
+        if let Some(existing) = existing {
+            item.id = existing.id;
+            *existing = item;
+        } else {
+            if !session.transcript_blocks.last().is_some_and(|block| {
+                block.turn_id == turn && block.after_message == session.messages.len()
+            }) {
+                session.transcript_blocks.push(TranscriptBlock {
+                    after_message: session.messages.len(),
+                    turn_id: turn,
+                    activities: Vec::new(),
+                });
+            }
+            session
+                .transcript_blocks
+                .last_mut()
+                .unwrap()
+                .activities
+                .push(item);
+        }
+    }
+    session.updated_at = crate::model::unix_time();
+    state.mark_session_dirty(session_id);
+    if !matches!(
+        event,
+        DriverEvent::TextDelta(_) | DriverEvent::ReasoningDelta(_)
+    ) {
+        task_store.save(&mut state)?;
+    }
+    Ok(())
+}
+
 fn forward_driver_events(
     session_id: Uuid,
     runtime_id: Uuid,
@@ -6729,6 +7274,7 @@ fn forward_driver_events(
     task_store: Arc<StateStore>,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     automations: Arc<AutomationService>,
+    boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
     memory: Arc<crate::memory::MemoryService>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
@@ -6740,9 +7286,16 @@ fn forward_driver_events(
         {
             entry.last_active = std::time::Instant::now();
         }
+        if boss.is_managed(session_id) {
+            if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &event) {
+                eprintln!("could not record Boss session {session_id}: {error:#}");
+            }
+        }
         let rejected_steer = agent.note_driver_event(session_id, &event);
         automations.note_driver_event(session_id, &event);
-        if let DriverEvent::TurnFinished { success, .. } = &event {
+        if let DriverEvent::TurnFinished { success, .. } = &event
+            && !boss.is_managed(session_id)
+        {
             auto_prompts.note_turn_finished(session_id, *success);
         }
         let event = match event {
@@ -6866,7 +7419,9 @@ fn forward_driver_events(
             &event,
             DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
         ) {
-            memory.note_session_activity(session_id);
+            if !boss.is_managed(session_id) {
+                memory.note_session_activity(session_id);
+            }
         }
         // Per-token deltas and streaming process output never enter the
         // replay journal: journaled they saturated each runtime's 2048-event
@@ -6878,6 +7433,10 @@ fn forward_driver_events(
             DriverEvent::TextDelta(_)
                 | DriverEvent::ReasoningDelta(_)
                 | DriverEvent::BackgroundWork(BackgroundWorkEvent::OutputDelta { .. })
+        );
+        let settled = matches!(
+            &event,
+            DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
         );
         let wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
@@ -6893,7 +7452,10 @@ fn forward_driver_events(
         if delivered.is_err() {
             break;
         }
-        if drains_queue {
+        if settled {
+            boss.note_settled(session_id);
+        }
+        if drains_queue && !boss.is_employee(session_id) {
             // A restarted daemon rebuilt no in-memory queue — the session
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
@@ -6914,6 +7476,7 @@ fn forward_driver_events(
                     &auto_prompts,
                     &task_state,
                     &task_store,
+                    &boss,
                 ) {
                     eprintln!(
                         "goddard-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
@@ -7105,7 +7668,9 @@ fn deliver_agent_prompt(
     auto_prompts: &AutoPromptService,
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
+    boss: &crate::boss::BossService,
 ) -> anyhow::Result<()> {
+    boss.require_active(session_id)?;
     if agent.has_parked_turn(session_id) && driver.supports_steer() {
         let mut entry = entry;
         entry.transport =
@@ -7142,10 +7707,9 @@ fn deliver_agent_prompt(
         hidden: false,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
-    driver.prompt(
-        agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
-            .unwrap_or(entry.prompt),
-    );
+    let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
+        .unwrap_or(entry.prompt);
+    driver.prompt(boss.prompt_with_context(session_id, prompt));
     Ok(())
 }
 
@@ -9733,6 +10297,7 @@ mod tests {
             task_store.clone(),
             sessions.clone(),
             Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
+            Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
             Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
             crate::memory::MemoryService::new(
                 Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
@@ -9807,6 +10372,7 @@ mod tests {
             task_store.clone(),
             sessions.clone(),
             Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
+            Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
             Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
             crate::memory::MemoryService::new(
                 Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
@@ -10255,5 +10821,73 @@ mod tests {
         );
 
         std::fs::remove_dir_all(root).ok();
+    }
+    #[test]
+    fn boss_transcripts_capture_unopened_employee_turns_and_tool_output() {
+        let root = std::env::temp_dir().join(format!("boss-transcript-{}", Uuid::new_v4()));
+        let store = StateStore::daemon(root.join("app.db"));
+        let state = Mutex::new(PersistedState::fresh(root.clone()));
+        let session_id = state.lock().sessions[0].id;
+        let events = vec![
+            DriverEvent::PromptSubmitted {
+                message: "Run release checks".into(),
+                turn_id: Uuid::new_v4(),
+                message_id: Uuid::new_v4(),
+                sent_by_task: None,
+                hidden: false,
+            },
+            DriverEvent::TurnStarted,
+            DriverEvent::TextDelta("Checking ".into()),
+            DriverEvent::TextDelta("release".into()),
+            DriverEvent::RichActivity(ActivityItem::new(
+                Some("tool-1".into()),
+                crate::model::ActivityKind::Tool,
+                "Tests",
+                None,
+                false,
+            )),
+            DriverEvent::RichActivity(
+                ActivityItem::new(
+                    Some("tool-1".into()),
+                    crate::model::ActivityKind::Tool,
+                    "Tests",
+                    None,
+                    true,
+                )
+                .with_output(Some("All checks passed".into())),
+            ),
+            DriverEvent::TextDelta("Ready".into()),
+            DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            },
+        ];
+        for event in events {
+            record_boss_event(&state, &store, session_id, &event).unwrap();
+        }
+        let mut restored = store.load().unwrap();
+        let session = restored
+            .sessions
+            .iter_mut()
+            .find(|entry| entry.id == session_id)
+            .unwrap();
+        store.hydrate(session).unwrap();
+        assert_eq!(
+            session
+                .messages
+                .iter()
+                .map(|entry| entry.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Run release checks", "Checking release", "Ready"]
+        );
+        assert_eq!(session.transcript_blocks[0].activities.len(), 1);
+        assert_eq!(
+            session.transcript_blocks[0].activities[0].output.as_deref(),
+            Some("All checks passed")
+        );
+        assert_eq!(session.turns[0].status, TurnStatus::Completed);
+        assert!(!session.transcript_index().is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -278,12 +278,16 @@ impl PiDriver {
             command.env("PI_SKIP_VERSION_CHECK", "1");
         }
 
+        let mcp_directory = computer_use
+            .as_ref()
+            .map(|runtime| &runtime.config.process_directory)
+            .or_else(|| agent.as_ref().map(|agent| &agent.shim_directory));
         if flavor == PiFlavor::OhMyPi
-            && let Some(runtime) = computer_use.as_ref()
+            && let Some(directory) = mcp_directory
             && !mcp_servers.is_empty()
         {
             let servers = super::mcp::config_map(&mcp_servers, "http");
-            let mcp_config = runtime.config.process_directory.join("omp-mcp.json");
+            let mcp_config = directory.join("omp-mcp.json");
             std::fs::write(
                 &mcp_config,
                 serde_json::to_vec(&serde_json::json!({

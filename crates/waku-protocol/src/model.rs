@@ -1812,7 +1812,12 @@ pub fn strip_injected_prompt_blocks(text: &str) -> String {
     let mut cleaned = text.to_owned();
     loop {
         let before = cleaned.len();
-        for tag in ["project-map", "project-memory", "goddard-agent"] {
+        for tag in [
+            "project-map",
+            "project-memory",
+            "goddard-agent",
+            "boss-persona",
+        ] {
             let open = format!("<{tag}>");
             let close = format!("</{tag}>");
             while let Some(start) = cleaned.find(&open) {
