@@ -1,0 +1,1 @@
+- Added Japanese and Simplified Chinese translations for Boss and aligned its smaller brain button with the sidebar’s right edge.

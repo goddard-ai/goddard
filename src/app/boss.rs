@@ -688,6 +688,7 @@ impl Waku {
         let theme = Theme::current(cx);
         div()
             .h(px(42.0))
+            .w_full()
             .px(px(8.0))
             .flex()
             .items_center()
@@ -712,11 +713,25 @@ impl Waku {
                     .child(div().truncate().child(state.identity.name.clone())),
             )
             .child(
-                boss_button(format!("boss-brain-{key:?}"), tr!("boss.brain"), &theme)
+                div()
+                    .id(format!("boss-brain-{key:?}"))
+                    .tab_index(0)
+                    .w(px(20.0))
+                    .h(px(20.0))
+                    .flex_shrink_0()
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|style| style.bg(theme.overlay))
+                    .active(|style| style.bg(theme.overlay_strong))
+                    .tooltip(Tooltip::text(tr!("boss.brain")))
                     .on_activation(cx, move |this, window, cx| {
                         this.open_boss_page(key, BossTab::Memory, window, cx)
                     })
-                    .child(icon("icons/brain.svg", 16.0, theme.text_secondary)),
+                    .child(icon("icons/brain.svg", 14.0, theme.text_secondary)),
             )
             .into_any_element()
     }
