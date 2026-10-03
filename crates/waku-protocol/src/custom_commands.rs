@@ -120,6 +120,40 @@ impl CustomCommandIcon {
         Self::Archive,
     ];
 
+    /// The subset personas and employees may wear: everything except `Bot`,
+    /// which stays exclusive to the user's custom commands so managed
+    /// identities never read as robots.
+    pub const EMPLOYEE: [Self; 23] = [
+        Self::Terminal,
+        Self::Command,
+        Self::Zap,
+        Self::Wrench,
+        Self::Gauge,
+        Self::Package,
+        Self::GitBranch,
+        Self::GitHub,
+        Self::Folder,
+        Self::File,
+        Self::Search,
+        Self::Globe,
+        Self::Server,
+        Self::CloudUpload,
+        Self::Download,
+        Self::Sparkle,
+        Self::Star,
+        Self::Target,
+        Self::Queue,
+        Self::Compose,
+        Self::Chart,
+        Self::Refresh,
+        Self::Archive,
+    ];
+
+    /// Whether this icon may represent a persona or employee.
+    pub fn is_employee_icon(self) -> bool {
+        Self::EMPLOYEE.contains(&self)
+    }
+
     /// Icon names are product names and stay untranslated.
     pub fn label(self) -> &'static str {
         match self {

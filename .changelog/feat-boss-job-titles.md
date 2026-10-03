@@ -1,1 +1,1 @@
-- Added job titles beneath Boss and employee names; employees receive stable human names from Goddard while the boss chooses their job titles. Job-specific icons distinguish employee roles in the sidebar and window header.
+- Added job titles beneath Boss and employee names; employees receive stable human names from Goddard while the boss chooses their job titles. Distinct role icons — researcher, developer, bug investigator, reviewer, tester, and more — mark employees in the sidebar and window header; the boss's own entries stay icon-free.

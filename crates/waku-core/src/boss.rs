@@ -614,6 +614,9 @@ impl BossService {
             BossOperation::UpsertPersona { mut persona } => {
                 self.require_owner(caller)?;
                 validate_name(&persona.name)?;
+                if persona.icon.is_some_and(|icon| !icon.is_employee_icon()) {
+                    bail!("persona icon is not in the employee icon set");
+                }
                 if persona.markdown.len() > MAX_FILE_BYTES {
                     bail!("persona is too large");
                 }
@@ -645,6 +648,9 @@ impl BossService {
             }
             BossOperation::SetEmployeeIcon { session_id, icon } => {
                 self.require_owner(caller)?;
+                if icon.is_some_and(|icon| !icon.is_employee_icon()) {
+                    bail!("icon is not in the employee icon set");
+                }
                 self.update(|state| {
                     let employee = state
                         .employees
@@ -1286,6 +1292,42 @@ mod tests {
             )
             .unwrap();
         assert_eq!(service.document().employees[0].icon, None);
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::SetEmployeeIcon {
+                        session_id,
+                        icon: Some(CustomCommandIcon::Bot),
+                    },
+                )
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn personas_reject_icons_outside_the_employee_set() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let mut persona = service.document().personas[0].clone();
+        persona.icon = Some(CustomCommandIcon::Bot);
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::UpsertPersona {
+                        persona: persona.clone()
+                    },
+                )
+                .is_err()
+        );
+        persona.icon = Some(CustomCommandIcon::Search);
+        assert!(
+            service
+                .handle(None, BossOperation::UpsertPersona { persona })
+                .is_ok()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

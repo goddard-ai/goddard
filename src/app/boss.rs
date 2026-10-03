@@ -200,13 +200,17 @@ impl Waku {
                         .insert(employee.session_id, employee.job_title.clone());
                     self.boss_ui.employee_icons.insert(
                         employee.session_id,
-                        employee.icon.or_else(|| {
-                            state
-                                .personas
-                                .iter()
-                                .find(|persona| persona.id == employee.persona_id)
-                                .and_then(|persona| persona.icon)
-                        }),
+                        employee
+                            .icon
+                            .filter(|icon| icon.is_employee_icon())
+                            .or_else(|| {
+                                state
+                                    .personas
+                                    .iter()
+                                    .find(|persona| persona.id == employee.persona_id)
+                                    .and_then(|persona| persona.icon)
+                                    .filter(|icon| icon.is_employee_icon())
+                            }),
                     );
                     self.boss_ui.managed.insert(employee.session_id);
                     if employee.expired {
@@ -720,9 +724,7 @@ impl Waku {
                 .employees
                 .iter()
                 .find(|employee| employee.session_id == session_id)
-                .map(|employee| {
-                    (*key, employee.identity.clone(), employee.job_title.clone())
-                })
+                .map(|employee| (*key, employee.identity.clone(), employee.job_title.clone()))
         })
     }
 
@@ -759,11 +761,7 @@ impl Waku {
     /// Re-roll the managed session's avatar seed — the top bar's
     /// double-click on the face. The boss passes `None`; an employee its
     /// own session id.
-    pub(super) fn regenerate_managed_avatar(
-        &mut self,
-        session_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn regenerate_managed_avatar(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let Some((key, ..)) = self.managed_session_meta(session_id) else {
             return;
         };
@@ -801,14 +799,12 @@ impl Waku {
             .cursor_default()
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .tooltip(Tooltip::text(tr!("boss.new_face")))
-            .on_click(cx.listener(
-                move |this, event: &gpui::ClickEvent, _, cx| {
-                    if event.click_count() == 2 {
-                        this.regenerate_managed_avatar(session_id, cx);
-                        cx.stop_propagation();
-                    }
-                },
-            ))
+            .on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                if event.click_count() == 2 {
+                    this.regenerate_managed_avatar(session_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     this.regenerate_managed_avatar(session_id, cx);
@@ -822,11 +818,11 @@ impl Waku {
                     "session-rename-field-{session_id}"
                 )))
                 .key_context(sidebar::SESSION_RENAME_PARENT_CONTEXT)
-                .on_action(cx.listener(
-                    |this, _: &sidebar::CancelSessionRename, window, cx| {
+                .on_action(
+                    cx.listener(|this, _: &sidebar::CancelSessionRename, window, cx| {
                         this.cancel_session_rename(window, cx);
-                    },
-                ))
+                    }),
+                )
                 .h(px(22.0))
                 .w(px(200.0))
                 .px(px(4.0))
@@ -855,14 +851,14 @@ impl Waku {
                 .cursor_default()
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .tooltip(Tooltip::text(tr!("common.rename")))
-                .on_click(cx.listener(
-                    move |this, event: &gpui::ClickEvent, window, cx| {
+                .on_click(
+                    cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                         if event.click_count() == 2 {
                             this.begin_session_rename(session_id, window, cx);
                             cx.stop_propagation();
                         }
-                    },
-                ))
+                    }),
+                )
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     if event.keystroke.key == "enter" {
                         this.begin_session_rename(session_id, window, cx);
@@ -1260,6 +1256,7 @@ impl Waku {
                 state.identity.name.clone(),
                 subtitle,
                 None,
+                false,
                 &theme,
             ))
             .when(speech_visible, |row| {
@@ -1377,6 +1374,7 @@ impl Waku {
                     .copied()
                     .flatten()
                     .map(crate::custom_commands::icon_path),
+                true,
                 &theme,
             ))
             .when_some(status_indicator, |row, indicator| row.child(indicator))
@@ -1940,7 +1938,7 @@ impl Waku {
                 .child(
                     div().flex().flex_wrap().gap(px(4.0)).children(
                         std::iter::once(None)
-                            .chain(CustomCommandIcon::ALL.into_iter().map(Some))
+                            .chain(CustomCommandIcon::EMPLOYEE.into_iter().map(Some))
                             .map(|choice| {
                                 let selected = editor.icon == choice;
                                 let label = choice.map_or("None", CustomCommandIcon::label);
@@ -2067,6 +2065,7 @@ fn boss_sidebar_label(
     name: String,
     job_title: String,
     job_icon: Option<&'static str>,
+    show_job_icon: bool,
     theme: &Theme,
 ) -> Div {
     div()
@@ -2090,7 +2089,7 @@ fn boss_sidebar_label(
                 .text_size(sp(13.0))
                 .line_height(sp(15.0))
                 .text_color(theme.text_tertiary)
-                .when(!job_title.is_empty(), |row| {
+                .when(show_job_icon && !job_title.is_empty(), |row| {
                     row.child(icon(
                         job_icon.unwrap_or_else(|| job_title_icon(&job_title)),
                         12.0,
@@ -2103,6 +2102,30 @@ fn boss_sidebar_label(
 
 pub(super) fn job_title_icon(title: &str) -> &'static str {
     let categories: &[(&[&str], &str)] = &[
+        (
+            &["bug", "debug", "incident", "investigator", "forensic"],
+            "icons/search.svg",
+        ),
+        (
+            &["integrator", "integration", "merge", "release"],
+            "icons/git-merge.svg",
+        ),
+        (&["review", "reviewer", "inspector"], "icons/eye.svg"),
+        (
+            &["verify", "verifier", "validation", "validator"],
+            "icons/circle-check.svg",
+        ),
+        (
+            &[
+                "tester",
+                "testing",
+                "test",
+                "qa",
+                "quality assurance",
+                "quality engineer",
+            ],
+            "icons/beaker.svg",
+        ),
         (
             &[
                 "engineer",
@@ -2125,7 +2148,7 @@ pub(super) fn job_title_icon(title: &str) -> &'static str {
                 "statistician",
                 "economist",
             ],
-            "icons/beaker.svg",
+            "icons/folder-search.svg",
         ),
         (
             &[
@@ -2143,6 +2166,7 @@ pub(super) fn job_title_icon(title: &str) -> &'static str {
                 "artist",
                 "creative",
                 "illustrator",
+                "designer",
                 "brand",
                 "fashion",
                 "ux",
@@ -2276,10 +2300,6 @@ pub(super) fn job_title_icon(title: &str) -> &'static str {
             "icons/user-round.svg",
         ),
         (
-            &["test", "qa", "quality assurance", "quality engineer"],
-            "icons/check.svg",
-        ),
-        (
             &[
                 "network",
                 "infrastructure",
@@ -2347,7 +2367,29 @@ pub(super) fn job_title_icon(title: &str) -> &'static str {
                 .any(|keyword| title.contains_ascii_case_insensitive(keyword))
         })
         .map(|(_, icon)| *icon)
-        .unwrap_or("icons/bot.svg")
+        .unwrap_or("icons/user-round.svg")
+}
+
+#[cfg(test)]
+mod job_title_icon_tests {
+    use super::job_title_icon;
+
+    #[test]
+    fn common_employee_roles_have_distinct_icons_without_a_bot_fallback() {
+        assert_eq!(job_title_icon("Researcher"), "icons/folder-search.svg");
+        assert_eq!(
+            job_title_icon("Rust developer"),
+            "icons/terminal-square.svg"
+        );
+        assert_eq!(job_title_icon("Bug investigator"), "icons/search.svg");
+        assert_eq!(job_title_icon("Integrator"), "icons/git-merge.svg");
+        assert_eq!(job_title_icon("Verifier"), "icons/circle-check.svg");
+        assert_eq!(job_title_icon("Writer"), "icons/file-text.svg");
+        assert_eq!(job_title_icon("Designer"), "icons/pencil.svg");
+        assert_eq!(job_title_icon("Reviewer"), "icons/eye.svg");
+        assert_eq!(job_title_icon("Tester"), "icons/beaker.svg");
+        assert_eq!(job_title_icon("Uncategorized role"), "icons/user-round.svg");
+    }
 }
 
 trait ContainsAsciiCaseInsensitive {
