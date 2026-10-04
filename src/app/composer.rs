@@ -6050,10 +6050,19 @@ impl Waku {
                             .child(icon(
                                 "icons/send.svg",
                                 16.0,
+                                // The chrome artwork is a fixed light
+                                // surface in every scheme, so the arrow
+                                // takes the dark half of the inverse pair —
+                                // the fill color in light themes, the glyph
+                                // color in dark ones.
                                 if can_send {
-                                    theme.on_inverse
+                                    if theme.is_dark {
+                                        theme.on_inverse
+                                    } else {
+                                        theme.inverse
+                                    }
                                 } else {
-                                    theme.text_ghost
+                                    theme.text_tertiary
                                 },
                             ))
                             // Says why the button is dead, for the case
