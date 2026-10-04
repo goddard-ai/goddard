@@ -2186,13 +2186,13 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
-    /// Boss rotation opt-in mirrored from daemon settings; release default off.
+    /// Daemon-owned Boss rotation policy mirrored for the settings UI.
     #[serde(default)]
     pub boss_rotation_enabled: bool,
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub boss_rotation_cache_ttl_secs: HashMap<ProviderKind, u64>,
+    #[serde(skip)]
+    pub boss_rotation_cache_ttl_secs: std::collections::HashMap<ProviderKind, u64>,
     /// Experimental: whether cross-session composer drafts are enabled.
     /// Daemon-owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -2504,7 +2504,7 @@ impl PersistedState {
             memory_experiment_enabled: default_experiment_enabled(),
             boss_rotation_enabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
-            boss_rotation_cache_ttl_secs: HashMap::new(),
+            boss_rotation_cache_ttl_secs: Default::default(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
