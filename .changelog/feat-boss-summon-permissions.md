@@ -1,0 +1,1 @@
+- Boss summon accepts a per-field `permissions` object that overrides the persona's grants for that one employee — memory folders, integrations (MCP access), delegation, and Computer Use — and `control` gains a `setPermissions` action to revise a live employee's grants without editing the persona.

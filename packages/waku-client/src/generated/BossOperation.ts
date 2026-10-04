@@ -3,6 +3,7 @@ import type { AgentWorkspace } from "./AgentWorkspace";
 import type { BossPersona } from "./BossPersona";
 import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeControl } from "./EmployeeControl";
+import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
 import type { RuntimeMode } from "./RuntimeMode";
 
@@ -16,4 +17,9 @@ workspace: AgentWorkspace | null,
  * The ref a worktree summon starts from; required when
  * `workspace` is `worktree`, ignored otherwise.
  */
-baseBranch: string | null, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersona, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishBundle", path: string, name: string | null, } | { "type": "dismissBundle", id: string, } | { "type": "pinBundle", id: string, pinned: boolean, } | { "type": "sweepBundle", id: string, dormant: boolean, } | { "type": "archiveBundle", id: string, archived: boolean, };
+baseBranch: string | null,
+/**
+ * Per-field grant overrides persisted on the employee record;
+ * `None` inherits the persona's permissions unchanged.
+ */
+permissions: PermissionOverrides | null, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersona, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishBundle", path: string, name: string | null, } | { "type": "dismissBundle", id: string, } | { "type": "pinBundle", id: string, pinned: boolean, } | { "type": "sweepBundle", id: string, dormant: boolean, } | { "type": "archiveBundle", id: string, archived: boolean, };

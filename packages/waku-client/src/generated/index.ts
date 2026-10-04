@@ -131,6 +131,7 @@ export type { PairRequestInfo } from "./PairRequestInfo";
 export type { PairedClientInfo } from "./PairedClientInfo";
 export type { PairingState } from "./PairingState";
 export type { PendingModelSwitch } from "./PendingModelSwitch";
+export type { PermissionOverrides } from "./PermissionOverrides";
 export type { PersonaPermissions } from "./PersonaPermissions";
 export type { PlanResetCredits } from "./PlanResetCredits";
 export type { PlanUsage } from "./PlanUsage";

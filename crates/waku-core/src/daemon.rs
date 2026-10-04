@@ -6087,14 +6087,15 @@ impl WakuBackend {
                 model,
                 workspace,
                 base_branch,
+                permissions,
             } => {
                 let _lock = self.boss.operation_lock.lock();
                 let supervisor = caller
                     .or(self.boss.document().session_id)
                     .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
-                let employee = self
-                    .boss
-                    .prepare_employee(supervisor, persona_id, job_title)?;
+                let employee =
+                    self.boss
+                        .prepare_employee(supervisor, persona_id, job_title, permissions)?;
                 let id = employee.session_id;
                 // Kept for the supervisor's transcript marker — `employee`
                 // itself moves into the task creation below.
@@ -6231,6 +6232,14 @@ impl WakuBackend {
                     self.agent.revoke_session(session_id);
                     return Ok(BossResult::Saved);
                 }
+                if let EmployeeControl::SetPermissions { permissions } = &action {
+                    self.boss
+                        .set_employee_permissions(caller, session_id, permissions.clone())?;
+                    // The employee's next prompt re-injects its persona
+                    // block so the revised grants reach it.
+                    self.boss.reset_context(session_id);
+                    return Ok(BossResult::Saved);
+                }
                 // A prompt to a finished employee resurrects it: the boss
                 // sends the same worker another job instead of summoning a
                 // replacement. Steer and Stop stay gated on `require_active`
@@ -6287,7 +6296,9 @@ impl WakuBackend {
                         )?;
                         self.finish_boss_employee(session_id)?;
                     }
-                    EmployeeControl::SetModel { .. } => unreachable!("handled above"),
+                    EmployeeControl::SetModel { .. } | EmployeeControl::SetPermissions { .. } => {
+                        unreachable!("handled above")
+                    }
                 }
                 Ok(BossResult::Saved)
             }
@@ -12224,7 +12235,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into())
+            .prepare_employee(supervisor, persona, "Release checks".into(), None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -12301,7 +12312,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into())
+            .prepare_employee(supervisor, persona, "Release checks".into(), None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -12411,7 +12422,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into())
+            .prepare_employee(supervisor, persona, "Release checks".into(), None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -12577,6 +12588,7 @@ mod tests {
                 model: None,
                 workspace: Some(AgentWorkspace::Worktree),
                 base_branch: Some("main".into()),
+                permissions: None,
             },
             &EventSink::detached(),
         );

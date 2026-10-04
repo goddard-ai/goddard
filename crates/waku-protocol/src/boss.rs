@@ -24,6 +24,55 @@ pub struct PersonaPermissions {
     pub computer_use: bool,
 }
 
+impl PersonaPermissions {
+    /// Restrict these grants to what `ceiling` holds — delegation can
+    /// narrow, never widen, a supervisor employee's own permissions.
+    pub fn clamp_within(&mut self, ceiling: &PersonaPermissions) {
+        self.memory_folders.retain(|folder| {
+            ceiling
+                .memory_folders
+                .iter()
+                .any(|grant| std::path::Path::new(folder).starts_with(grant))
+        });
+        self.integration_ids
+            .retain(|id| ceiling.integration_ids.contains(id));
+        self.summon_employees &= ceiling.summon_employees;
+        self.computer_use &= ceiling.computer_use;
+    }
+}
+
+/// Per-field grant overrides attached to an individual employee — each
+/// `Some` replaces that grant outright (an empty list clears it), while
+/// `None` leaves the inherited or current value unchanged. Summon applies
+/// them on top of the persona's permissions; the `setPermissions` control
+/// action applies them to the employee's live record. Either way an
+/// employee summoner stays clamped to its own grants.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PermissionOverrides {
+    pub memory_folders: Option<Vec<String>>,
+    pub integration_ids: Option<Vec<String>>,
+    pub summon_employees: Option<bool>,
+    pub computer_use: Option<bool>,
+}
+
+impl PermissionOverrides {
+    pub fn apply_to(&self, permissions: &mut PersonaPermissions) {
+        if let Some(folders) = &self.memory_folders {
+            permissions.memory_folders = folders.clone();
+        }
+        if let Some(ids) = &self.integration_ids {
+            permissions.integration_ids = ids.clone();
+        }
+        if let Some(flag) = self.summon_employees {
+            permissions.summon_employees = flag;
+        }
+        if let Some(flag) = self.computer_use {
+            permissions.computer_use = flag;
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossPersona {
@@ -140,6 +189,10 @@ pub enum BossOperation {
         /// `workspace` is `worktree`, ignored otherwise.
         #[serde(default)]
         base_branch: Option<String>,
+        /// Per-field grant overrides persisted on the employee record;
+        /// `None` inherits the persona's permissions unchanged.
+        #[serde(default)]
+        permissions: Option<PermissionOverrides>,
     },
     Control {
         session_id: Uuid,
@@ -273,6 +326,13 @@ pub enum EmployeeControl {
         #[serde(default)]
         reasoning_effort: Option<String>,
     },
+    /// Replace individual grants on the employee's record — memory and
+    /// delegation changes take effect immediately, while MCP server and
+    /// Computer Use grants apply to the employee's next launch. An
+    /// employee supervisor cannot raise a grant past its own.
+    SetPermissions {
+        permissions: PermissionOverrides,
+    },
     Stop,
 }
 
@@ -295,6 +355,37 @@ mod tests {
                 if provider == crate::model::ProviderKind::Codex
                     && model == "gpt-5.5"
                     && reasoning_effort.as_deref() == Some("high")
+        ));
+    }
+
+    #[test]
+    fn summon_and_set_permissions_decode_grant_overrides() {
+        let summon: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "summon",
+            "personaId": "00000000-0000-0000-0000-000000000001",
+            "jobTitle": "Verifier",
+            "prompt": "Check the build",
+            "project": "/project",
+            "permissions": {"memoryFolders": ["work"], "computerUse": true}
+        }))
+        .unwrap();
+        assert!(matches!(
+            summon,
+            super::BossOperation::Summon { permissions: Some(overrides), .. }
+                if overrides.memory_folders.as_deref() == Some(&["work".to_string()][..])
+                    && overrides.computer_use == Some(true)
+                    && overrides.integration_ids.is_none()
+        ));
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setPermissions",
+            "permissions": {"integrationIds": []}
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            EmployeeControl::SetPermissions { permissions }
+                if permissions.integration_ids == Some(Vec::new())
+                    && permissions.summon_employees.is_none()
         ));
     }
 }
