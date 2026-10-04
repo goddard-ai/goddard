@@ -144,9 +144,24 @@ pub(super) struct BossGoalRow {
     pub session_id: Uuid,
     pub name: String,
     pub job_title: String,
-    pub work_goal: waku_protocol::boss::EmployeeGoal,
-    pub expired: bool,
+    pub lifecycle: waku_protocol::boss::EmployeeLifecycle,
     pub blocked: bool,
+}
+
+/// The Goals panel lists fire-and-forget work only — errands report to
+/// their supervisor, so they never belong on the human's roster.
+fn boss_goal_rows(employees: &[waku_protocol::boss::BossEmployee]) -> Vec<BossGoalRow> {
+    employees
+        .iter()
+        .filter(|employee| employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal)
+        .map(|employee| BossGoalRow {
+            session_id: employee.session_id,
+            name: employee.identity.name.clone(),
+            job_title: employee.job_title.clone(),
+            lifecycle: employee.lifecycle(),
+            blocked: employee.blocker.is_some(),
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -218,20 +233,7 @@ impl Waku {
             }) {
                 continue;
             }
-            let rows = Arc::new(
-                state
-                    .employees
-                    .iter()
-                    .map(|employee| BossGoalRow {
-                        session_id: employee.session_id,
-                        name: employee.identity.name.clone(),
-                        job_title: employee.job_title.clone(),
-                        work_goal: employee.work_goal,
-                        expired: employee.expired,
-                        blocked: employee.blocker.is_some(),
-                    })
-                    .collect(),
-            );
+            let rows = Arc::new(boss_goal_rows(&state.employees));
             self.boss_ui.goal_rows.insert(key, rows);
             self.boss_ui.states.insert(key, state);
             changed = true;
@@ -3354,5 +3356,42 @@ mod tests {
             assert_eq!(frame.width.0, bucket as i32 * 2);
             assert_eq!(frame.height.0, bucket as i32 * 2);
         }
+    }
+
+    #[test]
+    fn goal_rows_exclude_errands_and_project_lifecycle() {
+        use waku_protocol::boss::{BossEmployee, EmployeeGoal, EmployeeLifecycle};
+
+        let employee = |work_goal: EmployeeGoal| BossEmployee {
+            session_id: Uuid::new_v4(),
+            supervisor_id: Uuid::new_v4(),
+            identity: BossIdentity {
+                id: Uuid::new_v4(),
+                name: "Marl".into(),
+                avatar_seed: String::new(),
+            },
+            job_title: "Builder".into(),
+            persona_id: Uuid::new_v4(),
+            work_goal,
+            created_at: None,
+            icon: None,
+            permissions: PersonaPermissions::default(),
+            pinned_files: Vec::new(),
+            expired: false,
+            expired_at: None,
+            blocker: Some("blocked on input".into()),
+            state: EmployeeLifecycle::Queued,
+            ticket: None,
+            queued_at: None,
+            request_id: None,
+            request_fingerprint: None,
+        };
+        let goal = employee(EmployeeGoal::Goal);
+        let goal_session = goal.session_id;
+        let rows = boss_goal_rows(&[employee(EmployeeGoal::Errand), goal]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, goal_session);
+        assert_eq!(rows[0].lifecycle, EmployeeLifecycle::Queued);
+        assert!(rows[0].blocked);
     }
 }

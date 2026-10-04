@@ -5993,11 +5993,7 @@ boss.goals_in_progress:
 boss.goals_completed:
   en: Completed
 boss.goals_empty:
-  en: No employee work yet
-boss.goals_errand:
-  en: Errand · reports when finished
-boss.goals_goal:
-  en: Goal · finishes quietly
+  en: No goals yet
 boss.goals_status_active:
   en: In progress
 boss.goals_status_starting:

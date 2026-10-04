@@ -8315,8 +8315,9 @@ impl Waku {
         let goal = session.and_then(|session| session.thread_goal.as_ref());
         let failed = session
             .is_some_and(|session| session.status == crate::model::SessionStatus::Failed);
-        let complete = row.expired || goal.is_some_and(|goal| goal.status.is_terminal());
-        let status = if row.expired {
+        let expired = row.lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired;
+        let complete = expired || goal.is_some_and(|goal| goal.status.is_terminal());
+        let status = if expired {
             if failed {
                 tr!("boss.goals_status_failed")
             } else if row.blocked {
@@ -8324,6 +8325,12 @@ impl Waku {
             } else {
                 tr!("boss.goals_status_complete")
             }
+        } else if matches!(
+            row.lifecycle,
+            waku_protocol::boss::EmployeeLifecycle::Queued
+                | waku_protocol::boss::EmployeeLifecycle::Dispatching
+        ) {
+            tr!("boss.goals_status_starting")
         } else if goal.is_some_and(|goal| {
             goal.status == crate::model::ThreadGoalStatus::Complete
         }) {
@@ -8368,10 +8375,6 @@ impl Waku {
                 _ => tr!("boss.goals_status_active"),
             }
         };
-        let work_kind = match row.work_goal {
-            waku_protocol::boss::EmployeeGoal::Errand => tr!("boss.goals_errand"),
-            waku_protocol::boss::EmployeeGoal::Goal => tr!("boss.goals_goal"),
-        };
         let category = if complete {
             tr!("boss.goals_completed")
         } else {
@@ -8400,8 +8403,6 @@ impl Waku {
                     .gap(px(6.0))
                     .text_size(sp(11.5))
                     .text_color(theme.text_secondary)
-                    .child(work_kind)
-                    .child("·")
                     .child(category)
                     .child("·")
                     .child(status),

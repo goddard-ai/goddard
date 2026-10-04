@@ -1,1 +1,1 @@
-- Open Goals in the Boss chat's right panel to see employee work in progress and completed, including whether each task is an errand that reports back or a goal that finishes quietly.
+- Open Goals in the Boss chat's right panel to see goal employees in progress and completed — fire-and-forget work that finishes quietly without reporting back.
