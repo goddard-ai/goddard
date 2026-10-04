@@ -630,6 +630,19 @@ pub enum EmployeeControl {
     SetPermissions {
         permissions: PermissionOverrides,
     },
+    /// Move the employee to a different workspace as one action: its
+    /// current turn is interrupted, the session rebinds — `worktree` forks
+    /// a fresh daemon-managed worktree off `base_branch`, `local` returns
+    /// it to the project's primary checkout — and the same transcript
+    /// resumes there. A failure anywhere leaves the employee running in
+    /// its old workspace.
+    SetWorkspace {
+        workspace: AgentWorkspace,
+        /// The ref the new worktree detaches at; required when `workspace`
+        /// is `worktree`, ignored for `local`.
+        #[serde(default)]
+        base_branch: Option<String>,
+    },
     Stop,
 }
 
@@ -666,6 +679,32 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(action, EmployeeControl::SetModel { interrupt: None, .. }));
+    }
+
+    #[test]
+    fn set_workspace_control_decodes_workspace_and_base_branch() {
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setWorkspace",
+            "workspace": "worktree",
+            "baseBranch": "dev"
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            EmployeeControl::SetWorkspace { workspace, base_branch }
+                if workspace == crate::AgentWorkspace::Worktree
+                    && base_branch.as_deref() == Some("dev")
+        ));
+        let local: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setWorkspace",
+            "workspace": "local"
+        }))
+        .unwrap();
+        assert!(matches!(
+            local,
+            EmployeeControl::SetWorkspace { workspace, base_branch }
+                if workspace == crate::AgentWorkspace::Local && base_branch.is_none()
+        ));
     }
 
     #[test]

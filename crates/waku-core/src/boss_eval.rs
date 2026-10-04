@@ -52,7 +52,11 @@ persist between eval calls for this boss session.
   summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?})
                                             employee session id
   control(sessionId, \"stop\")               shorthand for a bare action
-  control(sessionId, #{type:prompt|steer|stop|setModel,...})
+  control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
+                        setWorkspace,...})
+                                            setWorkspace takes workspace:
+                                            \"local\"|\"worktree\" plus baseBranch
+                                            for worktree — stops, rebinds, resumes
   transcript(sessionId[, turn])             transcript map
   readFile(path)                            #{path, content}
   writeFile(path, content)

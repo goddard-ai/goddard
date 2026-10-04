@@ -6836,6 +6836,19 @@ impl WakuBackend {
                     self.boss.reset_context(session_id);
                     return Ok(BossResult::Saved);
                 }
+                if let EmployeeControl::SetWorkspace {
+                    workspace,
+                    base_branch,
+                } = &action
+                {
+                    return self.control_employee_workspace(
+                        caller,
+                        session_id,
+                        *workspace,
+                        base_branch.clone(),
+                        events,
+                    );
+                }
                 // A prompt or steer to a finished employee resumes the same
                 // transcript. A steer has no open turn to fold into, so it
                 // becomes the next queued prompt. Stop remains live-only.
@@ -6904,7 +6917,9 @@ impl WakuBackend {
                         )?;
                         self.finish_boss_employee(session_id)?;
                     }
-                    EmployeeControl::SetModel { .. } | EmployeeControl::SetPermissions { .. } => {
+                    EmployeeControl::SetModel { .. }
+                    | EmployeeControl::SetPermissions { .. }
+                    | EmployeeControl::SetWorkspace { .. } => {
                         unreachable!("handled above")
                     }
                 }
@@ -7124,6 +7139,164 @@ impl WakuBackend {
             self.queue_agent_prompt_hidden(supervisor, prompt, Some(session_id), &events)?;
         }
         Ok(())
+    }
+
+    /// `control`'s `setWorkspace` action: one operation that stops the
+    /// employee's running turn, rebinds the session — `local` returns it
+    /// to the project's primary checkout, `worktree` forks a fresh
+    /// daemon-managed worktree off `base_branch` — and resumes the same
+    /// transcript there. Every fallible step runs before the turn is
+    /// touched, so a failure leaves the employee running in its old
+    /// workspace rather than stopped between the two.
+    fn control_employee_workspace(
+        &self,
+        caller: Option<Uuid>,
+        session_id: Uuid,
+        workspace: AgentWorkspace,
+        base_branch: Option<String>,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::BossResult;
+        self.boss.require_active(session_id)?;
+        if self.boss.employee(session_id).is_none() {
+            bail!("a retired employee's workspace changes when it is revived");
+        }
+        let (project_path, old_path) = {
+            let state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            if matches!(workspace, AgentWorkspace::Local) && session.workspace.is_local() {
+                bail!("employee already runs in the project's primary checkout");
+            }
+            let project_path = state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map(|project| project.path.clone())
+                .ok_or_else(|| anyhow!("employee session has no project to switch within"))?;
+            let old_path = session
+                .workspace
+                .path()
+                .unwrap_or(&project_path)
+                .to_path_buf();
+            (project_path, old_path)
+        };
+        let base_branch = base_branch
+            .map(|branch| branch.trim().to_owned())
+            .filter(|branch| !branch.is_empty());
+        if matches!(workspace, AgentWorkspace::Worktree) && base_branch.is_none() {
+            bail!("worktree workspaces require a base branch");
+        }
+        // Creation runs before the turn is touched so a Git failure leaves
+        // the employee running in its old workspace.
+        let created = match workspace {
+            AgentWorkspace::Local => None,
+            AgentWorkspace::Worktree => Some(crate::worktree::create(
+                &project_path,
+                None,
+                base_branch.as_deref(),
+                false,
+                &[],
+            )?),
+        };
+        // A cancelled turn settles like a finished one — for a live
+        // employee that means expiry, a supervisor report, and a cleared
+        // prompt queue. Marking the record expired first suppresses the
+        // settle; the resurrect below restores it once the old turn's
+        // events are known to have passed.
+        self.boss.update(|state| {
+            if let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session_id)
+            {
+                entry.expired = true;
+            }
+            Ok(())
+        })?;
+        let switch = (|| -> anyhow::Result<()> {
+            if self.agent.has_open_turn(session_id)
+                && let Some(entry) = self.sessions.lock().get(&session_id)
+            {
+                entry.driver.cancel();
+            }
+            let removed = self.sessions.lock().remove(&session_id);
+            if let Some(entry) = &removed {
+                entry.driver.begin_shutdown();
+            }
+            drop_detached(removed);
+            self.agent.revoke_session(session_id);
+            // Resurrecting before the cancelled turn's close event lands
+            // would let its settle finish the employee for real — the
+            // forwarder reads expiry at event time, so the open-turn flag
+            // clearing is what proves that evaluation already happened.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while self.agent.has_open_turn(session_id) {
+                if std::time::Instant::now() >= deadline {
+                    bail!("could not stop the employee's current turn");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            let mut state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            self.task_store.hydrate(session)?;
+            let to = created
+                .as_ref()
+                .map(|worktree| worktree.path.clone())
+                .unwrap_or_else(|| project_path.clone());
+            session.workspace = match &created {
+                Some(worktree) => SessionWorkspace::Worktree {
+                    path: worktree.path.clone(),
+                    name: worktree.name.clone(),
+                    branch: None,
+                    base_branch: base_branch.clone(),
+                },
+                None => SessionWorkspace::Local,
+            };
+            // The next delivered prompt folds this in, the same one-shot
+            // channel a provider switch uses — the transcript keeps the
+            // employee's own messages verbatim.
+            session.pending_provider_context = Some(format!(
+                "Your supervisor moved this session to a different workspace — \
+                 your working directory is now {}. Treat it as the project \
+                 root: read and write files only under it. The checkout it ran \
+                 in before, {}, still exists — absolute paths recorded earlier \
+                 in this conversation point there, and anything you left \
+                 uncommitted stayed behind.",
+                to.display(),
+                old_path.display()
+            ));
+            session.updated_at = crate::model::unix_time();
+            state.mark_session_dirty(session_id);
+            self.task_store.save(&mut state)?;
+            Ok(())
+        })();
+        if let Err(error) = switch {
+            let _ = self.boss.resurrect(session_id);
+            // The fork only ever held a fresh checkout — nothing the
+            // employee wrote — so abandoning it on a failed switch loses
+            // nothing.
+            if let Some(worktree) = &created {
+                let _ = crate::worktree::remove(&worktree.path, true);
+            }
+            return Err(error);
+        }
+        self.boss.resurrect(session_id)?;
+        self.queue_agent_prompt_hidden(
+            session_id,
+            "Continue the job you were assigned.".to_owned(),
+            caller,
+            events,
+        )
+        .context("the workspace switched, but the employee could not be resumed")?;
+        Ok(BossResult::Saved)
     }
 
     /// Interrupt delivery for an employee's report: steer into the
@@ -13786,6 +13959,211 @@ mod tests {
             .expect("the employee task persisted before the failed launch")
             .clone();
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+    /// `control`'s `setWorkspace` action is the boss-side move a client
+    /// drives with separate stop/switch/resume steps: the session rebinds
+    /// to a fresh daemon worktree, the employee record stays live, and the
+    /// next delivered prompt carries the move notice. A rejected switch —
+    /// the local target it already occupies, or a base ref Git cannot
+    /// resolve — leaves the employee bound to its old workspace with its
+    /// runtime untouched.
+    #[test]
+    fn boss_set_workspace_moves_an_employee_between_workspaces() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-set-workspace-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let git = |args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(&project)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        git(&["config", "core.autocrlf", "false"]);
+        std::fs::write(project.join("README.md"), "main\n").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=Goddard Tests",
+            "-c",
+            "user.email=waku@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "initial",
+        ]);
+
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(
+                supervisor,
+                persona,
+                "Move job".into(),
+                None,
+                waku_protocol::boss::EmployeeGoal::Errand,
+            )
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let git_project = Project::from_path(dunce::canonicalize(&project).unwrap());
+        let mut child = AgentSession::new(git_project.id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        {
+            let mut state = backend.task_state.lock();
+            state.projects.push(git_project);
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let first_capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            employee_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(first_capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: project.clone(),
+            },
+        );
+        let switch = |workspace: AgentWorkspace, base_branch: Option<&str>| {
+            backend.handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::SetWorkspace {
+                        workspace,
+                        base_branch: base_branch.map(str::to_owned),
+                    },
+                },
+                &EventSink::detached(),
+            )
+        };
+
+        // Rejected switches never touch the running employee.
+        assert!(switch(AgentWorkspace::Local, None).is_err());
+        assert!(switch(AgentWorkspace::Worktree, Some("no-such-ref")).is_err());
+        assert!(switch(AgentWorkspace::Worktree, None).is_err());
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            assert!(session.workspace.is_local());
+        }
+        assert_eq!(*first_capture.shutdowns.lock(), 0);
+        assert!(!backend.boss.employee(employee_id).unwrap().expired);
+
+        // The switch itself lands; only the resume prompt's provider
+        // launch fails under the test's missing binary.
+        let error = switch(AgentWorkspace::Worktree, Some("main")).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("could not be resumed"),
+            "{error:#}"
+        );
+        let worktree_path = {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            let SessionWorkspace::Worktree {
+                path, base_branch, ..
+            } = &session.workspace
+            else {
+                panic!("expected a worktree workspace")
+            };
+            assert_eq!(base_branch.as_deref(), Some("main"));
+            let repository = dunce::canonicalize(&project).unwrap();
+            assert!(path.starts_with(repository.parent().unwrap().join("worktrees")));
+            assert!(crate::worktree::is_linked_worktree(path));
+            let context = session.pending_provider_context.as_ref().unwrap();
+            assert!(context.contains(&path.display().to_string()));
+            assert!(context.contains(&project.display().to_string()));
+            path.clone()
+        };
+        // The old runtime was retired, the record is live again, and the
+        // resume prompt waits parked for the next runtime.
+        assert_eq!(*first_capture.shutdowns.lock(), 1);
+        assert!(!backend.boss.employee(employee_id).unwrap().expired);
+        assert!(backend.agent.has_queued(employee_id));
+
+        // Once a runtime exists the parked resume delivers with the move
+        // notice folded into it.
+        let second_capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            employee_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(second_capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: worktree_path.clone(),
+            },
+        );
+        backend
+            .queue_agent_prompt_hidden(
+                employee_id,
+                "check in".into(),
+                Some(supervisor),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        {
+            let prompts = second_capture.prompts.lock();
+            assert_eq!(prompts.len(), 2, "{prompts:?}");
+            assert!(prompts[0].contains(&worktree_path.display().to_string()));
+            assert!(prompts[0].contains("Continue the job"));
+        }
+
+        // Switching back rebinds the session to the primary checkout.
+        assert!(switch(AgentWorkspace::Local, None).is_err());
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            assert!(session.workspace.is_local());
+        }
+        assert_eq!(*second_capture.shutdowns.lock(), 1);
+        assert!(!backend.boss.employee(employee_id).unwrap().expired);
+
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
