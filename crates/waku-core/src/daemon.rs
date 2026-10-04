@@ -7061,7 +7061,12 @@ impl WakuBackend {
             if !failed {
                 session.status = SessionStatus::Idle;
             }
-            session.queued_messages.clear();
+            // Daemon-owned parked prompts survive the expiry: the mirrored
+            // queue is the revive path's backlog, so a follow-up sent while
+            // the employee wound down still reaches its next turn.
+            session
+                .queued_messages
+                .retain(|queued| queued.is_agent_owned());
             // The report carries the transcript index — a pointer map, never
             // a summary — and the same render is the index the memory
             // engine keeps under this session's scope. Durable promotion of
@@ -14252,5 +14257,113 @@ mod tests {
         incoming.updated_at = skeleton.updated_at + 1;
         assert!(merge_session_list_columns(&mut skeleton, incoming, false));
         assert_eq!(skeleton.planning.unwrap().finalized_at, Some(10));
+    }
+
+    /// A live employee with no open turn gets a control prompt right away:
+    /// the queue's drain is the same kick a fresh prompt sends, and two
+    /// sends deliver in submission order.
+    #[test]
+    fn a_prompt_to_an_idle_employee_starts_a_turn() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-idle-wake-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+        for text in ["follow up", "and another"] {
+            backend
+                .handle_boss_operation(
+                    Some(supervisor),
+                    BossOperation::Control {
+                        session_id: employee_id,
+                        action: EmployeeControl::Prompt { prompt: text.into() },
+                    },
+                    &EventSink::detached(),
+                )
+                .unwrap();
+        }
+        let prompts = child.prompts.lock().clone();
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[0].contains("follow up"));
+        assert!(prompts[1].contains("and another"));
+        drop(prompts);
+        assert!(!backend.agent.has_queued(employee_id));
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .is_some_and(|session| session.queued_messages.is_empty())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A prompt parked behind the employee's last turn outlives the expiry
+    /// the finish applies: its mirrored queue entry is the revive path's
+    /// backlog, so the next control prompt drains it first.
+    #[test]
+    fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-parked-finish-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued while working".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(child.prompts.lock().is_empty());
+        backend.finish_boss_employee(employee_id).unwrap();
+        assert!(backend.boss.employee(employee_id).unwrap().expired);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert_eq!(session.queued_messages.len(), 1);
+            assert_eq!(session.queued_messages[0].content, "queued while working");
+        }
+        // The expiry pass dropped the runtime; a revived prompt would
+        // cold-start one in production — a control driver stands in here.
+        backend.sessions.lock().insert(
+            employee_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(child.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "revive prompt".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let prompts = child.prompts.lock().clone();
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[0].contains("queued while working"));
+        assert!(prompts[1].contains("revive prompt"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

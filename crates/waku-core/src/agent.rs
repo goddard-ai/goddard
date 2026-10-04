@@ -423,22 +423,27 @@ impl AgentState {
 
     /// Rebuild the in-memory queue from prompts the session document still
     /// mirrors as parked — a restart dropped the memory copy but not the
-    /// persisted chips. Entries already in the queue win; `prompts` fills
-    /// the gaps in document order.
+    /// persisted chips. The document lists parked prompts in submission
+    /// order, so mirrored entries take the document's position; entries the
+    /// document does not know keep the memory copy's tail.
     pub fn seed_queue(&self, session_id: Uuid, prompts: Vec<AgentPrompt>) {
         let mut queues = self.queues.lock();
-        let queue = queues.entry(session_id).or_default();
+        let mut rest = std::mem::take(queues.entry(session_id).or_default());
+        let mut merged = VecDeque::with_capacity(rest.len() + prompts.len());
         for prompt in prompts {
-            if prompt
+            match prompt
                 .queued_id
-                .is_some_and(|id| queue.iter().any(|queued| queued.queued_id == Some(id)))
+                .and_then(|id| rest.iter().position(|queued| queued.queued_id == Some(id)))
             {
-                continue;
+                Some(index) => merged.push_back(rest.remove(index).unwrap()),
+                None => merged.push_back(prompt),
             }
-            queue.push_back(prompt);
         }
-        if queue.is_empty() {
+        merged.append(&mut rest);
+        if merged.is_empty() {
             queues.remove(&session_id);
+        } else {
+            queues.insert(session_id, merged);
         }
     }
 
@@ -1014,6 +1019,8 @@ mod tests {
         state.seed_queue(session, vec![restored, prompt("two", None)]);
 
         // Seeding is additive only for ids the queue does not already hold.
+        // The document is the order of record: "two" lost its mirror, so it
+        // falls behind the entries the document still places.
         state.seed_queue(
             session,
             vec![
@@ -1037,7 +1044,7 @@ mod tests {
         .flatten()
         .map(|entry| entry.prompt)
         .collect();
-        assert_eq!(order, ["one", "two", "three"]);
+        assert_eq!(order, ["one", "three", "two"]);
     }
 
     #[test]
