@@ -12,11 +12,11 @@ switches, employee completion indexes, side chats, and project memory configure
 these primitives instead of maintaining separate retrieval systems.
 
 Jev placement is the default write path, not the only one. A principal with
-write access to a scope — the Boss for its own scope, the user for project
-memory — may reorganize directly: refile chunks between topics, merge or split
-topics, edit labels and cues, prune or supersede facts. This is expected when
-the user asks for a specific memory change or when the writer sees its own
-organization has rotted. Manual edits write ordinary chunk revisions and update
+write access to a scope — the Boss for its own scope, a project agent or the
+user for project memory — may reorganize directly: refile chunks between
+topics, merge or split topics, edit labels and cues, prune or supersede facts.
+When the user's request is about memory itself, direct editing is expected,
+not exceptional. Manual edits write ordinary chunk revisions and update
 affected indexes, so Jev routing continues over whatever structure the manual
 pass leaves behind.
 
