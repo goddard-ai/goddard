@@ -10,4 +10,10 @@ export type BossState = { identity: BossIdentity, personaId: string, sessionId: 
  * Open planning sessions and their plan documents. Records stay after
  * finalization and archive — the freeze they carry is permanent.
  */
-planning: Array<BossPlan>, revision: number, };
+planning: Array<BossPlan>,
+/**
+ * The daemon clock when the user last had the Goals page open —
+ * a goal finished since then reads as unread in the sidebar, the
+ * same contract `BossBundle::viewed_at` gives its row.
+ */
+goalsViewedAt: number | null, revision: number, };

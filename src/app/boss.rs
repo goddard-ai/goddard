@@ -2554,7 +2554,6 @@ impl Waku {
             for (label, enabled) in [
                 ("boss.delegate", editor.permissions.summon_employees),
                 ("boss.computer", editor.permissions.computer_use),
-                ("boss.always_report", editor.permissions.always_report),
             ] {
                 form = form.child(
                     boss_button(label, tr!(label), &theme)
@@ -2575,13 +2574,9 @@ impl Waku {
                                         editor.permissions.summon_employees =
                                             !editor.permissions.summon_employees;
                                     }
-                                    "boss.computer" => {
+                                    _ => {
                                         editor.permissions.computer_use =
                                             !editor.permissions.computer_use;
-                                    }
-                                    _ => {
-                                        editor.permissions.always_report =
-                                            !editor.permissions.always_report;
                                     }
                                 }
                             }

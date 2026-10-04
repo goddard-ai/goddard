@@ -80,6 +80,7 @@ export type { DaemonSettings } from "./DaemonSettings";
 export type { DaemonStatsSample } from "./DaemonStatsSample";
 export type { DaySlice } from "./DaySlice";
 export type { EmployeeControl } from "./EmployeeControl";
+export type { EmployeeGoal } from "./EmployeeGoal";
 export type { EvalAnswer } from "./EvalAnswer";
 export type { EvalQuestion } from "./EvalQuestion";
 export type { EvalSettings } from "./EvalSettings";

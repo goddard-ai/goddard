@@ -22,9 +22,6 @@ pub struct PersonaPermissions {
     pub integration_ids: Vec<String>,
     pub summon_employees: bool,
     pub computer_use: bool,
-    /// The boss's per-persona opt-in to prompted reports: employees of this
-    /// persona deliver their finish report instead of expiring silently.
-    pub always_report: bool,
 }
 
 impl PersonaPermissions {
@@ -41,7 +38,6 @@ impl PersonaPermissions {
             .retain(|id| ceiling.integration_ids.contains(id));
         self.summon_employees &= ceiling.summon_employees;
         self.computer_use &= ceiling.computer_use;
-        self.always_report &= ceiling.always_report;
     }
 }
 
@@ -94,6 +90,23 @@ pub struct BossPersona {
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
 }
 
+/// The kind of bounded work a summon fixes. The boss picks it in the
+/// summon payload and it never changes afterward — it decides what a
+/// finish does, not the employee's persona or live state.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmployeeGoal {
+    /// The supervisor needs the completion — it chains into the next job
+    /// or the human's attention — so the finish delivers the employee's
+    /// transcript index as a report.
+    #[default]
+    Errand,
+    /// Fire-and-forget work: the finish prompts nobody. The record stays
+    /// on the daemon's roster past the one-hour retirement window so the
+    /// client's Goals page can list it.
+    Goal,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossEmployee {
@@ -103,6 +116,14 @@ pub struct BossEmployee {
     #[serde(default)]
     pub job_title: String,
     pub persona_id: Uuid,
+    /// The work kind fixed at summon; records written before it existed
+    /// deserialize as `Errand`.
+    #[serde(default)]
+    pub work_goal: EmployeeGoal,
+    /// Unix timestamp of the summon — the Goals page's started time.
+    /// `None` on records older than the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
     /// Optional per-employee override of the persona icon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
@@ -198,6 +219,11 @@ pub struct BossState {
     /// finalization and archive — the freeze they carry is permanent.
     #[serde(default)]
     pub planning: Vec<BossPlan>,
+    /// The daemon clock when the user last had the Goals page open —
+    /// a goal finished since then reads as unread in the sidebar, the
+    /// same contract `BossBundle::viewed_at` gives its row.
+    #[serde(default)]
+    pub goals_viewed_at: Option<u64>,
     pub revision: u64,
 }
 
@@ -269,6 +295,11 @@ pub enum BossOperation {
         /// `None` inherits the persona's permissions unchanged.
         #[serde(default)]
         permissions: Option<PermissionOverrides>,
+        /// The work kind fixed at summon — `errand` (the default) reports
+        /// its finish to the supervisor; `goal` expires silently and lists
+        /// on the client's Goals page.
+        #[serde(default)]
+        work_goal: EmployeeGoal,
     },
     Control {
         session_id: Uuid,
@@ -373,6 +404,9 @@ pub enum BossOperation {
     MarkBundleViewed {
         id: Uuid,
     },
+    /// Stamp the Goals page viewed at the daemon's clock — goal finishes
+    /// older than the stamp stop counting toward the sidebar's unread dot.
+    MarkGoalsViewed,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -566,10 +600,25 @@ mod tests {
         .unwrap();
         assert!(matches!(
             summon,
-            super::BossOperation::Summon { permissions: Some(overrides), .. }
+            super::BossOperation::Summon { permissions: Some(overrides), work_goal, .. }
                 if overrides.memory_folders.as_deref() == Some(&["work".to_string()][..])
                     && overrides.computer_use == Some(true)
                     && overrides.integration_ids.is_none()
+                    // An omitted kind is an errand: its finish reports.
+                    && work_goal == super::EmployeeGoal::Errand
+        ));
+        let summon: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "summon",
+            "personaId": "00000000-0000-0000-0000-000000000001",
+            "jobTitle": "Watcher",
+            "prompt": "Watch the queue",
+            "project": "/project",
+            "workGoal": "goal"
+        }))
+        .unwrap();
+        assert!(matches!(
+            summon,
+            super::BossOperation::Summon { work_goal: super::EmployeeGoal::Goal, .. }
         ));
         let action: EmployeeControl = serde_json::from_value(serde_json::json!({
             "type": "setPermissions",

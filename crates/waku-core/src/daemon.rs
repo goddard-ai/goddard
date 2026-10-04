@@ -6429,14 +6429,19 @@ impl WakuBackend {
                 workspace,
                 base_branch,
                 permissions,
+                work_goal,
             } => {
                 let _lock = self.boss.operation_lock.lock();
                 let supervisor = caller
                     .or(self.boss.document().session_id)
                     .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
-                let employee =
-                    self.boss
-                        .prepare_employee(supervisor, persona_id, job_title, permissions)?;
+                let employee = self.boss.prepare_employee(
+                    supervisor,
+                    persona_id,
+                    job_title,
+                    permissions,
+                    work_goal,
+                )?;
                 let id = employee.session_id;
                 // Kept for the supervisor's transcript marker — `employee`
                 // itself moves into the task creation below.
@@ -6796,13 +6801,15 @@ impl WakuBackend {
                 body.push_str(&format!("  {cue}\n"));
             }
         }
-        // A clean finish is silent — the boss reads outcomes lazily through
-        // `view` and `context`. A report goes out only when the employee
-        // flagged a blocker, its session failed, or its persona requires
-        // always-report; it lands with the supervisor and escalates to the
-        // boss when the supervisor cannot take prompts.
-        let reports =
-            employee.blocker.is_some() || employee.permissions.always_report || failed;
+        // The work kind the summon fixed decides whether a clean finish
+        // reports: an errand's lands with the supervisor (escalating to
+        // the boss when the supervisor cannot take prompts), while a
+        // goal's stays silent — the record lists on the client's Goals
+        // page instead. Either kind's finish still reports when the
+        // employee flagged a blocker or its session failed.
+        let reports = employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
+            || employee.blocker.is_some()
+            || failed;
         if reports
             && let Some(supervisor) = self.boss.report_target(&employee)
         {
@@ -12648,7 +12655,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -12698,8 +12705,9 @@ mod tests {
         assert!(backend.agent.resolve(&token).is_none());
         assert!(!backend.sessions.lock().contains_key(&employee_id));
         assert_eq!(*child_capture.shutdowns.lock(), 1);
-        // A clean finish is silent: the employee's status and index stay in
-        // `view` and `context`, but no prompt burns a supervisor turn.
+        // A goal's clean finish is silent: the employee's status and index
+        // stay in `view` and `context`, but no prompt burns a supervisor
+        // turn — the record lists on the client's Goals page instead.
         assert!(parent_capture.prompts.lock().is_empty());
         assert!(parent_capture.steers.lock().is_empty());
         assert!(backend.boss.require_active(employee_id).is_err());
@@ -12707,8 +12715,10 @@ mod tests {
     }
 
     /// Boss fixture shared by the report-gating tests: the boss session is
-    /// live, one prepared employee sits on the roster with a finished
-    /// transcript, and capture drivers stand in for both runtimes.
+    /// live, one prepared goal employee sits on the roster with a finished
+    /// transcript, and capture drivers stand in for both runtimes. The goal
+    /// kind keeps a clean finish silent, so these tests only hear back when
+    /// something besides the kind forces a report.
     fn employee_finish_fixture(
         root: &Path,
     ) -> (
@@ -12729,7 +12739,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -12837,15 +12847,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The kind fixed at summon — not any persona grant — is what makes a
+    /// clean finish report: the same fixture, tagged `errand` instead of
+    /// `goal`, delivers its transcript index to the supervisor.
     #[test]
-    fn an_always_report_employee_finish_delivers_the_index() {
-        let root = std::env::temp_dir().join(format!("boss-always-{}", Uuid::new_v4()));
+    fn an_errand_employee_finish_delivers_the_index() {
+        let root = std::env::temp_dir().join(format!("boss-errand-{}", Uuid::new_v4()));
         let (backend, _supervisor, employee_id, parent_capture, _child) =
             employee_finish_fixture(&root);
         backend
             .boss
             .update(|state| {
-                state.employees[0].permissions.always_report = true;
+                state.employees[0].work_goal = waku_protocol::boss::EmployeeGoal::Errand;
                 Ok(())
             })
             .unwrap();
@@ -12936,7 +12949,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -13046,7 +13059,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -13165,7 +13178,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -13297,6 +13310,7 @@ mod tests {
                 workspace: Some(AgentWorkspace::Worktree),
                 base_branch: Some("main".into()),
                 permissions: None,
+                work_goal: waku_protocol::boss::EmployeeGoal::Errand,
             },
             &EventSink::detached(),
         );

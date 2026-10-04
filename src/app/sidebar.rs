@@ -7283,6 +7283,7 @@ mod tests {
             personas: Vec::new(),
             employees: Vec::new(),
             bundles,
+            goals_viewed_at: None,
             revision: 0,
         }
     }

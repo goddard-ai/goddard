@@ -46,7 +46,7 @@ persist between eval calls for this boss session.
 
   view()                                    boss state map
   context()                                 work digest string
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,workspace?,baseBranch?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,workspace?,baseBranch?,workGoal?})
                                             employee session id
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel,...})
