@@ -477,7 +477,7 @@ pub fn apply_verdict(evaluation: &Evaluation) -> RouterVerdict {
 mod tests {
     use super::*;
     use uuid::Uuid;
-    use waku_protocol::boss::{BossEmployee, BossIdentity, PersonaPermissions};
+    use waku_protocol::boss::{BossEmployee, BossIdentity, EmployeeGoal, PersonaPermissions};
     use waku_protocol::model::{AgentSession, Project, ProviderKind};
 
     fn boss_state() -> BossState {
@@ -536,6 +536,8 @@ mod tests {
             identity: BossIdentity { id: Uuid::new_v4(), name: name.into(), avatar_seed: String::new() },
             job_title: "Engineer".into(),
             persona_id: Uuid::new_v4(),
+            work_goal: EmployeeGoal::Errand,
+            created_at: None,
             icon: None,
             permissions: PersonaPermissions::default(),
             pinned_files: Vec::new(),
