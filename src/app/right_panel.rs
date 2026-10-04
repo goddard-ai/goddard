@@ -1160,6 +1160,7 @@ impl RightPanelSurface {
             Self::File(_) | Self::FileAtRef { .. } => "file",
             Self::GitHub(_) => "github",
             Self::SideChat(_) => "side_chat",
+            Self::Plan { .. } => "plan",
         }
     }
 
@@ -1187,6 +1188,9 @@ impl RightPanelSurface {
             }
             Self::GitHub(_) => tr!("right_panel.github"),
             Self::SideChat(_) => tr!("right_panel.side_chat"),
+            Self::Plan { plan_file, .. } => {
+                plan_file.rsplit('/').next().unwrap_or(plan_file).to_owned()
+            }
         }
     }
 
@@ -1201,6 +1205,7 @@ impl RightPanelSurface {
             Self::File(path) | Self::FileAtRef { path, .. } => file_icon_for_path(path),
             Self::GitHub(_) => "icons/github.svg",
             Self::SideChat(_) => "icons/chat.svg",
+            Self::Plan { plan_file, .. } => file_icon_for_path(plan_file),
         }
     }
 }
@@ -1240,6 +1245,7 @@ fn managed_panel_surface(surface: &RightPanelSurface) -> bool {
             | RightPanelSurface::File(_)
             | RightPanelSurface::FileAtRef { .. }
             | RightPanelSurface::SideChat(_)
+            | RightPanelSurface::Plan { .. }
     )
 }
 
@@ -1262,7 +1268,8 @@ pub(super) fn reusable_surface_index(
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
         | RightPanelSurface::FileAtRef { .. }
-        | RightPanelSurface::PullRequest { .. } => {
+        | RightPanelSurface::PullRequest { .. }
+        | RightPanelSurface::Plan { .. } => {
             surfaces.iter().position(|surface| surface == requested)
         }
     }
@@ -2378,6 +2385,36 @@ impl Waku {
             state.drop_dead_fullscreen();
         }
         self.replace_active_right_panel_state(state);
+        // A planning session's plan tab is strip furniture, not a user tab —
+        // restore inserts it before whatever the parked strip holds. A strip
+        // meeting its session for the first time opens on the plan; a parked
+        // one gains the tab without moving the user's selection.
+        if let RightPanelOwner::Session(session_id) = self.right_panel_live_owner
+            && let Some(plan_file) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.planning.as_ref())
+                .map(|planning| planning.plan_file.clone())
+        {
+            let surface = RightPanelSurface::Plan {
+                session_id,
+                plan_file,
+            };
+            if !self.right_panel_surfaces.contains(&surface) {
+                let first_visit = self.right_panel_surfaces.is_empty();
+                self.right_panel_surfaces.insert(0, surface);
+                self.right_panel_active_surface = if first_visit {
+                    Some(0)
+                } else {
+                    self.right_panel_active_surface.map(|index| index + 1)
+                };
+                if first_visit {
+                    self.right_panel_visible = true;
+                }
+            }
+        }
         // A Git panel that parked with the strip comes back whole — refresh
         // it for whatever moved underneath while it was away, since fetches
         // in flight at park time failed their landing check. A relaunch
@@ -2533,6 +2570,7 @@ impl Waku {
                 }
             }
         }
+        self.plan_docs.remove(&session_id);
         self.right_panel_pr_states
             .retain(|(owner, _), _| *owner != session_id);
     }
@@ -3075,6 +3113,14 @@ impl Waku {
         if index >= self.right_panel_surfaces.len() {
             return;
         }
+        // A planning session's plan tab is part of the session — it leaves
+        // only when the session does, never through a close gesture.
+        if matches!(
+            self.right_panel_surfaces[index],
+            RightPanelSurface::Plan { .. }
+        ) {
+            return;
+        }
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
             self.drop_terminal(terminal_id, cx);
         }
@@ -3334,6 +3380,12 @@ impl Waku {
                 .into_any_element(),
             Some(RightPanelSurface::SideChat(session_id)) => self
                 .render_side_chat_panel(session_id, window, cx)
+                .into_any_element(),
+            Some(RightPanelSurface::Plan {
+                session_id,
+                plan_file,
+            }) => self
+                .render_plan_preview(session_id, &plan_file, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
@@ -4847,9 +4899,14 @@ impl Waku {
             };
             let uses_file_icon = matches!(
                 &surface,
-                RightPanelSurface::File(_) | RightPanelSurface::FileAtRef { .. }
+                RightPanelSurface::File(_)
+                    | RightPanelSurface::FileAtRef { .. }
+                    | RightPanelSurface::Plan { .. }
             ) || matches!(&surface, RightPanelSurface::Files)
                 && self.right_panel_files_selected_path.is_some();
+            // A plan tab is the session's own document — it stays mounted
+            // for the session's life, so the strip draws no close control.
+            let closable = !matches!(&surface, RightPanelSurface::Plan { .. });
             let activate_weak = cx.entity().downgrade();
             let close_weak = cx.entity().downgrade();
             tabs = tabs.child(
@@ -4908,24 +4965,26 @@ impl Waku {
                                 }),
                         )
                     })
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("close-right-panel-tab-{index}")))
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|element| element.bg(theme.overlay_strong))
-                            .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                let _ = close_weak.update(cx, |this, cx| {
-                                    this.close_right_panel_surface(index, cx);
-                                });
-                            }),
-                    )
+                    .when(closable, |element| {
+                        element.child(
+                            div()
+                                .id(SharedString::from(format!("close-right-panel-tab-{index}")))
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .rounded(px(4.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .hover(|element| element.bg(theme.overlay_strong))
+                                .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    let _ = close_weak.update(cx, |this, cx| {
+                                        this.close_right_panel_surface(index, cx);
+                                    });
+                                }),
+                        )
+                    })
                     .on_click(move |_, _, cx| {
                         let _ = activate_weak.update(cx, |this, cx| {
                             this.right_panel_active_surface = Some(index);
@@ -6937,6 +6996,266 @@ impl Waku {
         }
     }
 
+    /// Pulls a planning session's `plans/<name>.md` out of the owning
+    /// daemon's boss memory. The document lives outside every project
+    /// workspace, so neither the file-tree reads a `File` editor uses nor
+    /// the workspace client can reach it — only `BossOperation::ReadFile`
+    /// resolves the `memory/` prefix. The read re-arms whenever the boss
+    /// document's revision moves, so agent writes stream into the preview
+    /// one sync later.
+    pub(super) fn ensure_plan_doc(
+        &mut self,
+        key: waku_client::DaemonKey,
+        session_id: Uuid,
+        plan_file: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let revision = self
+            .boss_ui
+            .states
+            .get(&key)
+            .map(|state| state.revision)
+            .unwrap_or(0);
+        let fresh = self.plan_docs.get(&session_id).is_some_and(|doc| {
+            doc.revision == revision
+                && (doc.requested || matches!(doc.content, Some(Ok(_))))
+        });
+        if fresh {
+            return;
+        }
+        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        else {
+            self.plan_docs.insert(
+                session_id,
+                PlanDoc {
+                    key,
+                    revision,
+                    requested: false,
+                    content: Some(Err(tr!("boss.unreachable"))),
+                },
+            );
+            return;
+        };
+        self.plan_docs.insert(
+            session_id,
+            PlanDoc {
+                key,
+                revision,
+                requested: true,
+                content: None,
+            },
+        );
+        let path = format!("memory/{plan_file}");
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss {
+                            operation: waku_client::boss::BossOperation::ReadFile { path },
+                        },
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(doc) = waku.plan_docs.get_mut(&session_id) else {
+                    return;
+                };
+                // A newer state re-armed the read while this one was in
+                // flight — its own request supersedes this landing.
+                if doc.key != key || doc.revision != revision {
+                    return;
+                }
+                doc.requested = false;
+                doc.content = Some(match result {
+                    Ok(waku_client::ResponsePayload::Boss {
+                        result: waku_client::boss::BossResult::File { content, .. },
+                    }) => Ok(content),
+                    Ok(_) => Err(tr!("boss.unexpected_response")),
+                    Err(error) => Err(error.to_string()),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The scrollable read-only document behind a plan tab and the Boss
+    /// page's plan detail — the transcript's markdown engine over the
+    /// daemon-fetched text, with drag selection but no annotation layer:
+    /// pinned highlights belong to files, not to a boss-owned document.
+    pub(super) fn plan_document_view(
+        &mut self,
+        session_id: Uuid,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let palette = MarkdownPalette::from_theme(&theme);
+        let centered = self.panel_fullscreen_active();
+        let mut cache = self.plan_markdown.borrow_mut();
+        if !matches!(cache.as_ref(), Some((cached, _)) if *cached == session_id) {
+            *cache = Some((session_id, MarkdownView::document()));
+        }
+        let (_, view) = cache.as_mut().expect("entry ensured above");
+        view.set_text(text, false);
+        let preview_selection = self.plan_preview_selection.clone();
+        let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let reader_selection = preview_selection.clone();
+        let reader_source = text.to_owned();
+        let reader_title = tr!("speed_reader.preview_title", path = "plan");
+        let reader_waku = cx.entity().downgrade();
+        let ctx = MarkdownCtx::new(
+            format!("plan-preview-{session_id}"),
+            &palette,
+            metrics,
+            preview_selection.clone(),
+        )
+        .with_families(crate::fonts::current(cx))
+        .with_math_enabled(self.state.render_math)
+        .with_guided_reading(self.guided_reading())
+        .with_standalone_context_menu(self.menu_handle("plan-preview-math", cx))
+        .with_context_menu_items(Rc::new(move |_| {
+            let source = reader_selection
+                .selection
+                .borrow()
+                .selected_text()
+                .unwrap_or_else(|| reader_source.clone());
+            let waku = reader_waku.clone();
+            let title = reader_title.clone();
+            vec![MenuItem::new(
+                tr!("speed_reader.go_fast"),
+                move |window, cx| {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.open_speed_reader(title.clone(), source.clone(), window, cx);
+                    });
+                },
+            )]
+        }))
+        .with_link_items(self.markdown_link_menu_items.clone())
+        .with_link_handler(self.markdown_link_handler.clone());
+        let document = md::render::markdown(view, &ctx);
+
+        let preview_focus = self.transcript_control_focus("plan-preview", cx);
+        let preview_focus_click = preview_focus.clone();
+        let selection_input = {
+            let selection = preview_selection.clone();
+            canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+                move |_, region, window, _| {
+                    // The transcript's drag-select gesture, minus its
+                    // ⌥-click annotate action — a boss document pins no
+                    // highlights.
+                    md::render::install_selection_input(region, window, &selection, None)
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        };
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(theme.surface)
+            .child(
+                div()
+                    .track_focus(&preview_focus)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |_, _, window, cx| {
+                            window.focus(&preview_focus_click, cx);
+                        }),
+                    )
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("plan-preview-{session_id}")))
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.plan_preview_scroll_handle)
+                            // Painted before the document, so the frame's
+                            // selection registry holds exactly this frame's
+                            // text elements.
+                            .child(md::render::frame_reset(preview_selection.clone()))
+                            .child(
+                                div()
+                                    .when(centered, |element| {
+                                        element.w_full().flex().justify_center()
+                                    })
+                                    .child(
+                                        div()
+                                            .when(centered, |element| {
+                                                element
+                                                    .w_full()
+                                                    .max_w(px(CONTENT_MAX_WIDTH))
+                                                    .min_w_0()
+                                            })
+                                            .px(px(16.0))
+                                            .pt(px(14.0))
+                                            .pb(px(
+                                                24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES,
+                                            ))
+                                            .text_color(theme.text)
+                                            .children(document),
+                                    ),
+                            ),
+                    )
+                    .child(selection_input)
+                    .child(scrollbar::vertical(
+                        &self.plan_preview_scroll_handle,
+                        &self.plan_preview_scrollbar,
+                    )),
+            )
+    }
+
+    /// The Plan surface's body: the session's fetched document, a loading
+    /// or failure note while it is in flight, or the markdown preview
+    /// itself once the boss answers.
+    fn render_plan_preview(
+        &mut self,
+        session_id: Uuid,
+        plan_file: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let key = self.daemons.session_owner(session_id);
+        self.ensure_plan_doc(key, session_id, plan_file, cx);
+        let doc = self.plan_docs.get(&session_id);
+        match doc.and_then(|doc| doc.content.as_ref()) {
+            Some(Ok(text)) => {
+                let text = text.clone();
+                self.plan_document_view(session_id, &text, cx)
+            }
+            Some(Err(error)) => self.render_right_panel_empty_message(
+                tr!("boss.plan_unavailable"),
+                error.clone(),
+                cx,
+            ),
+            None => {
+                let theme = Theme::current(cx);
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.loading")),
+                    )
+            }
+        }
+    }
+
     /// The rendered-markdown alternative to the editor body, shown while the
     /// global preview toggle is on. It renders the editor's current text —
     /// unsaved edits included — with the transcript's markdown engine; the
@@ -7157,8 +7476,15 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         // ⌘S doubles as "Sync branch…" outside the file editor: with no file
-        // surface active the chord opens the branch picker instead.
+        // surface active the chord opens the branch picker instead — unless
+        // the visible surface is a document the user cannot save anyway.
         let Some(relative_path) = self.visible_right_panel_file_path() else {
+            if matches!(
+                self.active_right_panel_surface(),
+                Some(RightPanelSurface::Plan { .. })
+            ) {
+                return;
+            }
             self.open_sync_branch(window, cx);
             return;
         };

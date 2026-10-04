@@ -866,6 +866,21 @@ enum RightPanelSurface {
     /// A `/side` chat session rendered in its parent task's panel. Closing
     /// the tab deletes the session; the panel's owner is the parent.
     SideChat(Uuid),
+    /// A planning session's plan document, read through its boss daemon and
+    /// rendered read-only. The tab opens itself with the session and never
+    /// closes — `plan_file` is the daemon-normalized `plans/<name>.md`.
+    Plan { session_id: Uuid, plan_file: String },
+}
+
+/// A planning session's fetched plan document. `revision` is the Boss
+/// document revision the read answered — a newer state re-arms the fetch.
+struct PlanDoc {
+    key: waku_client::DaemonKey,
+    revision: u64,
+    /// A read is in flight — the render path must not issue another.
+    requested: bool,
+    /// The fetched markdown, or the failure text the preview shows.
+    content: Option<Result<String, String>>,
 }
 
 /// One side-chat tab's render state — a bottom-pinned row list, its scrollbar,
@@ -1893,7 +1908,11 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::Terminal(terminal_id) => {
             Some(PersistedRightPanelSurface::Terminal(*terminal_id))
         }
-        RightPanelSurface::Browser(_) | RightPanelSurface::BackgroundWork { .. } => None,
+        RightPanelSurface::Browser(_)
+        | RightPanelSurface::BackgroundWork { .. }
+        // A planning session's strip rebuilds its plan tab on restore —
+        // persisting it would only resurrect it for a renamed document.
+        | RightPanelSurface::Plan { .. } => None,
     }
 }
 
@@ -3374,6 +3393,14 @@ pub struct Waku {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
+    /// Plan documents fetched through each planning session's boss daemon,
+    /// keyed by session id — the rendered tab is read-only, so the cache
+    /// holds only text plus the Boss revision it answered.
+    plan_docs: HashMap<Uuid, PlanDoc>,
+    plan_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
+    plan_preview_selection: TranscriptSelection,
+    plan_preview_scroll_handle: ScrollHandle,
+    plan_preview_scrollbar: Rc<ScrollbarState>,
     /// Transient, snapshot-based speed reader opened from Markdown surfaces.
     speed_reader: Option<speed_reader::SpeedReader>,
     right_panel_pending_tab_reveal: Option<usize>,
@@ -7051,6 +7078,11 @@ impl Waku {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
+                plan_docs: HashMap::new(),
+                plan_markdown: RefCell::new(None),
+                plan_preview_selection: TranscriptSelection::default(),
+                plan_preview_scroll_handle: ScrollHandle::new(),
+                plan_preview_scrollbar: ScrollbarState::new(),
                 speed_reader: None,
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_file_focus: None,

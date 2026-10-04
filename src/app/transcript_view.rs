@@ -631,6 +631,87 @@ impl Waku {
         )
     }
 
+    /// The planning session's strip above the transcript — a normal-flow
+    /// banner, not an overlay, so it never fights the parked-request card
+    /// for the top of the viewport. While the plan is a draft it carries
+    /// the human approval gesture (`FinalizePlan` sent as the user, which
+    /// freezes immediately); once frozen it swaps the button for the
+    /// sealed state, since a second finalize can only fail.
+    pub(super) fn render_planning_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| Some(session.id) == self.state.selected_session)?;
+        let planning = session.planning.as_ref()?;
+        let theme = Theme::current(cx);
+        let session_id = session.id;
+        let finalized = planning.finalized_at.is_some();
+        let plan_file = planning.plan_file.clone();
+        Some(
+            div()
+                .w_full()
+                .px(px(16.0))
+                .py(px(8.0))
+                .border_b_1()
+                .border_color(theme.separator)
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(icon("icons/compass.svg", 14.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(if finalized {
+                            tr!("boss.plan_finalized")
+                        } else {
+                            planning.label.render()
+                        }),
+                )
+                .when(!finalized, |element| {
+                    let pending = self.boss_pending();
+                    element.child(
+                        div()
+                            .id("plan-finalize")
+                            .tab_index(0)
+                            .h(px(26.0))
+                            .px(px(12.0))
+                            .rounded(px(7.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .cursor_default()
+                            .bg(theme.inverse)
+                            .text_color(theme.on_inverse)
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .when(pending, |element| element.opacity(0.5))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|style| style.opacity(0.9))
+                            .active(|style| style.opacity(0.8))
+                            .child(icon("icons/circle-check.svg", 13.0, theme.on_inverse))
+                            .child(tr!("boss.plan_finalize"))
+                            .on_activation(cx, move |this, _, cx| {
+                                let key = this.daemons.session_owner(session_id);
+                                this.boss_request(
+                                    key,
+                                    waku_client::boss::BossOperation::FinalizePlan {
+                                        plan_file: Some(plan_file.clone()),
+                                    },
+                                    boss::BossReply::Finalize,
+                                    cx,
+                                );
+                            }),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
     fn scroll_transcript_to_bottom(&mut self, cx: &mut Context<Self>) {
         self.sync_transcript_rows();
         self.pin_transcript_to_tail();

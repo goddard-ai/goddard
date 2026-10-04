@@ -1062,6 +1062,10 @@ pub(super) enum SidebarRow {
     Automations,
     BossShowMore(waku_client::DaemonKey),
     Boss(waku_client::DaemonKey),
+    /// A daemon-managed planning session — the boss's own document, so the
+    /// row sits under the boss like an employee but carries the plan's idea
+    /// and kind label instead of a persona's name and job.
+    Planning(Uuid),
     Employee(Uuid),
     /// A boss-published file or folder in the Recent bundles group.
     Bundle(waku_client::DaemonKey, Uuid),
@@ -1088,9 +1092,19 @@ enum SidebarFold {
     Dormant,
 }
 
+/// The session a row navigates to — `Planning` rows carry a session the
+/// same way `Session` rows do, so every traversal that walks "the session
+/// rows" (⌘D, ⌘1–9, multi-select ranges, landing indexes) sees them.
+fn sidebar_row_session_id(row: &SidebarRow) -> Option<Uuid> {
+    match row {
+        SidebarRow::Session(id) | SidebarRow::Planning(id) => Some(*id),
+        _ => None,
+    }
+}
+
 pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
     rows.iter()
-        .position(|row| *row == SidebarRow::Session(session_id))
+        .position(|row| sidebar_row_session_id(row) == Some(session_id))
 }
 
 /// Headers, spacers, and folded-group controls are not sessions in the list.
@@ -1099,13 +1113,7 @@ pub(super) fn sidebar_jump_skips_session(
     from: Option<Uuid>,
     target: Uuid,
 ) -> bool {
-    let sessions: Vec<_> = rows
-        .iter()
-        .filter_map(|row| match row {
-            SidebarRow::Session(id) => Some(*id),
-            _ => None,
-        })
-        .collect();
+    let sessions: Vec<_> = rows.iter().filter_map(sidebar_row_session_id).collect();
     let Some(from_index) =
         from.and_then(|id| sessions.iter().position(|candidate| *candidate == id))
     else {
@@ -1130,10 +1138,7 @@ pub(super) fn next_sidebar_session_in_rows(
     let start = position % rows.len();
     (0..rows.len())
         .map(|offset| (start + offset) % rows.len())
-        .filter_map(|index| match rows[index] {
-            SidebarRow::Session(session_id) => Some(session_id),
-            _ => None,
-        })
+        .filter_map(|index| sidebar_row_session_id(&rows[index]))
         .find(|session_id| is_available(*session_id))
 }
 
@@ -1141,14 +1146,11 @@ pub(super) fn next_sidebar_session_in_rows(
 /// — rather than re-walking sessions — means folded groups, project "show
 /// more" overflow, and the pinned-first layout all apply for free.
 fn sidebar_shortcut_target_ids(rows: &[SidebarRow]) -> impl Iterator<Item = Uuid> + '_ {
-    rows.iter().filter_map(|row| match row {
-        SidebarRow::Session(session_id) => Some(*session_id),
-        _ => None,
-    })
+    rows.iter().filter_map(sidebar_row_session_id)
 }
 
 /// The label a row chip advertises — "⌘3" on macOS, "Ctrl+3" elsewhere.
-fn sidebar_shortcut_chip_label(index: usize) -> String {
+pub(super) fn sidebar_shortcut_chip_label(index: usize) -> String {
     if cfg!(target_os = "macos") {
         format!("⌘{}", index + 1)
     } else {
@@ -1166,7 +1168,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) | SidebarRow::Bundle(..) => SIDEBAR_SESSION_ROW_HEIGHT,
-        SidebarRow::Boss(_) | SidebarRow::Employee(_) => 42.0,
+        SidebarRow::Boss(_) | SidebarRow::Planning(_) | SidebarRow::Employee(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_) | SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => {
             SIDEBAR_SHOW_MORE_ROW_HEIGHT
@@ -3588,6 +3590,43 @@ impl Waku {
         )
     }
 
+    /// One daemon's live planning sessions, ordered the way its
+    /// `BossState.planning` records them — creation order. A session whose
+    /// planning marker reached the catalog ahead of the boss document
+    /// (the two arrive on different sync channels) still rows under its
+    /// boss, appended after the recorded order.
+    fn sidebar_planning_session_ids(&self, key: waku_client::DaemonKey) -> Vec<Uuid> {
+        let live = |session_id: Uuid| {
+            self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.planning.is_some()
+                    && session.archived_at.is_none()
+            })
+        };
+        let mut ids: Vec<Uuid> = self
+            .boss_ui
+            .states
+            .get(&key)
+            .into_iter()
+            .flat_map(|state| state.planning.iter().map(|plan| plan.session_id))
+            .filter(|session_id| live(*session_id))
+            .collect();
+        let mut unrecorded: Vec<&AgentSession> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.planning.is_some()
+                    && session.archived_at.is_none()
+                    && !ids.contains(&session.id)
+                    && self.daemons.session_owner(session.id) == key
+            })
+            .collect();
+        unrecorded.sort_by_key(|session| session.created_at);
+        ids.extend(unrecorded.iter().map(|session| session.id));
+        ids
+    }
+
     /// The sidebar row snapshot, rebuilt only when its inputs move.
     ///
     /// The sidebar re-renders at pulse cadence whenever one of its session
@@ -3655,6 +3694,27 @@ impl Waku {
             fingerprint = mix(
                 fingerprint,
                 u64::from(session_dormant(session, now, dormant_threshold)),
+            );
+        }
+        // Planning sessions skip the loop above as boss-managed, but they
+        // carry rows of their own — their lifecycle lands on a different
+        // sync channel than the boss document's revision, so identity,
+        // archive state, and the freeze flag all need mixing here.
+        for session in &self.state.sessions {
+            if session.planning.is_none() {
+                continue;
+            }
+            fingerprint = mix_uuid(fingerprint, session.id);
+            fingerprint = mix(fingerprint, u64::from(session.archived_at.is_some()));
+            fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
+            fingerprint = mix(
+                fingerprint,
+                u64::from(
+                    session
+                        .planning
+                        .as_ref()
+                        .is_some_and(|planning| planning.finalized_at.is_some()),
+                ),
             );
         }
         if self.state.sidebar_grouping == SidebarGrouping::Project {
@@ -3835,6 +3895,14 @@ impl Waku {
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
             for key in &self.boss_ui.hosts {
                 rows.push(SidebarRow::Boss(*key));
+                // Planning sessions row directly under the boss and above
+                // its employees — they are the boss's own work, not
+                // delegated tasks.
+                rows.extend(
+                    self.sidebar_planning_session_ids(*key)
+                        .into_iter()
+                        .map(SidebarRow::Planning),
+                );
                 if let Some(active) = self.boss_ui.active.get(key) {
                     rows.extend(active.iter().copied().map(SidebarRow::Employee));
                 }
@@ -4140,8 +4208,8 @@ impl Waku {
             .unwrap_or(target);
         let (lo, hi) = (anchor.min(target), anchor.max(target));
         for row in &rows[lo..=hi] {
-            if let SidebarRow::Session(id) = row {
-                self.sidebar_multi_selection.insert(*id);
+            if let Some(id) = sidebar_row_session_id(row) {
+                self.sidebar_multi_selection.insert(id);
             }
         }
         self.sidebar_multi_selection_anchor = Some(session_id);
@@ -4170,13 +4238,9 @@ impl Waku {
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let mut targets: Vec<Uuid> = rows
             .iter()
-            .filter_map(|row| match row {
-                SidebarRow::Session(session_id)
-                    if self.sidebar_multi_selection.contains(session_id) =>
-                {
-                    Some(*session_id)
-                }
-                _ => None,
+            .filter_map(|row| {
+                sidebar_row_session_id(row)
+                    .filter(|session_id| self.sidebar_multi_selection.contains(session_id))
             })
             .collect();
         for session in &self.state.sessions {
@@ -4288,6 +4352,17 @@ impl Waku {
                     .into_any_element()
             }
             SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
+            SidebarRow::Planning(session_id) => {
+                let shortcut_index = (self.sidebar_shortcut_hints
+                    && self.sidebar_multi_selection.is_empty())
+                .then(|| {
+                    sidebar_shortcut_target_ids(rows)
+                        .take(SIDEBAR_SHORTCUT_TARGET_COUNT)
+                        .position(|candidate| candidate == session_id)
+                })
+                .flatten();
+                self.render_boss_planning_row(session_id, shortcut_index, cx)
+            }
             SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
             SidebarRow::Bundle(key, id) => self.render_sidebar_bundle_row(key, id, cx),
             SidebarRow::Header(group) => {
@@ -7287,6 +7362,7 @@ mod tests {
             session_id: None,
             personas: Vec::new(),
             employees: Vec::new(),
+            planning: Vec::new(),
             bundles,
             goals_viewed_at: None,
             planning: Vec::new(),
@@ -7420,6 +7496,29 @@ mod tests {
         assert!(sidebar_jump_skips_session(&rows, Some(first), third));
         assert!(sidebar_jump_skips_session(&rows, Some(third), first));
         assert!(!sidebar_jump_skips_session(&rows, None, third));
+    }
+
+    #[test]
+    fn planning_rows_count_as_session_rows_for_navigation() {
+        let plan = Uuid::from_u128(1);
+        let employee = Uuid::from_u128(2);
+        let task = Uuid::from_u128(3);
+        let rows = [
+            SidebarRow::Boss(waku_client::DaemonKey::Local),
+            SidebarRow::Planning(plan),
+            SidebarRow::Employee(employee),
+            SidebarRow::GroupSpacer,
+            SidebarRow::Session(task),
+        ];
+        // The ⌘D walk reaches the planning row under the boss, and the
+        // row-index and jump helpers treat it as a session throughout.
+        assert_eq!(next_sidebar_session_in_rows(&rows, 0, |_| true), Some(plan));
+        assert_eq!(sidebar_session_row_index(&rows, plan), Some(1));
+        assert!(!sidebar_jump_skips_session(&rows, Some(plan), task));
+        assert_eq!(
+            sidebar_shortcut_target_ids(&rows).collect::<Vec<_>>(),
+            vec![plan, task]
+        );
     }
 
     #[test]

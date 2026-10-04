@@ -6040,3 +6040,15 @@ boss.plan_finalize_detail:
   en: Freeze %{file} ("%{idea}") as approved? The document becomes read-only and this planning session archives once its grace period ends.
 boss.plan_finalize:
   en: Finalize plan
+boss.plan_finalized:
+  en: Plan finalized
+boss.plan_finalized_ago:
+  en: Finalized %{ago}
+boss.plan_unavailable:
+  en: The plan could not be loaded.
+boss.plan_select:
+  en: Select a plan to read it.
+boss.plans:
+  en: Plans
+boss.plans_hint:
+  en: Finalized plans stay readable here after their planning session archives.

@@ -37,6 +37,7 @@ fn avatar_scale(bucket: u32) -> f32 {
 pub(super) enum BossTab {
     History,
     Memory,
+    Plans,
     Personas,
 }
 
@@ -69,6 +70,9 @@ pub(super) struct BossUi {
     pub bundle_page: Option<(DaemonKey, Uuid)>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
+    /// The Plans tab's selected plan — a `BossState.planning` record's
+    /// session id, resolved against the live state at render.
+    plans_selected: Option<Uuid>,
     files: Vec<BossFile>,
     files_key: Option<DaemonKey>,
     folder: String,
@@ -108,6 +112,7 @@ impl Default for BossUi {
             bundle_page: None,
             revision: 0,
             page: None,
+            plans_selected: None,
             files: Vec::new(),
             files_key: None,
             folder: "memory".into(),
@@ -134,6 +139,8 @@ enum BossItem {
     Employee(Uuid),
     Persona(Uuid),
     File(String, bool),
+    /// A `BossState.planning` record's session — Plans tab rows.
+    Plan(Uuid),
 }
 
 /// An armed composer command: the boss chat that answers the next
@@ -179,8 +186,9 @@ enum BossEditorKind {
     Name,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum BossReply {
+pub(super) enum BossReply {
     Open,
+    Finalize,
     List,
     Read,
     Saved,
@@ -313,6 +321,17 @@ impl Waku {
                 .iter()
                 .map(|file| BossItem::File(file.path.clone(), file.directory))
                 .collect(),
+            // The page is the frozen-document archive — live drafts stay on
+            // their planning session's sidebar row, not here.
+            BossTab::Plans => self
+                .boss_ui
+                .states
+                .get(&key)
+                .into_iter()
+                .flat_map(|state| &state.planning)
+                .filter(|plan| plan.finalized_at.is_some())
+                .map(|plan| BossItem::Plan(plan.session_id))
+                .collect(),
         };
         if self.boss_ui.rows != rows {
             self.boss_ui.rows = rows;
@@ -386,7 +405,14 @@ impl Waku {
         cx.notify();
     }
 
-    fn boss_request(
+    /// A boss operation is in flight — `boss_request` drops additional asks
+    /// until it settles, so callers that show a spinner or dim a button read
+    /// this rather than tracking the request themselves.
+    pub(super) fn boss_pending(&self) -> bool {
+        self.boss_ui.pending
+    }
+
+    pub(super) fn boss_request(
         &mut self,
         key: DaemonKey,
         operation: BossOperation,
@@ -468,7 +494,15 @@ impl Waku {
                             BossResult::Session { session, project } if matches!(reply, BossReply::Open) => {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
-                                if let Some(state) = this.boss_ui.states.get_mut(&key) { state.session_id = Some(session.id); }
+                                // Only `Open`'s session is the boss chat —
+                                // a createPlan result names the planning
+                                // session, and pointing the boss's
+                                // `session_id` at it would detach the chat.
+                                if session.planning.is_none()
+                                    && let Some(state) = this.boss_ui.states.get_mut(&key)
+                                {
+                                    state.session_id = Some(session.id);
+                                }
                                 let id = session.id;
                                 this.daemons.claim_session(id, key);
                                 if let Some(existing) =
@@ -1582,6 +1616,68 @@ impl Waku {
             .into_any_element()
     }
 
+    /// A planning session's sidebar row — the boss section's session row
+    /// without a persona: the plan's idea on the title line and a compass
+    /// plus the localized kind label in the detail slot an employee spends
+    /// on its job title.
+    pub(super) fn render_boss_planning_row(
+        &self,
+        id: Uuid,
+        shortcut_index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(session) = self.state.sessions.iter().find(|session| session.id == id) else {
+            return div().into_any_element();
+        };
+        let Some(planning) = session.planning.as_ref() else {
+            return div().into_any_element();
+        };
+        let status_indicator = self.session_status_indicator(session, &theme);
+        let selected = sidebar::sidebar_session_selected(
+            self.state.selected_session,
+            self.pending_session_activation
+                .map(|pending| pending.session_id),
+            id,
+        );
+        div()
+            .id(format!("boss-planning-{id}"))
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .pl(px(sidebar::SIDEBAR_GROUP_CHILD_PADDING))
+            .pr(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .when(selected, |row| row.bg(theme.sidebar_item_background))
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.request_session_activation(id, SessionActivationTransition::Visit, cx)
+            })
+            .child(boss_sidebar_label(
+                planning.idea.clone(),
+                planning.label.render(),
+                Some("icons/compass.svg"),
+                true,
+                &theme,
+                None,
+            ))
+            .when_some(status_indicator, |row, indicator| row.child(indicator))
+            .when_some(shortcut_index, |row, index| {
+                row.child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(sidebar::sidebar_shortcut_chip_label(index)),
+                )
+            })
+            .into_any_element()
+    }
+
     /// A Recent bundles row: the card chrome matches a task row, with the
     /// bundle's display name on the title line and its file name in the
     /// detail slot a task would spend on its project. Everything the row
@@ -2203,6 +2299,7 @@ impl Waku {
                 [
                     (BossTab::History, "boss.history"),
                     (BossTab::Memory, "boss.memory"),
+                    (BossTab::Plans, "boss.plans"),
                     (BossTab::Personas, "boss.personas"),
                 ]
                 .into_iter()
@@ -2210,6 +2307,7 @@ impl Waku {
                     let glyph = match target {
                         BossTab::History => "icons/folder-clock.svg",
                         BossTab::Memory => "icons/brain.svg",
+                        BossTab::Plans => "icons/map.svg",
                         BossTab::Personas => "icons/user-round.svg",
                     };
                     boss_button(label, tr!(label), &theme)
@@ -2251,6 +2349,14 @@ impl Waku {
                                 )
                             }),
                     );
+            }
+            BossTab::Plans => {
+                toolbar = toolbar.child(
+                    div()
+                        .flex_1()
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.plans_hint")),
+                );
             }
             BossTab::Personas => {
                 toolbar = toolbar
@@ -2394,15 +2500,18 @@ impl Waku {
                             .border_color(theme.separator)
                             .child(list),
                     )
-                    .child(
+                    .child(if tab == BossTab::Plans {
+                        self.render_boss_plan_detail(key, cx)
+                    } else {
                         div()
                             .flex_1()
                             .min_w_0()
                             .id("boss-editor-scroll")
                             .overflow_y_scroll()
                             .p(px(20.0))
-                            .child(editor),
-                    ),
+                            .child(editor)
+                            .into_any_element()
+                    }),
             )
             .into_any_element()
     }
@@ -2417,6 +2526,55 @@ impl Waku {
         let theme = Theme::current(cx);
         match item {
             BossItem::Employee(id) => self.render_boss_employee_row(id, cx),
+            BossItem::Plan(session_id) => {
+                let Some(plan) = self
+                    .boss_ui
+                    .states
+                    .get(&key)
+                    .and_then(|state| {
+                        state
+                            .planning
+                            .iter()
+                            .find(|plan| plan.session_id == session_id)
+                    })
+                    .cloned()
+                else {
+                    return div().into_any_element();
+                };
+                let selected = self.boss_ui.plans_selected == Some(session_id);
+                let detail = plan.finalized_at.map(|finalized_at| {
+                    tr!(
+                        "boss.plan_finalized_ago",
+                        ago = sidebar::format_time_ago(unix_time().saturating_sub(finalized_at))
+                    )
+                });
+                boss_button(format!("boss-plan-{session_id}"), plan.idea.clone(), &theme)
+                    .h(px(42.0))
+                    .w_full()
+                    .when(selected, |button| button.bg(theme.overlay))
+                    .child(icon("icons/file-text.svg", 16.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_w_0()
+                            .child(div().truncate().child(plan.idea.clone()))
+                            .when_some(detail, |element, detail| {
+                                element.child(
+                                    div()
+                                        .text_size(sp(11.0))
+                                        .text_color(theme.text_tertiary)
+                                        .truncate()
+                                        .child(detail),
+                                )
+                            }),
+                    )
+                    .on_activation(cx, move |this, _, cx| {
+                        this.boss_ui.plans_selected = Some(session_id);
+                        cx.notify();
+                    })
+                    .into_any_element()
+            }
             BossItem::Persona(id) => {
                 let Some(persona) = self
                     .boss_ui
@@ -2487,6 +2645,53 @@ impl Waku {
                     })
                     .into_any_element()
             }
+        }
+    }
+
+    /// The Plans tab's reading pane — the selected frozen document through
+    /// the same boss-memory read the session's plan tab uses.
+    fn render_boss_plan_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let empty = |label: String| {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().text_color(theme.text_secondary).child(label))
+                .into_any_element()
+        };
+        let Some(session_id) = self.boss_ui.plans_selected else {
+            return empty(tr!("boss.plan_select"));
+        };
+        let Some(plan) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .planning
+                    .iter()
+                    .find(|plan| plan.session_id == session_id)
+            })
+            .cloned()
+        else {
+            return empty(tr!("boss.plan_select"));
+        };
+        self.ensure_plan_doc(key, session_id, &plan.plan_file, cx);
+        match self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.content.as_ref())
+        {
+            Some(Ok(text)) => {
+                let text = text.clone();
+                self.plan_document_view(session_id, &text, cx)
+                    .into_any_element()
+            }
+            Some(Err(error)) => empty(format!("{}\n{error}", tr!("boss.plan_unavailable"))),
+            None => empty(tr!("boss.loading")),
         }
     }
 

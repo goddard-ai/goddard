@@ -2591,6 +2591,24 @@ impl Waku {
             self.save_remote_catalogs();
         }
 
+        // A planning session lands in the catalog already stamped — its row
+        // is new exactly when `createPlan` ran, wherever the op was issued
+        // from (the boss chat, the CLI, another client). Fresh snapshots
+        // only describe what already existed, so the incremental merge is
+        // the "just created" signal that steers the user onto the plan.
+        if !fresh
+            && let Some(session_id) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| {
+                    session.planning.is_some() && !known_session_ids.contains(&session.id)
+                })
+                .map(|session| session.id)
+        {
+            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
+        }
+
         let attach = self
             .state
             .sessions
