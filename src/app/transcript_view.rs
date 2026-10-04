@@ -4164,6 +4164,10 @@ impl Waku {
                     .map(|message| first_message_paragraph(message.visible_content()))
             })
             .unwrap_or_default();
+        // The clamp measures trimmed text — a reply that opens with blank
+        // lines or whitespace-only paragraphs must not spend the card's two
+        // preview lines on them.
+        let commentary = commentary.trim();
         let status_label = if self.boss_ui.expired.contains(&employee_id) {
             tr!("boss.employee_finished")
         } else {
@@ -4294,7 +4298,7 @@ impl Waku {
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .overflow_hidden()
                     .child(SharedString::from(if commentary.is_empty() {
-                        "…".to_string()
+                        "…"
                     } else {
                         commentary
                     })),
@@ -4732,12 +4736,13 @@ fn render_activity_image(
 
 /// The opening paragraph of a message flattened to one line — the summon
 /// card previews it, and the two-line clamp keeps as many leading words as
-/// fit.
+/// fit. The content trims first so a reply opening on blank lines or
+/// whitespace-only paragraphs measures from its real first line.
 fn first_message_paragraph(content: &str) -> String {
     content
+        .trim()
         .lines()
         .map(str::trim)
-        .skip_while(|line| line.is_empty())
         .take_while(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
