@@ -11,6 +11,15 @@ renders that selection for a new reader. Boss memory, session rotation, provider
 switches, employee completion indexes, side chats, and project memory configure
 these primitives instead of maintaining separate retrieval systems.
 
+**search** is a fourth read primitive, added alongside surface and handoff: an
+exact-match pull (SQLite FTS5 over chunk bodies) for literal identifiers —
+commit SHAs, paths, error strings, names — where judged relevance is the wrong
+tool. It complements zoom rather than replacing it: search is lexical (locate
+the chunk containing a string); zoom is spatial (descend the hierarchy to see
+the neighborhood a fact lives in). Search to locate, zoom to expand. The full
+read surface: **surface** (Jev, proactive per-prompt), **search** (exact,
+pull), **zoom** (hierarchy navigation), **handoff** (render for a new reader).
+
 Jev placement is the default write path, not the only one. A principal with
 write access to a scope — the Boss for its own scope, a project agent or the
 user for project memory — may reorganize directly: refile chunks between
