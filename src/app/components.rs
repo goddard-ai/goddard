@@ -668,6 +668,7 @@ fn render_sent_message_attachments(
         .max_w(px(540.0))
         .flex()
         .flex_wrap()
+        .items_center()
         .justify_end()
         .gap(px(8.0));
     for (index, attachment) in attachments.iter().enumerate() {
@@ -678,29 +679,22 @@ fn render_sent_message_attachments(
                 .id(SharedString::from(format!(
                     "message-{message_id}-attachment-{index}"
                 )))
-                .h(px(24.0))
-                .max_w(px(240.0))
-                .pl(px(6.0))
-                .pr(px(10.0))
-                .rounded(px(8.0))
-                .border(hairline())
-                .border_color(theme.border)
-                .bg(theme.inset)
+                .max_w_full()
                 .flex()
                 .items_center()
                 .gap(px(5.0))
                 .cursor_default()
                 .tab_index(0)
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .hover(|element| element.bg(theme.overlay))
+                .hover(|element| element.text_color(theme.text))
                 .tooltip(Tooltip::text(format!("{} — {session_id}", attachment.name)))
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
                 .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
                 .child(
                     div()
                         .min_w_0()
                         .truncate()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
                         .child(attachment.name.clone()),
                 )
                 .on_click(move |_, _, cx| {
@@ -833,6 +827,65 @@ fn render_sent_message_attachments(
         } else {
             right_panel::file_icon_for_path(&attachment.mention)
         };
+        // A boss command's context attachment names a published deliverable
+        // — a reference, not an uploaded blob — so it reads as flat text
+        // and an icon rather than a content tile.
+        if attachment.blob_reference.is_none() {
+            let click_waku = waku.clone();
+            let key_waku = waku.clone();
+            let key_menu = menu.clone();
+            let click_path = attachment.path.to_string_lossy().into_owned();
+            let key_path = click_path.clone();
+            let chip = div()
+                .id(SharedString::from(format!(
+                    "message-{message_id}-attachment-{index}"
+                )))
+                .max_w_full()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_pointer()
+                .track_focus(menu.trigger_focus_handle())
+                .tab_index(0)
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|element| element.text_color(theme.text))
+                .tooltip(Tooltip::text(attachment.name.clone()))
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(icon(icon_path, 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(attachment.name.clone()),
+                )
+                .on_click(move |_, _, cx| {
+                    let _ = click_waku.update(cx, |this, cx| {
+                        this.open_path_in_default_app(&click_path, cx);
+                    });
+                    cx.stop_propagation();
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    let key = event.keystroke.key.as_str();
+                    if matches!(key, "enter" | "space") {
+                        let _ = key_waku.update(cx, |this, cx| {
+                            this.open_path_in_default_app(&key_path, cx);
+                        });
+                        cx.stop_propagation();
+                    } else if key == "f10" && event.keystroke.modifiers.shift {
+                        key_menu.open_context_menu(window, cx);
+                        cx.stop_propagation();
+                    }
+                });
+            let reveal_path = attachment.path.clone();
+            row = row.child(context_menu(
+                chip,
+                SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
+                menu,
+                move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
+            ));
+            continue;
+        }
         let attachment_image = attachment_images.get(index).and_then(|image| image.clone());
         let mut tile = div()
             .id(SharedString::from(format!(
