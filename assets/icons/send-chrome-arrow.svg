@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="16px" viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>send-chrome-arrow</title>
+    <g id="send---chome" stroke="none" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round" stroke-width="1">
+        <g id="Graphic" transform="translate(3.3333, 2.7333)" stroke="#404040">
+            <polyline id="Path" stroke-width="1.33333333" points="0 4.66666667 4.66666667 8.8817842e-16 9.33333333 4.66666667"></polyline>
+            <line x1="4.66666667" y1="10.7333333" x2="4.66666667" y2="0.1" id="Path" stroke-width="1.33333333"></line>
+        </g>
+    </g>
+</svg>

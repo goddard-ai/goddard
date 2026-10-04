@@ -6047,24 +6047,26 @@ impl Waku {
                                     .hover(|element| element.opacity(0.9))
                                     .active(|element| element.opacity(0.8))
                             })
-                            .child(icon(
-                                "icons/send.svg",
-                                16.0,
-                                // The chrome artwork is a fixed light
-                                // surface in every scheme, so the arrow
-                                // takes the dark half of the inverse pair —
-                                // the fill color in light themes, the glyph
-                                // color in dark ones.
-                                if can_send {
-                                    if theme.is_dark {
-                                        theme.on_inverse
-                                    } else {
-                                        theme.inverse
-                                    }
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
+                            // The design stacks a light underlay stroke
+                            // beneath the dark arrow so it stays legible
+                            // over the chrome artwork in every scheme.
+                            // Both arrows stay at full opacity — only the
+                            // chrome image dims when there is nothing to
+                            // send.
+                            .child(
+                                img("icons/send-chrome-underlay.svg")
+                                    .absolute()
+                                    .top(px(6.0))
+                                    .left(px(6.0))
+                                    .size(px(16.0)),
+                            )
+                            .child(
+                                img("icons/send-chrome-arrow.svg")
+                                    .absolute()
+                                    .top(px(6.0))
+                                    .left(px(6.0))
+                                    .size(px(16.0)),
+                            )
                             // Says why the button is dead, for the case
                             // the draft is ready and the machine is not.
                             .when(no_providers, |element| {
