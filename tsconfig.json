@@ -16,5 +16,14 @@
 		"skipLibCheck": true
 	},
 	"include": ["src/**/*"],
-	"exclude": ["node_modules", "src/main.ts"]
+	"exclude": [
+		"node_modules",
+		"src/main.ts",
+		"src/**/*.mobile.*",
+		"src/**/*.ios.*",
+		"src/**/*.android.*",
+		"src/**/*.macos.*",
+		"src/**/*.windows.*",
+		"src/**/*.linux.*"
+	]
 }

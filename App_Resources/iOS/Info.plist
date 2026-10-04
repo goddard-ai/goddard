@@ -22,6 +22,12 @@
 	<string>1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_waku._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Goddard discovers daemons on your local network so this device can pair with them.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiresFullScreen</key>

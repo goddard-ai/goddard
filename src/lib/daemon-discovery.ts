@@ -2,11 +2,11 @@ import type { DiscoveredDaemon } from './daemon-discovery.web';
 
 export type { DiscoveredDaemon };
 
-// TODO(xplat-blocker): mDNS/Bonjour discovery. The reference app used
-// react-native-zeroconf; the NativeScript equivalents are unmaintained
-// (nativescript-zeroconf 1.x predates NS8). Options: write an NSNetServiceBrowser
-// / NsdManager wrapper, or contribute a plugin. Until then discovery returns
-// nothing and users enter daemon addresses manually.
+// mDNS/Bonjour discovery lives in the platform leaves —
+// daemon-discovery.ios.ts (NSNetServiceBrowser) and
+// daemon-discovery.android.ts (NsdManager) — since no maintained
+// NativeScript zeroconf plugin exists. This unsuffixed fallback keeps the
+// module importable on any platform without a dedicated leaf.
 export function subscribeDaemonDiscovery(
   _onChange: (daemons: DiscoveredDaemon[]) => void,
 ): () => void {
