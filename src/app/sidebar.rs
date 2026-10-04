@@ -7289,6 +7289,7 @@ mod tests {
             employees: Vec::new(),
             bundles,
             goals_viewed_at: None,
+            planning: Vec::new(),
             revision: 0,
         }
     }
