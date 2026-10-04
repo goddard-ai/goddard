@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `boss_managed` integer DEFAULT false NOT NULL;

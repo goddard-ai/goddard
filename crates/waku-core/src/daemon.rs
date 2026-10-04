@@ -641,6 +641,43 @@ impl WakuBackend {
             boss,
             auto_prompts,
         };
+        // Sessions summoned before `boss_managed` existed carry no stamp;
+        // the roster still names them, so mark them now — once an employee
+        // retires its record is gone and the task would leak back into the
+        // ordinary lists.
+        {
+            let document = backend.boss.document();
+            let managed: HashSet<Uuid> = document
+                .session_id
+                .into_iter()
+                .chain(
+                    document
+                        .employees
+                        .iter()
+                        .map(|employee| employee.session_id),
+                )
+                .collect();
+            if !managed.is_empty() {
+                let mut state = backend.task_state.lock();
+                let stamped: Vec<Uuid> = state
+                    .sessions
+                    .iter_mut()
+                    .filter(|session| !session.boss_managed && managed.contains(&session.id))
+                    .map(|session| {
+                        session.boss_managed = true;
+                        session.id
+                    })
+                    .collect();
+                if !stamped.is_empty() {
+                    for id in stamped {
+                        state.mark_session_dirty(id);
+                    }
+                    if let Err(error) = backend.task_store.save(&mut state) {
+                        eprintln!("could not stamp boss-managed sessions: {error:#}");
+                    }
+                }
+            }
+        }
         backend.purge_expired_archived_sessions();
         backend.start_archive_detail_prune();
         backend.install_link_handlers();
@@ -3684,6 +3721,8 @@ fn merge_session_list_columns(
     // Set once at creation and never mutated, but a skeleton merge should
     // still carry it: the daemon's cascade reads it without hydrating.
     existing.side_chat_of = incoming.side_chat_of;
+    // The stamp is monotonic; a client's older copy must not clear it.
+    existing.boss_managed |= incoming.boss_managed;
     true
 }
 
@@ -3707,6 +3746,8 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.dormant_exempt_until = incoming.dormant_exempt_until;
         existing.landed_at = incoming.landed_at;
     }
+    // The stamp is monotonic; a client's older copy must not clear it.
+    existing.boss_managed |= incoming.boss_managed;
     if incoming.detail_loaded {
         // A detail-loaded projection carries the client's queue edits:
         // every save of a managed session lands here, so a user-owned
@@ -5612,6 +5653,9 @@ impl WakuBackend {
             session.id = employee.session_id;
             session.set_title(&employee.identity.name);
             session.agent_rename_allowed = false;
+            // Origin rides the session, not the roster: a retired
+            // employee's task stays out of the ordinary lists.
+            session.boss_managed = true;
         }
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
@@ -6065,6 +6109,7 @@ impl WakuBackend {
                 session.runtime_mode = mode;
                 session.title = boss.identity.name;
                 session.agent_rename_allowed = false;
+                session.boss_managed = true;
                 let id = session.id;
                 state.push_session(session.clone());
                 self.task_store.save(&mut state)?;
@@ -12805,6 +12850,90 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The sidebar drops a task from its ordinary rows on `boss_managed`,
+    /// not roster membership — retirement removes the roster entry, so the
+    /// stamp is what keeps a retired employee's task hidden. Employees a
+    /// pre-flag daemon summoned get stamped from the roster at startup.
+    #[test]
+    fn a_retired_employees_task_stays_boss_managed() {
+        let root = std::env::temp_dir().join(format!("boss-retired-{}", Uuid::new_v4()));
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(supervisor, persona, "Release checks".into())
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        {
+            // A pre-flag employee task: persisted and on the roster, but
+            // never stamped.
+            let mut state = backend.task_state.lock();
+            let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+            child.id = employee_id;
+            // Unstarted sessions own no store row; a real employee task
+            // carries its assignment's turn.
+            child.begin_turn("seed");
+            child.finish_active_turn(crate::model::TurnStatus::Completed);
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        drop(backend);
+        // The next daemon over the same data stamps the roster's sessions
+        // while it constructs.
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .any(|session| session.id == employee_id && session.boss_managed)
+        );
+        backend
+            .boss
+            .update(|state| {
+                let employee = state
+                    .employees
+                    .iter_mut()
+                    .find(|entry| entry.session_id == employee_id)
+                    .unwrap();
+                employee.expired = true;
+                employee.expired_at = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
+        assert!(backend.boss.employee(employee_id).is_none());
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .is_some_and(|session| session.boss_managed)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// A worktree summon is the same managed worktree `agent create` makes:
     /// the employee task runs in the detached checkout and its assignment
     /// names that path, not the supervisor's primary checkout. The launch
@@ -12900,6 +13029,7 @@ mod tests {
                 .contains(&format!("Assigned project: {}", path.display()))
         );
         assert!(backend.boss.is_employee(session.id));
+        assert!(session.boss_managed);
         drop(state);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);

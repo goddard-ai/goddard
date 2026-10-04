@@ -546,7 +546,7 @@ impl Waku {
             session.id == session_id
                 && !session.has_started()
                 && !session.is_side_chat()
-                && !self.boss_ui.managed.contains(&session_id)
+                && !self.session_is_boss_managed(session)
         });
         if draft_started {
             self.new_task_last_started_at = Some(unix_time());
@@ -829,6 +829,15 @@ impl Waku {
                 .find(|employee| employee.session_id == session_id)
                 .map(|employee| (*key, employee.identity.clone(), employee.job_title.clone()))
         })
+    }
+
+    /// Whether the session belongs to a boss — its chat or a summoned
+    /// employee — including after the employee left the roster. The
+    /// session's `boss_managed` stamp survives retirement, where
+    /// `managed` membership does not; the set still answers for daemons
+    /// that predate the stamp.
+    pub(super) fn session_is_boss_managed(&self, session: &AgentSession) -> bool {
+        session.boss_managed || self.boss_ui.managed.contains(&session.id)
     }
 
     fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {

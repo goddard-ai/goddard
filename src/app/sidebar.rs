@@ -3028,7 +3028,7 @@ impl Waku {
             }
             // Managed sessions never render pull-request affordances, so
             // their checkouts are not worth a scan.
-            if self.boss_ui.managed.contains(&session.id) {
+            if self.session_is_boss_managed(session) {
                 continue;
             }
             let (cwd, branch) = match &session.workspace {
@@ -3354,7 +3354,7 @@ impl Waku {
                             && session.archived_at.is_none()
                             && !session.is_side_chat()
                             && !self.friend_sessions.contains_key(&session.id)
-                            && !self.boss_ui.managed.contains(&session.id)
+                            && !self.session_is_boss_managed(session)
                     })
                     .collect::<Vec<_>>();
                 sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
@@ -3609,7 +3609,7 @@ impl Waku {
                 || session.archived_at.is_some()
                 || session.is_side_chat()
                 || self.friend_sessions.contains_key(&session.id)
-                || self.boss_ui.managed.contains(&session.id)
+                || self.session_is_boss_managed(session)
             {
                 continue;
             }
@@ -3741,7 +3741,7 @@ impl Waku {
                     && session.archived_at.is_none()
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
-                    && !self.boss_ui.managed.contains(&session.id)
+                    && !self.session_is_boss_managed(session)
             })
             .collect::<Vec<_>>();
         // A focused project narrows the whole history to its tasks — the

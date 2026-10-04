@@ -1,0 +1,1 @@
+- A retired employee's task no longer reappears in the sidebar's task list when it leaves the boss's employee roster; it stays reachable from the boss transcript instead.

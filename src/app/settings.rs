@@ -9790,7 +9790,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session.archived_at.is_some() && !self.boss_ui.managed.contains(&session.id)
+                session.archived_at.is_some() && !self.session_is_boss_managed(session)
             })
             .collect::<Vec<_>>();
         archived.sort_by_key(|session| std::cmp::Reverse(session.archived_at));

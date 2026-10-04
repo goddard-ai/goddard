@@ -1470,7 +1470,7 @@ impl StateStore {
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-                        agent_rename_allowed, runtime_event_cursor,
+                        agent_rename_allowed, boss_managed, runtime_event_cursor,
                         friend_peer_id, friend_peer_name
                  FROM sessions ORDER BY updated_at",
             )
@@ -1497,9 +1497,10 @@ impl StateStore {
                     row.get::<_, Option<String>>(15)?,
                     row.get::<_, Option<String>>(16)?,
                     row.get::<_, bool>(17)?,
-                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, bool>(18)?,
                     row.get::<_, Option<String>>(19)?,
                     row.get::<_, Option<String>>(20)?,
+                    row.get::<_, Option<String>>(21)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2158,6 +2159,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     bool,
+    bool,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -2188,6 +2190,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         workspace,
         side_chat_of,
         agent_rename_allowed,
+        boss_managed,
         runtime_event_cursor,
         friend_peer_id,
         friend_peer_name,
@@ -2217,6 +2220,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         friend_peer_id,
         friend_peer_name,
         agent_rename_allowed,
+        boss_managed,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
         pending_model_switch: None,
@@ -2291,6 +2295,9 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     // Quarantine is detail, not a list column — the skeleton's flag is a
     // placeholder and the stored blob carries the real value.
     session.quarantined = stored.quarantined;
+    // The stamp is monotonic and the column may be ahead of an older blob —
+    // a skeleton save refreshes the column without rewriting detail.
+    session.boss_managed |= stored.boss_managed;
     session.environment = stored_environment;
     session.messages = stored.messages;
     // A queue entry whose id already runs in the transcript was delivered —
@@ -2671,9 +2678,9 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-         agent_rename_allowed, runtime_event_cursor,
+         agent_rename_allowed, boss_managed, runtime_event_cursor,
          friend_peer_id, friend_peer_name
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2692,6 +2699,7 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          workspace     = excluded.workspace,
          side_chat_of  = excluded.side_chat_of,
          agent_rename_allowed = excluded.agent_rename_allowed,
+         boss_managed = excluded.boss_managed,
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
          friend_peer_name = excluded.friend_peer_name";
@@ -2765,6 +2773,7 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .side_chat_of
             .map_or(Value::Null, |id| Value::Text(id.to_string())),
         Value::Integer(i64::from(session.agent_rename_allowed)),
+        Value::Integer(i64::from(session.boss_managed)),
         // NULL until the session first streams events, like the workspace
         // column: duplicated detail so attach need not hydrate.
         session

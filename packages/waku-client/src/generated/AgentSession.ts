@@ -170,7 +170,15 @@ incognito?: boolean,
 /**
  * The user has allowed this task's agent to set its own title.
  */
-agent_rename_allowed?: boolean, provider_cursor: ProviderResumeCursor | null,
+agent_rename_allowed?: boolean,
+/**
+ * Stamped when the session belongs to a boss — its own chat or a
+ * summoned employee's task. Roster membership ends when an employee
+ * retires, but this stays set so task lists keep the session out of
+ * the ordinary rows; it opens through the boss transcript as an
+ * ordinary task.
+ */
+boss_managed?: boolean, provider_cursor: ProviderResumeCursor | null,
 /**
  * Provider conversations this session ran on before switching away.
  * Each holds a resumable cursor and the transcript boundary the return

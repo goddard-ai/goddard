@@ -1719,6 +1719,13 @@ pub struct AgentSession {
     /// The user has allowed this task's agent to set its own title.
     #[serde(default, skip_serializing_if = "is_false")]
     pub agent_rename_allowed: bool,
+    /// Stamped when the session belongs to a boss — its own chat or a
+    /// summoned employee's task. Roster membership ends when an employee
+    /// retires, but this stays set so task lists keep the session out of
+    /// the ordinary rows; it opens through the boss transcript as an
+    /// ordinary task.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub boss_managed: bool,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Provider conversations this session ran on before switching away.
@@ -1878,6 +1885,7 @@ impl AgentSession {
             landed_at: None,
             incognito: false,
             agent_rename_allowed: false,
+            boss_managed: false,
             detail_loaded: true,
             provider_cursor: None,
             suspended_provider_sessions: Vec::new(),
@@ -1944,6 +1952,9 @@ impl AgentSession {
             // A list column: the sidebar and drafts list badge incognito rows.
             incognito: self.incognito,
             agent_rename_allowed: self.agent_rename_allowed,
+            // A list column: the sidebar keeps a retired employee's task
+            // out of the ordinary rows without consulting the roster.
+            boss_managed: self.boss_managed,
             // Incognito sessions persist nowhere, so the client's skeleton
             // may be the only surviving copy after a daemon restart — it
             // must carry the resume cursor, or survival depends on whether
@@ -3008,6 +3019,8 @@ impl AgentSession {
         fork.id = fork_id;
         fork.title = Self::DEFAULT_TITLE.to_owned();
         fork.agent_rename_allowed = false;
+        // The fork is the user's ordinary task, whatever its source was.
+        fork.boss_managed = false;
         fork.auto_title = Some(fork_title.to_owned());
         fork.status = SessionStatus::Idle;
         fork.created_at = now;

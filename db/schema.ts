@@ -83,6 +83,12 @@ export const sessions = sqliteTable(
     /** Per-task grant for the owning agent to change this task's title. */
     agentRenameAllowed: integer("agent_rename_allowed", { mode: "boolean" }).notNull().default(false),
     /**
+     * A boss chat or summoned employee task, duplicated from
+     * `session_details.data` so list filtering can hide it without
+     * hydrating. Unlike roster membership it survives employee retirement.
+     */
+    bossManaged: integer("boss_managed", { mode: "boolean" }).notNull().default(false),
+    /**
      * JSON-serialized RuntimeEventCursor, duplicated from `session_details.data`
      * so a runtime attach can resume its replay dedup without hydrating the
      * session. NULL before the session first streams events.
