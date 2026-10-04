@@ -84,6 +84,16 @@ pub struct DaemonSettings {
     /// in the background, and injects it into each session's first prompt.
     /// Defaults on in development builds, opt-in in release builds.
     pub memory_experiment_enabled: bool,
+    /// Opt-in for daemon-side Boss session rotation. Disabled by default.
+    #[serde(default)]
+    pub boss_rotation_enabled: bool,
+    /// Context fraction that makes a settled Boss session eligible to rotate.
+    #[serde(default = "default_boss_rotation_threshold")]
+    pub boss_rotation_context_threshold: f64,
+    /// Per-provider prompt-cache TTL in seconds; zero means the provider has
+    /// no reusable prompt cache. Missing entries use the five-minute policy.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub boss_rotation_cache_ttl_secs: HashMap<ProviderKind, u64>,
     /// Experimental opt-in for cross-session composer drafts. Defaults on in
     /// development builds and off in release builds.
     #[serde(default = "default_experiment_enabled")]
@@ -152,6 +162,10 @@ fn default_experiment_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
+fn default_boss_rotation_threshold() -> f64 {
+    0.8
+}
+
 impl Default for DaemonSettings {
     fn default() -> Self {
         Self {
@@ -170,6 +184,9 @@ impl Default for DaemonSettings {
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_rotation_enabled: false,
+            boss_rotation_context_threshold: default_boss_rotation_threshold(),
+            boss_rotation_cache_ttl_secs: HashMap::new(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: BTreeMap::new(),
             title_models: BTreeMap::new(),

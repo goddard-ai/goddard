@@ -88,6 +88,19 @@ auto_prompts: Array<AutoPromptRule>,
  */
 memory_experiment_enabled: boolean,
 /**
+ * Opt-in for daemon-side Boss session rotation. Disabled by default.
+ */
+boss_rotation_enabled: boolean,
+/**
+ * Context fraction that makes a settled Boss session eligible to rotate.
+ */
+boss_rotation_context_threshold: number,
+/**
+ * Per-provider prompt-cache TTL in seconds; zero means the provider has
+ * no reusable prompt cache. Missing entries use the five-minute policy.
+ */
+boss_rotation_cache_ttl_secs?: { [key in ProviderKind]?: number },
+/**
  * Experimental opt-in for cross-session composer drafts. Defaults on in
  * development builds and off in release builds.
  */

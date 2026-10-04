@@ -501,6 +501,10 @@ fn default_experiment_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
+fn default_boss_rotation_threshold() -> f64 {
+    0.8
+}
+
 /// Graduated features default on — their real gate is a configured eval
 /// backend, not a flag.
 fn default_enabled() -> bool {
@@ -2182,6 +2186,13 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    /// Boss rotation opt-in mirrored from daemon settings; release default off.
+    #[serde(default)]
+    pub boss_rotation_enabled: bool,
+    #[serde(default = "default_boss_rotation_threshold")]
+    pub boss_rotation_context_threshold: f64,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub boss_rotation_cache_ttl_secs: HashMap<ProviderKind, u64>,
     /// Experimental: whether cross-session composer drafts are enabled.
     /// Daemon-owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -2491,6 +2502,9 @@ impl PersistedState {
             qa_branch: default_qa_branch(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_rotation_enabled: false,
+            boss_rotation_context_threshold: default_boss_rotation_threshold(),
+            boss_rotation_cache_ttl_secs: HashMap::new(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
@@ -2745,6 +2759,9 @@ impl PersistedState {
             qa_branch: self.qa_branch.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
+            boss_rotation_enabled: self.boss_rotation_enabled,
+            boss_rotation_context_threshold: self.boss_rotation_context_threshold,
+            boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
@@ -2780,6 +2797,9 @@ impl PersistedState {
         self.qa_branch = settings.qa_branch;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.boss_rotation_enabled = settings.boss_rotation_enabled;
+        self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
+        self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.memory_models = settings.memory_models;
         self.title_models = settings.title_models;

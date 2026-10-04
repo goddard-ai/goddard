@@ -70,6 +70,10 @@ fn default_experiment_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
+fn default_boss_rotation_threshold() -> f64 {
+    0.8
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -351,6 +355,13 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    /// Boss rotation opt-in mirrored from daemon settings; release default off.
+    #[serde(default)]
+    pub boss_rotation_enabled: bool,
+    #[serde(default = "default_boss_rotation_threshold")]
+    pub boss_rotation_context_threshold: f64,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub boss_rotation_cache_ttl_secs: HashMap<ProviderKind, u64>,
     /// Experimental cross-session composer draft setting mirrored from daemon
     /// settings.
     #[serde(default = "default_experiment_enabled")]
@@ -505,6 +516,9 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_rotation_enabled: false,
+            boss_rotation_context_threshold: 0.8,
+            boss_rotation_cache_ttl_secs: Default::default(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             memory_models: Default::default(),
             title_models: Default::default(),
@@ -662,6 +676,9 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
+            boss_rotation_enabled: self.boss_rotation_enabled,
+            boss_rotation_context_threshold: self.boss_rotation_context_threshold,
+            boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             memory_models: self.memory_models.clone(),
             title_models: self.title_models.clone(),
@@ -726,6 +743,9 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.boss_rotation_enabled = settings.boss_rotation_enabled;
+        self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
+        self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.memory_models = settings.memory_models;
         self.title_models = settings.title_models;
