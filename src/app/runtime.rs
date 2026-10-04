@@ -6315,6 +6315,7 @@ impl Waku {
         let is_background = session.status == SessionStatus::Background;
         let is_busy = session.is_busy();
         if !submission.hidden {
+            self.note_user_message_target(session_id);
             self.record_action(
                 Some(session_id),
                 action_predictions::JournalAction::PromptSend {
@@ -6434,6 +6435,9 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
+        if !submission.hidden {
+            self.note_user_message_target(session_id);
+        }
         self.steer_session_submission(session_id, submission, cx);
     }
 

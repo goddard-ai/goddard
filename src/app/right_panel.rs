@@ -3321,7 +3321,7 @@ impl Waku {
                     .into_any_element()
                 }),
             Some(RightPanelSurface::File(path)) => self
-                .render_right_panel_file(path, width, window, cx)
+                .render_right_panel_file(path, width, true, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::FileAtRef { path, git_ref }) => self
                 .render_right_panel_ref_file(&path, &git_ref, width, window, cx)
@@ -5242,7 +5242,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         if let Some(relative_path) = self.right_panel_files_selected_path.clone() {
-            self.render_right_panel_file(relative_path, panel_width, window, cx)
+            self.render_right_panel_file(relative_path, panel_width, true, window, cx)
         } else {
             self.render_right_panel_working_tree(None, cx)
         }
@@ -5624,16 +5624,74 @@ impl Waku {
         self.working_tree_row_menu(waku, &absolute_path, &name, absolute_path.is_dir())
     }
 
+    /// The armed bundle's own page: a previewable file renders with the
+    /// file viewer's machinery at the chat column's full width — the
+    /// bundle's page, not the boss chat's right panel. The composer rides
+    /// underneath with the boss's chip, so a send from here lands on the
+    /// boss chat with the bundle attached. `None` whenever no armed bundle
+    /// is holding a page open, which drops stale state as it is found.
+    pub(super) fn render_bundle_preview_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (key, bundle_id) = self.boss_ui.bundle_page?;
+        let valid = self.boss_ui.command_bundle == Some((key, bundle_id))
+            && self
+                .boss_ui
+                .states
+                .get(&key)
+                .is_some_and(|state| state.session_id == self.state.selected_session);
+        if !valid {
+            self.boss_ui.bundle_page = None;
+            return None;
+        }
+        let relative_path = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .bundles
+                    .iter()
+                    .find(|bundle| bundle.id == bundle_id && !bundle.directory)
+            })
+            .and_then(|bundle| {
+                std::path::Path::new(&bundle.path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            });
+        let Some(relative_path) = relative_path else {
+            self.boss_ui.bundle_page = None;
+            return None;
+        };
+        Some(
+            self.render_right_panel_file(
+                relative_path,
+                self.chat_viewport_width(window),
+                false,
+                window,
+                cx,
+            )
+            .into_any_element(),
+        )
+    }
+
+    /// `show_tree` mounts the working-tree column beside the editor — the
+    /// strip's own browsing surface. A bundle's preview page leaves it
+    /// out: the page previews one published file, not its directory.
     fn render_right_panel_file(
         &mut self,
         relative_path: String,
         panel_width: f32,
+        show_tree: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
         let fullscreen = self.panel_fullscreen_active();
-        let file_tree_width = if fullscreen {
+        let file_tree_width = if !show_tree || fullscreen {
             0.0
         } else if !self.right_panel_file_tree_visible {
             0.0
@@ -5726,7 +5784,7 @@ impl Waku {
                     }
                 })
         });
-        let tree_toggle = (!fullscreen).then(|| {
+        let tree_toggle = (show_tree && !fullscreen).then(|| {
             let focus = self.transcript_control_focus("file-tree-toggle", cx);
             let label = if self.right_panel_file_tree_visible {
                 tr!("files.hide_tree")
@@ -5859,9 +5917,10 @@ impl Waku {
             .flex()
             .child(editor)
             // Fullscreen drops the file tree entirely; its resize handle
-            // would fight a surface that owns the window's width.
+            // would fight a surface that owns the window's width. A page
+            // render with `show_tree` off leaves the column out too.
             .when(
-                !fullscreen && self.right_panel_file_tree_visible,
+                show_tree && !fullscreen && self.right_panel_file_tree_visible,
                 |element| {
                     element.child(
                         div()
@@ -8124,8 +8183,9 @@ impl Waku {
                 .map(|project| project.path.clone()),
             RightPanelOwner::Boss(key) => {
                 // An armed sidebar bundle roots the boss chat's file
-                // surfaces at the path the boss published — a previewable
-                // file opens in place. Remote bundles have no local slice.
+                // surfaces at the path the boss published — its preview
+                // page reads through the same root. Remote bundles have
+                // no local slice.
                 if key != waku_client::DaemonKey::Local {
                     return None;
                 }

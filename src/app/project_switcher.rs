@@ -30,13 +30,15 @@ const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
 
 /// What a commit retargets: the draft the ⌘N gesture was opened on, the
-/// open Projects page's own project — the ⌘⇧P gesture's — or Big
-/// Picture's standing new-task draft.
+/// open Projects page's own project — the ⌘⇧P gesture's — Big Picture's
+/// standing new-task draft, or the boss chat, whose pick lands on a New
+/// Task page like the draft's.
 #[derive(Clone, Copy, PartialEq)]
 enum ProjectSwitcherTarget {
     Draft,
     ProjectsPage,
     BigPicture,
+    BossChat,
 }
 
 /// Runtime-only switcher state, like its task counterpart: recency lives in
@@ -322,6 +324,19 @@ impl Waku {
             }
             return;
         }
+        // ⌘N lands wherever the user worked most recently: a boss chat
+        // messaged since the last New Task start wins over the page. On
+        // the boss chat itself the chord asks "which project" — the
+        // picker's commit lands on the New Task page.
+        if self.boss_chat_key().is_some() && self.session_surface_active() {
+            if self.open_boss_chat_project_switcher(window, cx) {
+                return;
+            }
+        } else if let Some(key) = self.boss_message_outranks_new_task() {
+            self.settings_page = None;
+            self.chat_with_boss(key, cx);
+            return;
+        }
         // The chord shares ⌘N with New Session; when no draft can take
         // the switcher, let the keystroke fall through to it.
         if !self.open_project_switcher(reverse, window, cx) {
@@ -412,33 +427,66 @@ impl Waku {
             cx,
         );
         if opened {
-            self.project_switcher.searching = true;
-            self.project_switcher.recent_project_ids =
-                self.project_switcher.ordered_project_ids.clone();
-            let search = self
-                .project_switcher
-                .search
-                .get_or_insert_with(|| {
-                    let search = cx.new(|cx| {
-                        TextInput::new(window, cx)
-                            .clear_on_escape()
-                            .placeholder(tr!("command_palette.new_task_in_placeholder"))
-                            .accessibility_label(tr!("command_palette.new_task_in_placeholder"))
-                    });
-                    cx.subscribe(&search, |this, search, event: &InputEvent, cx| {
-                        if matches!(event, InputEvent::Edited) && this.project_switcher.searching {
-                            let query = search.read(cx).content().to_owned();
-                            this.filter_project_switcher(&query, cx);
-                        }
-                    })
-                    .detach();
-                    search
-                })
-                .clone();
-            search.update(cx, |input, cx| input.clear(cx));
-            self.filter_project_switcher("", cx);
+            self.begin_project_switcher_search(window, cx);
         }
         opened
+    }
+
+    /// ⌘N over the boss chat: the same searching switcher the New Task
+    /// page raises, headed by the boss's own row. Its project picks land
+    /// on the New Task page; its boss pick stays on the chat.
+    fn open_boss_chat_project_switcher(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(key) = self.boss_chat_key() else {
+            return false;
+        };
+        let current = self.boss_ui.states.get(&key).map(|state| state.identity.id);
+        if !self.open_switcher(
+            current,
+            self.state.selected_session,
+            ProjectSwitcherTarget::BossChat,
+            false,
+            false,
+            window,
+            cx,
+        ) {
+            return false;
+        }
+        self.begin_project_switcher_search(window, cx);
+        true
+    }
+
+    /// The first ⌘N opens the switcher searching — a focused field over the
+    /// recency list — which the boss chat and the New Task page share.
+    fn begin_project_switcher_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.project_switcher.searching = true;
+        self.project_switcher.recent_project_ids =
+            self.project_switcher.ordered_project_ids.clone();
+        let search = self
+            .project_switcher
+            .search
+            .get_or_insert_with(|| {
+                let search = cx.new(|cx| {
+                    TextInput::new(window, cx)
+                        .clear_on_escape()
+                        .placeholder(tr!("command_palette.new_task_in_placeholder"))
+                        .accessibility_label(tr!("command_palette.new_task_in_placeholder"))
+                });
+                cx.subscribe(&search, |this, search, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) && this.project_switcher.searching {
+                        let query = search.read(cx).content().to_owned();
+                        this.filter_project_switcher(&query, cx);
+                    }
+                })
+                .detach();
+                search
+            })
+            .clone();
+        search.update(cx, |input, cx| input.clear(cx));
+        self.filter_project_switcher("", cx);
     }
 
     /// ⌘N over Big Picture: the same overlay, answering "which project" for
@@ -494,13 +542,21 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
-        let projects: Vec<Project> = self
+        let mut projects: Vec<Project> = self
             .state
             .projects
             .iter()
             .filter(|project| !exclude_projectless || !project.is_projectless())
             .cloned()
             .collect();
+        // A New Task destination can also be the boss's own page: each live
+        // boss chat rows in like a project, ranked by its chat's recency.
+        if matches!(
+            target,
+            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+        ) {
+            projects.extend(self.boss_switcher_projects());
+        }
         let ordered = ordered_project_ids(current_project, &recent, &projects);
         let Some(highlighted_index) =
             task_switcher::initial_highlight_index(&ordered, current_project, reverse)
@@ -591,9 +647,16 @@ impl Waku {
     }
 
     fn filter_project_switcher(&mut self, query: &str, cx: &mut Context<Self>) {
+        let mut projects = self.state.projects.clone();
+        if matches!(
+            self.project_switcher.target,
+            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+        ) {
+            projects.extend(self.boss_switcher_projects());
+        }
         self.project_switcher.ordered_project_ids = filtered_project_ids(
             &self.project_switcher.recent_project_ids,
-            &self.state.projects,
+            &projects,
             self.home_directory.as_deref(),
             query,
         );
@@ -675,6 +738,51 @@ impl Waku {
             cx.notify();
             return;
         }
+        // A boss row is a destination, not a project pick — committing it
+        // opens that boss's chat from either New Task flavored target.
+        if let Some(project_id) = selected
+            && let Some(key) = self.boss_key_for_project(project_id)
+        {
+            self.chat_with_boss(key, cx);
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
+        // A switcher raised over the boss chat commits to the New Task
+        // page: the picked project's remembered draft, or a fresh one —
+        // the same landing ⌘N makes anywhere else.
+        if target == ProjectSwitcherTarget::BossChat {
+            if let Some(project_id) = selected
+                && self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id)
+            {
+                if self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id && project.is_projectless())
+                {
+                    self.create_projectless_session(cx);
+                } else if let Some(session_id) = self
+                    .session_navigation
+                    .remembered_new_task(&self.state.sessions, project_id)
+                {
+                    self.select_session(session_id, cx);
+                } else {
+                    self.create_session_for(project_id, self.state.last_provider, cx);
+                }
+            }
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
         let may_commit = pointer_selection || self.state.selected_session == original;
         let mut focus_after = previous_focus;
         // A projectless pick always commits: the collapsed row stands for a
@@ -729,6 +837,72 @@ impl Waku {
             window.focus(&previous_focus, cx);
         }
         cx.notify();
+    }
+
+    /// A boss row: the same entry chrome a project takes — hover,
+    /// highlight, pointer commit — with the boss's face and name where a
+    /// project's icon and path would sit, and its group for the path slot.
+    fn render_project_switcher_boss_entry(
+        &self,
+        key: waku_client::DaemonKey,
+        project_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(state) = self.boss_ui.states.get(&key) else {
+            return div().into_any_element();
+        };
+        let theme = Theme::current(cx);
+        let highlighted = self.project_switcher.highlighted_project_id == Some(project_id);
+        div()
+            .id(SharedString::from(format!("project-switcher-boss-{key:?}")))
+            .h(px(ROW_HEIGHT))
+            .w_full()
+            .flex_none()
+            .px(px(ROW_INSET_X))
+            .rounded(px(ROW_RADIUS))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .cursor_default()
+            .when(highlighted, |entry| entry.bg(theme.overlay_strong))
+            .hover(|entry| entry.bg(theme.overlay))
+            .on_mouse_move(cx.listener(move |this, _, _, cx| {
+                let Some(index) = this
+                    .project_switcher
+                    .ordered_project_ids
+                    .iter()
+                    .position(|candidate| *candidate == project_id)
+                else {
+                    return;
+                };
+                this.set_project_switcher_highlight(index, cx);
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if this.project_switcher.open {
+                    this.project_switcher.highlighted_project_id = Some(project_id);
+                    this.finish_project_switcher(true, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(self.boss_avatar(&state.identity, 16.0, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text)
+                    .child(state.identity.name.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.group")),
+            )
+            .into_any_element()
     }
 
     fn render_project_switcher_entry(
@@ -815,12 +989,17 @@ impl Waku {
             .ordered_project_ids
             .iter()
             .filter_map(|project_id| {
-                self.state
+                if let Some(project) = self
+                    .state
                     .projects
                     .iter()
                     .find(|project| project.id == *project_id)
+                {
+                    return Some(self.render_project_switcher_entry(project, cx));
+                }
+                self.boss_key_for_project(*project_id)
+                    .map(|key| self.render_project_switcher_boss_entry(key, *project_id, cx))
             })
-            .map(|project| self.render_project_switcher_entry(project, cx))
             .collect::<Vec<_>>();
         let viewport_height = f32::from(window.viewport_size().height);
         // Padding below the card pushes the centered layout up by half the

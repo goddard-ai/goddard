@@ -233,7 +233,7 @@ impl Waku {
     /// Width left for the chat column once the panels take theirs — the
     /// widths they are painted at this frame, so a transcript measured
     /// mid-slide matches the column it is laid out in.
-    fn chat_viewport_width(&self, window: &Window) -> f32 {
+    pub(super) fn chat_viewport_width(&self, window: &Window) -> f32 {
         f32::from(window.viewport_size().width)
             - self.sidebar_rendered_width
             - self.right_panel_rendered_width
@@ -633,6 +633,7 @@ impl Render for Waku {
             session.provider == ProviderKind::Antigravity && session.has_started()
         });
         let composer_mounted = self.composer_mounted();
+        let bundle_page = self.render_bundle_preview_page(window, cx);
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -856,6 +857,8 @@ impl Render for Waku {
                             )
                         } else if self.boss_ui.page.is_some() {
                             self.render_boss_page(cx)
+                        } else if let Some(bundle_page) = bundle_page {
+                            bundle_page
                         } else if self.drafts_page {
                             self.render_drafts_page(cx)
                         } else if self.automations_page {
@@ -878,7 +881,6 @@ impl Render for Waku {
                         },
                     )
                     .children(permission)
-                    .children(self.render_boss_finished_footer(cx))
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
                     // pages own no composer at all. While the overlay is

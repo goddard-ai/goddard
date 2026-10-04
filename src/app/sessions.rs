@@ -774,8 +774,10 @@ impl Waku {
         self.sync_right_panel_owner(cx);
         if session_changed {
             // A new session is a new context: a bundle click's armed boss
-            // command belongs to whatever was on screen before.
+            // command belongs to whatever was on screen before — and the
+            // preview page it may have opened with it.
             self.boss_ui.command_bundle = None;
+            self.boss_ui.bundle_page = None;
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);
@@ -4048,7 +4050,6 @@ impl Waku {
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
             || self.boss_ui.page.is_some()
-            || self.boss_employee_finished()
             // A started Antigravity session has no composer — keystrokes
             // belong to its TUI terminal or nowhere.
             || self.selected_session().is_some_and(|session| {
@@ -4137,7 +4138,6 @@ impl Waku {
             || self.drafts_page
             || self.automations_page
             || self.boss_ui.page.is_some()
-            || self.boss_employee_finished()
             || self.selected_friend_watch().is_some()
             || self.selected_session().is_some_and(|session| {
                 session.provider == ProviderKind::Antigravity && session.has_started()

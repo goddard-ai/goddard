@@ -3078,6 +3078,13 @@ pub struct Waku {
     /// focus whenever GPUI re-renders the list.
     transcript_control_focuses: RefCell<HashMap<String, FocusHandle>>,
     session_navigation: SessionNavigation,
+    /// ⌘N's two competing recencies: the daemon whose boss chat last took a
+    /// user message and when, against the last time a send started a task
+    /// from the New Task page. The fresher one is where the chord lands.
+    /// Runtime-only — a relaunch falls back to the New Task page until the
+    /// next boss message.
+    boss_last_message: Option<(waku_client::DaemonKey, u64)>,
+    new_task_last_started_at: Option<u64>,
     /// Sidebar task currently showing its inline rename field.
     session_rename: Option<Uuid>,
     /// Sidebar terminal currently showing its inline rename field — the
@@ -6885,6 +6892,8 @@ impl Waku {
                 changed_files_diff_generation: 0,
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,
+                boss_last_message: None,
+                new_task_last_started_at: None,
                 session_rename: None,
                 terminal_rename: None,
                 sidebar_multi_selection: HashSet::new(),

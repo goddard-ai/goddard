@@ -36,6 +36,11 @@ pub(super) struct BossUi {
     /// context, so the click parks its bundle here and the finish reapplies
     /// the arm once the boss chat is on screen.
     pub pending_bundle: Option<(DaemonKey, Uuid)>,
+    /// The bundle whose preview page covers the boss chat's transcript: a
+    /// previewable file's own page rather than a panel off the chat. Lives
+    /// and dies with `command_bundle` — the same arm brands the composer's
+    /// boss chip and roots the page's file at the bundle's directory.
+    pub bundle_page: Option<(DaemonKey, Uuid)>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     files: Vec<BossFile>,
@@ -73,6 +78,7 @@ impl Default for BossUi {
             sidebar_idle_visible: HashMap::new(),
             command_bundle: None,
             pending_bundle: None,
+            bundle_page: None,
             revision: 0,
             page: None,
             files: Vec::new(),
@@ -494,6 +500,68 @@ impl Waku {
             .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
     }
 
+    /// ⌘N's recency stamps: a user send to a boss chat marks that boss the
+    /// fresher destination; one that starts a New Task draft marks the page
+    /// instead. Callers gate on `!submission.hidden`, so system nudges and
+    /// continuations never count as either.
+    pub(super) fn note_user_message_target(&mut self, session_id: Uuid) {
+        let boss_key = self
+            .boss_ui
+            .states
+            .iter()
+            .find_map(|(key, state)| (state.session_id == Some(session_id)).then_some(*key));
+        if let Some(key) = boss_key {
+            self.boss_last_message = Some((key, unix_time()));
+            return;
+        }
+        let draft_started = self.state.sessions.iter().any(|session| {
+            session.id == session_id
+                && !session.has_started()
+                && !session.is_side_chat()
+                && !self.boss_ui.managed.contains(&session_id)
+        });
+        if draft_started {
+            self.new_task_last_started_at = Some(unix_time());
+        }
+    }
+
+    /// The daemon whose boss chat a user message last landed on, when it is
+    /// fresher than the last task the user started from the New Task page —
+    /// ⌘N's tie-break between the two destinations.
+    pub(super) fn boss_message_outranks_new_task(&self) -> Option<DaemonKey> {
+        let (key, at) = self.boss_last_message?;
+        (at > self.new_task_last_started_at.unwrap_or(0)).then_some(key)
+    }
+
+    /// The boss a project-list row stands for: boss workspaces live outside
+    /// `state.projects`, but the daemon mints their project id from the boss
+    /// identity, so the id maps straight back to its owner — `None` unless
+    /// the boss chat has actually opened its workspace.
+    pub(super) fn boss_key_for_project(&self, project_id: Uuid) -> Option<DaemonKey> {
+        if !self.boss_ui.projects.contains_key(&project_id) {
+            return None;
+        }
+        self.boss_ui
+            .states
+            .iter()
+            .find_map(|(key, state)| (state.identity.id == project_id).then_some(*key))
+    }
+
+    /// The project rows a picker adds for each live boss chat: the boss's
+    /// private workspace, renamed to its identity so the row and the search
+    /// read as the boss rather than a scratch directory.
+    pub(super) fn boss_switcher_projects(&self) -> Vec<Project> {
+        self.boss_ui
+            .states
+            .values()
+            .filter_map(|state| {
+                let mut project = self.boss_ui.projects.get(&state.identity.id)?.clone();
+                project.name = state.identity.name.clone();
+                Some(project)
+            })
+            .collect()
+    }
+
     /// The boss chat a main-composer submission answers to while armed —
     /// a live employee's task is on screen or a sidebar bundle was
     /// clicked — plus the context it attaches. `None` leaves the
@@ -529,12 +597,11 @@ impl Waku {
             }
         }
         let employee_id = self.state.selected_session?;
-        // A finished employee swaps the composer for the resurrection
-        // footer, and the boss's own chat is already the destination —
-        // neither is a command context.
-        if self.boss_ui.expired.contains(&employee_id)
-            || !self.boss_ui.identities.contains_key(&employee_id)
-        {
+        // The user never messages an employee directly — a finished one's
+        // page keeps the same composer, so expiry is not a command context
+        // boundary either. Only the boss's own chat opts out: it already
+        // is the destination.
+        if !self.boss_ui.identities.contains_key(&employee_id) {
             return None;
         }
         let key = self.daemons.session_owner(employee_id);
@@ -619,6 +686,8 @@ impl Waku {
         };
         submission.attachments.push(attachment);
         self.boss_ui.command_bundle = None;
+        self.boss_ui.bundle_page = None;
+        self.note_user_message_target(command.session_id);
         self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
         // Activation only syncs the hint when the session actually changed;
         // commanding the already-viewed boss chat leaves it to re-read.
@@ -924,7 +993,7 @@ impl Waku {
             .child(div().h(px(38.0)).flex_none())
     }
 
-    fn chat_with_boss(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+    pub(super) fn chat_with_boss(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -1157,42 +1226,6 @@ impl Waku {
         }
     }
 
-    pub(super) fn boss_employee_finished(&self) -> bool {
-        self.state
-            .selected_session
-            .is_some_and(|id| self.boss_ui.expired.contains(&id))
-    }
-
-    pub(super) fn render_boss_finished_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.session_surface_active() || !self.boss_employee_finished() {
-            return None;
-        }
-        let id = self.state.selected_session?;
-        let key = self.daemons.session_owner(id);
-        let theme = Theme::current(cx);
-        Some(
-            div()
-                .p(px(16.0))
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .border_t_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .flex_1()
-                        .text_color(theme.text_secondary)
-                        .child(tr!("boss.expired_hint")),
-                )
-                .child(
-                    boss_button("employee-boss-chat", tr!("boss.chat"), &theme)
-                        .child(tr!("boss.chat"))
-                        .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
-                )
-                .into_any_element(),
-        )
-    }
-
     pub(super) fn render_boss_sidebar_row(
         &self,
         key: DaemonKey,
@@ -1255,10 +1288,12 @@ impl Waku {
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_activation(cx, move |this, _, cx| {
                 // Clicking the boss also folds a finished-employee list the
-                // user expanded back down.
+                // user expanded back down, and hands the bundle preview
+                // page back to the chat transcript it covers.
                 if this.boss_ui.sidebar_idle_visible.remove(&key).is_some() {
                     this.sidebar_rows_fingerprint.set(None);
                 }
+                this.boss_ui.bundle_page = None;
                 this.chat_with_boss(key, cx)
             })
             .child(self.boss_avatar(&state.identity, 24.0, cx))
@@ -1794,8 +1829,9 @@ impl Waku {
 
     /// A bundle row's click or Enter: the bundle's task page is the boss
     /// chat that published it, opened with the file armed as composer
-    /// context. The arm parks in `pending_bundle` so the session switch
-    /// the open triggers cannot clear it before the chat lands.
+    /// context — and, when the file is previewable, its own preview page
+    /// on top of it. The arm parks in `pending_bundle` so the session
+    /// switch the open triggers cannot clear it before the chat lands.
     pub(super) fn open_bundle_task(
         &mut self,
         key: DaemonKey,
@@ -1813,7 +1849,7 @@ impl Waku {
     /// it triggered lands. If the chat on screen is the bundle's own
     /// boss, the armed composer context — which a session switch clears
     /// as belonging to the previous view — comes back, and a previewable
-    /// local file opens in the strip's file viewer.
+    /// local file takes the column as its own preview page.
     pub(super) fn complete_bundle_activation(
         &mut self,
         session_id: Uuid,
@@ -1848,14 +1884,15 @@ impl Waku {
         let Some(parent) = path.parent().map(Path::to_path_buf) else {
             return;
         };
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            return;
-        };
         self.sync_right_panel_files_root(cx);
         if self.right_panel_files_root.as_deref() != Some(parent.as_path()) {
             return;
         }
-        self.open_right_panel_file(name.to_owned(), cx);
+        // A previewable file gets its own page — the file viewer fills the
+        // boss chat's column rather than its right panel. The composer
+        // keeps the armed bundle's boss chip, so the page still reads as a
+        // command to the boss with the file attached.
+        self.boss_ui.bundle_page = Some((key, bundle_id));
     }
 
     /// Task affordances on a bundle row are daemon mutations — the bundle
