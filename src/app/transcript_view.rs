@@ -4297,11 +4297,11 @@ impl Waku {
                     .line_clamp(2)
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .overflow_hidden()
-                    .child(SharedString::from(if commentary.is_empty() {
-                        "…"
+                    .child(if commentary.is_empty() {
+                        SharedString::from("…").into_any_element()
                     } else {
-                        commentary
-                    })),
+                        summon_card_preview(commentary, theme, cx)
+                    }),
             )
             .into_any_element()
     }
@@ -4748,6 +4748,45 @@ fn first_message_paragraph(content: &str) -> String {
         .join(" ")
 }
 
+/// The inline runs a two-line preview can render styled — a single
+/// paragraph or heading. Hanging markers mend first so a still-streaming
+/// `**bold` reads bold; any block element (fence, list, table, quote,
+/// image) or multi-block text returns `None` and the card shows the
+/// trimmed plain text instead.
+fn summon_card_preview_runs(commentary: &str) -> Option<Vec<md::parser::InlineRun>> {
+    let mended = md::mend::close_hanging(commentary);
+    let source = mended.as_deref().unwrap_or(commentary);
+    match md::parser::parse(source).blocks.as_slice() {
+        [block] => match &block.block {
+            md::parser::Block::Paragraph { runs } | md::parser::Block::Heading { runs, .. } => {
+                Some(runs.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The summon card's commentary prefers markdown styling — inline code,
+/// bold, and links read the way they do in the transcript — but only one
+/// paragraph of inline runs can join the two-line clamp.
+fn summon_card_preview(commentary: &str, theme: &Theme, cx: &App) -> AnyElement {
+    let Some(runs) = summon_card_preview_runs(commentary) else {
+        return SharedString::from(commentary).into_any_element();
+    };
+    let flat = md::render::flatten(
+        &runs,
+        &MarkdownPalette::from_theme(theme),
+        &crate::fonts::current(cx),
+        FontWeight::NORMAL,
+        theme.text_tertiary,
+        &[],
+    );
+    gpui::StyledText::new(flat.text)
+        .with_runs(flat.runs)
+        .into_any_element()
+}
+
 /// The employee session id a `boss_summon` marker activity carries in
 /// `arguments` — `None` for every ordinary activity item.
 pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
@@ -5001,5 +5040,33 @@ mod summon_card_paragraph_tests {
     fn empty_and_blank_content_yield_empty() {
         assert_eq!(first_message_paragraph(""), "");
         assert_eq!(first_message_paragraph("  \n\n"), "");
+    }
+}
+
+#[cfg(test)]
+mod summon_card_preview_tests {
+    use super::summon_card_preview_runs;
+
+    #[test]
+    fn paragraphs_and_headings_render_styled() {
+        assert!(summon_card_preview_runs("plain words").is_some());
+        assert!(summon_card_preview_runs("**bold** and `code`").is_some());
+        assert!(summon_card_preview_runs("# a heading").is_some());
+    }
+
+    #[test]
+    fn block_elements_fall_back_to_plain_text() {
+        assert!(summon_card_preview_runs("```rust\nfn main() {}\n```").is_none());
+        assert!(summon_card_preview_runs("- first\n- second").is_none());
+        assert!(summon_card_preview_runs("> a quote").is_none());
+        assert!(summon_card_preview_runs("![img](x.png)").is_none());
+        assert!(summon_card_preview_runs("---").is_none());
+    }
+
+    #[test]
+    fn inline_styles_survive_in_the_runs() {
+        let runs = summon_card_preview_runs("a `b` **c**").unwrap();
+        assert!(runs.iter().any(|run| run.text == "b" && run.style.code));
+        assert!(runs.iter().any(|run| run.text == "c" && run.style.bold));
     }
 }
