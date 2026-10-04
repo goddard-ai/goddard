@@ -4,6 +4,8 @@ import type { BossEmployee } from "./BossEmployee";
 import type { BossIdentity } from "./BossIdentity";
 import type { BossPersona } from "./BossPersona";
 import type { BossPlan } from "./BossPlan";
+import type { BossResourcePolicy } from "./BossResourcePolicy";
+import type { DispatchNotification } from "./DispatchNotification";
 
 export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
 /**
@@ -25,4 +27,24 @@ planning: Array<BossPlan>,
  * a goal finished since then reads as unread in the sidebar, the
  * same contract `BossDeliverable::viewed_at` gives its row.
  */
-goalsViewedAt: number | null, revision: number, };
+goalsViewedAt: number | null,
+/**
+ * The boss-set admission policy — provider+model caps and the
+ * desired host broker policy. Missing from older documents: no model
+ * caps until the boss sets rules.
+ */
+resourcePolicy: BossResourcePolicy,
+/**
+ * Next admission sequence number (1-based) — monotonic across
+ * restarts so a queued ticket's FIFO position survives.
+ */
+nextSequence: number,
+/**
+ * Next dispatch-notification event id (1-based).
+ */
+nextEventId: number,
+/**
+ * Durable dispatch notifications awaiting delivery to supervisors —
+ * drained by id so restart can neither drop nor duplicate one.
+ */
+outbox?: Array<DispatchNotification>, revision: number, };

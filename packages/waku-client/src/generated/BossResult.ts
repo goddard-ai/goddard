@@ -3,9 +3,12 @@ import type { AgentSession } from "./AgentSession";
 import type { AgentSessionTranscript } from "./AgentSessionTranscript";
 import type { AutomationsState } from "./AutomationsState";
 import type { BossFile } from "./BossFile";
+import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossState } from "./BossState";
+import type { EmployeeLifecycle } from "./EmployeeLifecycle";
 import type { MemoryChunk } from "./MemoryChunk";
 import type { Project } from "./Project";
+import type { SummonAdmission } from "./SummonAdmission";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type BossResult = { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", index: string | null, chunks: Array<MemoryChunk>, inserted: MemoryChunk | null, imported: number | null, };
+export type BossResult = { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", index: string | null, chunks: Array<MemoryChunk>, inserted: MemoryChunk | null, imported: number | null, };

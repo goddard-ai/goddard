@@ -6,8 +6,11 @@ import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeControl } from "./EmployeeControl";
 import type { EmployeeGoal } from "./EmployeeGoal";
 import type { MemoryOperation } from "./MemoryOperation";
+import type { ModelLimit } from "./ModelLimit";
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
+import type { ResourcePolicy } from "./ResourcePolicy";
+import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
 export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
@@ -37,4 +40,45 @@ permissions: PermissionOverrides | null,
  * its finish to the supervisor; `goal` expires silently and lists
  * on the client's Goals page.
  */
-workGoal: EmployeeGoal, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersona, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };
+workGoal: EmployeeGoal,
+/**
+ * Host resources the assignment reserves for its lifetime — the
+ * employee's own `resource run` calls borrow subsets of the
+ * granted set rather than re-queuing. Empty means the job claims
+ * no host resources. A set larger than total host capacity fails
+ * the summon at submission.
+ */
+resources?: ResourceSet,
+/**
+ * Authorize this summon to spend burst slots above the model
+ * rule's `liveLimit` — it still cannot pass `hardCap`. Without
+ * it the ticket waits at `liveLimit`.
+ */
+allowBurst: boolean,
+/**
+ * Wave grouping seam — carried on the admission record now;
+ * grouped dispatch lands in a later phase.
+ */
+groupId?: string,
+/**
+ * Scheduling hint seam — stored on the admission record; the
+ * strict-FIFO scheduler does not reorder on it yet.
+ */
+priority?: number,
+/**
+ * Link the assignment to a daemon-owned goal projection — the
+ * Goals page shows it as pending work before any provider thread
+ * exists.
+ */
+goalId?: string,
+/**
+ * Idempotency key: a retry that lost its response returns the
+ * original employee rather than a duplicate. Reusing the id with
+ * different summon fields is an error.
+ */
+requestId?: string, } | { "type": "setResourcePolicy", expectedRevision: number, modelLimits: Array<ModelLimit>,
+/**
+ * Optional host section — updates the resource broker's policy
+ * file under its authority lock in the same accepted update.
+ */
+host?: ResourcePolicy, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersona, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };

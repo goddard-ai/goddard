@@ -2,7 +2,9 @@
 import type { BossIdentity } from "./BossIdentity";
 import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeGoal } from "./EmployeeGoal";
+import type { EmployeeLifecycle } from "./EmployeeLifecycle";
 import type { PersonaPermissions } from "./PersonaPermissions";
+import type { SummonTicket } from "./SummonTicket";
 
 export type BossEmployee = { sessionId: string, supervisorId: string, identity: BossIdentity, jobTitle: string, personaId: string,
 /**
@@ -39,4 +41,31 @@ expiredAt?: number | null,
  * job). Its presence turns a finish back into a delivered report;
  * resurrection clears it with the job that raised it.
  */
-blocker?: string | null, };
+blocker?: string | null,
+/**
+ * Admission lifecycle — `queued`, `dispatching`, `working`,
+ * `finishing`, or `expired`. Records written before the queue
+ * deserialize as `working`; `expired` stays the wire projection.
+ */
+state: EmployeeLifecycle,
+/**
+ * The employee's admission ticket — present from a queued summon
+ * through dispatch, and retained afterward for accounting and
+ * re-admission. Legacy employees predate it and run uncapped.
+ */
+ticket?: SummonTicket,
+/**
+ * When the current queued stint began — `None` once dispatched or
+ * for employees that never queued.
+ */
+queuedAt?: number,
+/**
+ * Idempotency key the summoner supplied; a retry with the same
+ * fields returns this record instead of a second employee.
+ */
+requestId?: string,
+/**
+ * Canonical fingerprint of the summon fields `request_id` covers —
+ * reusing the id with different fields is an error.
+ */
+requestFingerprint?: string, };
