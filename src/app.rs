@@ -932,6 +932,29 @@ enum SidebarDockItem {
     Settings,
 }
 
+impl SidebarDockItem {
+    /// The full button set — prewarming decodes `Friends` too even while the
+    /// feature flag keeps it unmounted.
+    const ALL: [Self; 5] = [
+        Self::Friends,
+        Self::Inbox,
+        Self::Archive,
+        Self::Shortcuts,
+        Self::Settings,
+    ];
+
+    /// The glyph sheet the button recolors to the theme's body text.
+    fn glyph_path(self) -> &'static str {
+        match self {
+            Self::Friends => "icons/friends.svg",
+            Self::Inbox => "icons/inbox.svg",
+            Self::Archive => "icons/dock-archive.svg",
+            Self::Shortcuts => "icons/dock-keyboard.svg",
+            Self::Settings => "icons/settings-hexagon.svg",
+        }
+    }
+}
+
 /// The quick-action dock's rise-and-fall slide. While `Moving`, `progress`
 /// is the raw risen fraction integrated per frame — direction comes from the
 /// hover flags each frame, so a pointer that re-enters mid-flight reverses
@@ -3288,6 +3311,11 @@ pub struct Waku {
     /// edge. A `Cell` because the sidebar renders through `&self` paths —
     /// the pane's content delegate included.
     sidebar_dock_motion: Cell<SidebarDockMotion>,
+    /// The glyph fill the dock's invisible prewarm mount last decoded —
+    /// `None` until it runs. Decoded images live in GPUI's app-level cache
+    /// for good, so a match skips the mount; a theme switch produces a new
+    /// fill and the next footer frame re-warms the recolored set.
+    sidebar_dock_prewarm_fill: RefCell<Option<String>>,
     /// The right-panel surface currently maximized over the window, if any —
     /// the docked layout it covers comes back exactly as it was. The flag
     /// is part of the live strip and parks with it on an owner swap, so a
@@ -6989,6 +7017,7 @@ impl Waku {
                 sidebar_dock_hover_item: None,
                 sidebar_dock_mouse_x: None,
                 sidebar_dock_motion: Cell::new(SidebarDockMotion::Hidden),
+                sidebar_dock_prewarm_fill: RefCell::new(None),
                 fullscreen_surface: None,
                 panel_fullscreen_slide: None,
                 panel_fullscreen_rendered_width: if right_panel_visible {

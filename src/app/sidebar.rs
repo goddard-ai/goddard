@@ -461,6 +461,20 @@ const DOCK_IND_GLYPHS: [(&str, f32, f32, f32, f32); 3] = [
     ("icons/dock-ind-glyph-right.svg", 27.0, 27.0, 19.219, 0.219),
 ];
 
+/// The `fill=` a dock glyph sheet gets recolored with — `theme.text`
+/// quantized to the bytes the render actually writes. The prewarm memoizes
+/// on it, so the string is shared with `dock_glyph_image` rather than
+/// recomputed independently.
+fn dock_glyph_fill(color: Hsla) -> String {
+    let rgb = color.to_rgb();
+    format!(
+        "fill=\"#{:02x}{:02x}{:02x}\"",
+        (rgb.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgb.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgb.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
 /// A dock glyph recolored to the theme's body text. The source SVGs draw the
 /// mark twice — a blurred drop shadow under the solid fill — so the glyph's
 /// `fill` is rewritten and the result rendered as an `img()` to keep those
@@ -468,13 +482,7 @@ const DOCK_IND_GLYPHS: [(&str, f32, f32, f32, f32); 3] = [
 /// the asset cache.
 fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpui::Image>> {
     let bytes = cx.asset_source().load(path).ok()??;
-    let rgb = color.to_rgb();
-    let fill = format!(
-        "fill=\"#{:02x}{:02x}{:02x}\"",
-        (rgb.r.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (rgb.g.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (rgb.b.clamp(0.0, 1.0) * 255.0).round() as u8,
-    );
+    let fill = dock_glyph_fill(color);
     let source = String::from_utf8_lossy(&bytes)
         .replace("fill=\"black\"", &fill)
         .replace("fill=\"#000000\"", &fill);
@@ -2176,6 +2184,44 @@ impl Waku {
             .w(px(DOCK_IND_LEFT + DOCK_IND_WIDTH))
             .h_full()
             .child(cluster)
+            .when_some(self.render_dock_prewarm(&theme, cx), |outer, warm| {
+                outer.child(warm)
+            })
+    }
+
+    /// An invisible mount of every image the dock paints, so the first raise
+    /// renders instantly instead of popping each asset in as it decodes.
+    /// `img()` resolves through GPUI's app-level asset cache, so the frames
+    /// these zero-size children kick off on the background executor are the
+    /// same ones the real render hits — and decoded entries are never
+    /// evicted, so the mount only re-runs when the glyph fill changes: once
+    /// at startup, and again on the repaint a theme switch already
+    /// schedules.
+    fn render_dock_prewarm(&self, theme: &Theme, cx: &App) -> Option<Div> {
+        let fill = dock_glyph_fill(theme.text);
+        if self.sidebar_dock_prewarm_fill.borrow().as_deref() == Some(fill.as_str()) {
+            return None;
+        }
+        *self.sidebar_dock_prewarm_fill.borrow_mut() = Some(fill);
+        let glyph = |path: &'static str| match dock_glyph_image(path, theme.text, cx) {
+            Some(image) => img(image),
+            None => img(path),
+        };
+        let mut warm = div()
+            .absolute()
+            .size_0()
+            .overflow_hidden()
+            .child(img("images/dock-button-bkg.webp"));
+        for (orb_path, ..) in DOCK_IND_ORBS {
+            warm = warm.child(img(orb_path));
+        }
+        for (glyph_path, ..) in DOCK_IND_GLYPHS {
+            warm = warm.child(glyph(glyph_path));
+        }
+        for item in SidebarDockItem::ALL {
+            warm = warm.child(glyph(item.glyph_path()));
+        }
+        Some(warm)
     }
 
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -2454,38 +2500,26 @@ impl Waku {
         // were exported at 2x, and the render size is the authored pixel
         // dimensions — half that left the glyphs undersized once the buttons
         // doubled.
-        let (id, path, label, glyph_size) = match item {
-            SidebarDockItem::Friends => (
-                "friends",
-                "icons/friends.svg",
-                tr!("settings.friends"),
-                size(px(46.0), px(47.0)),
-            ),
-            SidebarDockItem::Inbox => (
-                "inbox",
-                "icons/inbox.svg",
-                tr!("sidebar.inbox"),
-                size(px(42.0), px(42.0)),
-            ),
+        let (id, label, glyph_size) = match item {
+            SidebarDockItem::Friends => {
+                ("friends", tr!("settings.friends"), size(px(46.0), px(47.0)))
+            }
+            SidebarDockItem::Inbox => ("inbox", tr!("sidebar.inbox"), size(px(42.0), px(42.0))),
             SidebarDockItem::Archive => (
                 "archive",
-                "icons/dock-archive.svg",
                 tr!("settings.archived"),
                 size(px(46.0), px(46.0)),
             ),
             SidebarDockItem::Shortcuts => (
                 "shortcuts",
-                "icons/dock-keyboard.svg",
                 tr!("shortcuts.title"),
                 size(px(48.0), px(48.0)),
             ),
-            SidebarDockItem::Settings => (
-                "settings",
-                "icons/settings-hexagon.svg",
-                tr!("common.settings"),
-                size(px(48.0), px(48.0)),
-            ),
+            SidebarDockItem::Settings => {
+                ("settings", tr!("common.settings"), size(px(48.0), px(48.0)))
+            }
         };
+        let path = item.glyph_path();
         let hovered = self.sidebar_dock_hover_item == Some(item);
         // The Sketch "Dock" whites now track the theme: the buttons and their
         // hover labels take the composer surface, the glyphs the body text.
