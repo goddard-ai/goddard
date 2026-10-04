@@ -122,7 +122,6 @@ impl DeepSeekDriver {
             eval,
             sandbox: _,
             allow_model_fallback: _,
-            distillation: _,
             ephemeral: _,
         } = options;
         let (requested_session_id, resuming) = match provider_cursor {

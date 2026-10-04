@@ -3234,7 +3234,6 @@ impl Backend for WakuBackend {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
-                    distillation: false,
                     ephemeral: false,
                 };
                 let resumable = options.provider_cursor.is_some();
@@ -4352,7 +4351,6 @@ impl WakuBackend {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
-                distillation: false,
                 ephemeral: false,
             },
             event_sender,
@@ -4572,7 +4570,6 @@ impl WakuBackend {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
-                distillation: false,
                 ephemeral: false,
             },
             event_sender,
@@ -5369,7 +5366,6 @@ impl WakuBackend {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
-                distillation: false,
                 ephemeral: false,
             };
             (provider, options)

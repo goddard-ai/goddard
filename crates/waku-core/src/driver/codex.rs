@@ -29,8 +29,9 @@ use crate::model::{
 
 const DISABLE_EXTERNAL_COMPUTER_USE_PLUGIN: &str =
     "plugins.computer-use@openai-bundled.enabled=false";
-// Codex 0.146 only resolves plugin enablement from user/profile config layers, so a
-// process-local `-c` plugin override does not yet suppress its bundled capabilities.
+// Codex only resolves plugin enablement from user/profile config layers, so a
+// process-local `-c` plugin override cannot suppress its bundled capabilities.
+// `mcp_servers.*` overrides do apply from `-c`, verified on Codex 0.159.
 const DISABLE_EXTERNAL_COMPUTER_USE_MCP_COMMAND: &str =
     "mcp_servers.computer-use.command=\"/usr/bin/true\"";
 const DISABLE_EXTERNAL_COMPUTER_USE_MCP: &str = "mcp_servers.computer-use.enabled=false";
@@ -301,9 +302,24 @@ impl CodexThreadLease {
 fn configure_computer_use_command(
     command: &mut Command,
     computer_use_enabled: bool,
-    distillation: bool,
     servers: &[super::McpServerSpec],
 ) {
+    // Sessions inherit the user's interactive Codex config, including the
+    // desktop app's bundled REPL servers: `node_repl` from `[mcp_servers]` in
+    // config.toml and `cua_repl` from the enabled unified-computer-use plugin.
+    // Both spawn binaries inside ChatGPT.app, so on hosts without the desktop
+    // app every thread logs an MCP startup failure. `-c mcp_servers.*.enabled`
+    // suppresses startup entirely (verified on Codex 0.159) — unlike plugin
+    // enablement, which still only resolves from user/profile config layers.
+    command
+        .arg("-c")
+        .arg(DISABLE_CODEX_NODE_REPL_COMMAND)
+        .arg("-c")
+        .arg(DISABLE_CODEX_NODE_REPL)
+        .arg("-c")
+        .arg(DISABLE_CODEX_CUA_REPL_COMMAND)
+        .arg("-c")
+        .arg(DISABLE_CODEX_CUA_REPL);
     if computer_use_enabled {
         command
             .arg("-c")
@@ -314,20 +330,6 @@ fn configure_computer_use_command(
             .arg(DISABLE_EXTERNAL_COMPUTER_USE_MCP)
             .arg("-c")
             .arg(DISABLE_EXTERNAL_COMPUTER_USE_SKILL);
-    }
-    if computer_use_enabled || distillation {
-        command
-            .arg("-c")
-            .arg(DISABLE_CODEX_NODE_REPL_COMMAND)
-            .arg("-c")
-            .arg(DISABLE_CODEX_NODE_REPL);
-        if distillation {
-            command
-                .arg("-c")
-                .arg(DISABLE_CODEX_CUA_REPL_COMMAND)
-                .arg("-c")
-                .arg(DISABLE_CODEX_CUA_REPL);
-        }
     }
     for server in servers {
         if let Some((_, _, token)) = server.http_parts() {
@@ -359,7 +361,6 @@ impl CodexDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
-            distillation,
             ephemeral,
         } = options;
         let provider_session_id = match provider_cursor {
@@ -399,12 +400,7 @@ impl CodexDriver {
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
-        configure_computer_use_command(
-            command.command_mut(),
-            announce_computer_use,
-            distillation,
-            &mcp_servers,
-        );
+        configure_computer_use_command(command.command_mut(), announce_computer_use, &mcp_servers);
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
         }
@@ -3207,7 +3203,6 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
-                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
@@ -3290,7 +3285,6 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
-                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: directory.clone(),
@@ -3391,7 +3385,6 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: true,
-                distillation: true,
                 ephemeral: true,
                 binary: binary.clone(),
                 cwd: directory.clone(),
@@ -3461,7 +3454,6 @@ mod tests {
                     eval: None,
                     sandbox: None,
                     allow_model_fallback: false,
-                    distillation: false,
                     ephemeral: false,
                     binary: binary.clone(),
                     cwd: cwd.clone(),
@@ -3897,12 +3889,30 @@ mod tests {
     #[test]
     fn computer_use_command_configuration_follows_the_setting() {
         let mut disabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut disabled, false, false, &[]);
+        configure_computer_use_command(&mut disabled, false, &[]);
         let disabled_arguments = disabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        assert!(disabled_arguments.is_empty());
+        // The bundled desktop-app REPL servers are always suppressed so hosts
+        // without ChatGPT.app don't log an MCP startup failure per thread.
+        for expected in [
+            DISABLE_CODEX_NODE_REPL_COMMAND,
+            DISABLE_CODEX_NODE_REPL,
+            DISABLE_CODEX_CUA_REPL_COMMAND,
+            DISABLE_CODEX_CUA_REPL,
+        ] {
+            assert!(
+                disabled_arguments
+                    .iter()
+                    .any(|argument| argument == expected)
+            );
+        }
+        assert!(
+            !disabled_arguments
+                .iter()
+                .any(|argument| argument == DISABLE_EXTERNAL_COMPUTER_USE_MCP)
+        );
         assert!(
             disabled
                 .get_envs()
@@ -3910,7 +3920,7 @@ mod tests {
         );
 
         let mut enabled = Command::new("/usr/bin/true");
-        configure_computer_use_command(&mut enabled, true, false, &[]);
+        configure_computer_use_command(&mut enabled, true, &[]);
         let enabled_arguments = enabled
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())

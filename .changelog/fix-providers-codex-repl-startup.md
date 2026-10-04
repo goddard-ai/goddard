@@ -1,0 +1,1 @@
+- Codex tasks no longer log startup failures for the ChatGPT desktop app's bundled node_repl and cua_repl MCP servers on machines without the app installed.

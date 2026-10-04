@@ -211,7 +211,6 @@ impl PiDriver {
             eval: _,
             sandbox,
             allow_model_fallback: _,
-            distillation: _,
             ephemeral: _,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -1898,7 +1897,6 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
-                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
@@ -2151,7 +2149,6 @@ mod tests {
                 eval: None,
                 sandbox: None,
                 allow_model_fallback: false,
-                distillation: false,
                 ephemeral: false,
                 binary,
                 cwd: std::env::temp_dir(),
