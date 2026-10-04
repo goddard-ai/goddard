@@ -12,7 +12,7 @@ switches, employee completion indexes, side chats, and project memory configure
 these primitives instead of maintaining separate retrieval systems.
 
 **search** is a fourth read primitive, added alongside surface and handoff: an
-exact-match pull (SQLite FTS5 over chunk bodies) for literal identifiers —
+exact-match pull (ripgrep over the store's markdown) for literal identifiers —
 commit SHAs, paths, error strings, names — where judged relevance is the wrong
 tool. It complements zoom rather than replacing it: search is lexical (locate
 the chunk containing a string); zoom is spatial (descend the hierarchy to see
@@ -52,11 +52,34 @@ conversation selection/subscriptions still need to follow the new session pointe
 
 ## Data model and progressive zoom
 
-Keep canonical records in daemon-owned SQLite alongside the existing persistence
-surface, using its transaction conventions. Markdown remains an import/export
-and editing interface, not a second authoritative store. No automatic remote
-replication: scope IDs include daemon identity; each remote daemon enforces its
-own authority as described in [remote-boss.md](remote-boss.md).
+Keep canonical records as Markdown files on disk — this is the storage model
+OptMem validates: an append-only fact log, chunk files, and derived indexes. A
+scope is a directory; every write flows through daemon ops, so file mutation is
+serialized without needing a database. The daemon's existing SQLite remains for
+bookkeeping only (handoff manifests, delivery pointers, rotation journals) —
+never for memory content. No automatic remote replication: scope IDs include
+daemon identity; each remote daemon enforces its own authority as described in
+[remote-boss.md](remote-boss.md).
+
+File layout per scope:
+
+    <scope-root>/
+      LOG.txt              append-only raw fact log, one fact per line, never edited
+      INDEX.md             top-level index: ordered cue lines, regenerated not authored
+      topics/<topic>/
+        INDEX.md           topic index (overview cues -> chunk files)
+        <slug>.md          a chunk: ~60 lines, frontmatter header + body
+      handoffs/            rendered handoff artifacts for specific readers
+
+A chunk file's frontmatter carries its metadata (chunk_id, layer, title, cue,
+status, source refs, revision); the body is human-readable Markdown. Indexes are
+**derived files**: regenerated deterministically from chunk cues and topic
+membership whenever the store changes — never authored, always rebuildable
+(`rebuild-index` recreates them from LOG + chunks). They exist so Jev and agents
+read cheap cue lists instead of the whole store; `rg` over the scope handles
+the search primitive. Because indexes are derived, manual reorganization
+(moving a chunk file between topic directories) just triggers an index rebuild
+— structure lives in the layout, not in any index's memory.
 
 | Record | Required fields and invariant |
 | --- | --- |
@@ -256,7 +279,7 @@ reports use Boss ID, not the supervisor's remembered Boss session UUID.
 
 Initialization failure leaves the old session active and mailbox intact. Restart
 recovery uses the journal to abandon incomplete staging or resume committed
-delivery. SQLite and legacy `boss.json` cannot jointly commit; migrate the pointer
+delivery. Persisted pointers and the mailbox live in daemon bookkeeping; legacy `boss.json` cannot jointly commit — migrate the pointer
 and mailbox authority into the transactional lifecycle record, or use a replayable
 journal during the transition. Do not claim exactly-once provider execution:
 acknowledgement loss can leave an uncertain submission. Record it and reconcile
@@ -295,7 +318,7 @@ Migration is resumable and non-destructive:
    Existing employee expiration/roster retirement must not delete indexed sources.
    Preserve supervisory read restrictions after the runtime expires.
 5. Keep old CLI file paths and transcript operations as scoped adapters during
-   transition. Choose one canonical writer per migrated collection; mirror
+   transition. Choose one canonical writer per migrated collection (the daemon); mirror
    Markdown exports from committed engine revisions. External file edits become
    validated import revisions, with conflict detection rather than last-write wins.
 6. Record a migration ledger keyed by source path/ID and digest; restart resumes
