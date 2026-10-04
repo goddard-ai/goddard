@@ -113,7 +113,7 @@ pub(super) enum SidebarGroup {
     Dormant,
     /// Boss-published files and folders from the last twelve hours, always
     /// directly above the Pinned section in either grouping.
-    Bundles,
+    Deliverables,
     Planning,
     Date(SessionDateGroup),
     Project(Uuid),
@@ -126,7 +126,7 @@ impl SidebarGroup {
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
             Self::Dormant => "dormant".into(),
-            Self::Bundles => "bundles".into(),
+            Self::Deliverables => "deliverables".into(),
             Self::Planning => "phase-planning".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
@@ -141,7 +141,7 @@ impl SidebarGroup {
             Self::Pinned => PersistedSidebarGroup::Pinned,
             Self::Terminals => PersistedSidebarGroup::Terminals,
             Self::Dormant => PersistedSidebarGroup::Dormant,
-            Self::Bundles => PersistedSidebarGroup::Bundles,
+            Self::Deliverables => PersistedSidebarGroup::Deliverables,
             Self::Planning => PersistedSidebarGroup::Planning,
             Self::Date(group) => PersistedSidebarGroup::Date(group.index()),
             Self::Project(project_id) => PersistedSidebarGroup::Project(project_id),
@@ -157,7 +157,7 @@ impl SidebarGroup {
             PersistedSidebarGroup::Pinned => Self::Pinned,
             PersistedSidebarGroup::Terminals => Self::Terminals,
             PersistedSidebarGroup::Dormant => Self::Dormant,
-            PersistedSidebarGroup::Bundles => Self::Bundles,
+            PersistedSidebarGroup::Deliverables => Self::Deliverables,
             PersistedSidebarGroup::Planning => Self::Planning,
             PersistedSidebarGroup::Date(index) => Self::Date(*SessionDateGroup::ALL.get(index)?),
             PersistedSidebarGroup::Project(project_id) => Self::Project(project_id),
@@ -170,7 +170,7 @@ impl SidebarGroup {
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
             Self::Dormant => mix(fingerprint, 0x500),
-            Self::Bundles => mix(fingerprint, 0x700),
+            Self::Deliverables => mix(fingerprint, 0x700),
             Self::Planning => mix(fingerprint, 0x601),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
@@ -270,14 +270,14 @@ fn append_sidebar_group_rows(
     rows.push(SidebarRow::GroupSpacer);
 }
 
-/// The published bundles the sidebar lists, split like a project group's
+/// The published deliverables the sidebar lists, split like a project group's
 /// sessions: live rows first, then the dormant tail a "Show dormant" row
-/// reveals. A live bundle keeps its row for twelve hours after its last
+/// reveals. A live deliverable keeps its row for twelve hours after its last
 /// publish — an older one ages out of the sidebar entirely rather than
-/// falling into a date or project group. Pinned and dormant bundles are
+/// falling into a date or project group. Pinned and dormant deliverables are
 /// user-managed state and never age out; a pin outranks a sweep the way a
-/// pinned task cannot be dormant; archived bundles leave the list entirely.
-fn sidebar_recent_bundles(
+/// pinned task cannot be dormant; archived deliverables leave the list entirely.
+fn sidebar_recent_deliverables(
     states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
     now: u64,
 ) -> (
@@ -286,27 +286,27 @@ fn sidebar_recent_bundles(
 ) {
     let mut live = Vec::new();
     let mut dormant = Vec::new();
-    for (key, bundle) in states
+    for (key, deliverable) in states
         .iter()
-        .flat_map(|(key, state)| state.bundles.iter().map(move |bundle| (*key, bundle)))
+        .flat_map(|(key, state)| state.deliverables.iter().map(move |deliverable| (*key, deliverable)))
     {
-        if bundle.archived_at.is_some() {
+        if deliverable.archived_at.is_some() {
             continue;
         }
-        let pinned = bundle.pinned_at.is_some();
-        if !pinned && bundle.dormant_at.is_some() {
-            dormant.push((key, bundle));
+        let pinned = deliverable.pinned_at.is_some();
+        if !pinned && deliverable.dormant_at.is_some() {
+            dormant.push((key, deliverable));
         } else if pinned
-            || now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS
+            || now.saturating_sub(deliverable.updated_at) < SIDEBAR_DELIVERABLE_RECENT_SECS
         {
-            live.push((key, bundle));
+            live.push((key, deliverable));
         }
     }
     // Hosts come out of a HashMap, so ties need a stable key or the order
     // would churn with every rebuild. Pinned rows lead the live list the
     // way pinned tasks lead the sidebar.
-    let order = |(key, bundle): &(waku_client::DaemonKey, &waku_client::boss::BossBundle)| {
-        (std::cmp::Reverse(bundle.updated_at), *key, bundle.id)
+    let order = |(key, deliverable): &(waku_client::DaemonKey, &waku_client::boss::BossDeliverable)| {
+        (std::cmp::Reverse(deliverable.updated_at), *key, deliverable.id)
     };
     live.sort_by(|a, b| {
         b.1.pinned_at
@@ -317,11 +317,11 @@ fn sidebar_recent_bundles(
     dormant.sort_by(|a, b| order(a).cmp(&order(b)));
     (
         live.into_iter()
-            .map(|(key, bundle)| (key, bundle.id))
+            .map(|(key, deliverable)| (key, deliverable.id))
             .collect(),
         dormant
             .into_iter()
-            .map(|(key, bundle)| (key, bundle.id))
+            .map(|(key, deliverable)| (key, deliverable.id))
             .collect(),
     )
 }
@@ -374,9 +374,9 @@ const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 /// The spacer a project group carries between its rows and the next group.
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 
-/// How long a published bundle keeps its row in the Recent bundles group —
-/// measured from its last publish, so a re-published bundle jumps back in.
-const SIDEBAR_BUNDLE_RECENT_SECS: u64 = 12 * 60 * 60;
+/// How long a published deliverable keeps its row in the Recent deliverables group —
+/// measured from its last publish, so a re-published deliverable jumps back in.
+const SIDEBAR_DELIVERABLE_RECENT_SECS: u64 = 12 * 60 * 60;
 const SIDEBAR_GROUP_HEADER_INSET: f32 = 8.0;
 const SIDEBAR_GROUP_ICON_WIDTH: f32 = 14.0;
 const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
@@ -1060,8 +1060,8 @@ pub(super) enum SidebarRow {
     /// and kind label instead of a persona's name and job.
     Planning(Uuid),
     Employee(Uuid),
-    /// A boss-published file or folder in the Recent bundles group.
-    Bundle(waku_client::DaemonKey, Uuid),
+    /// A boss-published file or folder in the Recent deliverables group.
+    Deliverable(waku_client::DaemonKey, Uuid),
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -1160,7 +1160,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
-        SidebarRow::Session(_) | SidebarRow::Bundle(..) => SIDEBAR_SESSION_ROW_HEIGHT,
+        SidebarRow::Session(_) | SidebarRow::Deliverable(..) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::Boss(_) | SidebarRow::Planning(_) | SidebarRow::Employee(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_) | SidebarRow::ShowMore(_) | SidebarRow::ShowDormant(_) => {
@@ -3745,30 +3745,30 @@ impl Waku {
                 revealed.wrapping_add(dormant_revealed),
             );
         }
-        // Bundle content rides the boss-state revision mixed above; the one
-        // transition it cannot see is a bundle aging out of the recency
+        // Deliverable content rides the boss-state revision mixed above; the one
+        // transition it cannot see is a deliverable aging out of the recency
         // window, so the recent count joins the fingerprint. Pinned,
         // dormant, and archived rows cannot age out — only an untouched
-        // live bundle counts.
-        let recent_bundles = self
+        // live deliverable counts.
+        let recent_deliverables = self
             .boss_ui
             .states
             .values()
-            .flat_map(|state| &state.bundles)
-            .filter(|bundle| {
-                bundle.archived_at.is_none()
-                    && bundle.dormant_at.is_none()
-                    && bundle.pinned_at.is_none()
-                    && now.saturating_sub(bundle.updated_at) < SIDEBAR_BUNDLE_RECENT_SECS
+            .flat_map(|state| &state.deliverables)
+            .filter(|deliverable| {
+                deliverable.archived_at.is_none()
+                    && deliverable.dormant_at.is_none()
+                    && deliverable.pinned_at.is_none()
+                    && now.saturating_sub(deliverable.updated_at) < SIDEBAR_DELIVERABLE_RECENT_SECS
             })
             .count() as u64;
-        fingerprint = mix(fingerprint, recent_bundles);
+        fingerprint = mix(fingerprint, recent_deliverables);
         // The dormant fold's reveal count drives row membership too — the
         // project-grouping map fold above only runs under project grouping.
         fingerprint = mix(
             fingerprint,
             self.sidebar_project_dormant_reveals
-                .get(&SidebarGroup::Bundles)
+                .get(&SidebarGroup::Deliverables)
                 .copied()
                 .unwrap_or_default() as u64,
         );
@@ -3922,44 +3922,44 @@ impl Waku {
             rows.push(SidebarRow::GroupSpacer);
         }
 
-        // Bundles an employee produced and the boss published get their own
+        // Deliverables an employee produced and the boss published get their own
         // section directly above Pinned in either grouping. Under project
         // grouping they keep this dedicated group rather than folding into a
-        // project — a bundle's detail line names its file, not a project.
-        let (recent_bundles, dormant_bundles) = if self.state.boss_experiment_enabled {
-            sidebar_recent_bundles(&self.boss_ui.states, now)
+        // project — a deliverable's detail line names its file, not a project.
+        let (recent_deliverables, dormant_deliverables) = if self.state.boss_experiment_enabled {
+            sidebar_recent_deliverables(&self.boss_ui.states, now)
         } else {
             (Vec::new(), Vec::new())
         };
-        if !recent_bundles.is_empty() || !dormant_bundles.is_empty() {
-            rows.push(SidebarRow::Header(SidebarGroup::Bundles));
+        if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
+            rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
             if !self
                 .sidebar_collapsed_groups
-                .contains(&SidebarGroup::Bundles)
+                .contains(&SidebarGroup::Deliverables)
             {
                 rows.extend(
-                    recent_bundles
+                    recent_deliverables
                         .iter()
                         .copied()
-                        .map(|(key, id)| SidebarRow::Bundle(key, id)),
+                        .map(|(key, id)| SidebarRow::Deliverable(key, id)),
                 );
-                // A swept bundle keeps a fold row rather than vanishing —
+                // A swept deliverable keeps a fold row rather than vanishing —
                 // the same "Show dormant" reveal a project group's dormant
                 // tail uses.
                 let revealed = self
                     .sidebar_project_dormant_reveals
-                    .get(&SidebarGroup::Bundles)
+                    .get(&SidebarGroup::Deliverables)
                     .copied()
                     .unwrap_or_default();
                 rows.extend(
-                    dormant_bundles
+                    dormant_deliverables
                         .iter()
                         .take(revealed)
                         .copied()
-                        .map(|(key, id)| SidebarRow::Bundle(key, id)),
+                        .map(|(key, id)| SidebarRow::Deliverable(key, id)),
                 );
-                if dormant_bundles.len() > revealed {
-                    rows.push(SidebarRow::ShowDormant(SidebarGroup::Bundles));
+                if dormant_deliverables.len() > revealed {
+                    rows.push(SidebarRow::ShowDormant(SidebarGroup::Deliverables));
                 }
             }
             rows.push(SidebarRow::GroupSpacer);
@@ -4078,7 +4078,7 @@ impl Waku {
         }
 
         let has_session_header = rows.iter().any(|row| {
-            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Bundles))
+            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables))
         });
         if !has_session_header {
             // Keep the header actions visible while there is no history.
@@ -4357,14 +4357,14 @@ impl Waku {
                 self.render_boss_planning_row(session_id, shortcut_index, cx)
             }
             SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
-            SidebarRow::Bundle(key, id) => self.render_sidebar_bundle_row(key, id, cx),
+            SidebarRow::Deliverable(key, id) => self.render_sidebar_deliverable_row(key, id, cx),
             SidebarRow::Header(group) => {
                 // The header actions belong to the session history — the
-                // Terminals and Recent bundles groups sit above it but never
+                // Terminals and Recent deliverables groups sit above it but never
                 // carry them.
-                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Bundles)
+                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables)
                     && !rows[..index].iter().any(|row| {
-                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Bundles))
+                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables))
                     });
                 self.render_sidebar_group_header(group, first, cx)
                     .into_any_element()
@@ -4503,7 +4503,7 @@ impl Waku {
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
-            SidebarGroup::Bundles => tr!("sidebar.recent_bundles"),
+            SidebarGroup::Deliverables => tr!("sidebar.recent_deliverables"),
             SidebarGroup::Planning => tr!("phase.planning"),
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(_) if project_is_projectless => tr!("sidebar.chats"),
@@ -4544,7 +4544,7 @@ impl Waku {
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
                 | SidebarGroup::Dormant
-                | SidebarGroup::Bundles
+                | SidebarGroup::Deliverables
         )
         .then(|| {
             icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
@@ -4886,7 +4886,7 @@ impl Waku {
             | SidebarGroup::Planning
             | SidebarGroup::Date(_)
             | SidebarGroup::Dormant
-            | SidebarGroup::Bundles => return,
+            | SidebarGroup::Deliverables => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -7290,9 +7290,9 @@ pub(super) fn sidebar_session_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waku_client::boss::{BossBundle, BossIdentity, BossState};
+    use waku_client::boss::{BossDeliverable, BossIdentity, BossState};
 
-    fn boss_state_with_bundles(bundles: Vec<BossBundle>) -> BossState {
+    fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
             identity: BossIdentity {
                 id: Uuid::new_v4(),
@@ -7304,7 +7304,7 @@ mod tests {
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),
-            bundles,
+            deliverables,
             goals_viewed_at: None,
             planning: Vec::new(),
             revision: 0,
@@ -7312,9 +7312,9 @@ mod tests {
     }
 
     #[test]
-    fn recent_bundles_stay_within_twelve_hours_sorted_newest_first() {
+    fn recent_deliverables_stay_within_twelve_hours_sorted_newest_first() {
         let now = 1_000_000_000;
-        let bundle = |age: u64| BossBundle {
+        let deliverable = |age: u64| BossDeliverable {
             id: Uuid::new_v4(),
             name: String::new(),
             path: String::new(),
@@ -7327,20 +7327,20 @@ mod tests {
             viewed_at: None,
         };
         let hour = 3600;
-        let fresh = bundle(hour);
-        let older = bundle(2 * hour);
-        let edge = bundle(SIDEBAR_BUNDLE_RECENT_SECS - 1);
-        let expired = bundle(SIDEBAR_BUNDLE_RECENT_SECS);
+        let fresh = deliverable(hour);
+        let older = deliverable(2 * hour);
+        let edge = deliverable(SIDEBAR_DELIVERABLE_RECENT_SECS - 1);
+        let expired = deliverable(SIDEBAR_DELIVERABLE_RECENT_SECS);
         let remote = waku_client::DaemonKey::Remote(Uuid::new_v4());
-        let remote_fresh = bundle(30 * 60);
+        let remote_fresh = deliverable(30 * 60);
         let mut states = HashMap::new();
         states.insert(
             waku_client::DaemonKey::Local,
-            boss_state_with_bundles(vec![older.clone(), expired, edge.clone(), fresh.clone()]),
+            boss_state_with_deliverables(vec![older.clone(), expired, edge.clone(), fresh.clone()]),
         );
-        // A second host's bundles merge into the same newest-first ordering.
-        states.insert(remote, boss_state_with_bundles(vec![remote_fresh.clone()]));
-        let (live, dormant) = sidebar_recent_bundles(&states, now);
+        // A second host's deliverables merge into the same newest-first ordering.
+        states.insert(remote, boss_state_with_deliverables(vec![remote_fresh.clone()]));
+        let (live, dormant) = sidebar_recent_deliverables(&states, now);
         assert_eq!(
             live,
             vec![
@@ -7354,10 +7354,10 @@ mod tests {
     }
 
     #[test]
-    fn bundle_flags_gate_the_recency_window() {
+    fn deliverable_flags_gate_the_recency_window() {
         let now = 1_000_000_000;
-        let stale = SIDEBAR_BUNDLE_RECENT_SECS + 1;
-        let pinned = BossBundle {
+        let stale = SIDEBAR_DELIVERABLE_RECENT_SECS + 1;
+        let pinned = BossDeliverable {
             id: Uuid::new_v4(),
             name: String::new(),
             path: String::new(),
@@ -7384,14 +7384,14 @@ mod tests {
         pinned_and_swept.id = Uuid::new_v4();
         pinned_and_swept.dormant_at = Some(now);
         pinned_and_swept.updated_at += 1;
-        let fresh = BossBundle {
+        let fresh = BossDeliverable {
             pinned_at: None,
             dormant_at: None,
             archived_at: None,
             viewed_at: None,
             ..pinned.clone()
         };
-        let fresh = BossBundle {
+        let fresh = BossDeliverable {
             id: Uuid::new_v4(),
             updated_at: now,
             created_at: now,
@@ -7400,7 +7400,7 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(
             waku_client::DaemonKey::Local,
-            boss_state_with_bundles(vec![
+            boss_state_with_deliverables(vec![
                 swept.clone(),
                 archived,
                 pinned_and_swept.clone(),
@@ -7408,7 +7408,7 @@ mod tests {
                 pinned.clone(),
             ]),
         );
-        let (live, dormant) = sidebar_recent_bundles(&states, now);
+        let (live, dormant) = sidebar_recent_deliverables(&states, now);
         assert_eq!(
             live,
             vec![

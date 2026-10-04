@@ -81,7 +81,7 @@ runtime tool inventory across every provider.
 | `transcript`; CLI `search` and `read` | Inspect outcomes and past human work | Transcript authorization; boss search spans registered projects | Keep through typed tools, not shell |
 | `listFiles`, `readFile`, `writeFile`, `createFolder`; `memory` | Boss-owned documents, persistent facts, memory indexing | Relative files-root paths; employee grants; symlink rejection | Keep through boss operations |
 | `eval` | Batch and chain boss operations; retain script variables | Rhai budgets and ordinary operation authorization | Keep; do not add process, network, or arbitrary file bindings |
-| Bundle publishing and lifecycle; `speak` | Expose employee artifacts and notify the human | Owner-only operations; bundle path names a daemon-host artifact | Keep; artifact publication does not require shell |
+| Deliverable publishing and lifecycle; `speak` | Expose employee artifacts and notify the human | Owner-only operations; deliverable path names a daemon-host artifact | Keep; artifact publication does not require shell |
 | General command tools (`exec`, Bash, harness equivalents) | Today: run CLI boss ops, inspect Git/worktree, search project tree | Ordinary session access mode | Replace CLI dependence; remove arbitrary commands |
 | Native file read/search/edit/patch tools | Today: project investigation, direct verification, broader editing | Provider filesystem/access policy, not boss files ACL | Remove; delegate investigation and implementation |
 | Native web/search/network tools | Today: internet research if harness exposes it | Harness/config dependent; discouraged in persona | Remove; delegate research |
@@ -121,7 +121,7 @@ operation and bound them to that employee's workspace.
 
 Memory maintenance needs no general editor: boss files and deterministic memory
 operations already exist. Files use relative paths and reject symlink components
-(D `boss.rs:1253–1268`). `publishBundle` accepts an absolute artifact path and
+(D `boss.rs:1253–1268`). `publishDeliverable` accepts an absolute artifact path and
 checks its metadata through the daemon; the boss does not have to run a process
 to publish it (D `boss.rs:1048–1067`). Internet access is already assigned to
 employees by the default persona (D `boss.rs:1538`). Transcript discovery is a

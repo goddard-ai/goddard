@@ -2481,9 +2481,9 @@ impl Waku {
         self.state.apply_daemon_settings(settings);
         if !self.state.boss_experiment_enabled {
             self.boss_ui.page = None;
-            self.boss_ui.bundle_page = None;
-            self.boss_ui.command_bundle = None;
-            self.boss_ui.pending_bundle = None;
+            self.boss_ui.deliverable_page = None;
+            self.boss_ui.command_deliverable = None;
+            self.boss_ui.pending_deliverable = None;
         }
         // Inference-provider config rides the same document — the first
         // settings broadcast is the earliest the editor can seed from.
@@ -6346,7 +6346,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         // An armed boss command answers to the boss chat, not the
-        // selected task — the employee on screen or a clicked bundle
+        // selected task — the employee on screen or a clicked deliverable
         // rides along as the submission's context attachment. Hidden
         // nudges (continue, goal reminders) stay on their own session.
         if !submission.hidden

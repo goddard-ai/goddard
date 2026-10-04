@@ -3,9 +3,9 @@
 /**
  * A file or folder of employee output the boss published to the user's
  * sidebar. `path` is absolute on the daemon's host — employees run in their
- * assigned project directory, so bundles point outside the Boss files root.
+ * assigned project directory, so deliverables point outside the Boss files root.
  */
-export type BossBundle = { id: string, name: string, path: string,
+export type BossDeliverable = { id: string, name: string, path: string,
 /**
  * Recorded at publish time so renderers never stat the filesystem.
  */
@@ -15,19 +15,19 @@ directory: boolean, createdAt: number,
  */
 updatedAt: number,
 /**
- * A pinned bundle keeps its sidebar row past the recency window.
+ * A pinned deliverable keeps its sidebar row past the recency window.
  */
 pinnedAt: number | null,
 /**
- * A swept bundle hides behind the group's dormant fold until restored.
+ * A swept deliverable hides behind the group's dormant fold until restored.
  */
 dormantAt: number | null,
 /**
- * An archived bundle leaves the sidebar entirely.
+ * An archived deliverable leaves the sidebar entirely.
  */
 archivedAt: number | null,
 /**
- * When the user last opened the bundle. `None` — or older than
+ * When the user last opened the deliverable. `None` — or older than
  * `updated_at` after a re-publish — reads as unread in the sidebar.
  */
 viewedAt: number | null, };

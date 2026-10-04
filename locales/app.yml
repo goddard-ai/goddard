@@ -2158,8 +2158,8 @@ sidebar.dormant:
   en: Dormant
 sidebar.chats:
   en: Chats
-sidebar.recent_bundles:
-  en: Recent bundles
+sidebar.recent_deliverables:
+  en: Recent deliverables
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:
@@ -6059,9 +6059,9 @@ boss.voice_waiting:
 boss.voice_play:
   en: Open boss chat and play
 
-bundle.open:
+deliverable.open:
   en: Open
-bundle.dismiss:
+deliverable.dismiss:
   en: Remove from sidebar
 
 boss.greeting:

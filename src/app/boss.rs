@@ -58,20 +58,20 @@ pub(super) struct BossUi {
     pub expired: HashSet<Uuid>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
-    /// The bundle a sidebar click armed the composer with: the next main-
+    /// The deliverable a sidebar click armed the composer with: the next main-
     /// composer submission commands the boss with this file attached.
     /// Cleared by a send or a session selection.
-    pub command_bundle: Option<(DaemonKey, Uuid)>,
-    /// The bundle whose row click is still navigating to its task page —
-    /// the boss chat. Session activation clears `command_bundle` as stale
-    /// context, so the click parks its bundle here and the finish reapplies
+    pub command_deliverable: Option<(DaemonKey, Uuid)>,
+    /// The deliverable whose row click is still navigating to its task page —
+    /// the boss chat. Session activation clears `command_deliverable` as stale
+    /// context, so the click parks its deliverable here and the finish reapplies
     /// the arm once the boss chat is on screen.
-    pub pending_bundle: Option<(DaemonKey, Uuid)>,
-    /// The bundle whose preview page covers the boss chat's transcript: a
+    pub pending_deliverable: Option<(DaemonKey, Uuid)>,
+    /// The deliverable whose preview page covers the boss chat's transcript: a
     /// previewable file's own page rather than a panel off the chat. Lives
-    /// and dies with `command_bundle` — the same arm brands the composer's
-    /// boss chip and roots the page's file at the bundle's directory.
-    pub bundle_page: Option<(DaemonKey, Uuid)>,
+    /// and dies with `command_deliverable` — the same arm brands the composer's
+    /// boss chip and roots the page's file at the deliverable's directory.
+    pub deliverable_page: Option<(DaemonKey, Uuid)>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     /// The Plans tab's selected plan — a `BossState.planning` record's
@@ -115,9 +115,9 @@ impl Default for BossUi {
             expired: HashSet::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
-            command_bundle: None,
-            pending_bundle: None,
-            bundle_page: None,
+            command_deliverable: None,
+            pending_deliverable: None,
+            deliverable_page: None,
             revision: 0,
             page: None,
             plans_selected: None,
@@ -172,10 +172,10 @@ pub(super) struct BossCommand {
 }
 
 /// What a boss-command submission attaches: the live employee whose task
-/// is on screen, or the bundle a sidebar click armed.
+/// is on screen, or the deliverable a sidebar click armed.
 pub(super) enum BossCommandContext {
     Employee(Uuid),
-    Bundle {
+    Deliverable {
         path: PathBuf,
         name: String,
         directory: bool,
@@ -667,7 +667,7 @@ impl Waku {
     }
 
     /// The boss chat a main-composer submission answers to while armed —
-    /// a live employee's task is on screen or a sidebar bundle was
+    /// a live employee's task is on screen or a sidebar deliverable was
     /// clicked — plus the context it attaches. `None` leaves the
     /// submission aimed at the selected session.
     pub(super) fn composer_boss_command(&self) -> Option<BossCommand> {
@@ -676,25 +676,25 @@ impl Waku {
         if self.big_picture.is_open() {
             return None;
         }
-        if let Some((key, bundle_id)) = self.boss_ui.command_bundle {
+        if let Some((key, deliverable_id)) = self.boss_ui.command_deliverable {
             let command = self.boss_ui.states.get(&key).and_then(|state| {
                 state
-                    .bundles
+                    .deliverables
                     .iter()
-                    .find(|bundle| bundle.id == bundle_id)
-                    .and_then(|bundle| {
+                    .find(|deliverable| deliverable.id == deliverable_id)
+                    .and_then(|deliverable| {
                         Some(BossCommand {
                             session_id: state.session_id?,
                             identity: state.identity.clone(),
-                            context: BossCommandContext::Bundle {
-                                path: PathBuf::from(&bundle.path),
-                                name: bundle.name.clone(),
-                                directory: bundle.directory,
+                            context: BossCommandContext::Deliverable {
+                                path: PathBuf::from(&deliverable.path),
+                                name: deliverable.name.clone(),
+                                directory: deliverable.directory,
                             },
                         })
                     })
             });
-            // A dismissed or aged-out bundle disarms silently, falling
+            // A dismissed or aged-out deliverable disarms silently, falling
             // through to the viewed-employee check.
             if let Some(command) = command {
                 return Some(command);
@@ -719,7 +719,7 @@ impl Waku {
 
     /// The attachment a boss-command submission carries: a session
     /// reference for the viewed employee, the published file itself for
-    /// an armed bundle. Its mention token splices into the provider-
+    /// an armed deliverable. Its mention token splices into the provider-
     /// facing prompt while the chip lands in the boss transcript's bubble.
     fn boss_command_attachment(&self, context: &BossCommandContext) -> MessageAttachment {
         match context {
@@ -741,7 +741,7 @@ impl Waku {
                     session_id: Some(*session_id),
                 }
             }
-            BossCommandContext::Bundle {
+            BossCommandContext::Deliverable {
                 path,
                 name,
                 directory,
@@ -763,7 +763,7 @@ impl Waku {
     }
 
     /// The armed boss command's shared landing: the context attachment
-    /// folds into the submission, the armed bundle clears, and the boss
+    /// folds into the submission, the armed deliverable clears, and the boss
     /// chat comes on screen so the command's destination is visible.
     /// Returns the boss chat session the caller submits or steers to.
     pub(super) fn boss_command_submission_parts(
@@ -789,8 +789,8 @@ impl Waku {
             format!("{prompt} {token}")
         };
         submission.attachments.push(attachment);
-        self.boss_ui.command_bundle = None;
-        self.boss_ui.bundle_page = None;
+        self.boss_ui.command_deliverable = None;
+        self.boss_ui.deliverable_page = None;
         self.note_user_message_target(command.session_id);
         self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
         // Activation only syncs the hint when the session actually changed;
@@ -801,7 +801,7 @@ impl Waku {
 
     /// Keep the composer hint honest about where Enter sends: an armed
     /// boss command goes to the boss chat — the employee on screen or the
-    /// armed bundle riding along as its attachment — everything else to
+    /// armed deliverable riding along as its attachment — everything else to
     /// the selected task.
     pub(super) fn sync_composer_placeholder(&self, cx: &mut Context<Self>) {
         // Big Picture writes its own hint while it holds the composer.
@@ -1131,9 +1131,9 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return;
         }
-        // Re-opening the boss chat hands the bundle preview page back to
+        // Re-opening the boss chat hands the deliverable preview page back to
         // the chat transcript it covers, even when it was already selected.
-        self.boss_ui.bundle_page = None;
+        self.boss_ui.deliverable_page = None;
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -1711,35 +1711,35 @@ impl Waku {
             .into_any_element()
     }
 
-    /// A Recent bundles row: the card chrome matches a task row, with the
-    /// bundle's display name on the title line and its file name in the
+    /// A Recent deliverables row: the card chrome matches a task row, with the
+    /// deliverable's display name on the title line and its file name in the
     /// detail slot a task would spend on its project. Everything the row
     /// needs was recorded at publish — no filesystem reads on the frame path.
-    pub(super) fn render_sidebar_bundle_row(
+    pub(super) fn render_sidebar_deliverable_row(
         &self,
         key: DaemonKey,
-        bundle_id: Uuid,
+        deliverable_id: Uuid,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(bundle) = self
+        let Some(deliverable) = self
             .boss_ui
             .states
             .get(&key)
-            .and_then(|state| state.bundles.iter().find(|bundle| bundle.id == bundle_id))
+            .and_then(|state| state.deliverables.iter().find(|deliverable| deliverable.id == deliverable_id))
         else {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let path = PathBuf::from(&bundle.path);
+        let path = PathBuf::from(&deliverable.path);
         let file_name = path
             .file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or(&bundle.path)
+            .unwrap_or(&deliverable.path)
             .to_owned();
-        let detail_icon = if bundle.directory {
+        let detail_icon = if deliverable.directory {
             "icons/folder.svg"
         } else {
-            right_panel::file_icon_for_path(&bundle.path)
+            right_panel::file_icon_for_path(&deliverable.path)
         };
         // A remote daemon's path names its host's filesystem — the row keeps
         // the host in the detail line rather than pretending it is local.
@@ -1750,40 +1750,40 @@ impl Waku {
             },
             DaemonKey::Local => file_name,
         };
-        let age = sidebar::format_time_ago(unix_time().saturating_sub(bundle.updated_at));
+        let age = sidebar::format_time_ago(unix_time().saturating_sub(deliverable.updated_at));
         // Unread reads like a task's unseen completion: never opened, or
         // refreshed by a re-publish since the last open.
-        let unread = bundle
+        let unread = deliverable
             .viewed_at
-            .is_none_or(|viewed| viewed < bundle.updated_at);
-        let pinned = bundle.pinned_at.is_some();
-        let dormant = bundle.dormant_at.is_some() && !pinned;
-        let menu = self.menu_handle(format!("bundle-{key:?}-{bundle_id}"), cx);
+            .is_none_or(|viewed| viewed < deliverable.updated_at);
+        let pinned = deliverable.pinned_at.is_some();
+        let dormant = deliverable.dormant_at.is_some() && !pinned;
+        let menu = self.menu_handle(format!("deliverable-{key:?}-{deliverable_id}"), cx);
         let keyboard_menu = menu.clone();
         let row_focus = menu.trigger_focus_handle().clone();
-        // A clicked bundle opens its task page — the boss chat that
+        // A clicked deliverable opens its task page — the boss chat that
         // published it — with the file armed as composer context; a
         // previewable local file also opens in the strip's file viewer
         // once the chat lands. The row keeps a selected highlight until a
         // send or session switch clears the arm.
-        let armed = self.boss_ui.command_bundle == Some((key, bundle_id));
-        let group_name = SharedString::from(format!("bundle-row-{key:?}-{bundle_id}"));
+        let armed = self.boss_ui.command_deliverable == Some((key, deliverable_id));
+        let group_name = SharedString::from(format!("deliverable-row-{key:?}-{deliverable_id}"));
         // The mini controls share the task row's chrome: zero-width until
         // the row is hovered or the button takes keyboard focus. The
         // Finder button is the escape hatch the in-app preview replaced —
-        // remote bundles keep it out since the path is not local.
+        // remote deliverables keep it out since the path is not local.
         let finder_button = (key == DaemonKey::Local).then(|| {
             let focus = self
-                .sidebar_bundle_finder_focuses
+                .sidebar_deliverable_finder_focuses
                 .borrow_mut()
-                .entry((key, bundle_id))
+                .entry((key, deliverable_id))
                 .or_insert_with(|| cx.focus_handle())
                 .clone();
             let finder_path = path.clone();
             let key_path = path.clone();
-            self.sidebar_bundle_button(
+            self.sidebar_deliverable_button(
                 &group_name,
-                format!("bundle-finder-{key:?}-{bundle_id}"),
+                format!("deliverable-finder-{key:?}-{deliverable_id}"),
                 &focus,
                 "icons/folder-open.svg",
                 tr!("common.reveal_in_finder"),
@@ -1802,18 +1802,18 @@ impl Waku {
             })
         });
         let pin_focus = self
-            .sidebar_bundle_pin_focuses
+            .sidebar_deliverable_pin_focuses
             .borrow_mut()
-            .entry((key, bundle_id))
+            .entry((key, deliverable_id))
             .or_insert_with(|| cx.focus_handle())
             .clone();
         // Holding Option retasks the pin control the way a task row's
         // does: on a live row it sweeps to the dormant fold, on a dormant
         // row it restores.
         let pin_button = self
-            .sidebar_bundle_button(
+            .sidebar_deliverable_button(
                 &group_name,
-                format!("bundle-pin-{key:?}-{bundle_id}"),
+                format!("deliverable-pin-{key:?}-{deliverable_id}"),
                 &pin_focus,
                 if self.sidebar_alt_held {
                     if dormant {
@@ -1843,27 +1843,27 @@ impl Waku {
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 cx.stop_propagation();
                 if event.modifiers().alt || this.sidebar_alt_held {
-                    this.set_bundle_dormant(key, bundle_id, !dormant, cx);
+                    this.set_deliverable_dormant(key, deliverable_id, !dormant, cx);
                 } else {
-                    this.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                    this.set_deliverable_pinned(key, deliverable_id, !pinned, cx);
                 }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                    this.set_deliverable_pinned(key, deliverable_id, !pinned, cx);
                     cx.stop_propagation();
                 }
             }));
         let archive_focus = self
-            .sidebar_bundle_archive_focuses
+            .sidebar_deliverable_archive_focuses
             .borrow_mut()
-            .entry((key, bundle_id))
+            .entry((key, deliverable_id))
             .or_insert_with(|| cx.focus_handle())
             .clone();
         let archive_button = self
-            .sidebar_bundle_button(
+            .sidebar_deliverable_button(
                 &group_name,
-                format!("bundle-archive-{key:?}-{bundle_id}"),
+                format!("deliverable-archive-{key:?}-{deliverable_id}"),
                 &archive_focus,
                 "icons/archive.svg",
                 tr!("session.archive"),
@@ -1872,16 +1872,16 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
-                this.set_bundle_archived(key, bundle_id, true, cx);
+                this.set_deliverable_archived(key, deliverable_id, true, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.set_bundle_archived(key, bundle_id, true, cx);
+                    this.set_deliverable_archived(key, deliverable_id, true, cx);
                     cx.stop_propagation();
                 }
             }));
         let row = div()
-            .id(SharedString::from(format!("bundle-{key:?}-{bundle_id}")))
+            .id(SharedString::from(format!("deliverable-{key:?}-{deliverable_id}")))
             .group(group_name.clone())
             .w_full()
             .min_w_0()
@@ -1896,14 +1896,14 @@ impl Waku {
             .when(armed, |element| element.bg(theme.sidebar_item_background))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
-            .tooltip(Tooltip::text(bundle.path.clone()))
+            .tooltip(Tooltip::text(deliverable.path.clone()))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.open_bundle_task(key, bundle_id, cx);
+                this.open_deliverable_task(key, deliverable_id, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key_name = event.keystroke.key.as_str();
                 if matches!(key_name, "enter" | "space") {
-                    this.open_bundle_task(key, bundle_id, cx);
+                    this.open_deliverable_task(key, deliverable_id, cx);
                     cx.stop_propagation();
                 } else if key_name == "f10" && event.keystroke.modifiers.shift {
                     keyboard_menu.open_context_menu(window, cx);
@@ -1931,7 +1931,7 @@ impl Waku {
                                     .truncate()
                                     .text_size(sp(13.5))
                                     .text_color(theme.text)
-                                    .child(bundle.name.clone()),
+                                    .child(deliverable.name.clone()),
                             )
                             .children(finder_button)
                             .child(pin_button)
@@ -2001,7 +2001,7 @@ impl Waku {
                 .w_full()
                 .pb(px(sidebar::SIDEBAR_SESSION_ROW_GAP))
                 .child(row),
-            SharedString::from(format!("bundle-menu-{key:?}-{bundle_id}")),
+            SharedString::from(format!("deliverable-menu-{key:?}-{deliverable_id}")),
             &menu,
             move |_cx| {
                 let pin_waku = waku.clone();
@@ -2009,7 +2009,7 @@ impl Waku {
                 let archive_waku = waku.clone();
                 let remove_waku = waku.clone();
                 let mut items = vec![
-                    MenuItem::new(tr!("bundle.open"), {
+                    MenuItem::new(tr!("deliverable.open"), {
                         let path = path.clone();
                         move |_, cx| crate::platform::open_with_default_app(&path, cx)
                     })
@@ -2028,7 +2028,7 @@ impl Waku {
                         },
                         move |_, cx| {
                             let _ = pin_waku.update(cx, |waku, cx| {
-                                waku.set_bundle_pinned(key, bundle_id, !pinned, cx);
+                                waku.set_deliverable_pinned(key, deliverable_id, !pinned, cx);
                             });
                         },
                     )
@@ -2044,7 +2044,7 @@ impl Waku {
                     items.push(
                         MenuItem::new(tr!("session.restore"), move |_, cx| {
                             let _ = sweep_waku.update(cx, |waku, cx| {
-                                waku.set_bundle_dormant(key, bundle_id, false, cx);
+                                waku.set_deliverable_dormant(key, deliverable_id, false, cx);
                             });
                         })
                         .icon("icons/rotate-cw.svg"),
@@ -2053,7 +2053,7 @@ impl Waku {
                     items.push(
                         MenuItem::new(tr!("session.sweep"), move |_, cx| {
                             let _ = sweep_waku.update(cx, |waku, cx| {
-                                waku.set_bundle_dormant(key, bundle_id, true, cx);
+                                waku.set_deliverable_dormant(key, deliverable_id, true, cx);
                             });
                         })
                         .icon("icons/broom.svg"),
@@ -2062,16 +2062,16 @@ impl Waku {
                 items.extend([
                     MenuItem::new(tr!("session.archive"), move |_, cx| {
                         let _ = archive_waku.update(cx, |waku, cx| {
-                            waku.set_bundle_archived(key, bundle_id, true, cx);
+                            waku.set_deliverable_archived(key, deliverable_id, true, cx);
                         });
                     })
                     .icon("icons/archive.svg"),
                     MenuItem::Separator,
-                    MenuItem::new(tr!("bundle.dismiss"), move |_, cx| {
+                    MenuItem::new(tr!("deliverable.dismiss"), move |_, cx| {
                         let _ = remove_waku.update(cx, |waku, cx| {
                             waku.boss_request(
                                 key,
-                                BossOperation::DismissBundle { id: bundle_id },
+                                BossOperation::DismissDeliverable { id: deliverable_id },
                                 BossReply::List,
                                 cx,
                             );
@@ -2084,10 +2084,10 @@ impl Waku {
         )
     }
 
-    /// A bundle row's hover-revealed mini control — the same zero-width
+    /// A deliverable row's hover-revealed mini control — the same zero-width
     /// chrome a task row's pin and archive buttons use: it expands under
     /// row hover or its own keyboard focus.
-    fn sidebar_bundle_button(
+    fn sidebar_deliverable_button(
         &self,
         group_name: &SharedString,
         id: String,
@@ -2126,31 +2126,31 @@ impl Waku {
             .child(icon(icon_path, 12.0, theme.text_secondary))
     }
 
-    /// A bundle row's click or Enter: the bundle's task page is the boss
+    /// A deliverable row's click or Enter: the deliverable's task page is the boss
     /// chat that published it, opened with the file armed as composer
     /// context — and, when the file is previewable, its own preview page
-    /// on top of it. The arm parks in `pending_bundle` so the session
+    /// on top of it. The arm parks in `pending_deliverable` so the session
     /// switch the open triggers cannot clear it before the chat lands.
-    pub(super) fn open_bundle_task(
+    pub(super) fn open_deliverable_task(
         &mut self,
         key: DaemonKey,
-        bundle_id: Uuid,
+        deliverable_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        self.mark_bundle_viewed(key, bundle_id, cx);
-        self.boss_ui.command_bundle = Some((key, bundle_id));
-        self.boss_ui.pending_bundle = Some((key, bundle_id));
+        self.mark_deliverable_viewed(key, deliverable_id, cx);
+        self.boss_ui.command_deliverable = Some((key, deliverable_id));
+        self.boss_ui.pending_deliverable = Some((key, deliverable_id));
         self.sync_composer_placeholder(cx);
         self.chat_with_boss(key, cx);
         cx.notify();
     }
 
-    /// Opening a bundle stamps it viewed on the owning daemon; the stamped
+    /// Opening a deliverable stamps it viewed on the owning daemon; the stamped
     /// state returns through the usual revision broadcast. The stamp is
     /// fire-and-forget outside `boss_request`'s pending gate — an in-flight
     /// list or save must never drop the view, and the view must never
     /// queue a click behind them.
-    fn mark_bundle_viewed(&self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
+    fn mark_deliverable_viewed(&self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
         let Some(client) = self
             .daemons
             .supervisor(key)
@@ -2164,24 +2164,24 @@ impl Waku {
                     Uuid::nil(),
                     Uuid::nil(),
                     waku_client::Command::Boss {
-                        operation: BossOperation::MarkBundleViewed { id },
+                        operation: BossOperation::MarkDeliverableViewed { id },
                     },
                 );
             })
             .detach();
     }
 
-    /// The deferred half of a bundle row click, fired when the activation
-    /// it triggered lands. If the chat on screen is the bundle's own
+    /// The deferred half of a deliverable row click, fired when the activation
+    /// it triggered lands. If the chat on screen is the deliverable's own
     /// boss, the armed composer context — which a session switch clears
     /// as belonging to the previous view — comes back, and a previewable
     /// local file takes the column as its own preview page.
-    pub(super) fn complete_bundle_activation(
+    pub(super) fn complete_deliverable_activation(
         &mut self,
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, bundle_id)) = self.boss_ui.pending_bundle.take() else {
+        let Some((key, deliverable_id)) = self.boss_ui.pending_deliverable.take() else {
             return;
         };
         let Some((directory, path)) = self
@@ -2191,15 +2191,15 @@ impl Waku {
             .filter(|state| state.session_id == Some(session_id))
             .and_then(|state| {
                 state
-                    .bundles
+                    .deliverables
                     .iter()
-                    .find(|bundle| bundle.id == bundle_id)
-                    .map(|bundle| (bundle.directory, PathBuf::from(&bundle.path)))
+                    .find(|deliverable| deliverable.id == deliverable_id)
+                    .map(|deliverable| (deliverable.directory, PathBuf::from(&deliverable.path)))
             })
         else {
             return;
         };
-        self.boss_ui.command_bundle = Some((key, bundle_id));
+        self.boss_ui.command_deliverable = Some((key, deliverable_id));
         self.sync_composer_placeholder(cx);
         if directory || key != DaemonKey::Local {
             return;
@@ -2216,15 +2216,15 @@ impl Waku {
         }
         // A previewable file gets its own page — the file viewer fills the
         // boss chat's column rather than its right panel. The composer
-        // keeps the armed bundle's boss chip, so the page still reads as a
+        // keeps the armed deliverable's boss chip, so the page still reads as a
         // command to the boss with the file attached.
-        self.boss_ui.bundle_page = Some((key, bundle_id));
+        self.boss_ui.deliverable_page = Some((key, deliverable_id));
     }
 
-    /// Task affordances on a bundle row are daemon mutations — the bundle
+    /// Task affordances on a deliverable row are daemon mutations — the deliverable
     /// record is boss state, so the pin, sweep, and archive the row shows
     /// round-trip through the owning daemon like a publish or dismiss.
-    fn set_bundle_pinned(
+    fn set_deliverable_pinned(
         &mut self,
         key: DaemonKey,
         id: Uuid,
@@ -2233,13 +2233,13 @@ impl Waku {
     ) {
         self.boss_request(
             key,
-            BossOperation::PinBundle { id, pinned },
+            BossOperation::PinDeliverable { id, pinned },
             BossReply::List,
             cx,
         );
     }
 
-    fn set_bundle_dormant(
+    fn set_deliverable_dormant(
         &mut self,
         key: DaemonKey,
         id: Uuid,
@@ -2248,13 +2248,13 @@ impl Waku {
     ) {
         self.boss_request(
             key,
-            BossOperation::SweepBundle { id, dormant },
+            BossOperation::SweepDeliverable { id, dormant },
             BossReply::List,
             cx,
         );
     }
 
-    fn set_bundle_archived(
+    fn set_deliverable_archived(
         &mut self,
         key: DaemonKey,
         id: Uuid,
@@ -2263,7 +2263,7 @@ impl Waku {
     ) {
         self.boss_request(
             key,
-            BossOperation::ArchiveBundle { id, archived },
+            BossOperation::ArchiveDeliverable { id, archived },
             BossReply::List,
             cx,
         );

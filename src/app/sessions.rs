@@ -779,11 +779,11 @@ impl Waku {
         // the page's strip is what needs parking.
         self.sync_right_panel_owner(cx);
         if session_changed {
-            // A new session is a new context: a bundle click's armed boss
+            // A new session is a new context: a deliverable click's armed boss
             // command belongs to whatever was on screen before — and the
             // preview page it may have opened with it.
-            self.boss_ui.command_bundle = None;
-            self.boss_ui.bundle_page = None;
+            self.boss_ui.command_deliverable = None;
+            self.boss_ui.deliverable_page = None;
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);
@@ -792,10 +792,10 @@ impl Waku {
         } else {
             self.ensure_right_panel_terminals(cx);
         }
-        // A bundle row's own navigation re-arms its composer context and
+        // A deliverable row's own navigation re-arms its composer context and
         // opens its file preview once the boss chat it opened is on
         // screen — the click parks both behind this landing.
-        self.complete_bundle_activation(session_id, cx);
+        self.complete_deliverable_activation(session_id, cx);
         self.reset_visible_state();
         if session_changed {
             // Each materialized worktree has its own cache entry. A task that

@@ -5751,26 +5751,26 @@ impl Waku {
         self.working_tree_row_menu(waku, &absolute_path, &name, absolute_path.is_dir())
     }
 
-    /// The armed bundle's own page: a previewable file renders with the
+    /// The armed deliverable's own page: a previewable file renders with the
     /// file viewer's machinery at the chat column's full width — the
-    /// bundle's page, not the boss chat's right panel. The composer rides
+    /// deliverable's page, not the boss chat's right panel. The composer rides
     /// underneath with the boss's chip, so a send from here lands on the
-    /// boss chat with the bundle attached. `None` whenever no armed bundle
+    /// boss chat with the deliverable attached. `None` whenever no armed deliverable
     /// is holding a page open, which drops stale state as it is found.
-    pub(super) fn render_bundle_preview_page(
+    pub(super) fn render_deliverable_preview_page(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (key, bundle_id) = self.boss_ui.bundle_page?;
-        let valid = self.boss_ui.command_bundle == Some((key, bundle_id))
+        let (key, deliverable_id) = self.boss_ui.deliverable_page?;
+        let valid = self.boss_ui.command_deliverable == Some((key, deliverable_id))
             && self
                 .boss_ui
                 .states
                 .get(&key)
                 .is_some_and(|state| state.session_id == self.state.selected_session);
         if !valid {
-            self.boss_ui.bundle_page = None;
+            self.boss_ui.deliverable_page = None;
             return None;
         }
         let relative_path = self
@@ -5779,18 +5779,18 @@ impl Waku {
             .get(&key)
             .and_then(|state| {
                 state
-                    .bundles
+                    .deliverables
                     .iter()
-                    .find(|bundle| bundle.id == bundle_id && !bundle.directory)
+                    .find(|deliverable| deliverable.id == deliverable_id && !deliverable.directory)
             })
-            .and_then(|bundle| {
-                std::path::Path::new(&bundle.path)
+            .and_then(|deliverable| {
+                std::path::Path::new(&deliverable.path)
                     .file_name()
                     .and_then(|name| name.to_str())
                     .map(str::to_owned)
             });
         let Some(relative_path) = relative_path else {
-            self.boss_ui.bundle_page = None;
+            self.boss_ui.deliverable_page = None;
             return None;
         };
         Some(
@@ -5807,9 +5807,9 @@ impl Waku {
     }
 
     /// `show_tree` mounts the working-tree column beside the editor — the
-    /// strip's own browsing surface. A bundle's preview page leaves it
+    /// strip's own browsing surface. A deliverable's preview page leaves it
     /// out: the page previews one published file, not its directory.
-    /// `bundle_page` lays the surface out as a page — the markdown preview
+    /// `deliverable_page` lays the surface out as a page — the markdown preview
     /// centers its column like the maximized panel and a bottom fade marks
     /// content scrolling under the composer, as the transcript's does.
     fn render_right_panel_file(
@@ -5817,7 +5817,7 @@ impl Waku {
         relative_path: String,
         panel_width: f32,
         show_tree: bool,
-        bundle_page: bool,
+        deliverable_page: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -5852,7 +5852,7 @@ impl Waku {
                 &relative_path,
                 &editor_state,
                 panel_width - file_tree_width,
-                bundle_page,
+                deliverable_page,
                 window,
                 cx,
             )
@@ -6042,10 +6042,10 @@ impl Waku {
                     .children(preview_toggle),
             )
             .child(body)
-            // A bundle's page rides above the composer like the transcript:
+            // A deliverable's page rides above the composer like the transcript:
             // its rows dissolve into the surface where more waits below.
             .when_some(
-                bundle_page
+                deliverable_page
                     .then(|| {
                         if image_mode {
                             None
@@ -7341,7 +7341,7 @@ impl Waku {
         relative_path: &str,
         editor_state: &Entity<TextInput>,
         pane_width: f32,
-        bundle_page: bool,
+        deliverable_page: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -7355,9 +7355,9 @@ impl Waku {
 
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        // The maximized panel and a bundle's page both own a full-width
+        // The maximized panel and a deliverable's page both own a full-width
         // column — the document centers at the content measure either way.
-        let centered = self.panel_fullscreen_active() || bundle_page;
+        let centered = self.panel_fullscreen_active() || deliverable_page;
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::document()));
@@ -8765,26 +8765,26 @@ impl Waku {
                 .find(|project| project.id == project_id)
                 .map(|project| project.path.clone()),
             RightPanelOwner::Boss(key) => {
-                // An armed sidebar bundle roots the boss chat's file
+                // An armed sidebar deliverable roots the boss chat's file
                 // surfaces at the path the boss published — its preview
-                // page reads through the same root. Remote bundles have
+                // page reads through the same root. Remote deliverables have
                 // no local slice.
                 if key != waku_client::DaemonKey::Local {
                     return None;
                 }
-                let (bundle_key, bundle_id) = self.boss_ui.command_bundle?;
-                if bundle_key != key {
+                let (deliverable_key, deliverable_id) = self.boss_ui.command_deliverable?;
+                if deliverable_key != key {
                     return None;
                 }
-                let bundle = self
+                let deliverable = self
                     .boss_ui
                     .states
                     .get(&key)?
-                    .bundles
+                    .deliverables
                     .iter()
-                    .find(|bundle| bundle.id == bundle_id)?;
-                let path = PathBuf::from(&bundle.path);
-                if bundle.directory {
+                    .find(|deliverable| deliverable.id == deliverable_id)?;
+                let path = PathBuf::from(&deliverable.path);
+                if deliverable.directory {
                     Some(path)
                 } else {
                     path.parent().map(Path::to_path_buf)

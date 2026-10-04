@@ -693,7 +693,7 @@ sidebar.pinned: 已置顶
 sidebar.terminals: 终端
 sidebar.dormant: 休眠
 sidebar.chats: 聊天
-sidebar.recent_bundles: 最近的文件包
+sidebar.recent_deliverables: 最近的交付物
 sidebar.yesterday: 昨天
 sidebar.this_week: 本周
 sidebar.this_month: 本月
@@ -2979,8 +2979,8 @@ boss.failed: "老板操作失败：%{error}"
 boss.voice_waiting: "老板有一条语音消息等待播放 —— 说“Go ahead”或打开它的聊天。"
 boss.voice_play: "打开老板聊天并播放"
 
-bundle.open: "打开"
-bundle.dismiss: "从边栏移除"
+deliverable.open: "打开"
+deliverable.dismiss: "从边栏移除"
 
 boss.greeting: 今天我们做些什么？
 boss.new_face: 新面孔

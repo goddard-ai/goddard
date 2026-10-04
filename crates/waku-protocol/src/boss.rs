@@ -149,10 +149,10 @@ pub struct BossEmployee {
 
 /// A file or folder of employee output the boss published to the user's
 /// sidebar. `path` is absolute on the daemon's host — employees run in their
-/// assigned project directory, so bundles point outside the Boss files root.
+/// assigned project directory, so deliverables point outside the Boss files root.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct BossBundle {
+pub struct BossDeliverable {
     pub id: Uuid,
     pub name: String,
     pub path: String,
@@ -161,16 +161,16 @@ pub struct BossBundle {
     pub created_at: u64,
     /// Re-publishing a path bumps this; the sidebar's recency window reads it.
     pub updated_at: u64,
-    /// A pinned bundle keeps its sidebar row past the recency window.
+    /// A pinned deliverable keeps its sidebar row past the recency window.
     #[serde(default)]
     pub pinned_at: Option<u64>,
-    /// A swept bundle hides behind the group's dormant fold until restored.
+    /// A swept deliverable hides behind the group's dormant fold until restored.
     #[serde(default)]
     pub dormant_at: Option<u64>,
-    /// An archived bundle leaves the sidebar entirely.
+    /// An archived deliverable leaves the sidebar entirely.
     #[serde(default)]
     pub archived_at: Option<u64>,
-    /// When the user last opened the bundle. `None` — or older than
+    /// When the user last opened the deliverable. `None` — or older than
     /// `updated_at` after a re-publish — reads as unread in the sidebar.
     #[serde(default)]
     pub viewed_at: Option<u64>,
@@ -218,15 +218,16 @@ pub struct BossState {
     /// assigned to another employee. They are not part of the visible roster.
     #[serde(default)]
     pub retired_employees: Vec<BossEmployee>,
-    #[serde(default)]
-    pub bundles: Vec<BossBundle>,
+    /// Documents saved before the rename record these under `bundles`.
+    #[serde(default, alias = "bundles")]
+    pub deliverables: Vec<BossDeliverable>,
     /// Open planning sessions and their plan documents. Records stay after
     /// finalization and archive — the freeze they carry is permanent.
     #[serde(default)]
     pub planning: Vec<BossPlan>,
     /// The daemon clock when the user last had the Goals page open —
     /// a goal finished since then reads as unread in the sidebar, the
-    /// same contract `BossBundle::viewed_at` gives its row.
+    /// same contract `BossDeliverable::viewed_at` gives its row.
     #[serde(default)]
     pub goals_viewed_at: Option<u64>,
     pub revision: u64,
@@ -395,33 +396,33 @@ pub enum BossOperation {
     },
     /// Publish a file or folder to the user's sidebar. `path` is absolute on
     /// this daemon's host; `name` defaults to the path's file name.
-    PublishBundle {
+    PublishDeliverable {
         path: String,
         #[serde(default)]
         name: Option<String>,
     },
-    DismissBundle {
+    DismissDeliverable {
         id: Uuid,
     },
     /// Direct deterministic access to the Boss's file-canonical memory store.
     Memory {
         operation: MemoryOperation,
     },
-    /// Pin or unpin a bundle's sidebar row; pinned bundles lead the group
+    /// Pin or unpin a deliverable's sidebar row; pinned deliverables lead the group
     /// and never age out of it.
-    PinBundle {
+    PinDeliverable {
         id: Uuid,
         pinned: bool,
     },
-    /// Sweep a bundle behind the group's dormant fold, or restore it to the
+    /// Sweep a deliverable behind the group's dormant fold, or restore it to the
     /// live list.
-    SweepBundle {
+    SweepDeliverable {
         id: Uuid,
         dormant: bool,
     },
-    /// Archive or unarchive a bundle — archived bundles leave the sidebar
+    /// Archive or unarchive a deliverable — archived deliverables leave the sidebar
     /// but keep their record.
-    ArchiveBundle {
+    ArchiveDeliverable {
         id: Uuid,
         archived: bool,
     },
@@ -432,9 +433,9 @@ pub enum BossOperation {
     Eval {
         script: String,
     },
-    /// Stamp the bundle viewed at the daemon's clock — opening its page or
+    /// Stamp the deliverable viewed at the daemon's clock — opening its page or
     /// preview retires the sidebar's unread marker.
-    MarkBundleViewed {
+    MarkDeliverableViewed {
         id: Uuid,
     },
     /// Stamp the Goals page viewed at the daemon's clock — goal finishes
@@ -841,7 +842,7 @@ mod tests {
             "sessionId": null,
             "personas": [],
             "employees": [],
-            "bundles": [],
+            "deliverables": [],
             "revision": 0
         }))
         .unwrap();

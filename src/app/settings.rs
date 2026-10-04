@@ -7269,9 +7269,9 @@ impl Waku {
         self.state.boss_experiment_enabled = enabled;
         if !enabled {
             self.boss_ui.page = None;
-            self.boss_ui.bundle_page = None;
-            self.boss_ui.command_bundle = None;
-            self.boss_ui.pending_bundle = None;
+            self.boss_ui.deliverable_page = None;
+            self.boss_ui.command_deliverable = None;
+            self.boss_ui.pending_deliverable = None;
         }
         self.save();
         cx.notify();

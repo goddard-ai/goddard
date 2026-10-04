@@ -8,7 +8,7 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
-    BossBundle, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPlan,
+    BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPlan,
     BossResult, BossState, EmployeeGoal, PermissionOverrides, PersonaPermissions,
 };
 
@@ -684,7 +684,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -1321,13 +1321,13 @@ impl BossService {
                 self.update(|_| Ok(()))?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::PublishBundle { path, name } => {
+            BossOperation::PublishDeliverable { path, name } => {
                 self.require_owner(caller)?;
                 let target = PathBuf::from(&path);
                 if !target.is_absolute() {
-                    bail!("bundle paths must be absolute");
+                    bail!("deliverable paths must be absolute");
                 }
-                let metadata = fs::metadata(&target).context("bundle path does not exist")?;
+                let metadata = fs::metadata(&target).context("deliverable path does not exist")?;
                 let directory = metadata.is_dir();
                 let name = match name {
                     Some(name) => {
@@ -1343,16 +1343,16 @@ impl BossService {
                 };
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    // Re-publishing a path refreshes the bundle in place —
+                    // Re-publishing a path refreshes the deliverable in place —
                     // it jumps back into the sidebar's recency window.
-                    if let Some(bundle) =
-                        state.bundles.iter_mut().find(|bundle| bundle.path == path)
+                    if let Some(deliverable) =
+                        state.deliverables.iter_mut().find(|deliverable| deliverable.path == path)
                     {
-                        bundle.name = name;
-                        bundle.directory = directory;
-                        bundle.updated_at = now;
+                        deliverable.name = name;
+                        deliverable.directory = directory;
+                        deliverable.updated_at = now;
                     } else {
-                        state.bundles.push(BossBundle {
+                        state.deliverables.push(BossDeliverable {
                             id: Uuid::new_v4(),
                             name,
                             path,
@@ -1369,75 +1369,75 @@ impl BossService {
                 })?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::DismissBundle { id } => {
+            BossOperation::DismissDeliverable { id } => {
                 self.require_owner(caller)?;
                 self.update(|state| {
-                    let count = state.bundles.len();
-                    state.bundles.retain(|bundle| bundle.id != id);
-                    if state.bundles.len() == count {
-                        bail!("unknown bundle");
+                    let count = state.deliverables.len();
+                    state.deliverables.retain(|deliverable| deliverable.id != id);
+                    if state.deliverables.len() == count {
+                        bail!("unknown deliverable");
                     }
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::PinBundle { id, pinned } => {
+            BossOperation::PinDeliverable { id, pinned } => {
                 self.require_owner(caller)?;
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    let bundle = state
-                        .bundles
+                    let deliverable = state
+                        .deliverables
                         .iter_mut()
-                        .find(|bundle| bundle.id == id)
-                        .ok_or_else(|| anyhow!("unknown bundle"))?;
-                    bundle.pinned_at = pinned.then_some(now);
+                        .find(|deliverable| deliverable.id == id)
+                        .ok_or_else(|| anyhow!("unknown deliverable"))?;
+                    deliverable.pinned_at = pinned.then_some(now);
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::SweepBundle { id, dormant } => {
+            BossOperation::SweepDeliverable { id, dormant } => {
                 self.require_owner(caller)?;
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    let bundle = state
-                        .bundles
+                    let deliverable = state
+                        .deliverables
                         .iter_mut()
-                        .find(|bundle| bundle.id == id)
-                        .ok_or_else(|| anyhow!("unknown bundle"))?;
-                    bundle.dormant_at = dormant.then_some(now);
+                        .find(|deliverable| deliverable.id == id)
+                        .ok_or_else(|| anyhow!("unknown deliverable"))?;
+                    deliverable.dormant_at = dormant.then_some(now);
                     if !dormant {
                         // Restoring re-enters the recency window the way a
-                        // re-publish does — a dormant bundle can outlive it.
-                        bundle.updated_at = now;
+                        // re-publish does — a dormant deliverable can outlive it.
+                        deliverable.updated_at = now;
                     }
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::ArchiveBundle { id, archived } => {
+            BossOperation::ArchiveDeliverable { id, archived } => {
                 self.require_owner(caller)?;
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    let bundle = state
-                        .bundles
+                    let deliverable = state
+                        .deliverables
                         .iter_mut()
-                        .find(|bundle| bundle.id == id)
-                        .ok_or_else(|| anyhow!("unknown bundle"))?;
-                    bundle.archived_at = archived.then_some(now);
+                        .find(|deliverable| deliverable.id == id)
+                        .ok_or_else(|| anyhow!("unknown deliverable"))?;
+                    deliverable.archived_at = archived.then_some(now);
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::MarkBundleViewed { id } => {
+            BossOperation::MarkDeliverableViewed { id } => {
                 self.require_owner(caller)?;
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    let bundle = state
-                        .bundles
+                    let deliverable = state
+                        .deliverables
                         .iter_mut()
-                        .find(|bundle| bundle.id == id)
-                        .ok_or_else(|| anyhow!("unknown bundle"))?;
-                    bundle.viewed_at = Some(now);
+                        .find(|deliverable| deliverable.id == id)
+                        .ok_or_else(|| anyhow!("unknown deliverable"))?;
+                    deliverable.viewed_at = Some(now);
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
@@ -1857,11 +1857,11 @@ fn fresh_state() -> BossState {
         session_id: None,
         personas: vec![
             BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as deliverables. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
         retired_employees: Vec::new(),
-        bundles: Vec::new(),
+        deliverables: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
         revision: 0,
@@ -1880,7 +1880,7 @@ fn disabled_state() -> BossState {
         personas: Vec::new(),
         employees: Vec::new(),
         retired_employees: Vec::new(),
-        bundles: Vec::new(),
+        deliverables: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
         revision: 0,
@@ -2763,9 +2763,9 @@ mod tests {
     }
 
     #[test]
-    fn bundles_publish_dismiss_and_survive_restart() {
+    fn deliverables_publish_dismiss_and_survive_restart() {
         let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
-        let output = std::env::temp_dir().join(format!("boss-bundle-{}", Uuid::new_v4()));
+        let output = std::env::temp_dir().join(format!("boss-deliverable-{}", Uuid::new_v4()));
         fs::create_dir_all(&output).unwrap();
         let file = output.join("report.md");
         fs::write(&file, "report").unwrap();
@@ -2773,7 +2773,7 @@ mod tests {
         let dir_path = output.to_string_lossy().into_owned();
         let service = BossService::open(root.clone()).unwrap();
 
-        // Only the boss or a human manages bundles — an employee is refused.
+        // Only the boss or a human manages deliverables — an employee is refused.
         let employee_id = Uuid::new_v4();
         service
             .update(|state| {
@@ -2800,34 +2800,34 @@ mod tests {
             })
             .unwrap();
         for op in [
-            BossOperation::PublishBundle {
+            BossOperation::PublishDeliverable {
                 path: file_path.clone(),
                 name: None,
             },
-            BossOperation::DismissBundle { id: Uuid::nil() },
-            BossOperation::PinBundle {
+            BossOperation::DismissDeliverable { id: Uuid::nil() },
+            BossOperation::PinDeliverable {
                 id: Uuid::nil(),
                 pinned: true,
             },
-            BossOperation::SweepBundle {
+            BossOperation::SweepDeliverable {
                 id: Uuid::nil(),
                 dormant: true,
             },
-            BossOperation::ArchiveBundle {
+            BossOperation::ArchiveDeliverable {
                 id: Uuid::nil(),
                 archived: true,
             },
-            BossOperation::MarkBundleViewed { id: Uuid::nil() },
+            BossOperation::MarkDeliverableViewed { id: Uuid::nil() },
         ] {
             assert!(service.handle(Some(employee_id), op).is_err());
         }
-        // Bundles carry absolute paths to real outputs — relative paths and
+        // Deliverables carry absolute paths to real outputs — relative paths and
         // missing files are both refused.
         assert!(
             service
                 .handle(
                     None,
-                    BossOperation::PublishBundle {
+                    BossOperation::PublishDeliverable {
                         path: "outputs/report.md".into(),
                         name: None,
                     },
@@ -2838,7 +2838,7 @@ mod tests {
             service
                 .handle(
                     None,
-                    BossOperation::PublishBundle {
+                    BossOperation::PublishDeliverable {
                         path: "/definitely/missing".into(),
                         name: None,
                     },
@@ -2849,7 +2849,7 @@ mod tests {
         service
             .handle(
                 None,
-                BossOperation::PublishBundle {
+                BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: None,
                 },
@@ -2858,47 +2858,47 @@ mod tests {
         service
             .handle(
                 None,
-                BossOperation::PublishBundle {
+                BossOperation::PublishDeliverable {
                     path: dir_path.clone(),
                     name: Some("Deliverables".into()),
                 },
             )
             .unwrap();
         let state = service.document();
-        assert_eq!(state.bundles.len(), 2);
-        let file_bundle = state
-            .bundles
+        assert_eq!(state.deliverables.len(), 2);
+        let file_deliverable = state
+            .deliverables
             .iter()
-            .find(|bundle| bundle.path == file_path)
+            .find(|deliverable| deliverable.path == file_path)
             .unwrap();
-        assert_eq!(file_bundle.name, "report.md");
-        assert!(!file_bundle.directory);
-        let dir_bundle = state
-            .bundles
+        assert_eq!(file_deliverable.name, "report.md");
+        assert!(!file_deliverable.directory);
+        let dir_deliverable = state
+            .deliverables
             .iter()
-            .find(|bundle| bundle.path == dir_path)
+            .find(|deliverable| deliverable.path == dir_path)
             .unwrap();
-        assert_eq!(dir_bundle.name, "Deliverables");
-        assert!(dir_bundle.directory);
-        let file_id = file_bundle.id;
-        let file_created = file_bundle.created_at;
+        assert_eq!(dir_deliverable.name, "Deliverables");
+        assert!(dir_deliverable.directory);
+        let file_id = file_deliverable.id;
+        let file_created = file_deliverable.created_at;
 
-        // Re-publishing refreshes the same bundle rather than stacking rows.
+        // Re-publishing refreshes the same deliverable rather than stacking rows.
         service
             .handle(
                 None,
-                BossOperation::PublishBundle {
+                BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: Some("Report".into()),
                 },
             )
             .unwrap();
         let state = service.document();
-        assert_eq!(state.bundles.len(), 2);
+        assert_eq!(state.deliverables.len(), 2);
         let republished = state
-            .bundles
+            .deliverables
             .iter()
-            .find(|bundle| bundle.path == file_path)
+            .find(|deliverable| deliverable.path == file_path)
             .unwrap();
         assert_eq!(republished.id, file_id);
         assert_eq!(republished.name, "Report");
@@ -2906,28 +2906,28 @@ mod tests {
         assert!(republished.updated_at >= file_created);
 
         // Sidebar affordances ride the same owner gate: pin, sweep, and
-        // archive mutate the bundle in place and refuse unknown ids.
+        // archive mutate the deliverable in place and refuse unknown ids.
         for op in [
-            BossOperation::PinBundle {
+            BossOperation::PinDeliverable {
                 id: Uuid::new_v4(),
                 pinned: true,
             },
-            BossOperation::SweepBundle {
+            BossOperation::SweepDeliverable {
                 id: Uuid::new_v4(),
                 dormant: true,
             },
-            BossOperation::ArchiveBundle {
+            BossOperation::ArchiveDeliverable {
                 id: Uuid::new_v4(),
                 archived: true,
             },
-            BossOperation::MarkBundleViewed { id: Uuid::new_v4() },
+            BossOperation::MarkDeliverableViewed { id: Uuid::new_v4() },
         ] {
             assert!(service.handle(None, op).is_err());
         }
         service
             .handle(
                 None,
-                BossOperation::PinBundle {
+                BossOperation::PinDeliverable {
                     id: file_id,
                     pinned: true,
                 },
@@ -2936,7 +2936,7 @@ mod tests {
         service
             .handle(
                 None,
-                BossOperation::SweepBundle {
+                BossOperation::SweepDeliverable {
                     id: file_id,
                     dormant: true,
                 },
@@ -2945,23 +2945,23 @@ mod tests {
         service
             .handle(
                 None,
-                BossOperation::ArchiveBundle {
+                BossOperation::ArchiveDeliverable {
                     id: file_id,
                     archived: true,
                 },
             )
             .unwrap();
-        let bundle = service.document().bundles[0].clone();
-        assert_eq!(bundle.id, file_id);
-        assert!(bundle.pinned_at.is_some());
-        assert!(bundle.dormant_at.is_some());
-        assert!(bundle.archived_at.is_some());
+        let deliverable = service.document().deliverables[0].clone();
+        assert_eq!(deliverable.id, file_id);
+        assert!(deliverable.pinned_at.is_some());
+        assert!(deliverable.dormant_at.is_some());
+        assert!(deliverable.archived_at.is_some());
         // The same operations clear their flags — and unarchiving keeps the
         // row's other state.
         service
             .handle(
                 None,
-                BossOperation::ArchiveBundle {
+                BossOperation::ArchiveDeliverable {
                     id: file_id,
                     archived: false,
                 },
@@ -2970,52 +2970,52 @@ mod tests {
         service
             .handle(
                 None,
-                BossOperation::SweepBundle {
+                BossOperation::SweepDeliverable {
                     id: file_id,
                     dormant: false,
                 },
             )
             .unwrap();
-        let bundle = service.document().bundles[0].clone();
-        assert_eq!(bundle.archived_at, None);
-        assert_eq!(bundle.dormant_at, None);
-        assert!(bundle.pinned_at.is_some());
+        let deliverable = service.document().deliverables[0].clone();
+        assert_eq!(deliverable.archived_at, None);
+        assert_eq!(deliverable.dormant_at, None);
+        assert!(deliverable.pinned_at.is_some());
 
-        // A fresh bundle is unread until the owner opens it; re-publishing
+        // A fresh deliverable is unread until the owner opens it; re-publishing
         // refreshed content makes it unread again by leaving `viewed_at`
         // behind `updated_at`.
-        assert_eq!(bundle.viewed_at, None);
+        assert_eq!(deliverable.viewed_at, None);
         service
-            .handle(None, BossOperation::MarkBundleViewed { id: file_id })
+            .handle(None, BossOperation::MarkDeliverableViewed { id: file_id })
             .unwrap();
-        let bundle = service.document().bundles[0].clone();
-        let viewed = bundle.viewed_at.expect("opening stamps viewed_at");
-        assert!(viewed >= bundle.updated_at);
+        let deliverable = service.document().deliverables[0].clone();
+        let viewed = deliverable.viewed_at.expect("opening stamps viewed_at");
+        assert!(viewed >= deliverable.updated_at);
         service
             .handle(
                 None,
-                BossOperation::PublishBundle {
+                BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: None,
                 },
             )
             .unwrap();
-        let bundle = service.document().bundles[0].clone();
-        assert_eq!(bundle.viewed_at, Some(viewed));
-        assert!(bundle.updated_at >= viewed);
+        let deliverable = service.document().deliverables[0].clone();
+        assert_eq!(deliverable.viewed_at, Some(viewed));
+        assert!(deliverable.updated_at >= viewed);
 
         drop(service);
         let restored = BossService::open(root.clone()).unwrap();
-        assert_eq!(restored.document().bundles.len(), 2);
+        assert_eq!(restored.document().deliverables.len(), 2);
         assert!(
             restored
-                .handle(None, BossOperation::DismissBundle { id: Uuid::new_v4() })
+                .handle(None, BossOperation::DismissDeliverable { id: Uuid::new_v4() })
                 .is_err()
         );
         restored
-            .handle(None, BossOperation::DismissBundle { id: file_id })
+            .handle(None, BossOperation::DismissDeliverable { id: file_id })
             .unwrap();
-        assert_eq!(restored.document().bundles.len(), 1);
+        assert_eq!(restored.document().deliverables.len(), 1);
         drop(restored);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(output).unwrap();

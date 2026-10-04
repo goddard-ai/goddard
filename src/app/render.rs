@@ -634,7 +634,7 @@ impl Render for Waku {
             session.provider == ProviderKind::Antigravity && session.has_started()
         });
         let composer_mounted = self.composer_mounted();
-        let bundle_page = self.render_bundle_preview_page(window, cx);
+        let deliverable_page = self.render_deliverable_preview_page(window, cx);
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -858,8 +858,8 @@ impl Render for Waku {
                             )
                         } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some() {
                             self.render_boss_page(cx)
-                        } else if let Some(bundle_page) = bundle_page {
-                            bundle_page
+                        } else if let Some(deliverable_page) = deliverable_page {
+                            deliverable_page
                         } else if self.drafts_page {
                             self.render_drafts_page(cx)
                         } else if self.automations_page {

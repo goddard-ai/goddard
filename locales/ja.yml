@@ -703,7 +703,7 @@ sidebar.pinned: ピン留め
 sidebar.terminals: ターミナル
 sidebar.dormant: 休眠
 sidebar.chats: チャット
-sidebar.recent_bundles: 最近のバンドル
+sidebar.recent_deliverables: 最近の成果物
 sidebar.yesterday: 昨日
 sidebar.this_week: 今週
 sidebar.this_month: 今月
@@ -3027,8 +3027,8 @@ boss.failed: "ボスの操作に失敗しました: %{error}"
 boss.voice_waiting: "ボスから音声メッセージが届いています — 「Go ahead」と話すか、チャットを開いてください。"
 boss.voice_play: "ボスチャットを開いて再生"
 
-bundle.open: "開く"
-bundle.dismiss: "サイドバーから削除"
+deliverable.open: "開く"
+deliverable.dismiss: "サイドバーから削除"
 
 boss.greeting: 今日は何をしましょうか？
 boss.new_face: 新しい顔

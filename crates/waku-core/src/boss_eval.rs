@@ -62,8 +62,8 @@ persist between eval calls for this boss session.
   writeFile(path, content)
   listFiles([path])                         [{path,directory}] — root when omitted
   createFolder(path)
-  publishBundle(path[, name])
-  dismissBundle(id)
+  publishDeliverable(path[, name])
+  dismissDeliverable(id)
   speak(parts | \"whole utterance\")         client connections reached
   browse(url[, title])                     open an http(s) page in the boss chat panel
   terminal(title, cwd[, command])           pinned standalone terminal request
@@ -77,7 +77,7 @@ persist between eval calls for this boss session.
                                             zoom — returns its filled fields
   op(#{type,...})                           escape hatch: any operation by its
                                             JSON form, result returned whole
-                                            (e.g. pinBundle/sweepBundle/archiveBundle)
+                                            (e.g. pinDeliverable/sweepDeliverable/archiveDeliverable)
   help()                                    this text";
 
 /// The result of one `run` call: the script's scope when it could be
@@ -420,31 +420,31 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
             call(&tx, tagged("createFolder", json_path(path))).and_then(unwrap_result)
         }
     });
-    engine.register_fn("publishBundle", {
+    engine.register_fn("publishDeliverable", {
         let tx = tx.clone();
         move |path: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
-            call(&tx, tagged("publishBundle", json_path(path))).and_then(unwrap_result)
+            call(&tx, tagged("publishDeliverable", json_path(path))).and_then(unwrap_result)
         }
     });
-    engine.register_fn("publishBundle", {
+    engine.register_fn("publishDeliverable", {
         let tx = tx.clone();
         move |path: ImmutableString, name: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
             call(
                 &tx,
                 tagged(
-                    "publishBundle",
+                    "publishDeliverable",
                     serde_json::json!({ "path": path.as_str(), "name": name.as_str() }),
                 ),
             )
             .and_then(unwrap_result)
         }
     });
-    engine.register_fn("dismissBundle", {
+    engine.register_fn("dismissDeliverable", {
         let tx = tx.clone();
         move |id: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
             call(
                 &tx,
-                tagged("dismissBundle", serde_json::json!({ "id": id.as_str() })),
+                tagged("dismissDeliverable", serde_json::json!({ "id": id.as_str() })),
             )
             .and_then(unwrap_result)
         }
@@ -770,7 +770,7 @@ mod tests {
         assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!("1 live")));
 
         let outcome = eval_with(
-            "op(#{type: \"dismissBundle\", id: \"00000000-0000-0000-0000-000000000000\"})",
+            "op(#{type: \"dismissDeliverable\", id: \"00000000-0000-0000-0000-000000000000\"})",
             Scope::new(),
             &|_| bail!("dispatch rejects it"),
         );

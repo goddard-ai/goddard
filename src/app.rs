@@ -3203,17 +3203,17 @@ pub struct Waku {
     /// Stable keyboard focus for each session row's hover-revealed pin
     /// control.
     sidebar_session_pin_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
-    /// Stable keyboard focus for each bundle row's hover-revealed Finder
+    /// Stable keyboard focus for each deliverable row's hover-revealed Finder
     /// control.
-    sidebar_bundle_finder_focuses:
+    sidebar_deliverable_finder_focuses:
         RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
-    /// Stable keyboard focus for each bundle row's hover-revealed pin
+    /// Stable keyboard focus for each deliverable row's hover-revealed pin
     /// control.
-    sidebar_bundle_pin_focuses:
+    sidebar_deliverable_pin_focuses:
         RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
-    /// Stable keyboard focus for each bundle row's hover-revealed archive
+    /// Stable keyboard focus for each deliverable row's hover-revealed archive
     /// control.
-    sidebar_bundle_archive_focuses:
+    sidebar_deliverable_archive_focuses:
         RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
     /// Stable keyboard focus for each terminal row's hover-revealed close
     /// control.
@@ -6987,9 +6987,9 @@ impl Waku {
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
-                sidebar_bundle_finder_focuses: RefCell::new(HashMap::new()),
-                sidebar_bundle_pin_focuses: RefCell::new(HashMap::new()),
-                sidebar_bundle_archive_focuses: RefCell::new(HashMap::new()),
+                sidebar_deliverable_finder_focuses: RefCell::new(HashMap::new()),
+                sidebar_deliverable_pin_focuses: RefCell::new(HashMap::new()),
+                sidebar_deliverable_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_terminal_close_focuses: RefCell::new(HashMap::new()),
                 sidebar_terminal_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),

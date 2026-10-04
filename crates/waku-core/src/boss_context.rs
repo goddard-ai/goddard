@@ -492,7 +492,7 @@ mod tests {
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),
-            bundles: Vec::new(),
+            deliverables: Vec::new(),
             planning: Vec::new(),
             goals_viewed_at: None,
             revision: 0,
