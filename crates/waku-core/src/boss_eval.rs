@@ -49,8 +49,11 @@ persist between eval calls for this boss session.
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?})
-                                            employee session id
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,groupId?})
+                                            employee session id — summons sharing a
+                                            groupId form a wave: one notice lands
+                                            when every member finishes, fails, or
+                                            is cancelled
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
                         setWorkspace,...})

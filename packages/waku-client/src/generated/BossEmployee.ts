@@ -43,6 +43,12 @@ expiredAt?: number | null,
  */
 blocker?: string | null,
 /**
+ * A supervisor stop marked the record before it expired — wave
+ * tallies count the member as cancelled rather than finished.
+ * Re-admission clears it like `blocker`.
+ */
+cancelled: boolean,
+/**
  * Admission lifecycle — `queued`, `dispatching`, `working`,
  * `finishing`, or `expired`. Records written before the queue
  * deserialize as `working`; `expired` stays the wire projection.

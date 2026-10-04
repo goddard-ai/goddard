@@ -9,9 +9,9 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
     AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
-    BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, DispatchNotification,
-    EmployeeGoal, EmployeeLifecycle, ModelLimit, PermissionOverrides, PersonaPermissions,
-    SummonTicket,
+    BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
+    DispatchNotification, EmployeeGoal, EmployeeLifecycle, ModelLimit, PermissionOverrides,
+    PersonaPermissions, SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification,
 };
 
 pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
@@ -129,6 +129,7 @@ impl BossService {
             }
             normalize_lifecycle(employee);
         }
+        reconcile_waves(&mut state, now);
         *self.state.lock() = state;
         *self.interrupted.lock() = self
             .state
@@ -198,6 +199,7 @@ impl BossService {
             }
             normalize_lifecycle(employee);
         }
+        reconcile_waves(&mut state, now);
         let service = Self {
             root,
             active: std::sync::atomic::AtomicBool::new(true),
@@ -536,6 +538,7 @@ impl BossService {
             expired: false,
             expired_at: None,
             blocker: None,
+            cancelled: false,
             state: EmployeeLifecycle::Queued,
             ticket: None,
             queued_at: None,
@@ -835,7 +838,9 @@ impl BossService {
                     entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                     entry.expired_at = None;
                     entry.blocker = None;
+                    entry.cancelled = false;
                     state.employees.push(entry);
+                    wave_member_in_flight(state, session);
                     revived = true;
                     return Ok(());
                 }
@@ -848,7 +853,11 @@ impl BossService {
                 entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                 entry.expired_at = None;
                 entry.blocker = None;
+                entry.cancelled = false;
                 revived = true;
+            }
+            if revived {
+                wave_member_in_flight(state, session);
             }
             Ok(())
         })?;
@@ -891,14 +900,20 @@ impl BossService {
     /// retired from the roster, archived after finalization, or never an
     /// employee.
     pub fn report_target(&self, employee: &BossEmployee) -> Option<Uuid> {
-        let supervisor_is_planning = self.is_planning(employee.supervisor_id)
+        self.report_target_for(employee.supervisor_id)
+    }
+
+    /// The supervisor's live session, or the boss session when it cannot
+    /// take prompts — the escalation wave-resolution notices share.
+    pub fn report_target_for(&self, supervisor: Uuid) -> Option<Uuid> {
+        let supervisor_is_planning = self.is_planning(supervisor)
             && self
                 .backend
                 .lock()
                 .upgrade()
-                .map(|backend| backend.session_active(employee.supervisor_id))
+                .map(|backend| backend.session_active(supervisor))
                 .unwrap_or(true);
-        let supervisor_admitted = self.employee(employee.supervisor_id).is_some_and(|entry| {
+        let supervisor_admitted = self.employee(supervisor).is_some_and(|entry| {
             matches!(
                 entry.lifecycle(),
                 EmployeeLifecycle::Queued
@@ -907,18 +922,33 @@ impl BossService {
             )
         });
         if supervisor_admitted || supervisor_is_planning {
-            Some(employee.supervisor_id)
+            Some(supervisor)
         } else {
             self.document().session_id
         }
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
-        let employee = self.begin_finishing(session)?;
+        let employee = self.begin_finishing(session, false)?;
         if employee.is_some() {
             self.complete_expiry(session)?;
         }
         Ok(employee)
+    }
+
+    /// A supervisor stop marked the employee before teardown — the wave
+    /// tally counts the member as cancelled rather than finished.
+    pub fn mark_cancelled(&self, session: Uuid) -> anyhow::Result<()> {
+        self.update(|state| {
+            if let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            {
+                entry.cancelled = true;
+            }
+            Ok(())
+        })
     }
 
     /// Start an employee's teardown: persist `finishing` so the model
@@ -927,7 +957,18 @@ impl BossService {
     /// transition — a second finish, a queued cancel, or a settled
     /// generation all see `None`. Queued tickets skip `finishing` and
     /// expire directly: they hold no capacity to release.
-    pub fn begin_finishing(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
+    ///
+    /// `failed` is the session-side terminal verdict the Boss document
+    /// cannot see (`SessionStatus::Failed`). The transition is the point
+    /// of no return — a `finishing` record always settles into `expired`
+    /// through the tail or recovery — so the wave member's outcome lands
+    /// in the same durable write, and an all-terminal wave pushes its
+    /// completion notice into the outbox here.
+    pub fn begin_finishing(
+        &self,
+        session: Uuid,
+        failed: bool,
+    ) -> anyhow::Result<Option<BossEmployee>> {
         let now = waku_protocol::model::unix_time();
         let mut employee = None;
         self.update(|state| {
@@ -949,7 +990,22 @@ impl BossService {
                     },
                     now,
                 );
+                let outcome = if entry.cancelled {
+                    WaveMemberOutcome::Cancelled
+                } else if failed || entry.blocker.is_some() {
+                    WaveMemberOutcome::Failed
+                } else {
+                    WaveMemberOutcome::Finished
+                };
+                let supervisor_id = entry.supervisor_id;
+                let group = entry
+                    .ticket
+                    .as_ref()
+                    .and_then(|ticket| ticket.group_id.clone());
                 employee = Some(entry.clone());
+                if let Some(group) = group {
+                    record_wave_outcome(state, &group, session, supervisor_id, outcome, now);
+                }
             }
             Ok(())
         })?;
@@ -1108,6 +1164,9 @@ impl BossService {
             ticket.sequence = state.next_sequence;
             employee.set_lifecycle(EmployeeLifecycle::Queued, now);
             employee.queued_at = Some(now);
+            if let Some(group) = ticket.group_id.clone() {
+                join_wave(state, &group, &employee);
+            }
             employee.ticket = Some(ticket);
             state.employees.push(employee.clone());
             Ok(())
@@ -1326,9 +1385,14 @@ impl BossService {
             employee.set_lifecycle(EmployeeLifecycle::Queued, now);
             employee.expired_at = None;
             employee.blocker = None;
+            employee.cancelled = false;
             employee.queued_at = Some(now);
             employee.ticket = Some(ticket);
             outcome = Some((employee.clone(), stale_reservation));
+            // A re-admitted member is back in flight — its recorded
+            // outcome clears, and a resolved wave reopens for one more
+            // resolution.
+            wave_member_in_flight(state, session);
             Ok(())
         })?;
         outcome.context("not a Boss employee")
@@ -1442,6 +1506,32 @@ impl BossService {
         let now = waku_protocol::model::unix_time();
         self.update(|state| {
             if let Some(entry) = state.outbox.iter_mut().find(|entry| entry.id == id) {
+                entry.delivered_at = Some(now);
+            }
+            Ok(())
+        })
+    }
+
+    /// Wave-resolution notices still owed a supervisor.
+    pub fn wave_outbox_pending(&self) -> Vec<WaveNotification> {
+        self.state
+            .lock()
+            .wave_outbox
+            .iter()
+            .filter(|entry| entry.delivered_at.is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// A wave notice reached its supervisor's durable prompt queue.
+    pub fn wave_outbox_mark_delivered(&self, id: u64) -> anyhow::Result<()> {
+        let now = waku_protocol::model::unix_time();
+        self.update(|state| {
+            if let Some(entry) = state
+                .wave_outbox
+                .iter_mut()
+                .find(|entry| entry.id == id)
+            {
                 entry.delivered_at = Some(now);
             }
             Ok(())
@@ -1617,6 +1707,15 @@ impl BossService {
                     state.personas.retain(|entry| entry.id == persona);
                     state.employees.retain(|entry| {
                         entry.session_id == caller || entry.supervisor_id == caller
+                    });
+                    // Waves stay scoped to what the caller can already see:
+                    // its own memberships and the groups it summoned.
+                    state.waves.retain(|wave| {
+                        wave.supervisor_id == caller
+                            || wave
+                                .members
+                                .iter()
+                                .any(|member| member.session_id == caller)
                     });
                 }
                 Ok(BossResult::State { state })
@@ -2435,6 +2534,169 @@ fn restart_interrupted(employee: &BossEmployee) -> bool {
     employee.lifecycle() != EmployeeLifecycle::Queued || employee.ticket.is_none()
 }
 
+/// Admit the employee under its ticket's wave id — first admission
+/// creates the record, later ones append. A member joining a resolved
+/// wave reopens it: the enlarged membership resolves once more.
+fn join_wave(state: &mut BossState, group: &str, employee: &BossEmployee) {
+    let member = WaveMember {
+        session_id: employee.session_id,
+        outcome: None,
+    };
+    match state.waves.iter_mut().find(|wave| wave.id == group) {
+        Some(wave) => {
+            wave.resolved_at = None;
+            if !wave
+                .members
+                .iter()
+                .any(|entry| entry.session_id == employee.session_id)
+            {
+                wave.members.push(member);
+            }
+        }
+        None => state.waves.push(BossWave {
+            id: group.to_owned(),
+            supervisor_id: employee.supervisor_id,
+            members: vec![member],
+            resolved_at: None,
+        }),
+    }
+}
+
+/// A member re-entered admission or revived — it is in flight again, so
+/// its recorded outcome clears and a resolved wave reopens.
+fn wave_member_in_flight(state: &mut BossState, session: Uuid) {
+    for wave in &mut state.waves {
+        if let Some(member) = wave
+            .members
+            .iter_mut()
+            .find(|entry| entry.session_id == session)
+        {
+            member.outcome = None;
+            wave.resolved_at = None;
+        }
+    }
+}
+
+/// Record a member's terminal outcome inside the state update that
+/// commits it, then resolve the wave when every member has one: tally
+/// the membership, stamp `resolved_at`, and park the completion notice
+/// in `wave_outbox` — one durable write, so a restart can neither lose
+/// the resolution nor fire it twice.
+fn record_wave_outcome(
+    state: &mut BossState,
+    group: &str,
+    session: Uuid,
+    supervisor_id: Uuid,
+    outcome: WaveMemberOutcome,
+    now: u64,
+) {
+    let wave = match state.waves.iter_mut().find(|wave| wave.id == group) {
+        Some(wave) => wave,
+        None => {
+            // A summon written before wave records existed — build the
+            // record late so the group still resolves.
+            state.waves.push(BossWave {
+                id: group.to_owned(),
+                supervisor_id,
+                members: Vec::new(),
+                resolved_at: None,
+            });
+            state.waves.last_mut().unwrap()
+        }
+    };
+    match wave
+        .members
+        .iter_mut()
+        .find(|entry| entry.session_id == session)
+    {
+        Some(member) => member.outcome = Some(outcome),
+        None => wave.members.push(WaveMember {
+            session_id: session,
+            outcome: Some(outcome),
+        }),
+    }
+    if wave.resolved_at.is_none()
+        && !wave.members.is_empty()
+        && wave.members.iter().all(|entry| entry.outcome.is_some())
+    {
+        wave.resolved_at = Some(now);
+        let tally = |outcome| {
+            wave.members
+                .iter()
+                .filter(|entry| entry.outcome == Some(outcome))
+                .count() as u32
+        };
+        state.next_event_id = state.next_event_id.saturating_add(1);
+        state.wave_outbox.push(WaveNotification {
+            id: state.next_event_id,
+            wave_id: group.to_owned(),
+            supervisor_id: wave.supervisor_id,
+            finished: tally(WaveMemberOutcome::Finished),
+            failed: tally(WaveMemberOutcome::Failed),
+            cancelled: tally(WaveMemberOutcome::Cancelled),
+            created_at: now,
+            delivered_at: None,
+        });
+    }
+}
+
+/// Startup repair: a member whose outcome never landed — an expiry path
+/// that predates waves, or a crash between writes — would stall its wave
+/// forever. Fold every expired member's record back into the tally, then
+/// resolve whatever went all-terminal; the pushed notice drains through
+/// the normal outbox delivery.
+fn reconcile_waves(state: &mut BossState, now: u64) {
+    let expired: Vec<(Uuid, WaveMemberOutcome, Uuid)> = state
+        .employees
+        .iter()
+        .chain(state.retired_employees.iter())
+        .filter(|entry| entry.lifecycle() == EmployeeLifecycle::Expired)
+        .map(|entry| {
+            let outcome = if entry.cancelled {
+                WaveMemberOutcome::Cancelled
+            } else if entry.blocker.is_some() {
+                WaveMemberOutcome::Failed
+            } else {
+                WaveMemberOutcome::Finished
+            };
+            (entry.session_id, outcome, entry.supervisor_id)
+        })
+        .collect();
+    let groups: Vec<String> = state
+        .waves
+        .iter()
+        .filter(|wave| wave.resolved_at.is_none())
+        .flat_map(|wave| {
+            wave.members
+                .iter()
+                .filter(|member| member.outcome.is_none())
+                .map(|_| wave.id.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for group in groups {
+        let members: Vec<Uuid> = state
+            .waves
+            .iter()
+            .find(|wave| wave.id == group)
+            .map(|wave| {
+                wave.members
+                    .iter()
+                    .filter(|member| member.outcome.is_none())
+                    .map(|member| member.session_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for session in members {
+            if let Some((_, outcome, supervisor)) =
+                expired.iter().find(|(id, _, _)| *id == session)
+            {
+                record_wave_outcome(state, &group, session, *supervisor, *outcome, now);
+            }
+        }
+    }
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let temporary = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
     let mut options = fs::OpenOptions::new();
@@ -2477,6 +2739,8 @@ fn fresh_state() -> BossState {
         next_sequence: 0,
         next_event_id: 0,
         outbox: Vec::new(),
+        waves: Vec::new(),
+        wave_outbox: Vec::new(),
         revision: 0,
     }
 }
@@ -2500,6 +2764,8 @@ fn disabled_state() -> BossState {
         next_sequence: 0,
         next_event_id: 0,
         outbox: Vec::new(),
+        waves: Vec::new(),
+        wave_outbox: Vec::new(),
         revision: 0,
     }
 }
@@ -2793,6 +3059,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -2849,6 +3116,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -2980,6 +3248,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -3427,6 +3696,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -3709,6 +3979,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -3795,6 +4066,7 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    cancelled: false,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -4215,6 +4487,147 @@ mod memory_op_tests {
         // its own supervisor's chain.
         employee.supervisor_id = Uuid::new_v4();
         assert_eq!(service.report_target(&employee), Some(boss));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A member admitted under a `groupId` joins the wave in the same
+    /// durable write; when the last member commits to terminal the wave
+    /// resolves into exactly one outbox notice — and re-admission reopens
+    /// it for one more.
+    #[test]
+    fn a_wave_resolves_once_and_reopens_on_readmission() {
+        let root = std::env::temp_dir().join(format!("boss-wave-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let ticket = || SummonTicket {
+            sequence: 0,
+            generation: 1,
+            provider: crate::model::ProviderKind::Codex,
+            model: "gpt-5.5".into(),
+            reasoning_effort: None,
+            prompt: "do it".into(),
+            project: "/tmp".into(),
+            workspace: None,
+            base_branch: None,
+            resources: waku_protocol::resources::ResourceSet::default(),
+            allow_burst: false,
+            pending_prompts: Vec::new(),
+            group_id: Some("wave".into()),
+            priority: None,
+            goal_id: None,
+            reservation: None,
+            blocked_by: Vec::new(),
+            dispatch_event: None,
+        };
+        let member = |title: &str| {
+            service
+                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand)
+                .unwrap()
+        };
+        let first = member("A");
+        let second = member("B");
+        service
+            .enqueue_ticket(first.clone(), ticket())
+            .unwrap();
+        service
+            .enqueue_ticket(second.clone(), ticket())
+            .unwrap();
+        let wave = &service.document().waves[0];
+        assert_eq!(wave.supervisor_id, boss);
+        assert_eq!(wave.members.len(), 2);
+        assert!(wave.resolved_at.is_none());
+
+        service.begin_finishing(first.session_id, false).unwrap();
+        service.complete_expiry(first.session_id).unwrap();
+        assert!(
+            service.document().wave_outbox.is_empty(),
+            "one member still in flight — no notice yet"
+        );
+        service.begin_finishing(second.session_id, false).unwrap();
+        service.complete_expiry(second.session_id).unwrap();
+        let document = service.document();
+        let wave = &document.waves[0];
+        assert!(wave.resolved_at.is_some());
+        assert_eq!(document.wave_outbox.len(), 1);
+        assert_eq!(document.wave_outbox[0].wave_id, "wave");
+        assert_eq!(document.wave_outbox[0].finished, 2);
+        assert_eq!(document.wave_outbox[0].supervisor_id, boss);
+
+        // Re-admission puts the member back in flight: the wave reopens,
+        // then resolves once more when it settles.
+        service
+            .requeue_employee(first.session_id, ticket(), |_| {})
+            .unwrap();
+        let wave = &service.document().waves[0];
+        assert!(wave.resolved_at.is_none());
+        assert!(
+            wave.members
+                .iter()
+                .find(|member| member.session_id == first.session_id)
+                .unwrap()
+                .outcome
+                .is_none()
+        );
+        service.begin_finishing(first.session_id, false).unwrap();
+        let document = service.document();
+        assert!(document.waves[0].resolved_at.is_some());
+        assert_eq!(document.wave_outbox.len(), 2, "a distinct resolution, not a repeat");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A member expired before its outcome could land — an old document,
+    /// or a crash between writes — still resolves its wave: opening the
+    /// service folds expired member records into the tally.
+    #[test]
+    fn a_wave_reconciles_an_expired_member_missing_its_outcome() {
+        let root = std::env::temp_dir().join(format!("boss-wave-heal-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let employee = service
+            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand)
+            .unwrap();
+        let session_id = employee.session_id;
+        // The wave record with the member still in flight, and an expired
+        // employee that never reported an outcome — the state a write
+        // interrupted mid-flight leaves behind.
+        service
+            .update(|state| {
+                state.waves.push(BossWave {
+                    id: "wave".into(),
+                    supervisor_id: boss,
+                    members: vec![WaveMember {
+                        session_id,
+                        outcome: None,
+                    }],
+                    resolved_at: None,
+                });
+                let mut employee = employee;
+                employee.expired = true;
+                employee.expired_at = Some(1);
+                employee.set_lifecycle(EmployeeLifecycle::Expired, 1);
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let reopened = BossService::open(root.clone()).unwrap();
+        let document = reopened.document();
+        assert!(document.waves[0].resolved_at.is_some());
+        assert_eq!(document.wave_outbox.len(), 1);
+        assert_eq!(document.wave_outbox[0].finished, 1);
         fs::remove_dir_all(root).unwrap();
     }
 }

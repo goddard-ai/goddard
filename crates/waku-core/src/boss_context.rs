@@ -152,6 +152,20 @@ pub fn employee_roster(
         digest.push('\n');
         digest.push_str(&row.2);
     }
+    for wave in &boss.waves {
+        let done = wave
+            .members
+            .iter()
+            .filter(|member| member.outcome.is_some())
+            .count();
+        let line = if wave.resolved_at.is_some() {
+            format!("wave \"{}\" resolved — {done}/{} members done", wave.id, wave.members.len())
+        } else {
+            format!("wave \"{}\" in flight — {done}/{} members done", wave.id, wave.members.len())
+        };
+        digest.push('\n');
+        digest.push_str(&line);
+    }
     digest
 }
 
@@ -502,6 +516,8 @@ mod tests {
             next_sequence: 0,
             next_event_id: 0,
             outbox: Vec::new(),
+            waves: Vec::new(),
+            wave_outbox: Vec::new(),
             revision: 0,
         }
     }
@@ -552,6 +568,7 @@ mod tests {
             expired,
             expired_at: expired.then(unix_time),
             blocker: None,
+            cancelled: false,
             state: EmployeeLifecycle::Working,
             ticket: None,
             queued_at: None,

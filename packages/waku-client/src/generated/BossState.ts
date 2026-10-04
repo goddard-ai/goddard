@@ -5,7 +5,9 @@ import type { BossIdentity } from "./BossIdentity";
 import type { BossPersona } from "./BossPersona";
 import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
+import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
+import type { WaveNotification } from "./WaveNotification";
 
 export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
 /**
@@ -47,4 +49,14 @@ nextEventId: number,
  * Durable dispatch notifications awaiting delivery to supervisors —
  * drained by id so restart can neither drop nor duplicate one.
  */
-outbox?: Array<DispatchNotification>, revision: number, };
+outbox?: Array<DispatchNotification>,
+/**
+ * Wave membership and resolution — one record per `groupId` this
+ * boss's summons have used.
+ */
+waves?: Array<BossWave>,
+/**
+ * Durable wave-resolution notifications awaiting delivery — drained
+ * by id beside the dispatch outbox.
+ */
+waveOutbox?: Array<WaveNotification>, revision: number, };

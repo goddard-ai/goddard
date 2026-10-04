@@ -48,8 +48,9 @@ allowBurst: boolean,
  */
 pendingPrompts?: Array<string>,
 /**
- * Optional wave/group id — reserved for the queue-grouping phase;
- * carried now so admission records do not need a schema change then.
+ * Optional wave/group id — every ticket admitted under the same id
+ * is a wave member; the daemon notifies the supervisor once when
+ * the membership goes all-terminal.
  */
 groupId?: string,
 /**

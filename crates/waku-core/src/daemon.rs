@@ -6802,6 +6802,7 @@ impl WakuBackend {
                                         summary_i18n: None,
                                     },
                                 )?;
+                                self.boss.mark_cancelled(session_id)?;
                                 self.finish_boss_employee(session_id)?;
                                 Ok(BossResult::Saved)
                             }
@@ -7046,6 +7047,7 @@ impl WakuBackend {
                                 summary_i18n: None,
                             },
                         )?;
+                        self.boss.mark_cancelled(session_id)?;
                         self.finish_boss_employee(session_id)?;
                     }
                     EmployeeControl::SetModel { .. }
@@ -7189,7 +7191,16 @@ impl WakuBackend {
         // `finishing` persists while the teardown runs — the model slot
         // stays claimed through shutdown, so a crash mid-finish leaves a
         // reconciling record instead of a leaked or double-counted slot.
-        let Some(employee) = self.boss.begin_finishing(session_id)? else {
+        // The session's terminal verdict feeds the wave tally — read it
+        // before the durable transition commits the member's outcome.
+        let failed = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| session.status == SessionStatus::Failed);
+        let Some(employee) = self.boss.begin_finishing(session_id, failed)? else {
             return Ok(());
         };
         self.finish_boss_employee_tail(session_id, &employee)
@@ -7312,6 +7323,8 @@ impl WakuBackend {
             let events = self.event_source.lock().clone();
             self.queue_agent_prompt_hidden(supervisor, prompt, Some(session_id), &events)?;
         }
+        // This finish may have resolved a wave — drain its notice.
+        self.deliver_wave_notifications();
         Ok(())
     }
 
@@ -7564,6 +7577,7 @@ impl WakuBackend {
             eprintln!("could not reconcile host resource policy: {error:#}");
         }
         self.deliver_dispatch_notifications();
+        self.deliver_wave_notifications();
         loop {
             let heads = self.boss.queued_heads();
             if heads.is_empty() {
@@ -7890,6 +7904,70 @@ impl WakuBackend {
         }
     }
 
+    /// Deliver durable wave-resolution notices to their supervisors — the
+    /// same contract the dispatch outbox carries: parked-or-delivered
+    /// dedupes on the derived message id, so a restart re-drives
+    /// undelivered entries without ever repeating one.
+    fn deliver_wave_notifications(&self) {
+        let pending = self.boss.wave_outbox_pending();
+        if pending.is_empty() {
+            return;
+        }
+        let events = self.event_source.lock().clone();
+        for note in pending {
+            let Some(target) = self.boss.report_target_for(note.supervisor_id) else {
+                continue;
+            };
+            let queued_id = Uuid::from_u128(0xFEED_FACE_u128 << 96 | u128::from(note.id));
+            {
+                let mut state = self.task_state.lock();
+                let already = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == target)
+                    .and_then(|session| {
+                        self.task_store.hydrate(session).ok()?;
+                        let parked = session
+                            .queued_messages
+                            .iter()
+                            .any(|queued| queued.id == queued_id);
+                        let delivered = session
+                            .messages
+                            .iter()
+                            .any(|message| message.id == queued_id);
+                        Some(parked || delivered)
+                    })
+                    .unwrap_or(false);
+                if already {
+                    let _ = self.boss.wave_outbox_mark_delivered(note.id);
+                    continue;
+                }
+            }
+            let total = note.finished + note.failed + note.cancelled;
+            let prompt = if note.cancelled == total {
+                format!(
+                    "Wave \"{}\" resolved — all {total} members were cancelled.",
+                    note.wave_id
+                )
+            } else {
+                let mut parts = vec![
+                    format!("{} finished", note.finished),
+                    format!("{} blocked/failed", note.failed),
+                ];
+                if note.cancelled > 0 {
+                    parts.push(format!("{} cancelled", note.cancelled));
+                }
+                format!("Wave \"{}\" resolved — {}.", note.wave_id, parts.join(", "))
+            };
+            if self
+                .queue_agent_prompt_with_id(target, prompt, None, true, Some(queued_id), &events)
+                .is_ok()
+            {
+                let _ = self.boss.wave_outbox_mark_delivered(note.id);
+            }
+        }
+    }
+
     /// Restart reconciliation for one interrupted employee. Queued records
     /// never reach here. `dispatching` consults the persisted turn
     /// identity: a session whose first prompt already adopted finishes as
@@ -8210,6 +8288,7 @@ impl WakuBackend {
                         summary_i18n: None,
                     },
                 )?;
+                self.boss.mark_cancelled(session_id)?;
                 self.finish_boss_employee(session_id)?;
                 Ok(BossResult::Saved)
             }
@@ -16066,6 +16145,187 @@ mod tests {
             "the note id dedupes a re-driven delivery"
         );
         let _ = (held_task, held);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Two summons under one `groupId` make a wave: membership is
+    /// durable, every member's terminal state tallies once, and the
+    /// supervisor gets a single resolution notice whose outbox entry
+    /// dedupes re-delivery and survives reopening the document.
+    #[test]
+    fn a_wave_reports_once_when_every_member_settles() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("summon-wave-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let summon = |job: &str| {
+            let mut op = summon_op(&backend, &root, job, ProviderKind::Codex, Some("gpt-5.5"));
+            if let BossOperation::Summon { group_id, .. } = &mut op {
+                *group_id = Some("wave-1".into());
+            }
+            let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+                .handle_boss_operation(Some(boss), op, &EventSink::detached())
+                .unwrap()
+            else {
+                panic!("expected a summoned result")
+            };
+            session_id
+        };
+        let first = summon("alpha");
+        let second = summon("beta");
+        let wave = backend
+            .boss
+            .document()
+            .waves
+            .iter()
+            .find(|wave| wave.id == "wave-1")
+            .expect("the group id opened a wave")
+            .clone();
+        assert_eq!(wave.supervisor_id, boss);
+        assert_eq!(
+            wave.members
+                .iter()
+                .map(|member| member.session_id)
+                .collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        assert!(wave.resolved_at.is_none());
+
+        // A capture driver counts what reaches the supervisor, then the
+        // held slot frees: each member's launch dies on the fixture's
+        // missing binary and expires as failed.
+        let capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            boss,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.to_path_buf(),
+            },
+        );
+        backend
+            .resource_broker()
+            .unwrap()
+            .release_admission(held_task, held);
+        backend.run_summon_scheduler();
+        for member in [first, second] {
+            assert!(backend.boss.employee(member).unwrap().expired);
+        }
+
+        let document = backend.boss.document();
+        let wave = document.waves.iter().find(|wave| wave.id == "wave-1").unwrap();
+        assert!(wave.resolved_at.is_some());
+        assert_eq!(document.wave_outbox.len(), 1, "one resolution, one notice");
+        let wave_prompts: Vec<String> = capture
+            .prompts
+            .lock()
+            .iter()
+            .filter(|prompt| prompt.contains("Wave \"wave-1\""))
+            .cloned()
+            .collect();
+        assert_eq!(wave_prompts.len(), 1, "{wave_prompts:?}");
+        assert!(wave_prompts[0].contains("0 finished, 2 blocked/failed"));
+        assert!(backend.boss.wave_outbox_pending().is_empty());
+        // Re-driving the outbox cannot repeat the parked notice.
+        backend.deliver_wave_notifications();
+        assert_eq!(
+            capture
+                .prompts
+                .lock()
+                .iter()
+                .filter(|prompt| prompt.contains("Wave \"wave-1\""))
+                .count(),
+            1
+        );
+        // The resolution survives reopening the Boss document.
+        let reopened = crate::boss::BossService::open(root.join("boss")).unwrap();
+        let reopened_document = reopened.document();
+        let wave = reopened_document
+            .waves
+            .iter()
+            .find(|wave| wave.id == "wave-1")
+            .unwrap();
+        assert!(wave.resolved_at.is_some());
+        assert_eq!(reopened_document.wave_outbox.len(), 1);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Cancelling every member resolves the wave too — the notice reads
+    /// as cancelled, not a clean finish.
+    #[test]
+    fn an_all_cancelled_wave_reports_as_cancelled() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("summon-wave-stop-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let summon = |job: &str| {
+            let mut op = summon_op(&backend, &root, job, ProviderKind::Codex, Some("gpt-5.5"));
+            if let BossOperation::Summon { group_id, .. } = &mut op {
+                *group_id = Some("wave-stop".into());
+            }
+            let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+                .handle_boss_operation(Some(boss), op, &EventSink::detached())
+                .unwrap()
+            else {
+                panic!("expected a summoned result")
+            };
+            session_id
+        };
+        let first = summon("alpha");
+        let second = summon("beta");
+        let capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            boss,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.to_path_buf(),
+            },
+        );
+        for member in [first, second] {
+            backend
+                .handle_boss_operation(
+                    Some(boss),
+                    BossOperation::Control {
+                        session_id: member,
+                        action: EmployeeControl::Stop,
+                    },
+                    &EventSink::detached(),
+                )
+                .unwrap();
+        }
+        let prompts = capture.prompts.lock().clone();
+        let wave_prompts: Vec<&String> = prompts
+            .iter()
+            .filter(|prompt| prompt.contains("Wave \"wave-stop\""))
+            .collect();
+        assert_eq!(wave_prompts.len(), 1, "{wave_prompts:?}");
+        assert!(wave_prompts[0].contains("all 2 members were cancelled"));
+        assert!(
+            backend
+                .boss
+                .document()
+                .waves
+                .iter()
+                .find(|wave| wave.id == "wave-stop")
+                .unwrap()
+                .resolved_at
+                .is_some()
+        );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

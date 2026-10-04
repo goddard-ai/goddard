@@ -56,8 +56,9 @@ resources?: ResourceSet,
  */
 allowBurst: boolean,
 /**
- * Wave grouping seam — carried on the admission record now;
- * grouped dispatch lands in a later phase.
+ * Group the summons into a wave: every ticket admitted under
+ * the same id is a member, and the daemon reports once to the
+ * supervisor when all members reach a terminal state.
  */
 groupId?: string,
 /**

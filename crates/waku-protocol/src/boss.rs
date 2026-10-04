@@ -178,8 +178,9 @@ pub struct SummonTicket {
     /// envelope in submission order and survive restart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_prompts: Vec<String>,
-    /// Optional wave/group id — reserved for the queue-grouping phase;
-    /// carried now so admission records do not need a schema change then.
+    /// Optional wave/group id — every ticket admitted under the same id
+    /// is a wave member; the daemon notifies the supervisor once when
+    /// the membership goes all-terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub group_id: Option<String>,
@@ -287,6 +288,76 @@ pub struct DispatchNotification {
     pub delivered_at: Option<u64>,
 }
 
+/// How a wave member's current admission ended — recorded when the
+/// employee commits to terminal, cleared if it re-enters the queue.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WaveMemberOutcome {
+    /// The assignment settled — a clean or idle expiry.
+    Finished,
+    /// The member flagged a blocker, its session failed, or the launch
+    /// or restart recovery could not deliver the assignment.
+    Failed,
+    /// A supervisor stopped the employee before it finished.
+    Cancelled,
+}
+
+/// One employee admitted under a wave id. `outcome` is `None` while the
+/// member is in flight — queued, dispatching, or working.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveMember {
+    pub session_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outcome: Option<WaveMemberOutcome>,
+}
+
+/// A summon group (`groupId`) the daemon watches for an all-terminal
+/// membership. Each resolution pushes exactly one durable outbox
+/// notification; admitting or reviving a member reopens the wave, and the
+/// enlarged membership resolves once more.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossWave {
+    /// The `groupId` the summoner passed, namespaced to this boss.
+    pub id: String,
+    /// The first member's supervisor — notification delivery escalates
+    /// to the boss session when it cannot take prompts.
+    pub supervisor_id: Uuid,
+    /// Every employee ever admitted under this id — members are never
+    /// removed, so retirement cannot strand the tally.
+    pub members: Vec<WaveMember>,
+    /// When the membership last went all-terminal — `None` while members
+    /// are in flight or the wave has never resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolved_at: Option<u64>,
+}
+
+/// A wave-resolution notice the daemon owes a supervisor — the same
+/// durable, id-deduped outbox contract `DispatchNotification` carries.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveNotification {
+    pub id: u64,
+    pub wave_id: String,
+    /// The wave's supervisor at creation — resolved through the usual
+    /// report-target fallback at delivery.
+    pub supervisor_id: Uuid,
+    /// Member tallies at resolution. `cancelled` counts separately so an
+    /// all-cancelled wave reports as cancelled rather than clean.
+    pub finished: u32,
+    /// Blocker-flagged, session-failed, launch-failed, and
+    /// restart-interrupted members.
+    pub failed: u32,
+    pub cancelled: u32,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivered_at: Option<u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossEmployee {
@@ -324,6 +395,11 @@ pub struct BossEmployee {
     /// resurrection clears it with the job that raised it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocker: Option<String>,
+    /// A supervisor stop marked the record before it expired — wave
+    /// tallies count the member as cancelled rather than finished.
+    /// Re-admission clears it like `blocker`.
+    #[serde(default)]
+    pub cancelled: bool,
     /// Admission lifecycle — `queued`, `dispatching`, `working`,
     /// `finishing`, or `expired`. Records written before the queue
     /// deserialize as `working`; `expired` stays the wire projection.
@@ -471,6 +547,14 @@ pub struct BossState {
     /// drained by id so restart can neither drop nor duplicate one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outbox: Vec<DispatchNotification>,
+    /// Wave membership and resolution — one record per `groupId` this
+    /// boss's summons have used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waves: Vec<BossWave>,
+    /// Durable wave-resolution notifications awaiting delivery — drained
+    /// by id beside the dispatch outbox.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wave_outbox: Vec<WaveNotification>,
     pub revision: u64,
 }
 
@@ -588,8 +672,9 @@ pub enum BossOperation {
         /// it the ticket waits at `liveLimit`.
         #[serde(default)]
         allow_burst: bool,
-        /// Wave grouping seam — carried on the admission record now;
-        /// grouped dispatch lands in a later phase.
+        /// Group the summons into a wave: every ticket admitted under
+        /// the same id is a member, and the daemon reports once to the
+        /// supervisor when all members reach a terminal state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         group_id: Option<String>,
