@@ -724,6 +724,68 @@ impl Waku {
         )
     }
 
+    /// Fulfill a boss terminal request on the app that received its runtime
+    /// intent. Terminal views are client-owned, so the daemon only records
+    /// and delivers the request.
+    pub(super) fn fulfill_boss_terminal_intent(
+        &mut self,
+        title: String,
+        cwd: String,
+        command: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let requested = PathBuf::from(cwd.trim());
+        let remote = self.is_remote_path(&requested);
+        let requested_ok = remote || requested.is_dir();
+        let working_directory = if requested_ok {
+            Some(requested.clone())
+        } else {
+            let project_root = self
+                .selected_workspace_path()
+                .map(Path::to_path_buf)
+                .filter(|path| path.is_dir());
+            project_root
+                .or_else(dirs::home_dir)
+                .filter(|path| path.is_dir())
+        };
+        if !requested_ok {
+            let Some(working_directory) = working_directory.as_ref() else {
+                self.show_toast(tr!("terminal.boss_directory_unavailable"));
+                return;
+            };
+            self.show_toast(tr!(
+                "terminal.boss_directory_fallback",
+                requested = requested.display(),
+                fallback = working_directory.display()
+            ));
+        }
+        let Some(working_directory) = working_directory else {
+            return;
+        };
+        let command = command.map(|script| {
+            let mut command = waku_protocol::custom_commands::CustomCommand::new(script);
+            command.name = Some(title.clone());
+            command.icon = waku_protocol::custom_commands::CustomCommandIcon::Terminal;
+            command
+        });
+        let Some(terminal_id) = self.create_terminal(working_directory, None, command, cx) else {
+            self.show_toast(tr!("terminal.boss_create_failed"));
+            return;
+        };
+        if let Some(record) = self.terminal_records.get_mut(&terminal_id) {
+            record.custom_title = Some(title.clone());
+            record.pinned = true;
+        }
+        if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {
+            terminal.update(cx, |terminal, cx| {
+                terminal.set_custom_title(Some(title), cx)
+            });
+        }
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.save();
+        cx.notify();
+    }
+
     fn create_terminal_with_launch(
         &mut self,
         working_directory: PathBuf,

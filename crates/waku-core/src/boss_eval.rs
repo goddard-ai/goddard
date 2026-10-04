@@ -62,6 +62,7 @@ persist between eval calls for this boss session.
   dismissBundle(id)
   speak(parts | \"whole utterance\")         client connections reached
   browse(url[, title])                     open an http(s) page in the boss chat panel
+  terminal(title, cwd[, command])           pinned standalone terminal request
   upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default
   setEmployeeIcon(sessionId, icon | ())
   rename(name)                              the boss's name
@@ -257,6 +258,22 @@ fn append_output(output: &Mutex<String>, text: &str) {
 /// Bind the boss operations as script-callable functions. Each builds the
 /// operation's wire JSON — the same shapes `goddard-agent boss` accepts —
 /// so the eval surface tracks the protocol enum.
+fn terminal_call(
+    tx: &Sender<EvalMessage>,
+    title: ImmutableString,
+    cwd: ImmutableString,
+    command: Option<String>,
+) -> Result<Dynamic, Box<EvalAltResult>> {
+    call(
+        tx,
+        tagged(
+            "terminal",
+            serde_json::json!({ "title": title.as_str(), "cwd": cwd.as_str(), "command": command }),
+        ),
+    )
+    .and_then(unwrap_result)
+}
+
 fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
     engine.register_fn("automation", {
         let tx = tx.clone();
@@ -287,6 +304,21 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
         let tx = tx.clone();
         move || -> Result<Dynamic, Box<EvalAltResult>> {
             call(&tx, tagged("context", serde_json::json!({}))).and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("terminal", {
+        let tx = tx.clone();
+        move |title: ImmutableString, cwd: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
+            terminal_call(&tx, title, cwd, None)
+        }
+    });
+    engine.register_fn("terminal", {
+        let tx = tx.clone();
+        move |title: ImmutableString,
+              cwd: ImmutableString,
+              command: ImmutableString|
+              -> Result<Dynamic, Box<EvalAltResult>> {
+            terminal_call(&tx, title, cwd, Some(command.to_string()))
         }
     });
     engine.register_fn("summon", {
@@ -744,6 +776,31 @@ mod tests {
                 .as_ref()
                 .unwrap_err()
                 .contains("dispatch rejects it")
+        );
+    }
+
+    #[test]
+    fn terminal_binding_dispatches_optional_command() {
+        let outcome = eval_with(
+            "terminal(\"Dev server\", \"/work/app\", \"bun run dev\")",
+            Scope::new(),
+            &|operation| match operation {
+                BossOperation::Terminal {
+                    title,
+                    cwd,
+                    command,
+                } => {
+                    assert_eq!(title, "Dev server");
+                    assert_eq!(cwd, "/work/app");
+                    assert_eq!(command.as_deref(), Some("bun run dev"));
+                    Ok(BossResult::TerminalRequested { title, cwd })
+                }
+                other => bail!("unexpected operation {other:?}"),
+            },
+        );
+        assert_eq!(
+            outcome.value.as_ref(),
+            Ok(&serde_json::json!({ "title": "Dev server", "cwd": "/work/app" }))
         );
     }
 

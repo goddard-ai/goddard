@@ -3936,6 +3936,13 @@ pub enum SandboxSetupStatus {
 
 #[derive(Clone, Debug)]
 pub enum DriverEvent {
+    /// A boss request for the receiving desktop app to create a pinned
+    /// standalone terminal. The daemon cannot own this app-local entity.
+    BossTerminalIntent {
+        title: String,
+        cwd: String,
+        command: Option<String>,
+    },
     /// Client-only acknowledgement that every daemon event through this
     /// sequence has been incorporated into the local session projection.
     /// Providers never emit this and the daemon never serializes it.

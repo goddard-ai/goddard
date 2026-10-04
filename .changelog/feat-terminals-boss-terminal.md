@@ -1,0 +1,1 @@
+- Ask the boss to open a pinned terminal for a dev server or watcher; if its requested directory is unavailable, Goddard uses the selected project or home directory and reports the fallback.

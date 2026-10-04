@@ -251,6 +251,13 @@ impl Waku {
         // gets one labeled continuation on a fresh runtime first.
         let runtime_lost = matches!(event, DriverEvent::RuntimeLost);
         match event {
+            DriverEvent::BossTerminalIntent {
+                title,
+                cwd,
+                command,
+            } => {
+                self.fulfill_boss_terminal_intent(title, cwd, command, cx);
+            }
             // Unreachable: normalized into `Error` above so it renders in the
             // client's locale before any dispatch runs.
             DriverEvent::LocalizedError { .. } => {}

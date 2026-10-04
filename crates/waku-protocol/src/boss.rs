@@ -277,6 +277,16 @@ pub enum BossOperation {
         url: String,
         #[serde(default)]
         title: Option<String>,
+    /// Ask the connected desktop app to create a pinned, standalone terminal.
+    /// Terminals belong to the app rather than the daemon; the daemon records
+    /// this intent on the caller's event stream for the app to fulfill.
+    /// Boss principals and the human may create terminals, employees may not.
+    Terminal {
+        title: String,
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        command: Option<String>,
     },
     /// Freeze a plan document after user approval. A planning session
     /// finalizes its own plan (`plan_file` omitted); the boss chat or a
@@ -557,6 +567,11 @@ pub enum BossResult {
         plan_file: String,
         finalized_at: u64,
     },
+    /// The daemon accepted a terminal intent and emitted it to the app.
+    TerminalRequested {
+        title: String,
+        cwd: String,
+    },
     Summoned {
         session_id: Uuid,
     },
@@ -715,6 +730,18 @@ mod tests {
                 if title == "Auth migration" && plan_file == "auth.md"
                     && prompt == "Plan the auth migration"
                     && provider.is_none() && model.is_none()
+        ));
+        let terminal: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "terminal",
+            "title": "Dev server",
+            "cwd": "/work/app",
+            "command": "bun run dev"
+        }))
+        .unwrap();
+        assert!(matches!(
+            terminal,
+            super::BossOperation::Terminal { title, cwd, command }
+                if title == "Dev server" && cwd == "/work/app" && command.as_deref() == Some("bun run dev")
         ));
         // A planning session finalizes its own plan by omitting the file.
         let finalize: super::BossOperation = serde_json::from_value(serde_json::json!({

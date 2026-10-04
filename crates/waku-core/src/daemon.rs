@@ -6592,6 +6592,27 @@ impl WakuBackend {
                 events.boss_browse_requested(Uuid::new_v4(), session_id, url.clone(), title.clone());
                 Ok(BossResult::Browse { session_id, url, title })
             }
+            BossOperation::Terminal { title, cwd, command } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss can create a user terminal");
+                }
+                let title = title.trim().to_owned();
+                if title.is_empty() {
+                    bail!("a terminal needs a title");
+                }
+                let cwd = cwd.trim().to_owned();
+                if cwd.is_empty() {
+                    bail!("a terminal needs a working directory");
+                }
+                events.send(waku_protocol::event_to_wire(
+                    crate::model::DriverEvent::BossTerminalIntent {
+                        title: title.clone(),
+                        cwd: cwd.clone(),
+                        command,
+                    },
+                )?)?;
+                Ok(BossResult::TerminalRequested { title, cwd })
+            }
             BossOperation::FinalizePlan { plan_file } => {
                 self.finalize_plan(caller, plan_file, events)
             }

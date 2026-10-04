@@ -3592,6 +3592,12 @@ sync.on_base:
 
 terminal.starting:
   en: Starting terminal…
+terminal.boss_directory_fallback:
+  en: "Terminal directory %{requested} is unavailable; using %{fallback} instead."
+terminal.boss_directory_unavailable:
+  en: The requested directory, project root, and home directory are unavailable.
+terminal.boss_create_failed:
+  en: Could not create the requested terminal.
 terminal.close_title:
   en: Kill this terminal?
 terminal.close_title_named:

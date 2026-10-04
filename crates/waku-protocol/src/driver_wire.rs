@@ -22,6 +22,14 @@ pub fn encode_enum<T: Serialize>(value: T) -> anyhow::Result<String> {
 
 pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
     let (kind, payload) = match event {
+        DriverEvent::BossTerminalIntent {
+            title,
+            cwd,
+            command,
+        } => (
+            "bossTerminalIntent",
+            json!({ "title": title, "cwd": cwd, "command": command }),
+        ),
         DriverEvent::RuntimeEventCursorAdvanced(_) => {
             bail!("client-only runtime cursors cannot be sent by the daemon")
         }
@@ -187,6 +195,22 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
 pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
     let payload = event.payload;
     Ok(match event.kind.as_str() {
+        "bossTerminalIntent" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TerminalIntent {
+                title: String,
+                cwd: String,
+                #[serde(default)]
+                command: Option<String>,
+            }
+            let intent: TerminalIntent = serde_json::from_value(payload)?;
+            DriverEvent::BossTerminalIntent {
+                title: intent.title,
+                cwd: intent.cwd,
+                command: intent.command,
+            }
+        }
         "connected" => DriverEvent::Connected {
             provider_cursor: serde_json::from_value(payload)?,
         },
