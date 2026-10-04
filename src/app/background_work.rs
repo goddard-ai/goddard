@@ -975,6 +975,14 @@ impl Waku {
         // A managed session's strip hosts no review or work-item surfaces —
         // chips that would open them stay off rather than dead-clicking.
         let managed = session.is_some_and(|session| self.boss_ui.managed.contains(&session.id));
+        // A boss session's own chat drops the project-launch and environment
+        // surfaces — they target employee workspaces, not the boss's.
+        let boss_session = session.is_some_and(|session| {
+            self.boss_ui
+                .states
+                .values()
+                .any(|state| state.session_id == Some(session.id))
+        });
         let git_status = change_counts.and_then(|(additions, deletions)| {
             if managed {
                 return None;
@@ -1050,7 +1058,11 @@ impl Waku {
                 .any(|entry| self.notifications.has_unread_pull_request(&entry.url));
             Some(self.render_pull_request_control(&badge, Rc::new(others), unread, cx))
         });
-        let open_in = self.render_open_in_control(workspace_path, cx);
+        let open_in = if boss_session {
+            None
+        } else {
+            self.render_open_in_control(workspace_path, cx)
+        };
         let entries = Rc::new(entries);
         let weak = cx.entity().downgrade();
         let info = popover(
@@ -1080,7 +1092,7 @@ impl Waku {
             .children(git_status)
             .children(pull_request)
             .children(open_in)
-            .child(info)
+            .when(!boss_session, |strip| strip.child(info))
             .into_any_element()
     }
 
