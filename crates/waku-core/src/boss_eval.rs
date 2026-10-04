@@ -58,7 +58,7 @@ persist between eval calls for this boss session.
   publishBundle(path[, name])
   dismissBundle(id)
   speak(parts | \"whole utterance\")         client connections reached
-  upsertPersona(#{name,markdown,...})       id/knowledgeFiles/permissions default
+  upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default
   setEmployeeIcon(sessionId, icon | ())
   rename(name)                              the boss's name
   renameEmployee(sessionId, name)
@@ -405,7 +405,7 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
             // assigns a fresh id to a nil one on upsert.
             let mut merged = serde_json::json!({
                 "id": uuid::Uuid::nil(),
-                "knowledgeFiles": [],
+                "pinnedFiles": [],
                 "permissions": {},
             });
             if let (serde_json::Value::Object(base), serde_json::Value::Object(extra)) =

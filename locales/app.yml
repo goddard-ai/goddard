@@ -5966,8 +5966,8 @@ boss.name_path:
   en: Name or file path
 boss.markdown:
   en: Markdown content
-boss.knowledge:
-  en: Knowledge files (one relative path per line)
+boss.pinned_files:
+  en: Pinned memory files (one path beneath memory/ per line)
 boss.memory_grants:
   en: Memory folders (one folder beneath memory/ per line)
 boss.permissions_hint:

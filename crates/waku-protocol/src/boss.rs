@@ -83,8 +83,11 @@ pub struct BossPersona {
     pub id: Uuid,
     pub name: String,
     pub markdown: String,
-    /// Paths relative to the Boss files root.
-    pub knowledge_files: Vec<String>,
+    /// Memory files pinned into the persona's context — paths relative to
+    /// `memory/` in the Boss files root, matching `memory_folders`.
+    /// Pinning also grants employees read access to the file.
+    #[serde(default, alias = "knowledgeFiles")]
+    pub pinned_files: Vec<String>,
     pub permissions: PersonaPermissions,
     /// Default icon shown for employees using this persona.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,8 +108,10 @@ pub struct BossEmployee {
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
     /// The grants assigned when this employee was summoned.
     pub permissions: PersonaPermissions,
-    #[serde(default)]
-    pub knowledge_files: Vec<String>,
+    /// The persona's memory pins at summon time — paths relative to
+    /// `memory/` in the Boss files root.
+    #[serde(default, alias = "knowledgeFiles")]
+    pub pinned_files: Vec<String>,
     pub expired: bool,
     /// Unix timestamp when the employee finished. Retired after one hour
     /// unless the boss assigns the employee another prompt first.

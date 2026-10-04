@@ -11,7 +11,12 @@ icon?: CustomCommandIcon | null,
 /**
  * The grants assigned when this employee was summoned.
  */
-permissions: PersonaPermissions, knowledgeFiles: Array<string>, expired: boolean,
+permissions: PersonaPermissions,
+/**
+ * The persona's memory pins at summon time — paths relative to
+ * `memory/` in the Boss files root.
+ */
+pinnedFiles: Array<string>, expired: boolean,
 /**
  * Unix timestamp when the employee finished. Retired after one hour
  * unless the boss assigns the employee another prompt first.

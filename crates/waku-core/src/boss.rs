@@ -122,12 +122,55 @@ impl BossService {
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
         };
+        service.migrate_legacy_pins();
         service.save(&service.state.lock())?;
         Ok(service)
     }
 
     pub fn document(&self) -> BossState {
         self.state.lock().clone()
+    }
+
+    /// Legacy documents pinned knowledge files by their path beneath the
+    /// files root; pins are now relative to `memory/` — the one store.
+    /// Rewrite `memory/x` as `x`, move a file pinned from elsewhere
+    /// beneath `memory/`, and drop pins that cannot resolve: managed
+    /// persona documents, missing files, and unsafe paths. Upserts
+    /// reject `memory/`-prefixed pins, so a stored prefix can only come
+    /// from a legacy document.
+    fn migrate_legacy_pins(&self) {
+        let mut state = self.state.lock();
+        for persona in &mut state.personas {
+            self.migrate_pin_list(&mut persona.pinned_files);
+        }
+        for employee in &mut state.employees {
+            self.migrate_pin_list(&mut employee.pinned_files);
+        }
+    }
+
+    fn migrate_pin_list(&self, pins: &mut Vec<String>) {
+        pins.retain_mut(|entry| {
+            if let Some(rest) = entry.strip_prefix("memory/") {
+                *entry = rest.to_owned();
+                return validate_relative(entry, false).is_ok();
+            }
+            if entry.starts_with("personas/") || validate_relative(entry, false).is_err() {
+                return false;
+            }
+            let (Ok(from), Ok(to)) = (
+                self.file_path(entry, false),
+                self.file_path(&format!("memory/{entry}"), false),
+            ) else {
+                return false;
+            };
+            if fs::symlink_metadata(&from).is_ok_and(|meta| meta.is_file()) && !to.exists() {
+                if let Some(parent) = to.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::rename(&from, &to);
+            }
+            to.is_file()
+        });
     }
 
     pub fn set_task_notifier(&self, notifier: crate::share::TaskNotifier) {
@@ -222,7 +265,7 @@ impl BossService {
             .find(|persona| persona.id == persona_id)
             .ok_or_else(|| anyhow!("unknown persona"))?;
         let mut permissions = persona.permissions.clone();
-        let mut knowledge_files = persona.knowledge_files.clone();
+        let mut pinned_files = persona.pinned_files.clone();
         if let Some(overrides) = &overrides {
             self.validate_memory_folders(overrides.memory_folders.as_deref().unwrap_or(&[]))?;
             overrides.apply_to(&mut permissions);
@@ -242,7 +285,10 @@ impl BossService {
                 bail!("employees inherit their supervisor's boss-assigned persona");
             }
             permissions.clamp_within(&parent.permissions);
-            knowledge_files.retain(|path| self.authorize_file(Some(caller), path, false).is_ok());
+            pinned_files.retain(|path| {
+                self.authorize_file(Some(caller), &format!("memory/{path}"), false)
+                    .is_ok()
+            });
         }
         let id = Uuid::new_v4();
         Ok(BossEmployee {
@@ -263,7 +309,7 @@ impl BossService {
             persona_id,
             icon: None,
             permissions,
-            knowledge_files,
+            pinned_files,
             expired: false,
             expired_at: None,
             blocker: None,
@@ -408,16 +454,18 @@ impl BossService {
         };
         let role = if let Some(employee) = employee {
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire. Finishing is silent — your supervisor reads your outcome from its `view` or `context`, not from a delivered prompt, so do not expect a reply. When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned memory files: {}. Finish this bounded job, return your results, and expire. Finishing is silent — your supervisor reads your outcome from its `view` or `context`, not from a delivered prompt, so do not expect a reply. When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
                 serde_json::to_string(&employee.permissions).unwrap_or_default(),
-                employee.knowledge_files.join(", ")
+                pinned_paths(employee.pinned_files.as_slice())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak, eval. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees finish silently — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish reaches you only when the employee flagged a blocker through its `reportBlocker` operation or its persona grants `alwaysReport`. A blocker report also interrupts your running turn when it can. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak, eval. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees finish silently — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish reaches you only when the employee flagged a blocker through its `reportBlocker` operation or its persona grants `alwaysReport`. A blocker report also interrupts your running turn when it can. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -427,13 +475,16 @@ impl BossService {
             .map(|path| format!("Project context: {}. For a job in another project, supply its absolute path when summoning. If this path is unavailable inside a sandbox, the guest's current working directory is the assigned project.", path.display()))
             .unwrap_or_default();
         format!(
-            "<boss-persona>\n{}\n\n{}\nKnowledge files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
+            "<boss-persona>\n{}\n\n{}\nPinned memory files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
             persona.markdown,
             role,
-            employee
-                .map(|entry| entry.knowledge_files.as_slice())
-                .unwrap_or(&persona.knowledge_files)
-                .join(", ")
+            pinned_paths(
+                employee
+                    .map(|entry| entry.pinned_files.as_slice())
+                    .unwrap_or(&persona.pinned_files),
+            )
+            .collect::<Vec<_>>()
+            .join(", ")
         )
     }
 
@@ -769,8 +820,12 @@ impl BossService {
                 if persona.markdown.len() > MAX_FILE_BYTES {
                     bail!("persona is too large");
                 }
-                for path in &persona.knowledge_files {
-                    self.file_path(path, false)?;
+                for path in &persona.pinned_files {
+                    if path == "memory" || path.starts_with("memory/") {
+                        bail!("pinned files are paths beneath memory/");
+                    }
+                    validate_relative(path, false)?;
+                    self.file_path(&format!("memory/{path}"), false)?;
                 }
                 self.validate_memory_folders(&persona.permissions.memory_folders)?;
                 if persona.id.is_nil() {
@@ -1037,7 +1092,9 @@ impl BossService {
             .iter()
             .map(|folder| format!("memory/{folder}"))
             .any(|folder| path == folder || path.starts_with(&format!("{folder}/")))
-            || employee.knowledge_files.iter().any(|file| file == path)
+            || path
+                .strip_prefix("memory/")
+                .is_some_and(|rest| employee.pinned_files.iter().any(|file| file == rest))
             || path == format!("personas/{}/PERSONA.md", persona.id);
         // Directory discovery reveals only ancestors of a granted file/folder.
         let ancestor = directory
@@ -1047,7 +1104,12 @@ impl BossService {
                     .memory_folders
                     .iter()
                     .map(|folder| format!("memory/{folder}"))
-                    .chain(employee.knowledge_files.iter().cloned())
+                    .chain(
+                        employee
+                            .pinned_files
+                            .iter()
+                            .map(|file| format!("memory/{file}")),
+                    )
                     .any(|file| file.starts_with(&format!("{path}/"))));
         if !permitted && !ancestor {
             bail!("persona does not grant access to this Boss file");
@@ -1071,6 +1133,12 @@ impl BossService {
         }
         Ok(result)
     }
+}
+
+/// Render memory-relative pins as the files-root paths agents pass to
+/// `readFile`.
+fn pinned_paths(pinned: &[String]) -> impl Iterator<Item = String> + '_ {
+    pinned.iter().map(|path| format!("memory/{path}"))
 }
 
 fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
@@ -1333,8 +1401,8 @@ fn fresh_state() -> BossState {
         persona_id,
         session_id: None,
         personas: vec![
-            BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory and knowledge granted to your persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; finished employees expire silently, so read their outcomes through `view` or `context` — a finish reaches you only when the employee flagged a blocker or its persona requires always-report. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone. Queued prompts may be lost as an employee finishes, so summon a fresh employee for follow-up work rather than piling prompts onto one about to expire. Track employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; finished employees expire silently, so read their outcomes through `view` or `context` — a finish reaches you only when the employee flagged a blocker or its persona requires always-report. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone. Queued prompts may be lost as an employee finishes, so summon a fresh employee for follow-up work rather than piling prompts onto one about to expire. Track employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
         bundles: Vec::new(),
@@ -1489,7 +1557,7 @@ mod tests {
                     persona_id: state.personas[1].id,
                     icon: None,
                     permissions: PersonaPermissions::default(),
-                    knowledge_files: Vec::new(),
+                    pinned_files: Vec::new(),
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -1538,7 +1606,7 @@ mod tests {
                     persona_id: state.personas[1].id,
                     icon: None,
                     permissions: PersonaPermissions::default(),
-                    knowledge_files: Vec::new(),
+                    pinned_files: Vec::new(),
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -1662,7 +1730,7 @@ mod tests {
                         memory_folders: vec!["work".into()],
                         ..Default::default()
                     },
-                    knowledge_files: Vec::new(),
+                    pinned_files: Vec::new(),
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -2099,7 +2167,7 @@ mod tests {
                     persona_id: state.personas[1].id,
                     icon: None,
                     permissions: PersonaPermissions::default(),
-                    knowledge_files: Vec::new(),
+                    pinned_files: Vec::new(),
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -2349,7 +2417,7 @@ mod tests {
                     persona_id: state.personas[1].id,
                     icon: None,
                     permissions: PersonaPermissions::default(),
-                    knowledge_files: Vec::new(),
+                    pinned_files: Vec::new(),
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -2405,6 +2473,133 @@ mod tests {
             panic!("avatar regeneration returns the updated state");
         };
         assert_ne!(state.identity.avatar_seed, boss_seed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pinned_memory_files_grant_read_and_survive_legacy_migration() {
+        let root = std::env::temp_dir().join(format!("boss-pins-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let session_id = Uuid::new_v4();
+        let persona = service.document().personas[1].id;
+        service
+            .update(|state| {
+                state.employees.push(BossEmployee {
+                    session_id,
+                    supervisor_id: Uuid::new_v4(),
+                    identity: BossIdentity {
+                        id: session_id,
+                        name: "Maren".into(),
+                        avatar_seed: session_id.to_string(),
+                    },
+                    job_title: "Review".into(),
+                    persona_id: persona,
+                    icon: None,
+                    permissions: PersonaPermissions::default(),
+                    pinned_files: vec!["work/note.md".into()],
+                    expired: false,
+                    expired_at: None,
+                    blocker: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        for (path, content) in [
+            ("memory/work/note.md", "pinned"),
+            ("memory/work/other.md", "unpinned"),
+        ] {
+            service
+                .handle(
+                    None,
+                    BossOperation::WriteFile {
+                        path: path.into(),
+                        content: content.into(),
+                    },
+                )
+                .unwrap();
+        }
+        // A pin grants file-level read without a folder grant; neighbors
+        // in the same folder stay closed.
+        assert!(
+            service
+                .handle(
+                    Some(session_id),
+                    BossOperation::ReadFile {
+                        path: "memory/work/note.md".into()
+                    }
+                )
+                .is_ok()
+        );
+        assert!(
+            service
+                .handle(
+                    Some(session_id),
+                    BossOperation::ReadFile {
+                        path: "memory/work/other.md".into()
+                    }
+                )
+                .is_err()
+        );
+        // Pins inject the files-root path into the persona context.
+        let prompt = service.prompt_with_context(session_id, "job".into());
+        assert!(prompt.contains("Pinned memory files: memory/work/note.md"));
+        // Pins are memory-relative — writing them with the store prefix is refused.
+        let mut persona_doc = service.document().personas[1].clone();
+        persona_doc.pinned_files = vec!["memory/work/note.md".into()];
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::UpsertPersona {
+                        persona: persona_doc
+                    },
+                )
+                .is_err()
+        );
+
+        drop(service);
+        // Legacy documents pinned knowledge files beneath the files root:
+        // `memory/` paths rewrite relative to the store, pins of files
+        // elsewhere move the file beneath `memory/`, and unresolvable
+        // pins drop.
+        let path = root.join("boss.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        fs::write(root.join("files/stray.md"), "moved").unwrap();
+        legacy["personas"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("pinnedFiles");
+        legacy["personas"][1]["knowledgeFiles"] = serde_json::json!([
+            "memory/self/core.md",
+            "stray.md",
+            "gone.md",
+            "personas/managed/PERSONA.md"
+        ]);
+        legacy["employees"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("pinnedFiles");
+        legacy["employees"][0]["knowledgeFiles"] = serde_json::json!(["memory/work/note.md"]);
+        fs::create_dir_all(root.join("files/memory/self")).unwrap();
+        fs::write(root.join("files/memory/self/core.md"), "core").unwrap();
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let migrated = BossService::open(root.clone()).unwrap();
+        let state = migrated.document();
+        assert_eq!(
+            state.personas[1].pinned_files,
+            vec!["self/core.md".to_owned(), "stray.md".to_owned()]
+        );
+        assert_eq!(
+            state.employees[0].pinned_files,
+            vec!["work/note.md".to_owned()]
+        );
+        assert!(!root.join("files/stray.md").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("files/memory/stray.md")).unwrap(),
+            "moved"
+        );
+        drop(migrated);
         fs::remove_dir_all(root).unwrap();
     }
 }

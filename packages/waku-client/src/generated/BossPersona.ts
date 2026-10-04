@@ -4,9 +4,11 @@ import type { PersonaPermissions } from "./PersonaPermissions";
 
 export type BossPersona = { id: string, name: string, markdown: string,
 /**
- * Paths relative to the Boss files root.
+ * Memory files pinned into the persona's context — paths relative to
+ * `memory/` in the Boss files root, matching `memory_folders`.
+ * Pinning also grants employees read access to the file.
  */
-knowledgeFiles: Array<string>, permissions: PersonaPermissions,
+pinnedFiles: Array<string>, permissions: PersonaPermissions,
 /**
  * Default icon shown for employees using this persona.
  */

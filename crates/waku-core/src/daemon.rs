@@ -12868,7 +12868,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into())
+            .prepare_employee(supervisor, persona, "Release checks".into(), None)
             .unwrap();
         let employee_id = employee.session_id;
         backend

@@ -162,7 +162,7 @@ struct BossEditor {
     kind: BossEditorKind,
     name: Entity<TextInput>,
     content: Entity<TextInput>,
-    knowledge: Entity<TextInput>,
+    pinned: Entity<TextInput>,
     memory: Entity<TextInput>,
     permissions: PersonaPermissions,
     icon: Option<CustomCommandIcon>,
@@ -413,7 +413,7 @@ impl Waku {
                         [
                             &editor.name,
                             &editor.content,
-                            &editor.knowledge,
+                            &editor.pinned,
                             &editor.memory,
                         ]
                         .iter()
@@ -1057,7 +1057,7 @@ impl Waku {
         let values = [
             &editor.name,
             &editor.content,
-            &editor.knowledge,
+            &editor.pinned,
             &editor.memory,
         ]
         .iter()
@@ -1101,9 +1101,9 @@ impl Waku {
                 input
             })
         };
-        let knowledge = persona
+        let pinned = persona
             .as_ref()
-            .map(|entry| entry.knowledge_files.join("\n"))
+            .map(|entry| entry.pinned_files.join("\n"))
             .unwrap_or_default();
         let permissions = persona
             .as_ref()
@@ -1114,12 +1114,12 @@ impl Waku {
         let original = vec![
             name.clone(),
             content.clone(),
-            knowledge.clone(),
+            pinned.clone(),
             memory.clone(),
         ];
         let name = input(tr!("boss.name_path"), name, false, cx);
         let content = input(tr!("boss.markdown"), content, true, cx);
-        let knowledge = input(tr!("boss.knowledge"), knowledge, true, cx);
+        let pinned = input(tr!("boss.pinned_files"), pinned, true, cx);
         let memory = input(tr!("boss.memory_grants"), memory, true, cx);
         let focus = name.read(cx).focus();
         self.boss_ui.editor = Some(BossEditor {
@@ -1127,7 +1127,7 @@ impl Waku {
             kind,
             name,
             content,
-            knowledge,
+            pinned,
             memory,
             original,
             original_permissions: permissions.clone(),
@@ -1170,7 +1170,7 @@ impl Waku {
                         id,
                         name,
                         markdown: content,
-                        knowledge_files: lines(editor.knowledge.read(cx).content()),
+                        pinned_files: lines(editor.pinned.read(cx).content()),
                         permissions,
                         icon: editor.icon,
                     },
@@ -2443,10 +2443,10 @@ impl Waku {
         }
         if is_persona {
             form = form
-                .child(tr!("boss.knowledge"))
-                .child(boss_input(editor.knowledge.clone(), &theme))
                 .child(tr!("boss.memory_grants"))
                 .child(boss_input(editor.memory.clone(), &theme))
+                .child(tr!("boss.pinned_files"))
+                .child(boss_input(editor.pinned.clone(), &theme))
                 .child("Persona icon (employees inherit this unless overridden)")
                 .child(
                     div().flex().flex_wrap().gap(px(4.0)).children(

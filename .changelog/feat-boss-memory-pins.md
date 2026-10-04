@@ -1,0 +1,1 @@
+- Boss personas' knowledge files merged into memory: the persona editor now lists **pinned memory files** — paths beneath `memory/` injected into each summoned agent's context and readable without a folder grant. Existing knowledge file entries migrate automatically.
