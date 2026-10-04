@@ -1,15 +1,124 @@
 //! File-canonical, daemon-owned memory collections.
 //!
 //! Records are immutable Markdown revisions; indexes are deterministic views
-//! rebuilt from those records. This module deliberately contains no Jev calls.
+//! rebuilt from those records. Jev questions are bounded here; daemon callers
+//! perform evaluations asynchronously and treat their verdicts as shadow data.
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
+
+/// Maximum number of cue candidates submitted in one memory judgment.
+pub const EVAL_CANDIDATE_CAP: usize = 12;
+pub const PLACE_FEATURE: &str = "memory-place";
+pub const SURFACE_FEATURE: &str = "memory-surface";
+const FACT_CAP: usize = 4_000;
+const CUE_CAP: usize = 240;
+
+/// Shared bounded state and independent placement questions. `new` is always
+/// legal, so missing or malformed answers cannot make a fact disappear.
+pub fn placement_eval(
+    fact: &str,
+    topic_cues: &[(String, String)],
+) -> (Value, BTreeMap<String, EvalQuestion>) {
+    let candidates: Vec<Value> = topic_cues
+        .iter()
+        .take(EVAL_CANDIDATE_CAP)
+        .map(|(id, cue)| {
+            json!({
+                "id": id,
+                "cue": cue.chars().take(CUE_CAP).collect::<String>(),
+            })
+        })
+        .collect();
+    let mut targets: BTreeMap<String, Option<String>> = topic_cues
+        .iter()
+        .take(EVAL_CANDIDATE_CAP)
+        .map(|(id, cue)| (id.clone(), Some(cue.chars().take(CUE_CAP).collect())))
+        .collect();
+    targets.insert("new".into(), Some("create a new topic or chunk".into()));
+    let state = json!({
+        "fact": fact.chars().take(FACT_CAP).collect::<String>(),
+        "topicCues": candidates,
+    });
+    let questions = BTreeMap::from([
+        ("layer".into(), EvalQuestion::Choice {
+            instructions: "Which level fits this fact's specificity? Choose overview, topic, or detail.".into(),
+            criteria: BTreeMap::from([
+                ("overview".into(), Some("broad durable themes spanning multiple topics".into())),
+                ("topic".into(), Some("a coherent subject grouping several related facts".into())),
+                ("detail".into(), Some("one specific fact or event".into())),
+            ]),
+        }),
+        ("target".into(), EvalQuestion::Choice {
+            instructions: "Which candidate topic cue covers this fact without changing its meaning? Choose new when none fits.".into(),
+            criteria: targets,
+        }),
+    ]);
+    (state, questions)
+}
+
+/// Score authorized cue candidates for a prompt. Results are only observations
+/// in Phase 3; the caller continues to apply its deterministic recency set.
+pub fn surface_eval(prompt: &str, candidates: &[Chunk]) -> (Value, BTreeMap<String, EvalQuestion>) {
+    let cues: Vec<Value> = candidates
+        .iter()
+        .take(EVAL_CANDIDATE_CAP)
+        .map(|chunk| {
+            json!({
+                "id": chunk.chunk_id,
+                "cue": chunk.cue.chars().take(CUE_CAP).collect::<String>(),
+                "title": chunk.title.chars().take(CUE_CAP).collect::<String>(),
+            })
+        })
+        .collect();
+    let state =
+        json!({ "message": prompt.chars().take(FACT_CAP).collect::<String>(), "candidates": cues });
+    let questions = candidates.iter().take(EVAL_CANDIDATE_CAP).map(|chunk| (
+        format!("relevant:{}", chunk.chunk_id),
+        EvalQuestion::Noul {
+            instructions: format!("Would memory candidate {} materially help answer or continue this message?", chunk.chunk_id),
+            criteria: None,
+        },
+    )).collect();
+    (state, questions)
+}
+
+/// Shadow summary used by calibration diagnostics. It deliberately does not
+/// return an insertion target or surfaced chunks for application.
+pub fn shadow_verdict(evaluation: &Evaluation) -> Value {
+    let mut verdict = serde_json::Map::new();
+    for (name, answer) in &evaluation.answers {
+        match answer {
+            EvalAnswer::Choice {
+                choice,
+                confidence,
+                probabilities,
+            } => {
+                verdict.insert(name.clone(), json!({ "choice": choice, "confidence": confidence, "probabilities": probabilities }));
+            }
+            EvalAnswer::Noul { noul } => {
+                verdict.insert(name.clone(), json!({ "probability": noul }));
+            }
+            EvalAnswer::Score {
+                score,
+                confidence,
+                probabilities,
+                ..
+            } => {
+                verdict.insert(name.clone(), json!({ "score": score, "confidence": confidence, "probabilities": probabilities }));
+            }
+        }
+    }
+    Value::Object(verdict)
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -504,6 +613,52 @@ fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_eval_batches_are_bounded_and_keep_safe_fallback_options() {
+        let topics = (0..20)
+            .map(|n| (format!("topic-{n}"), format!("cue-{n}")))
+            .collect::<Vec<_>>();
+        let (state, questions) = placement_eval(&"f".repeat(10_000), &topics);
+        assert_eq!(state["fact"].as_str().unwrap().chars().count(), FACT_CAP);
+        assert_eq!(
+            state["topicCues"].as_array().unwrap().len(),
+            EVAL_CANDIDATE_CAP
+        );
+        assert_eq!(questions.len(), 2);
+        let EvalQuestion::Choice { criteria, .. } = &questions["target"] else {
+            panic!("target is a Choice")
+        };
+        assert!(criteria.contains_key("new"));
+        assert_eq!(criteria.len(), EVAL_CANDIDATE_CAP + 1);
+
+        let chunks = topics
+            .iter()
+            .map(|(id, cue)| Chunk {
+                version: 1,
+                chunk_id: id.clone(),
+                scope_id: "scope".into(),
+                collection_id: "c".into(),
+                layer: "detail".into(),
+                revision: 1,
+                title: id.clone(),
+                cue: cue.clone(),
+                status: "active".into(),
+                source_id: "s".into(),
+                source_digest: "d".into(),
+                created_at: 1,
+                body: String::new(),
+            })
+            .collect::<Vec<_>>();
+        let (state, questions) = surface_eval("prompt", &chunks);
+        assert_eq!(
+            state["candidates"].as_array().unwrap().len(),
+            EVAL_CANDIDATE_CAP
+        );
+        assert_eq!(questions.len(), EVAL_CANDIDATE_CAP);
+        assert!(questions.contains_key("relevant:topic-11"));
+        assert!(!questions.contains_key("relevant:topic-12"));
+    }
     #[test]
     fn acl_matrix_and_import_idempotency_and_corruption() {
         let t = std::env::temp_dir().join(format!("memory-{}", Uuid::new_v4()));

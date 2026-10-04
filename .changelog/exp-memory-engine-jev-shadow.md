@@ -1,0 +1,1 @@
+- [Experimental] Memory placement and relevance judgments now have bounded Jev question batches for calibration; memory continues to use deterministic insertion and recency behavior while these judgments run in shadow mode.
