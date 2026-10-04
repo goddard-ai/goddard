@@ -463,6 +463,12 @@ fn agent_environment_pairs(
             parent.to_string(),
         ));
     }
+    if let Some(reservation) = agent.resource_reservation {
+        pairs.push((
+            waku_protocol::AGENT_RESOURCE_RESERVATION_ENV.to_owned(),
+            reservation.to_string(),
+        ));
+    }
     pairs
 }
 
@@ -1572,6 +1578,7 @@ mod tests {
             task_tools: true,
             settings_writes: true,
             boss: false,
+            resource_reservation: None,
         }
     }
 

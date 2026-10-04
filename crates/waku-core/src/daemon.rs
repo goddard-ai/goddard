@@ -378,6 +378,23 @@ pub(crate) struct AgentCreateSelection {
     pub context_window: Option<String>,
 }
 
+/// A provider/model selection resolved to concrete values — the output of
+/// [`WakuBackend::resolve_agent_task_selection`], shared by `agent create`
+/// and summon admission. `concrete_model` is the catalog id the queue
+/// counts when `model` carries a requested/inherited value or `None` for
+/// the provider default.
+pub(crate) struct ResolvedAgentSelection {
+    pub provider: ProviderKind,
+    pub model: Option<String>,
+    pub concrete_model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub context_window: Option<String>,
+    pub routed: Option<crate::routing::RouteRun>,
+    pub sender_mode: waku_protocol::model::RuntimeMode,
+    pub sender_environment: crate::model::SessionEnvironment,
+}
+
 /// A created task's first prompt. `Fixed` ships as sent. `Assignment` is
 /// the Boss employee wrapper: the job text follows an "Assigned project"
 /// line resolved against the task's run directory — the worktree path for
@@ -523,6 +540,27 @@ pub struct WakuBackend {
     automations: Arc<AutomationService>,
     boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
+    /// Summon-queue wake channel — the scheduler thread parks on the
+    /// condvar between passes; summons, policy writes, releases, and the
+    /// reconciliation tick set the flag to run one pass.
+    summon_wake: Arc<(Mutex<bool>, Condvar)>,
+    /// Guards spawning the scheduler thread — `set_event_source` and lazy
+    /// Boss activation may both reach it.
+    summon_scheduler_started: std::sync::atomic::AtomicBool,
+    /// Tests root their own broker ledger rather than the host's.
+    broker_root: Mutex<Option<PathBuf>>,
+}
+
+/// How often the summon scheduler re-scans while tickets wait — the
+/// bounded reconciliation tick that catches broker-side capacity changes
+/// (a freed device, an external release) no daemon event announces.
+const SUMMON_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn resource_set_empty(set: &waku_protocol::resources::ResourceSet) -> bool {
+    set.exclusive.is_empty()
+        && set.resident_devices == 0
+        && set.native_builds == 0
+        && set.desktop_input == 0
 }
 
 fn claim_managed_goal_turn(
@@ -646,6 +684,9 @@ impl WakuBackend {
             automations,
             boss,
             auto_prompts,
+            summon_wake: Arc::new((Mutex::new(false), Condvar::new())),
+            summon_scheduler_started: std::sync::atomic::AtomicBool::new(false),
+            broker_root: Mutex::new(None),
         };
         // Sessions summoned before `boss_managed` existed carry no stamp;
         // the roster still names them, so mark them now — once an employee
@@ -853,6 +894,7 @@ impl WakuBackend {
     /// starts serving — the service needs the backend's `Arc` for dispatch.
     pub fn start_automations(self: &Arc<Self>) {
         self.boss.bind_backend(self);
+        self.start_summon_scheduler();
         self.automations.start(self);
         self.auto_prompts.start(self);
     }
@@ -3413,6 +3455,15 @@ impl Backend for WakuBackend {
             Command::AgentResources { operation } => {
                 let owner =
                     agent.context("resource reservations require a scoped task credential")?;
+                // Admission tickets are daemon-owned — model slots and the
+                // dispatch order they encode belong to the summon queue,
+                // not to task-scoped callers.
+                if matches!(
+                    operation,
+                    waku_protocol::resources::ResourceOperation::Admission { .. }
+                ) {
+                    bail!("admission reservations are daemon-internal");
+                }
                 // An acquire can park its caller in a wait for minutes; the
                 // human-facing boss delegates waits to employees instead.
                 if self.boss.is_boss_principal(owner)
@@ -3425,7 +3476,7 @@ impl Backend for WakuBackend {
                         "the boss stays available to the human — summon an employee to run workloads that reserve host resources"
                     );
                 }
-                let status = crate::resource_broker::Broker::host()?.operate(owner, operation)?;
+                let status = self.resource_broker()?.operate(owner, operation)?;
                 if let Some(id) = status.request_id {
                     self.agent.note_resource(owner, id);
                     if let Some(reservation) = status.reservations.iter().find(|r| r.id == id) {
@@ -5592,6 +5643,11 @@ impl WakuBackend {
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
             boss: self.boss.is_boss_principal(session_id),
+            resource_reservation: self
+                .boss
+                .employee(session_id)
+                .and_then(|employee| employee.ticket)
+                .and_then(|ticket| ticket.reservation),
         })
     }
 
@@ -5793,144 +5849,15 @@ impl WakuBackend {
         }
         let project = dunce::canonicalize(&project)
             .with_context(|| format!("project path {} does not exist", project.display()))?;
-        // Fields the payload omits inherit the sending task's configuration,
-        // but only while it runs the resolved provider — a different
-        // provider's model and trait vocabularies may not carry over.
-        let sender_config = sender.and_then(|id| {
-            self.task_state
-                .lock()
-                .sessions
-                .iter()
-                .find(|session| session.id == id)
-                .map(|session| {
-                    (
-                        session.provider,
-                        session.model.clone(),
-                        session.reasoning_effort.clone(),
-                        session.service_tier.clone(),
-                        session.context_window.clone(),
-                        (session.runtime_mode, session.environment()),
-                    )
-                })
-        });
-        // `"auto"` hands provider and model selection to the same routing
-        // pass `RouteTask` serves an Auto draft; when the eval backend
-        // cannot answer it lands on the last-used target instead of
-        // failing, so it never blocks a create.
-        let routed = match selection.model.as_deref().map(str::trim) {
-            Some("auto") => {
-                if selection.provider.is_some() {
-                    bail!("`model: \"auto\"` routes the provider too; omit `provider`");
-                }
-                Some(self.route_agent_task(&project, prompt.text()))
-            }
-            _ => None,
-        };
-        let provider = routed
-            .as_ref()
-            .map(|run| run.decision.target.provider)
-            .or(selection.provider)
-            .or(sender_config.as_ref().map(|config| config.0))
-            .ok_or_else(|| {
-                anyhow!("`provider` is required when no sending task is known to inherit from")
-            })?;
-        // Access posture is not provider vocabulary: a sandboxed or
-        // full-access task's spawned work keeps its containment whatever
-        // provider it resolves to.
-        let (sender_mode, sender_environment) = sender_config
-            .as_ref()
-            .map(|config| config.5)
-            .unwrap_or_default();
-        let sender_config = sender_config.filter(|config| config.0 == provider);
-        let model = match (&routed, selection.model.as_deref().map(str::trim)) {
-            (Some(run), _) => run.decision.target.model.clone(),
-            (None, Some("" | "default")) => None,
-            (None, Some(model)) => Some(model.to_owned()),
-            (None, None) => sender_config.as_ref().and_then(|config| config.1.clone()),
-        };
-        let (inherited_effort, inherited_tier, inherited_window) = sender_config
-            .map(|config| (config.2, config.3, config.4))
-            .unwrap_or_default();
-        // The resolved model's catalog entry bounds which inherited traits
-        // still apply; an empty or missing entry cannot constrain them.
-        let catalog = crate::model_catalog::cached_models(provider)
-            .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
-        let catalog_model = match model.as_deref() {
-            Some(requested) => {
-                waku_protocol::model_catalog::packed_catalog_model(&catalog, requested, provider)
-                    .map(|matched| matched.model)
-            }
-            None => catalog
-                .iter()
-                .find(|entry| entry.is_default)
-                .or_else(|| catalog.first()),
-        };
-        // A summon's explicit effort is machine-written configuration like
-        // `setModel`'s: fail the summon when the resolved model's catalog
-        // lists efforts and does not include it, rather than silently run
-        // the employee at another effort. `agent create` keeps its
-        // pass-through for ids a stale catalog may not list yet.
-        if employee.is_some()
-            && let Some(effort) = selection.reasoning_effort.as_deref().map(str::trim)
-            && !matches!(effort, "" | "default")
-            && let Some(model) = catalog_model
-            && !model.reasoning_efforts.is_empty()
-            && !model
-                .reasoning_efforts
-                .iter()
-                .any(|option| option.id == effort)
-        {
-            bail!("reasoning effort {effort:?} is not supported by model {:?}", model.id);
-        }
-        let reasoning_effort = resolve_agent_trait(
-            selection.reasoning_effort.or_else(|| {
-                routed
-                    .as_ref()
-                    .and_then(|run| run.decision.target.effort.clone())
-            }),
-            inherited_effort
-                .map(|value| waku_protocol::model_catalog::normalize_reasoning_effort(&value)),
-            catalog_model.map(|model| model.reasoning_efforts.as_slice()),
-            catalog_model.and_then(|model| model.default_reasoning_effort.as_deref()),
-        );
-        let service_tier = resolve_agent_trait(
-            selection.service_tier,
-            inherited_tier,
-            catalog_model.map(|model| model.service_tiers.as_slice()),
-            catalog_model.and_then(|model| model.default_service_tier.as_deref()),
-        );
-        let context_window = resolve_agent_trait(
-            selection.context_window,
-            inherited_window,
-            catalog_model.map(|model| model.context_windows.as_slice()),
-            catalog_model.and_then(|model| model.default_context_window.as_deref()),
-        );
-        let (project_id, project_path) = {
-            let mut state = self.task_state.lock();
-            match state
-                .projects
-                .iter()
-                .find(|existing| {
-                    dunce::canonicalize(&existing.path).is_ok_and(|path| path == project)
-                })
-                .map(|existing| (existing.id, existing.path.clone()))
-            {
-                Some(found) => found,
-                None => {
-                    if crate::worktree::is_linked_worktree(&project) {
-                        bail!(
-                            "{} is a Git worktree; only primary checkouts can be registered as projects",
-                            project.display()
-                        );
-                    }
-                    let registered = Project::from_path(project.clone());
-                    let found = (registered.id, registered.path.clone());
-                    state.projects.push(registered);
-                    found
-                }
-            }
-        };
-        let mut session = AgentSession::new(project_id, provider);
+        let resolved = self.resolve_agent_task_selection(
+            sender,
+            &selection,
+            &project,
+            prompt.text(),
+            employee.is_some(),
+        )?;
+        let (project_id, project_path) = self.register_agent_project(&project)?;
+        let mut session = AgentSession::new(project_id, resolved.provider);
         if let Some(title) = selection.title.as_deref() {
             session.set_title(title);
         }
@@ -5938,15 +5865,15 @@ impl WakuBackend {
         // provider cannot run (a sandbox guest or cloud it lacks) fails the
         // launch honestly rather than silently running the spawned work
         // somewhere less contained.
-        session.runtime_mode = sender_mode;
-        session.environment = sender_environment;
-        session.model = model;
-        if let Some(run) = routed {
+        session.runtime_mode = resolved.sender_mode;
+        session.environment = resolved.sender_environment;
+        session.model = resolved.model.clone();
+        if let Some(run) = resolved.routed {
             session.route_decision = Some(run.decision);
         }
-        session.reasoning_effort = reasoning_effort;
-        session.service_tier = service_tier;
-        session.context_window = context_window;
+        session.reasoning_effort = resolved.reasoning_effort.clone();
+        session.service_tier = resolved.service_tier.clone();
+        session.context_window = resolved.context_window.clone();
         session.workspace = match workspace {
             AgentWorkspace::Local => SessionWorkspace::Local,
             AgentWorkspace::Worktree => {
@@ -6012,6 +5939,24 @@ impl WakuBackend {
         // The adopted prompt above already persisted, so a launch failure
         // still leaves a normal task behind. Delivering it now starts the
         // first turn immediately.
+        self.launch_prepared_session(session_id, turn_id, message_id, prompt, sender, events)?;
+        Ok(session_id)
+    }
+
+    /// The launch tail shared by `agent create` and summon dispatch:
+    /// ensure the runtime, publish the adopted prompt into its event
+    /// stream, then hand the provider the persona-wrapped text — clean
+    /// first, with the session's context blocks following as a hidden
+    /// steer or a prefix for providers without steer support.
+    fn launch_prepared_session(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        message_id: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
         let (runtime_id, driver) = self.ensure_agent_runtime(session_id, events)?;
         let sink = events.for_session(session_id, runtime_id);
         sink.send(event_to_wire(DriverEvent::PromptSubmitted {
@@ -6036,7 +5981,174 @@ impl WakuBackend {
             };
             driver.prompt(prompt);
         }
-        Ok(session_id)
+        Ok(())
+    }
+
+    /// The project row an agent task runs in — an existing project resolves
+    /// by its canonical path; an unknown path registers only as a primary
+    /// checkout (linked worktrees can never be projects).
+    fn register_agent_project(&self, project: &Path) -> anyhow::Result<(Uuid, PathBuf)> {
+        let mut state = self.task_state.lock();
+        match state
+            .projects
+            .iter()
+            .find(|existing| dunce::canonicalize(&existing.path).is_ok_and(|path| path == project))
+            .map(|existing| (existing.id, existing.path.clone()))
+        {
+            Some(found) => Ok(found),
+            None => {
+                if crate::worktree::is_linked_worktree(project) {
+                    bail!(
+                        "{} is a Git worktree; only primary checkouts can be registered as projects",
+                        project.display()
+                    );
+                }
+                let registered = Project::from_path(project.to_path_buf());
+                let found = (registered.id, registered.path.clone());
+                state.projects.push(registered);
+                self.task_store.save(&mut state)?;
+                Ok(found)
+            }
+        }
+    }
+
+    /// Resolve one `agent create`/summon selection to a canonical provider
+    /// plus the concrete model id the admission queue counts — routing,
+    /// inheritance, and catalog defaults run here, never at dispatch.
+    /// `strict_effort` rejects an explicit effort the resolved model's
+    /// catalog does not list (summons and `setModel` are machine-written
+    /// configuration; `agent create` keeps its pass-through).
+    fn resolve_agent_task_selection(
+        &self,
+        sender: Option<Uuid>,
+        selection: &AgentCreateSelection,
+        project: &Path,
+        prompt_text: &str,
+        strict_effort: bool,
+    ) -> anyhow::Result<ResolvedAgentSelection> {
+        // Fields the payload omits inherit the sending task's configuration,
+        // but only while it runs the resolved provider — a different
+        // provider's model and trait vocabularies may not carry over.
+        let sender_config = sender.and_then(|id| {
+            self.task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .map(|session| {
+                    (
+                        session.provider,
+                        session.model.clone(),
+                        session.reasoning_effort.clone(),
+                        session.service_tier.clone(),
+                        session.context_window.clone(),
+                        (session.runtime_mode, session.environment()),
+                    )
+                })
+        });
+        // `"auto"` hands provider and model selection to the same routing
+        // pass `RouteTask` serves an Auto draft; when the eval backend
+        // cannot answer it lands on the last-used target instead of
+        // failing, so it never blocks a create.
+        let routed = match selection.model.as_deref().map(str::trim) {
+            Some("auto") => {
+                if selection.provider.is_some() {
+                    bail!("`model: \"auto\"` routes the provider too; omit `provider`");
+                }
+                Some(self.route_agent_task(project, prompt_text))
+            }
+            _ => None,
+        };
+        let provider = routed
+            .as_ref()
+            .map(|run| run.decision.target.provider)
+            .or(selection.provider)
+            .or(sender_config.as_ref().map(|config| config.0))
+            .ok_or_else(|| {
+                anyhow!("`provider` is required when no sending task is known to inherit from")
+            })?;
+        // Access posture is not provider vocabulary: a sandboxed or
+        // full-access task's spawned work keeps its containment whatever
+        // provider it resolves to.
+        let (sender_mode, sender_environment) = sender_config
+            .as_ref()
+            .map(|config| config.5)
+            .unwrap_or_default();
+        let sender_config = sender_config.filter(|config| config.0 == provider);
+        let model = match (&routed, selection.model.as_deref().map(str::trim)) {
+            (Some(run), _) => run.decision.target.model.clone(),
+            (None, Some("" | "default")) => None,
+            (None, Some(model)) => Some(model.to_owned()),
+            (None, None) => sender_config.as_ref().and_then(|config| config.1.clone()),
+        };
+        let (inherited_effort, inherited_tier, inherited_window) = sender_config
+            .map(|config| (config.2, config.3, config.4))
+            .unwrap_or_default();
+        // The resolved model's catalog entry bounds which inherited traits
+        // still apply; an empty or missing entry cannot constrain them.
+        let catalog = crate::model_catalog::cached_models(provider)
+            .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
+        let catalog_model = match model.as_deref() {
+            Some(requested) => {
+                waku_protocol::model_catalog::packed_catalog_model(&catalog, requested, provider)
+                    .map(|matched| matched.model)
+            }
+            None => catalog
+                .iter()
+                .find(|entry| entry.is_default)
+                .or_else(|| catalog.first()),
+        };
+        // A summon's explicit effort is machine-written configuration like
+        // `setModel`'s: fail the summon when the resolved model's catalog
+        // lists efforts and does not include it, rather than silently run
+        // the employee at another effort. `agent create` keeps its
+        // pass-through for ids a stale catalog may not list yet.
+        if strict_effort
+            && let Some(effort) = selection.reasoning_effort.as_deref().map(str::trim)
+            && !matches!(effort, "" | "default")
+            && let Some(model) = catalog_model
+            && !model.reasoning_efforts.is_empty()
+            && !model
+                .reasoning_efforts
+                .iter()
+                .any(|option| option.id == effort)
+        {
+            bail!("reasoning effort {effort:?} is not supported by model {:?}", model.id);
+        }
+        let reasoning_effort = resolve_agent_trait(
+            selection.reasoning_effort.clone().or_else(|| {
+                routed
+                    .as_ref()
+                    .and_then(|run| run.decision.target.effort.clone())
+            }),
+            inherited_effort
+                .map(|value| waku_protocol::model_catalog::normalize_reasoning_effort(&value)),
+            catalog_model.map(|model| model.reasoning_efforts.as_slice()),
+            catalog_model.and_then(|model| model.default_reasoning_effort.as_deref()),
+        );
+        let service_tier = resolve_agent_trait(
+            selection.service_tier.clone(),
+            inherited_tier,
+            catalog_model.map(|model| model.service_tiers.as_slice()),
+            catalog_model.and_then(|model| model.default_service_tier.as_deref()),
+        );
+        let context_window = resolve_agent_trait(
+            selection.context_window.clone(),
+            inherited_window,
+            catalog_model.map(|model| model.context_windows.as_slice()),
+            catalog_model.and_then(|model| model.default_context_window.as_deref()),
+        );
+        Ok(ResolvedAgentSelection {
+            provider,
+            model,
+            concrete_model: catalog_model.map(|model| model.id.clone()),
+            reasoning_effort,
+            service_tier,
+            context_window,
+            routed,
+            sender_mode,
+            sender_environment,
+        })
     }
 
     /// The session's first prompt already went out clean; its context
@@ -6628,85 +6740,79 @@ impl WakuBackend {
                 base_branch,
                 permissions,
                 work_goal,
+                resources,
+                allow_burst,
+                group_id,
+                priority,
+                goal_id,
+                request_id,
             } => {
                 let _lock = self.boss.operation_lock.lock();
-                let supervisor = caller
-                    .or(self.boss.document().session_id)
-                    .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
-                let employee = self.boss.prepare_employee(
-                    supervisor,
+                self.summon_employee(
+                    caller,
                     persona_id,
                     job_title,
-                    permissions,
-                    work_goal,
-                )?;
-                let id = employee.session_id;
-                // Kept for the supervisor's transcript marker — `employee`
-                // itself moves into the task creation below.
-                let employee_name = employee.identity.name.clone();
-                let employee_title = employee.job_title.clone();
-                let selection = AgentCreateSelection {
+                    prompt,
+                    project,
                     provider,
                     model,
-                    title: Some(employee.identity.name.clone()),
                     reasoning_effort,
-                    service_tier: None,
-                    context_window: None,
-                };
-                match self.create_agent_task_inner(
-                    Some(supervisor),
-                    selection,
-                    PathBuf::from(project),
-                    workspace.unwrap_or_default(),
+                    workspace,
                     base_branch,
-                    AgentTaskPrompt::Assignment(prompt),
+                    permissions,
+                    work_goal,
+                    resources,
+                    allow_burst,
+                    group_id,
+                    priority,
+                    goal_id,
+                    request_id,
                     events,
-                    Some(employee),
-                    None,
-                ) {
-                    Ok(session_id) => {
-                        // A summon marker lands in the supervisor's own
-                        // transcript at this turn's anchor — the desktop
-                        // renders it as the live employee card instead of a
-                        // plain activity row, with the employee's session id
-                        // in `arguments`.
-                        let mut marker = crate::model::ActivityItem::new(
-                            None,
-                            crate::model::ActivityKind::Tool,
-                            format!("Summoned {employee_name} — {employee_title}"),
-                            None,
-                            true,
-                        )
-                        .with_tool_name(Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME));
-                        marker.arguments = Some(session_id.to_string());
-                        let event = DriverEvent::RichActivity(marker);
-                        record_boss_event(
-                            &self.task_state,
-                            &self.task_store,
-                            supervisor,
-                            &event,
-                        )?;
-                        let _ = events.send(event_to_wire(event)?);
-                        Ok(BossResult::Summoned { session_id })
-                    }
-                    Err(error) => {
-                        // A failed launch may already have persisted a task.
-                        if self.boss.is_employee(id) {
-                            record_boss_event(
-                                &self.task_state,
-                                &self.task_store,
-                                id,
-                                &DriverEvent::Error(format!("Employee launch failed: {error:#}")),
-                            )?;
-                            self.finish_boss_employee(id)?;
-                        }
-                        Err(error)
-                    }
-                }
+                )
             }
             BossOperation::Control { session_id, action } => {
                 let _operation = self.boss.operation_lock.lock();
                 self.boss.require_control(caller, session_id)?;
+                use waku_protocol::boss::EmployeeLifecycle;
+                match self.boss.employee_lifecycle(session_id) {
+                    Some(EmployeeLifecycle::Queued) => {
+                        return self.control_queued_employee(caller, session_id, action);
+                    }
+                    Some(EmployeeLifecycle::Dispatching) => {
+                        // Mid-launch: prompts park in the mirrored queue and
+                        // drain once the runtime lands; stop unwinds the
+                        // in-flight grant; everything else retries against
+                        // a settled state.
+                        return match action {
+                            EmployeeControl::Prompt { prompt } => {
+                                if prompt.trim().is_empty() {
+                                    bail!("employee prompts cannot be empty");
+                                }
+                                self.queue_agent_prompt(session_id, prompt, caller, events)?;
+                                Ok(BossResult::Saved)
+                            }
+                            EmployeeControl::Stop => {
+                                record_boss_event(
+                                    &self.task_state,
+                                    &self.task_store,
+                                    session_id,
+                                    &DriverEvent::TurnFinished {
+                                        success: false,
+                                        summary: Some("Cancelled during dispatch".into()),
+                                        summary_i18n: None,
+                                    },
+                                )?;
+                                self.finish_boss_employee(session_id)?;
+                                Ok(BossResult::Saved)
+                            }
+                            _ => bail!("employee is dispatching — retry once it is working"),
+                        };
+                    }
+                    Some(EmployeeLifecycle::Finishing) => {
+                        bail!("employee is finishing; summon a fresh employee")
+                    }
+                    _ => {}
+                }
                 if let EmployeeControl::SetModel {
                     provider,
                     model,
@@ -6752,15 +6858,35 @@ impl WakuBackend {
                         })
                         .transpose()?
                         .flatten();
-                    let current_provider = self
+                    let model_id = selected.model.id.clone();
+                    let current = self
                         .task_state
                         .lock()
                         .sessions
                         .iter()
                         .find(|session| session.id == session_id)
-                        .map(|session| session.provider)
+                        .map(|session| (session.provider, session.model.clone()))
                         .ok_or_else(|| anyhow!("employee session is missing"))?;
-                    let provider_changed = current_provider != *provider;
+                    let model_changed =
+                        current.0 != *provider || current.1.as_deref() != Some(model_id.as_str());
+                    // A different provider+model pair is a different
+                    // capacity claim — the employee re-enters admission
+                    // against the new cap rather than jumping between
+                    // pools mid-flight.
+                    if model_changed {
+                        self.requeue_employee(session_id, |ticket, _started| {
+                            ticket.provider = *provider;
+                            ticket.model = model_id;
+                            ticket.reasoning_effort = effort.clone();
+                        })?;
+                        let removed = self.sessions.lock().remove(&session_id);
+                        if let Some(entry) = &removed {
+                            entry.driver.begin_shutdown();
+                        }
+                        drop_detached(removed);
+                        self.agent.revoke_session(session_id);
+                        return Ok(BossResult::Saved);
+                    }
                     let runtime = self
                         .sessions
                         .lock()
@@ -6771,24 +6897,23 @@ impl WakuBackend {
                             driver.cancel();
                         }
                     }
-                    let applied_in_place = !provider_changed
-                        && runtime.as_ref().is_some_and(|driver| {
-                            let mode = self
-                                .task_state
-                                .lock()
-                                .sessions
-                                .iter()
-                                .find(|session| session.id == session_id)
-                                .map(|session| session.runtime_mode)
-                                .unwrap_or_default();
-                            driver.apply_options(crate::driver::SessionOptions {
-                                mode,
-                                model: Some(selected.model.id.clone()),
-                                reasoning_effort: effort.clone(),
-                                service_tier: None,
-                                context_window: None,
-                            })
-                        });
+                    let applied_in_place = runtime.as_ref().is_some_and(|driver| {
+                        let mode = self
+                            .task_state
+                            .lock()
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == session_id)
+                            .map(|session| session.runtime_mode)
+                            .unwrap_or_default();
+                        driver.apply_options(crate::driver::SessionOptions {
+                            mode,
+                            model: Some(model_id.clone()),
+                            reasoning_effort: effort.clone(),
+                            service_tier: None,
+                            context_window: None,
+                        })
+                    });
                     {
                         let mut state = self.task_state.lock();
                         let session = state
@@ -6797,21 +6922,12 @@ impl WakuBackend {
                             .find(|session| session.id == session_id)
                             .ok_or_else(|| anyhow!("employee session is missing"))?;
                         session.provider = *provider;
-                        session.model = Some(selected.model.id.clone());
+                        session.model = Some(model_id);
                         session.reasoning_effort = effort;
                         session.service_tier = None;
                         session.context_window = None;
                         session.auto_route = false;
                         session.route_decision = None;
-                        if provider_changed {
-                            session.provider_cursor = None;
-                            session.provider_session_id = None;
-                            session.pending_provider_context = Some(format!(
-                                "This employee was switched to {} / {}. Continue with the existing task context. Read the prior transcript with `goddard-agent read '{{}}'` and relevant turns with `goddard-agent read '{{\"turn\": N}}'` before relying on earlier details.",
-                                provider.display_name(),
-                                selected.model.name
-                            ));
-                        }
                         session.updated_at = crate::model::unix_time();
                         state.mark_session_dirty(session_id);
                         self.task_store.save(&mut state)?;
@@ -6822,8 +6938,6 @@ impl WakuBackend {
                             entry.driver.begin_shutdown();
                         }
                         drop_detached(removed);
-                    }
-                    if provider_changed || !applied_in_place {
                         self.agent.revoke_session(session_id);
                     }
                     return Ok(BossResult::Saved);
@@ -6849,9 +6963,11 @@ impl WakuBackend {
                         events,
                     );
                 }
-                // A prompt or steer to a finished employee resumes the same
-                // transcript. A steer has no open turn to fold into, so it
-                // becomes the next queued prompt. Stop remains live-only.
+                // A prompt or steer to a finished employee re-enters
+                // admission with the same transcript — the ticket resumes
+                // it once capacity frees; a steer has no open turn to
+                // fold into, so it becomes the next queued prompt. Stop
+                // remains live-only.
                 let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
                     || self
                         .boss
@@ -6859,17 +6975,32 @@ impl WakuBackend {
                         .retired_employees
                         .iter()
                         .any(|e| e.session_id == session_id);
-                if let EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } =
-                    &action
-                {
-                    if prompt.trim().is_empty() {
-                        bail!("employee prompts cannot be empty");
-                    }
-                    self.boss.resurrect(session_id)?;
-                }
-                if was_expired && let EmployeeControl::Steer { prompt } = &action {
-                    self.queue_agent_prompt(session_id, prompt.clone(), caller, events)?;
-                    return Ok(BossResult::Saved);
+                if was_expired {
+                    return match &action {
+                        EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } => {
+                            if prompt.trim().is_empty() {
+                                bail!("employee prompts cannot be empty");
+                            }
+                            let prompt = prompt.clone();
+                            self.requeue_employee(session_id, |ticket, started| {
+                                // A session that already ran replays the
+                                // prompt as a new turn behind its parked
+                                // backlog — the transcript owns the
+                                // original envelope, so the ticket's copy
+                                // goes; a never-launched shell folds the
+                                // prompt into the envelope instead.
+                                if started {
+                                    ticket.prompt.clear();
+                                    ticket.pending_prompts.push(prompt);
+                                } else {
+                                    ticket.prompt = prompt;
+                                    ticket.pending_prompts.clear();
+                                }
+                            })?;
+                            Ok(BossResult::Saved)
+                        }
+                        _ => bail!("employee has expired; prompt or steer can resume it"),
+                    };
                 }
                 self.boss.require_active(session_id)?;
                 match action {
@@ -6975,6 +7106,21 @@ impl WakuBackend {
                     ),
                 })
             }
+            BossOperation::SetResourcePolicy {
+                expected_revision,
+                model_limits,
+                host,
+            } => {
+                let _lock = self.boss.operation_lock.lock();
+                let policy =
+                    self.boss
+                        .set_resource_policy(caller, expected_revision, model_limits, host)?;
+                if let Some(host) = &policy.host {
+                    self.resource_broker()?.set_policy(host)?;
+                }
+                self.wake_summon_queue();
+                Ok(BossResult::ResourcePolicySet { policy })
+            }
             BossOperation::Eval { script } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can eval boss scripts");
@@ -7040,9 +7186,26 @@ impl WakuBackend {
     }
 
     pub(crate) fn finish_boss_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
-        let Some(employee) = self.boss.expire(session_id)? else {
+        // `finishing` persists while the teardown runs — the model slot
+        // stays claimed through shutdown, so a crash mid-finish leaves a
+        // reconciling record instead of a leaked or double-counted slot.
+        let Some(employee) = self.boss.begin_finishing(session_id)? else {
             return Ok(());
         };
+        self.finish_boss_employee_tail(session_id, &employee)
+    }
+
+    /// The teardown after `begin_finishing` — also driven directly by
+    /// restart recovery for records already parked at `finishing`. The
+    /// steps tolerate a resumed run: teardown no-ops on a missing
+    /// runtime, `complete_expiry` takes the reservation exactly once,
+    /// and the report goes out only while the record can still be read
+    /// as finishing.
+    fn finish_boss_employee_tail(
+        &self,
+        session_id: Uuid,
+        employee: &waku_protocol::boss::BossEmployee,
+    ) -> anyhow::Result<()> {
         self.integrations.revoke_task(session_id);
         self.agent.clear_session(session_id);
         let removed = self.sessions.lock().remove(&session_id);
@@ -7061,6 +7224,17 @@ impl WakuBackend {
             sink.end_session_runtime();
         }
         drop_detached(removed);
+        // Capacity releases exactly once, after the runtime is gone —
+        // `complete_expiry` hands back the ticket's reservation only on
+        // the winning expiry, and the broker's release keeps resident
+        // devices under their own retention rules. Waking the scheduler
+        // is what pulls the next queued ticket forward.
+        if let Some(reservation) = self.boss.complete_expiry(session_id)?
+            && let Ok(broker) = self.resource_broker()
+        {
+            broker.release_admission(session_id, reservation);
+        }
+        self.wake_summon_queue();
         let (body, failed, chunk) = {
             let mut state = self.task_state.lock();
             let session = state
@@ -7299,6 +7473,970 @@ impl WakuBackend {
         Ok(BossResult::Saved)
     }
 
+    // ---- Summon queue: admission, dispatch, recovery ----
+
+    /// Spawn the summon scheduler once — the worker every queue wake and
+    /// the bounded reconciliation tick share. Nothing here holds
+    /// `operation_lock`; admission decisions serialize through
+    /// `BossService::update` and the broker's authority lock.
+    fn start_summon_scheduler(&self) {
+        use std::sync::atomic::Ordering;
+        let Some(backend) = self.boss.backend() else {
+            // Not bound yet — `start_automations` runs us once it is.
+            return;
+        };
+        if !self.boss.is_active() || self.summon_scheduler_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let backend = Arc::downgrade(&backend);
+        let wake = self.summon_wake.clone();
+        let _ = std::thread::Builder::new()
+            .name("summon-scheduler".into())
+            .spawn(move || {
+                loop {
+                    let Some(backend) = backend.upgrade() else {
+                        return;
+                    };
+                    backend.run_summon_scheduler();
+                    let queued = !backend.boss.queued_heads().is_empty();
+                    let (lock, condvar) = &*wake;
+                    let mut signaled = lock.lock();
+                    // Queued tickets get a bounded tick so broker-side changes
+                    // no daemon event announces — a freed device, an external
+                    // release — still reach the queue. An idle queue parks.
+                    let timeout = if queued {
+                        SUMMON_RECONCILE_INTERVAL
+                    } else {
+                        std::time::Duration::from_secs(3600)
+                    };
+                    // A wake that landed mid-pass already set the flag —
+                    // honoring it before parking keeps the queue prompt.
+                    if !*signaled {
+                        condvar.wait_for(&mut signaled, timeout);
+                    }
+                    *signaled = false;
+                }
+            });
+    }
+
+    /// The host resource broker — or the test-rooted ledger a backend was
+    /// pointed at.
+    fn resource_broker(&self) -> anyhow::Result<crate::resource_broker::Broker> {
+        match self.broker_root.lock().clone() {
+            Some(root) => Ok(crate::resource_broker::Broker::at(root)),
+            None => crate::resource_broker::Broker::host(),
+        }
+    }
+
+    /// Wake the scheduler for one dispatch pass — call after enqueueing a
+    /// ticket, releasing a slot, or changing policy or a queued selection.
+    /// Without a scheduler thread (tests never bind the backend's `Arc`)
+    /// the pass runs inline, so admissions still land before the op
+    /// returns.
+    fn wake_summon_queue(&self) {
+        self.start_summon_scheduler();
+        if self
+            .summon_scheduler_started
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            let (lock, condvar) = &*self.summon_wake;
+            *lock.lock() = true;
+            condvar.notify_all();
+        } else {
+            self.run_summon_scheduler();
+        }
+    }
+
+    /// One full dispatch pass: every queue group's head attempts an atomic
+    /// admission grant; a granted head launches, a denied head records its
+    /// wait reason and stalls only its own group. Repeats while progress
+    /// is made — a dispatch exposes the group's next entry, which may be
+    /// grantable on a different model.
+    pub(crate) fn run_summon_scheduler(&self) {
+        // The boss document owns the policy; the broker's file follows it
+        // when one was set — a crash between the two writes reconciles
+        // here rather than dispatching under a stale host policy.
+        if let Some(host) = self.boss.document().resource_policy.host
+            && let Ok(broker) = self.resource_broker()
+            && broker.policy().is_ok_and(|current| current != host)
+            && let Err(error) = broker.set_policy(&host)
+        {
+            eprintln!("could not reconcile host resource policy: {error:#}");
+        }
+        self.deliver_dispatch_notifications();
+        loop {
+            let heads = self.boss.queued_heads();
+            if heads.is_empty() {
+                return;
+            }
+            let mut progressed = false;
+            for employee in heads {
+                match self.dispatch_queued_head(&employee) {
+                    Ok(true) => progressed = true,
+                    Ok(false) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "summon dispatch for {} failed: {error:#}",
+                            employee.session_id
+                        );
+                    }
+                }
+            }
+            if !progressed {
+                return;
+            }
+        }
+    }
+
+    /// Try one head-of-line ticket: atomic model+resource grant through
+    /// the broker, then the persisted launch outside every lock. A grant
+    /// the state transition rejects is released immediately — stale
+    /// generation, cancelled ticket.
+    fn dispatch_queued_head(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+    ) -> anyhow::Result<bool> {
+        let Some(ticket) = employee.ticket.clone() else {
+            return Ok(false);
+        };
+        let session_id = employee.session_id;
+        let rule = self.boss.model_limit(ticket.provider, &ticket.model);
+        let claim = waku_protocol::resources::AdmissionClaim {
+            daemon: self.boss.document().identity.id,
+            provider: ticket.provider.id().to_owned(),
+            model: ticket.model.clone(),
+            live_limit: rule
+                .as_ref()
+                .map(|rule| rule.live_limit)
+                .unwrap_or(u32::MAX),
+            hard_cap: rule.as_ref().map(|rule| rule.hard_cap).unwrap_or(u32::MAX),
+            allow_burst: ticket.allow_burst,
+        };
+        // The reservation key is stable per generation, so a retry after a
+        // lost response or a restart re-issues instead of double-claiming.
+        let reservation_id = Uuid::from_u128(session_id.as_u128() ^ u128::from(ticket.generation));
+        let attempt = self.resource_broker().and_then(|broker| {
+            broker.try_admission(
+                session_id,
+                reservation_id,
+                ticket.resources.clone(),
+                employee.job_title.clone(),
+                claim,
+            )
+        });
+        let attempt = match attempt {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                // Validation-level failures mean the accepted set became
+                // impossible — hold the ticket pending with the reason
+                // until it is edited, canceled, or policy changes.
+                self.boss.record_blocked(
+                    session_id,
+                    vec![waku_protocol::boss::AdmissionBlocker::HostResources {
+                        detail: format!("{error:#}"),
+                    }],
+                )?;
+                return Ok(false);
+            }
+        };
+        if !attempt.granted {
+            self.boss.record_blocked(session_id, attempt.blockers)?;
+            return Ok(false);
+        }
+        if !self
+            .boss
+            .mark_dispatching(session_id, ticket.generation, Some(reservation_id))?
+        {
+            // A stop or re-admission settled the generation mid-grant —
+            // drop the claims; nobody else will.
+            if let Ok(broker) = self.resource_broker() {
+                broker.release_admission(session_id, reservation_id);
+            }
+            return Ok(false);
+        }
+        match self.dispatch_employee(employee, &ticket) {
+            Ok(resumed) => {
+                if !self.boss.mark_working(session_id, ticket.generation)? {
+                    // Stopped or re-admitted while the launch ran — the
+                    // finish path already reclaimed the slot; tear down
+                    // the runtime this launch just started.
+                    let removed = self.sessions.lock().remove(&session_id);
+                    if let Some(entry) = &removed {
+                        entry.driver.begin_shutdown();
+                    }
+                    drop_detached(removed);
+                    return Ok(false);
+                }
+                if resumed {
+                    // The envelope parked in the daemon queue while the
+                    // ticket was dispatching — drain it in order now that
+                    // the record reads working.
+                    let events = self.event_source.lock().clone();
+                    let (_runtime, driver) = self.ensure_agent_runtime(session_id, &events)?;
+                    self.drain_agent_queue(session_id, &driver, &events)?;
+                }
+                // The envelope has been adopted — the transcript owns it
+                // now, and a later requeue must not replay it.
+                let _ = self.boss.update(|state| {
+                    if let Some(entry) = state
+                        .employees
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                        && let Some(ticket) = &mut entry.ticket
+                    {
+                        ticket.prompt.clear();
+                        ticket.pending_prompts.clear();
+                    }
+                    Ok(())
+                });
+                self.boss.outbox_push(
+                    session_id,
+                    ticket.generation,
+                    ticket.provider,
+                    ticket.model.clone(),
+                    ticket.goal_id,
+                )?;
+                self.deliver_dispatch_notifications();
+                Ok(true)
+            }
+            Err(error) => {
+                let _ = record_boss_event(
+                    &self.task_state,
+                    &self.task_store,
+                    session_id,
+                    &DriverEvent::Error(format!("Employee launch failed: {error:#}")),
+                );
+                // `dispatching -> expired`: the blocker rides the finish
+                // report so the supervisor hears why the job died, and the
+                // summon RPC surfaces an immediate failure as an error.
+                let _ = self.boss.update(|state| {
+                    if let Some(entry) = state
+                        .employees
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                    {
+                        entry.blocker = Some(format!("Employee launch failed: {error:#}"));
+                    }
+                    Ok(())
+                });
+                self.finish_boss_employee(session_id)?;
+                Ok(true)
+            }
+        }
+    }
+
+    /// The persisted launch for a granted ticket. Fresh summons adopt the
+    /// envelope — assignment plus every prompt parked while queued — onto
+    /// the shell and start the provider; re-admitted employees (revival,
+    /// setModel) park their ticket prompts so the caller can drain them in
+    /// order once `mark_working` lands. Deferred launch revalidates the
+    /// mutable parts: the project path and the worktree fork happen now,
+    /// not at admission. Returns `true` when the session resumed rather
+    /// than cold-started.
+    fn dispatch_employee(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> anyhow::Result<bool> {
+        let session_id = employee.session_id;
+        let events = self.event_source.lock().clone();
+        let started = {
+            let mut state = self.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            self.task_store.hydrate(&mut state.sessions[index])?;
+            state.sessions[index].has_started()
+        };
+        if started {
+            for prompt in std::iter::once(ticket.prompt.clone())
+                .chain(ticket.pending_prompts.iter().cloned())
+                .filter(|prompt| !prompt.trim().is_empty())
+            {
+                self.queue_agent_prompt(session_id, prompt, Some(employee.supervisor_id), &events)?;
+            }
+            return Ok(true);
+        }
+        let project = dunce::canonicalize(Path::new(&ticket.project))
+            .with_context(|| format!("project path {} does not exist", ticket.project))?;
+        let (project_id, project_path) = self.register_agent_project(&project)?;
+        let created = match ticket.workspace.unwrap_or_default() {
+            AgentWorkspace::Local => None,
+            AgentWorkspace::Worktree => Some(crate::worktree::create(
+                &project_path,
+                None,
+                ticket.base_branch.as_deref(),
+                false,
+                &[],
+            )?),
+        };
+        let workspace = match &created {
+            Some(worktree) => SessionWorkspace::Worktree {
+                path: worktree.path.clone(),
+                name: worktree.name.clone(),
+                branch: None,
+                base_branch: ticket.base_branch.clone(),
+            },
+            None => SessionWorkspace::Local,
+        };
+        let envelope = std::iter::once(ticket.prompt.clone())
+            .chain(ticket.pending_prompts.iter().cloned())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let prompt = AgentTaskPrompt::Assignment(envelope).resolve(&workspace, &project_path);
+        let turn_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        {
+            let mut state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            self.task_store.hydrate(session)?;
+            session.project_id = project_id;
+            session.provider = ticket.provider;
+            session.model = Some(ticket.model.clone());
+            session.reasoning_effort = ticket.reasoning_effort.clone();
+            session.workspace = workspace;
+            session.adopt_submitted_prompt(
+                &prompt,
+                turn_id,
+                message_id,
+                Some(employee.supervisor_id),
+                false,
+            );
+            session.updated_at = crate::model::unix_time();
+            state.mark_session_dirty(session_id);
+            self.task_store.save(&mut state)?;
+        }
+        self.launch_prepared_session(
+            session_id,
+            turn_id,
+            message_id,
+            prompt,
+            Some(employee.supervisor_id),
+            &events,
+        )?;
+        Ok(false)
+    }
+
+    /// Deliver durable dispatch notifications to their supervisors.
+    /// `delivered` means durably parked in the supervisor's prompt queue —
+    /// a restart re-drives undelivered entries and both the session's
+    /// parked mirror and its delivered messages dedupe on the derived
+    /// message id, so a lost response can never duplicate the notice.
+    fn deliver_dispatch_notifications(&self) {
+        let pending = self.boss.outbox_pending();
+        if pending.is_empty() {
+            return;
+        }
+        let events = self.event_source.lock().clone();
+        for note in pending {
+            let Some(employee) = self.boss.employee(note.session_id) else {
+                let _ = self.boss.outbox_mark_delivered(note.id);
+                continue;
+            };
+            let Some(target) = self.boss.report_target(&employee) else {
+                continue;
+            };
+            let queued_id = Uuid::from_u128(0xD15A7C4D_u128 << 96 | u128::from(note.id));
+            {
+                let mut state = self.task_state.lock();
+                let already = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == target)
+                    .and_then(|session| {
+                        self.task_store.hydrate(session).ok()?;
+                        let parked = session
+                            .queued_messages
+                            .iter()
+                            .any(|queued| queued.id == queued_id);
+                        let delivered = session
+                            .messages
+                            .iter()
+                            .any(|message| message.id == queued_id);
+                        Some(parked || delivered)
+                    })
+                    .unwrap_or(false);
+                if already {
+                    let _ = self.boss.outbox_mark_delivered(note.id);
+                    continue;
+                }
+            }
+            let prompt = format!(
+                "Employee {} ({}) has started working on {} / {}.",
+                employee.identity.name,
+                note.session_id,
+                note.provider.display_name(),
+                note.model
+            );
+            if self
+                .queue_agent_prompt_with_id(
+                    target,
+                    prompt,
+                    Some(note.session_id),
+                    true,
+                    Some(queued_id),
+                    &events,
+                )
+                .is_ok()
+            {
+                let _ = self.boss.outbox_mark_delivered(note.id);
+            }
+        }
+    }
+
+    /// Restart reconciliation for one interrupted employee. Queued records
+    /// never reach here. `dispatching` consults the persisted turn
+    /// identity: a session whose first prompt already adopted finishes as
+    /// interrupted like any working employee, while an unstarted launch
+    /// reverts to the queue — replaying it would double-dispatch, and
+    /// reporting it would mourn a job that never ran.
+    pub(crate) fn recover_boss_employee(
+        &self,
+        entry: &waku_protocol::boss::BossEmployee,
+    ) -> anyhow::Result<()> {
+        use waku_protocol::boss::EmployeeLifecycle;
+        match entry.lifecycle() {
+            EmployeeLifecycle::Dispatching => {
+                let started = self
+                    .task_state
+                    .lock()
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == entry.session_id)
+                    .is_some_and(|session| session.has_started());
+                if started {
+                    let _ = self.boss.update(|state| {
+                        if let Some(employee) = state
+                            .employees
+                            .iter_mut()
+                            .find(|candidate| candidate.session_id == entry.session_id)
+                        {
+                            if employee.blocker.is_none() {
+                                employee.blocker = Some("interrupted by a daemon restart".into());
+                            }
+                        }
+                        Ok(())
+                    });
+                    self.finish_boss_employee(entry.session_id)
+                } else {
+                    self.boss.revert_dispatch(entry.session_id)?;
+                    self.wake_summon_queue();
+                    Ok(())
+                }
+            }
+            EmployeeLifecycle::Finishing => self.finish_boss_employee_tail(entry.session_id, entry),
+            _ => self.finish_boss_employee(entry.session_id),
+        }
+    }
+
+    /// `summon`: validate and resolve everything before accepting —
+    /// caller, persona, grants, prompt, project, resource shape, and a
+    /// concrete provider+model — then persist the one admission ticket:
+    /// employee record, task shell, and queue sequence. Capacity is a
+    /// wait reason, never an RPC error: the answer is `queued` (or the
+    /// state the ticket reached before the bounded wait elapsed), and
+    /// the scheduler claims a slot and launches asynchronously.
+    #[allow(clippy::too_many_arguments)]
+    fn summon_employee(
+        &self,
+        caller: Option<Uuid>,
+        persona_id: Uuid,
+        job_title: String,
+        prompt: String,
+        project: String,
+        provider: Option<ProviderKind>,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+        workspace: Option<AgentWorkspace>,
+        base_branch: Option<String>,
+        permissions: Option<waku_protocol::boss::PermissionOverrides>,
+        work_goal: waku_protocol::boss::EmployeeGoal,
+        resources: Option<waku_protocol::resources::ResourceSet>,
+        allow_burst: bool,
+        group_id: Option<String>,
+        priority: Option<i64>,
+        goal_id: Option<Uuid>,
+        request_id: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        let supervisor = caller
+            .or(self.boss.document().session_id)
+            .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
+        if prompt.trim().is_empty() {
+            bail!("agent sessions require a prompt");
+        }
+        let fingerprint = serde_json::to_string(&serde_json::json!({
+            "personaId": persona_id, "jobTitle": job_title, "prompt": prompt,
+            "project": project, "provider": provider, "model": model,
+            "reasoningEffort": reasoning_effort, "workspace": workspace,
+            "baseBranch": base_branch, "permissions": permissions,
+            "workGoal": work_goal, "resources": resources,
+            "allowBurst": allow_burst, "groupId": group_id,
+            "priority": priority, "goalId": goal_id,
+        }))?;
+        if let Some(request_id) = request_id
+            && let Some(existing) = self
+                .boss
+                .document()
+                .employees
+                .iter()
+                .find(|entry| entry.request_id == Some(request_id))
+                .cloned()
+        {
+            if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+                // Lost-response retry — the original admission stands.
+                return self.summoned_result(existing.session_id);
+            }
+            bail!("requestId was already used for a different summon");
+        }
+        let mut employee = self.boss.prepare_employee(
+            supervisor,
+            persona_id,
+            job_title,
+            permissions,
+            work_goal,
+        )?;
+        let selection = AgentCreateSelection {
+            provider,
+            model,
+            title: Some(employee.identity.name.clone()),
+            reasoning_effort,
+            service_tier: None,
+            context_window: None,
+        };
+        let resolved = self.resolve_agent_task_selection(
+            Some(supervisor),
+            &selection,
+            Path::new(&project),
+            &prompt,
+            true,
+        )?;
+        // A ticket counts a concrete provider+model pair — never an
+        // ambiguous `default` bucket. When neither the request nor the
+        // catalog names one, the summoner must say so explicitly.
+        let model_id = resolved
+            .model
+            .clone()
+            .or_else(|| resolved.concrete_model.clone())
+            .ok_or_else(|| {
+                anyhow!("could not resolve a concrete model — pass `model` explicitly")
+            })?;
+        let resources = resources.unwrap_or_default();
+        if !resource_set_empty(&resources) {
+            self.resource_broker()?.validate_set(&resources)?;
+        }
+        let ticket = waku_protocol::boss::SummonTicket {
+            sequence: 0,
+            generation: 1,
+            provider: resolved.provider,
+            model: model_id,
+            reasoning_effort: resolved.reasoning_effort.clone(),
+            prompt: prompt.clone(),
+            project: project.clone(),
+            workspace,
+            base_branch,
+            resources,
+            allow_burst,
+            pending_prompts: Vec::new(),
+            group_id,
+            priority,
+            goal_id,
+            reservation: None,
+            blocked_by: Vec::new(),
+            dispatch_event: None,
+        };
+        employee.request_id = request_id;
+        employee.request_fingerprint = request_id.map(|_| fingerprint);
+        let employee_name = employee.identity.name.clone();
+        let employee_title = employee.job_title.clone();
+        // The task shell lands before the roster does — a client that
+        // opens the new employee immediately finds the assignment's
+        // session, still unstarted: no worktree, no runtime, no claims.
+        self.create_employee_shell(&employee, &resolved, &ticket)?;
+        let session_id = employee.session_id;
+        if let Err(error) = self.boss.enqueue_ticket(employee, ticket) {
+            self.remove_session_shell(session_id);
+            return Err(error);
+        }
+        // The summon marker lands in the supervisor's transcript now —
+        // the card reads the roster record and shows its queued state
+        // until the ticket dispatches.
+        let mut marker = crate::model::ActivityItem::new(
+            None,
+            crate::model::ActivityKind::Tool,
+            format!("Summoned {employee_name} — {employee_title}"),
+            None,
+            true,
+        )
+        .with_tool_name(Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME));
+        marker.arguments = Some(session_id.to_string());
+        let event = DriverEvent::RichActivity(marker);
+        record_boss_event(&self.task_state, &self.task_store, supervisor, &event)?;
+        let _ = events.send(event_to_wire(event)?);
+        self.wake_summon_queue();
+        // Answer with the state the ticket actually reached — a free slot
+        // dispatches nearly synchronously, so most summons still return
+        // `working`/`dispatching` rather than `queued`.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match self.boss.employee_lifecycle(session_id) {
+                Some(state) if state != waku_protocol::boss::EmployeeLifecycle::Queued => break,
+                _ if std::time::Instant::now() >= deadline => break,
+                _ => std::thread::sleep(std::time::Duration::from_millis(25)),
+            }
+        }
+        let result = self.summoned_result(session_id)?;
+        // A launch that failed inside the wait surfaces as the summon
+        // error it used to be — the ticket is expired either way, and a
+        // supervisor that scripted on failure sees it immediately rather
+        // than in the finish report.
+        if let waku_protocol::boss::BossResult::Summoned {
+            state: waku_protocol::boss::EmployeeLifecycle::Expired,
+            ..
+        } = result
+            && let Some(error) = self
+                .boss
+                .employee(session_id)
+                .and_then(|employee| employee.blocker)
+                .filter(|note| note.starts_with("Employee launch failed"))
+        {
+            bail!("{error}");
+        }
+        Ok(result)
+    }
+
+    /// The `Summoned` payload for the employee's current state —
+    /// `queued` carries position and wait reasons; dispatched states
+    /// carry the resolved selection.
+    fn summoned_result(&self, session_id: Uuid) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::{BossResult, SummonAdmission};
+        let employee = self
+            .boss
+            .employee(session_id)
+            .ok_or_else(|| anyhow!("employee record is missing"))?;
+        Ok(BossResult::Summoned {
+            session_id,
+            state: employee.lifecycle(),
+            admission: employee.ticket.as_ref().map(|ticket| SummonAdmission {
+                provider: ticket.provider,
+                model: ticket.model.clone(),
+                queue_position: self.boss.queue_position(session_id),
+                blocked_by: ticket.blocked_by.clone(),
+            }),
+        })
+    }
+
+    /// The minimal managed task a queued ticket owns: registered project,
+    /// stamped session, resolved selection — but no adopted prompt,
+    /// worktree, runtime, or claims until dispatch.
+    fn create_employee_shell(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        resolved: &ResolvedAgentSelection,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> anyhow::Result<()> {
+        let project = dunce::canonicalize(Path::new(&ticket.project))
+            .with_context(|| format!("project path {} does not exist", ticket.project))?;
+        let (project_id, _) = self.register_agent_project(&project)?;
+        let mut session = AgentSession::new(project_id, resolved.provider);
+        session.id = employee.session_id;
+        session.set_title(&employee.identity.name);
+        session.agent_rename_allowed = false;
+        session.boss_managed = true;
+        session.runtime_mode = resolved.sender_mode;
+        session.environment = resolved.sender_environment;
+        session.model = Some(ticket.model.clone());
+        if let Some(run) = &resolved.routed {
+            session.route_decision = Some(run.decision.clone());
+        }
+        session.reasoning_effort = resolved.reasoning_effort.clone();
+        session.service_tier = resolved.service_tier.clone();
+        session.context_window = resolved.context_window.clone();
+        let mut state = self.task_state.lock();
+        state.push_session(session);
+        self.task_store.save(&mut state)?;
+        Ok(())
+    }
+
+    /// Drop a task shell whose admission never committed — best-effort
+    /// cleanup so an orphan shell cannot surface as a real employee task.
+    fn remove_session_shell(&self, session_id: Uuid) {
+        let mut state = self.task_state.lock();
+        let before = state.sessions.len();
+        state.sessions.retain(|session| session.id != session_id);
+        if state.sessions.len() != before {
+            let _ = self.task_store.save(&mut state);
+        }
+    }
+
+    /// Controls a queued employee's ticket. `prompt` appends durable
+    /// instructions to the dispatch envelope; `steer` cannot steer a turn
+    /// that does not exist; `stop` cancels the pending work; model and
+    /// workspace edits rewrite the ticket in place, keeping its sequence.
+    fn control_queued_employee(
+        &self,
+        caller: Option<Uuid>,
+        session_id: Uuid,
+        action: waku_protocol::boss::EmployeeControl,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::{BossResult, EmployeeControl};
+        match action {
+            EmployeeControl::Prompt { prompt } => {
+                if prompt.trim().is_empty() {
+                    bail!("employee prompts cannot be empty");
+                }
+                if !self.boss.append_queued_prompt(session_id, prompt)? {
+                    bail!("employee is no longer queued");
+                }
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::Steer { .. } => {
+                bail!("employee is queued, not running — steer needs a live turn")
+            }
+            EmployeeControl::Stop => {
+                record_boss_event(
+                    &self.task_state,
+                    &self.task_store,
+                    session_id,
+                    &DriverEvent::TurnFinished {
+                        success: false,
+                        summary: Some("Cancelled while queued".into()),
+                        summary_i18n: None,
+                    },
+                )?;
+                self.finish_boss_employee(session_id)?;
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetModel {
+                provider,
+                model,
+                reasoning_effort,
+                ..
+            } => {
+                let effort = self.validate_employee_model(provider, &model, reasoning_effort)?;
+                if !self.boss.reticket(session_id, |ticket| {
+                    ticket.provider = provider;
+                    ticket.model = model.clone();
+                    ticket.reasoning_effort = effort;
+                })? {
+                    bail!("employee is no longer queued");
+                }
+                self.wake_summon_queue();
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetWorkspace {
+                workspace,
+                base_branch,
+            } => {
+                if matches!(workspace, AgentWorkspace::Worktree)
+                    && base_branch
+                        .as_deref()
+                        .is_none_or(|branch| branch.trim().is_empty())
+                {
+                    bail!("worktree workspaces require a base branch");
+                }
+                if !self.boss.reticket(session_id, |ticket| {
+                    ticket.workspace = Some(workspace);
+                    ticket.base_branch = base_branch.clone();
+                })? {
+                    bail!("employee is no longer queued");
+                }
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetPermissions { permissions } => {
+                self.boss
+                    .set_employee_permissions(caller, session_id, permissions)?;
+                self.boss.reset_context(session_id);
+                Ok(BossResult::Saved)
+            }
+        }
+    }
+
+    /// Re-enter an employee into admission — resurrection and `setModel`
+    /// share it. The durable transition lands first (queued, new
+    /// generation, tail sequence); the caller then tears down the old
+    /// runtime and releases the previous generation's claims, so a crash
+    /// leaves a queued ticket rather than a silently dead slot. Prompts
+    /// parked for the old lifetime move onto the ticket's pending list —
+    /// ahead of whatever this requeue adds — and their mirrored chips
+    /// leave the document so dispatch does not deliver them twice.
+    fn requeue_employee(
+        &self,
+        session_id: Uuid,
+        adjust: impl FnOnce(&mut waku_protocol::boss::SummonTicket, bool),
+    ) -> anyhow::Result<()> {
+        let (base, started) = self.ticket_base_for(session_id)?;
+        let mut parked = Vec::new();
+        {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            {
+                self.task_store.hydrate(session)?;
+                if session
+                    .queued_messages
+                    .iter()
+                    .any(|queued| queued.is_agent_owned())
+                {
+                    parked = session
+                        .queued_messages
+                        .iter()
+                        .filter(|queued| queued.is_agent_owned())
+                        .map(|queued| queued.content.clone())
+                        .collect();
+                    session
+                        .queued_messages
+                        .retain(|queued| !queued.is_agent_owned());
+                    session.updated_at = crate::model::unix_time();
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
+            }
+        }
+        self.agent.clear_session(session_id);
+        let (_employee, stale_reservation) =
+            self.boss.requeue_employee(session_id, base, |ticket| {
+                if !parked.is_empty() {
+                    let mut combined = parked;
+                    combined.extend(std::mem::take(&mut ticket.pending_prompts));
+                    ticket.pending_prompts = combined;
+                }
+                adjust(ticket, started);
+            })?;
+        if let Some(reservation) = stale_reservation
+            && let Ok(broker) = self.resource_broker()
+        {
+            broker.release_admission(session_id, reservation);
+        }
+        self.wake_summon_queue();
+        Ok(())
+    }
+
+    /// A synthesized ticket for employees whose records predate admission
+    /// tickets — a pre-queue summon requeuing for a prompt or a model
+    /// change. `requeue_employee` keeps a real ticket when one exists;
+    /// this fills the gap with the session's resolved state. The bool is
+    /// whether the session ever started — it decides whether requeued
+    /// prompts fold into the original envelope or replay as new turns.
+    fn ticket_base_for(
+        &self,
+        session_id: Uuid,
+    ) -> anyhow::Result<(waku_protocol::boss::SummonTicket, bool)> {
+        let (provider, model, effort, project, workspace, base_branch, started) = {
+            let mut state = self.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            self.task_store.hydrate(&mut state.sessions[index])?;
+            let session = &state.sessions[index];
+            let project = state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map(|project| project.path.display().to_string())
+                .unwrap_or_default();
+            let (workspace, base_branch) = match &session.workspace {
+                SessionWorkspace::Worktree { base_branch, .. } => {
+                    (AgentWorkspace::Worktree, base_branch.clone())
+                }
+                _ => (AgentWorkspace::Local, None),
+            };
+            (
+                session.provider,
+                session.model.clone(),
+                session.reasoning_effort.clone(),
+                project,
+                workspace,
+                base_branch,
+                session.has_started(),
+            )
+        };
+        let model = model
+            .or_else(|| {
+                let catalog = crate::model_catalog::cached_models(provider)
+                    .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
+                catalog
+                    .iter()
+                    .find(|entry| entry.is_default)
+                    .or_else(|| catalog.first())
+                    .map(|entry| entry.id.clone())
+            })
+            .ok_or_else(|| anyhow!("could not resolve a concrete model for re-admission"))?;
+        Ok((
+            waku_protocol::boss::SummonTicket {
+                sequence: 0,
+                generation: 0,
+                provider,
+                model,
+                reasoning_effort: effort,
+                prompt: String::new(),
+                project,
+                workspace: Some(workspace),
+                base_branch,
+                resources: waku_protocol::resources::ResourceSet::default(),
+                allow_burst: false,
+                pending_prompts: Vec::new(),
+                group_id: None,
+                priority: None,
+                goal_id: None,
+                reservation: None,
+                blocked_by: Vec::new(),
+                dispatch_event: None,
+            },
+            started,
+        ))
+    }
+
+    /// Catalog validation shared by `setModel` on queued and working
+    /// employees — the provider's catalog must list the model and any
+    /// pinned effort. Returns the normalized effort pin.
+    fn validate_employee_model(
+        &self,
+        provider: ProviderKind,
+        model: &str,
+        reasoning_effort: Option<String>,
+    ) -> anyhow::Result<Option<String>> {
+        let catalog = crate::model_catalog::cached_models(provider)
+            .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
+        let selected =
+            waku_protocol::model_catalog::packed_catalog_model(&catalog, model, provider)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "model {model:?} is not listed for {}",
+                        provider.display_name()
+                    )
+                })?;
+        reasoning_effort
+            .map(|effort| {
+                if effort == "default" {
+                    Ok(None)
+                } else if selected
+                    .model
+                    .reasoning_efforts
+                    .iter()
+                    .any(|option| option.id == effort)
+                {
+                    Ok(Some(effort))
+                } else {
+                    Err(anyhow!(
+                        "reasoning effort is not supported by model {model:?}"
+                    ))
+                }
+            })
+            .transpose()
+            .map(|effort| effort.flatten())
+    }
+
     /// Interrupt delivery for an employee's report: steer into the
     /// supervisor's open turn when its runtime can take one, else park a
     /// hidden prompt that drains when the turn settles.
@@ -7356,11 +8494,31 @@ impl WakuBackend {
             bail!("agent prompts require a prompt");
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
-        let mut delivery = delivery;
+        let delivery = delivery;
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
+            use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;
-            // Queue delivery resumes a finished employee. An expired steer
-            // is queued as a new turn because there is no live turn to fold into.
+            // Queue delivery to a queued ticket joins its dispatch
+            // envelope; a prompt to a finished employee re-enters
+            // admission and resumes the same transcript once dispatched.
+            match self.boss.employee_lifecycle(target) {
+                Some(EmployeeLifecycle::Queued) => {
+                    if !self.boss.append_queued_prompt(target, prompt.clone())? {
+                        bail!("employee {target} is no longer queued");
+                    }
+                    return Ok(ResponsePayload::Ack);
+                }
+                Some(EmployeeLifecycle::Dispatching) => {
+                    // Mid-launch — the parked queue drains once the
+                    // runtime lands.
+                    self.queue_agent_prompt(target, prompt, sender, &events)?;
+                    return Ok(ResponsePayload::Ack);
+                }
+                Some(EmployeeLifecycle::Finishing) => {
+                    bail!("employee {target} is finishing; try again in a moment")
+                }
+                _ => {}
+            }
             let was_expired = self.boss.employee(target).is_some_and(|employee| employee.expired)
                 || self
                     .boss
@@ -7368,13 +8526,19 @@ impl WakuBackend {
                     .retired_employees
                     .iter()
                     .any(|employee| employee.session_id == target);
-            if matches!(delivery, AgentPromptDelivery::Queue) || was_expired {
-                self.boss.resurrect(target)?;
+            if was_expired {
+                self.requeue_employee(target, |ticket, started| {
+                    if started {
+                        ticket.prompt.clear();
+                        ticket.pending_prompts.push(prompt.clone());
+                    } else {
+                        ticket.prompt = prompt.clone();
+                        ticket.pending_prompts.clear();
+                    }
+                })?;
+                return Ok(ResponsePayload::Ack);
             }
             self.boss.require_active(target)?;
-            if was_expired {
-                delivery = AgentPromptDelivery::Queue;
-            }
         }
         if self.session_quarantined(target) {
             bail!("received files are quarantined until trusted");
@@ -7427,7 +8591,7 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        self.queue_agent_prompt_with_visibility(target, prompt, sender, false, events)
+        self.queue_agent_prompt_with_id(target, prompt, sender, false, None, events)
     }
 
     fn queue_agent_prompt_hidden(
@@ -7437,18 +8601,22 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        self.queue_agent_prompt_with_visibility(target, prompt, sender, true, events)
+        self.queue_agent_prompt_with_id(target, prompt, sender, true, None, events)
     }
 
-    fn queue_agent_prompt_with_visibility(
+    /// A deterministic `queued_id` rides durable deliveries — dispatch
+    /// notifications — so redelivery dedupes on it through both the parked
+    /// mirror and the delivered message row.
+    fn queue_agent_prompt_with_id(
         &self,
         target: Uuid,
         prompt: String,
         sender: Option<Uuid>,
         hidden: bool,
+        queued_id: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        let queued_id = Uuid::new_v4();
+        let queued_id = queued_id.unwrap_or_else(Uuid::new_v4);
         self.agent.enqueue(
             target,
             crate::agent::AgentPrompt {
@@ -7475,6 +8643,18 @@ impl WakuBackend {
                 sender,
                 hidden,
             )?;
+        }
+        // A queued or dispatching ticket owns no settled runtime — park
+        // the prompt in the mirrored queue; dispatch drains it when the
+        // launch lands.
+        if self.boss.employee_lifecycle(target).is_some_and(|state| {
+            matches!(
+                state,
+                waku_protocol::boss::EmployeeLifecycle::Queued
+                    | waku_protocol::boss::EmployeeLifecycle::Dispatching
+            )
+        }) {
+            return Ok(());
         }
         if self.agent.is_working(target) {
             // The runtime event forwarder delivers queued prompts in
@@ -13854,6 +15034,12 @@ mod tests {
                 base_branch: Some("main".into()),
                 permissions: None,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                resources: None,
+                allow_burst: false,
+                group_id: None,
+                priority: None,
+                goal_id: None,
+                request_id: None,
             },
             &EventSink::detached(),
         );
@@ -13932,6 +15118,12 @@ mod tests {
                     base_branch: None,
                     permissions: None,
                     work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                    resources: None,
+                    allow_burst: false,
+                    group_id: None,
+                    priority: None,
+                    goal_id: None,
+                    request_id: None,
                 },
                 &EventSink::detached(),
             )
@@ -13960,6 +15152,920 @@ mod tests {
             .clone();
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
 
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A backend wired for summon-queue tests: the boss session id set,
+    /// the broker ledger rooted inside the temp dir (never the host's),
+    /// and every provider binary pointed at a missing path so a granted
+    /// dispatch fails deterministically at launch.
+    fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
+        let (backend, boss) = surface_test_backend(root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        *backend.broker_root.lock() = Some(root.join("broker"));
+        let mut daemon_settings = backend.settings.get();
+        for provider in [ProviderKind::Claude, ProviderKind::Codex] {
+            daemon_settings.provider_binary_overrides.insert(
+                provider,
+                root.join(format!("missing-{}", provider.id()))
+                    .display()
+                    .to_string(),
+            );
+        }
+        backend.settings.replace(daemon_settings).unwrap();
+        // Finish reports deliver to the supervisor through the normal
+        // prompt path — a control driver stands in for its runtime.
+        backend.sessions.lock().insert(
+            boss,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.to_path_buf(),
+            },
+        );
+        (backend, boss)
+    }
+
+    /// Hold one model claim in the test broker as the daemon — the same
+    /// key admission counts against, so queued tickets see a full pool
+    /// without a real runtime. Returns `(task, reservation)` for release.
+    fn hold_model_slot(backend: &WakuBackend, provider: ProviderKind, model: &str) -> (Uuid, Uuid) {
+        let task = Uuid::new_v4();
+        let reservation = Uuid::new_v4();
+        let attempt = backend
+            .resource_broker()
+            .unwrap()
+            .try_admission(
+                task,
+                reservation,
+                waku_protocol::resources::ResourceSet::default(),
+                "capacity fixture".into(),
+                waku_protocol::resources::AdmissionClaim {
+                    daemon: backend.boss.document().identity.id,
+                    provider: provider.id().into(),
+                    model: model.into(),
+                    // The fixture's own claim always grants — the limits
+                    // it pretends to hold gate only itself, while real
+                    // tickets count the reservation it leaves behind.
+                    live_limit: u32::MAX,
+                    hard_cap: u32::MAX,
+                    allow_burst: false,
+                },
+            )
+            .unwrap();
+        assert!(attempt.granted, "fixture slot could not be held");
+        (task, reservation)
+    }
+
+    /// Upsert one provider/model rule into the durable policy — the
+    /// revision comes from the document so repeated calls stay linear.
+    fn set_model_policy(
+        backend: &WakuBackend,
+        provider: ProviderKind,
+        model: &str,
+        live_limit: u32,
+        hard_cap: u32,
+    ) {
+        let mut policy = backend.boss.document().resource_policy.clone();
+        policy
+            .model_limits
+            .retain(|rule| !(rule.provider == provider && rule.model == model));
+        policy.model_limits.push(waku_protocol::boss::ModelLimit {
+            provider,
+            model: model.into(),
+            live_limit,
+            hard_cap,
+        });
+        backend
+            .boss
+            .set_resource_policy(None, policy.revision, policy.model_limits, policy.host)
+            .unwrap();
+    }
+
+    fn summon_op(
+        backend: &WakuBackend,
+        root: &Path,
+        job: &str,
+        provider: ProviderKind,
+        model: Option<&str>,
+    ) -> waku_protocol::boss::BossOperation {
+        waku_protocol::boss::BossOperation::Summon {
+            persona_id: backend.boss.document().personas[1].id,
+            job_title: job.into(),
+            prompt: format!("Work on {job}"),
+            project: root.join("repo").display().to_string(),
+            provider: Some(provider),
+            model: model.map(str::to_owned),
+            reasoning_effort: None,
+            workspace: None,
+            base_branch: None,
+            permissions: None,
+            work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+            resources: None,
+            allow_burst: false,
+            group_id: None,
+            priority: None,
+            goal_id: None,
+            request_id: None,
+        }
+    }
+
+    /// At capacity a valid summon is not an error — it is a durable
+    /// queued ticket that creates no worktree, no runtime, and no claims.
+    /// The returned admission carries the position and the wait reason.
+    #[test]
+    fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
+        use waku_protocol::boss::{AdmissionBlocker, BossResult, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-queued-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let result = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "queued job",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .expect("at capacity the summon must still be accepted");
+        let BossResult::Summoned {
+            session_id,
+            state,
+            admission,
+        } = result
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        let admission = admission.expect("queued results carry an admission");
+        assert_eq!(admission.queue_position, Some(1));
+        assert!(
+            admission.blocked_by.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
+            )),
+            "expected the full pool as the wait reason: {:?}",
+            admission.blocked_by
+        );
+
+        // Nothing but the shell exists: no runtime, no started turn, and
+        // the ledger still holds only the fixture slot.
+        assert!(backend.sessions.lock().get(&session_id).is_none());
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .expect("the task shell persists for clients");
+            assert!(!session.has_started());
+        }
+        assert!(
+            !root
+                .join("repo")
+                .parent()
+                .unwrap()
+                .join("worktrees")
+                .exists(),
+            "a queued ticket must not create worktrees"
+        );
+        let status = backend
+            .resource_broker()
+            .unwrap()
+            .operate(
+                Uuid::new_v4(),
+                waku_protocol::resources::ResourceOperation::Status { id: None },
+            )
+            .unwrap();
+        assert_eq!(
+            status
+                .reservations
+                .iter()
+                .filter(|reservation| reservation.granted_at.is_some() && !reservation.released)
+                .count(),
+            1
+        );
+
+        // Freeing the pool dispatches the head — here the launch fails on
+        // the missing binary and the employee expires with the blocker the
+        // finish report carries.
+        backend
+            .resource_broker()
+            .unwrap()
+            .release_admission(held_task, held);
+        backend.run_summon_scheduler();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert!(employee.expired);
+        assert!(
+            employee
+                .blocker
+                .as_deref()
+                .is_some_and(|note| note.contains("Employee launch failed"))
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Per-root FIFO: two queued tickets attempt in sequence order, which
+    /// the broker ledger's grant order records directly — the second
+    /// group's ticket never leapfrogs the first's.
+    #[test]
+    fn queued_tickets_dispatch_fifo_once_capacity_frees() {
+        use waku_protocol::boss::{BossResult, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-fifo-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let summon = |job: &str| {
+            let BossResult::Summoned {
+                session_id, state, ..
+            } = backend
+                .handle_boss_operation(
+                    Some(boss),
+                    summon_op(&backend, &root, job, ProviderKind::Codex, Some("gpt-5.5")),
+                    &EventSink::detached(),
+                )
+                .unwrap()
+            else {
+                panic!("expected a summoned result")
+            };
+            assert_eq!(state, EmployeeLifecycle::Queued);
+            session_id
+        };
+        let first = summon("first");
+        let second = summon("second");
+        assert_eq!(
+            backend.boss.queue_position(second),
+            Some(2),
+            "the second ticket waits behind the first"
+        );
+        // The queue root yields exactly one head — the earlier ticket —
+        // so the second can never leapfrog it mid-dispatch.
+        let heads: Vec<Uuid> = backend
+            .boss
+            .queued_heads()
+            .iter()
+            .map(|entry| entry.session_id)
+            .collect();
+        assert_eq!(heads, vec![first]);
+
+        backend
+            .resource_broker()
+            .unwrap()
+            .release_admission(held_task, held);
+        backend.run_summon_scheduler();
+        // With the pool free both dispatched in turn and expired on the
+        // missing binary.
+        assert!(backend.boss.employee(first).unwrap().expired);
+        assert!(backend.boss.employee(second).unwrap().expired);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Model caps key on the provider+model pair: a full codex pool does
+    /// not block a claude ticket.
+    #[test]
+    fn model_limits_key_on_the_provider_model_pair() {
+        use waku_protocol::boss::{BossOperation, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-keys-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+
+        let blocked = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "codex job",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let waku_protocol::boss::BossResult::Summoned {
+            session_id,
+            state,
+            admission,
+            ..
+        } = blocked
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        assert!(admission.unwrap().blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            waku_protocol::boss::AdmissionBlocker::ModelLimit { used: 0, limit: 0 }
+        )));
+
+        // Strict per-root FIFO: a claude ticket behind the blocked codex
+        // head waits too — it is never even attempted, so it records no
+        // wait reason of its own. The codex rule's key never applies to
+        // it.
+        let queued = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(&backend, &root, "claude job", ProviderKind::Claude, None),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let waku_protocol::boss::BossResult::Summoned {
+            session_id: claude_id,
+            state: claude_state,
+            admission: claude_admission,
+        } = queued
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(claude_state, EmployeeLifecycle::Queued);
+        let claude_admission = claude_admission.unwrap();
+        assert_eq!(claude_admission.queue_position, Some(2));
+        assert!(claude_admission.blocked_by.is_empty());
+
+        // Once the blocked head leaves, the claude ticket dispatches —
+        // under its own (absent) cap, not the codex rule — and expires on
+        // the missing binary.
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: waku_protocol::boss::EmployeeControl::Stop,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend.run_summon_scheduler();
+        assert!(backend.boss.employee(claude_id).unwrap().expired);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `liveLimit` is the normal pool and `hardCap` opens only to summons
+    /// that explicitly ask for burst — and stops there.
+    #[test]
+    fn burst_admission_needs_the_flag_and_stops_at_hard_cap() {
+        use waku_protocol::boss::{AdmissionBlocker, BossOperation, BossResult, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-burst-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        // The burst-flagged ticket is the head: its pool is the hard cap —
+        // still full at two held slots.
+        let mut op = summon_op(
+            &backend,
+            &root,
+            "burst",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon { allow_burst, .. } = &mut op {
+            *allow_burst = true;
+        }
+        let BossResult::Summoned {
+            session_id: burst_id,
+            state,
+            admission,
+            ..
+        } = backend
+            .handle_boss_operation(Some(boss), op, &EventSink::detached())
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        assert!(
+            admission.unwrap().blocked_by.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::ModelLimit { used: 2, limit: 2 }
+            ))
+        );
+        // Without the flag a ticket caps at the live pool — and behind
+        // the burst head it never even gets evaluated.
+        let waku_protocol::boss::BossResult::Summoned { admission, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "plain",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert!(admission.unwrap().blocked_by.is_empty());
+
+        // Free one slot: the burst head grants into the hard-cap half and
+        // expires on launch; the plain ticket then reads its own live cap.
+        backend
+            .resource_broker()
+            .unwrap()
+            .release_admission(held_task, held);
+        backend.run_summon_scheduler();
+        assert!(backend.boss.employee(burst_id).unwrap().expired);
+        let plain = backend.boss.queued_heads();
+        assert_eq!(plain.len(), 1);
+        assert!(
+            plain[0]
+                .ticket
+                .as_ref()
+                .unwrap()
+                .blocked_by
+                .iter()
+                .any(|blocker| matches!(
+                    blocker,
+                    AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
+                )),
+            "the non-burst head reports the live pool: {:?}",
+            plain[0].ticket.as_ref().unwrap().blocked_by
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Queued employees take prompts into their durable envelope and stop
+    /// settles them without ever touching a reservation.
+    #[test]
+    fn queued_employees_take_prompts_and_expire_without_claims() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("summon-control-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "parked",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        let control = |action: EmployeeControl| {
+            backend.handle_boss_operation(
+                Some(boss),
+                BossOperation::Control { session_id, action },
+                &EventSink::detached(),
+            )
+        };
+        control(EmployeeControl::Prompt {
+            prompt: "also check the migrations".into(),
+        })
+        .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(
+            employee.ticket.as_ref().unwrap().pending_prompts,
+            vec!["also check the migrations".to_owned()]
+        );
+        assert!(
+            control(EmployeeControl::Steer {
+                prompt: "nope".into()
+            })
+            .is_err()
+        );
+        control(EmployeeControl::Stop).unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert!(employee.expired);
+        assert!(backend.sessions.lock().get(&session_id).is_none());
+        let status = backend
+            .resource_broker()
+            .unwrap()
+            .operate(
+                Uuid::new_v4(),
+                waku_protocol::resources::ResourceOperation::Status { id: None },
+            )
+            .unwrap();
+        assert_eq!(
+            status
+                .reservations
+                .iter()
+                .filter(|reservation| !reservation.released)
+                .count(),
+            1,
+            "only the fixture slot remains — the cancelled ticket held nothing"
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A queued `setModel` retickets into the destination pool: the
+    /// sequence is kept, and when the destination is itself full the
+    /// ticket waits under the new key.
+    #[test]
+    fn setmodel_on_a_queued_ticket_moves_its_admission_key() {
+        use waku_protocol::boss::{
+            AdmissionBlocker, BossOperation, EmployeeControl, EmployeeLifecycle,
+        };
+        let root = std::env::temp_dir().join(format!("summon-setmodel-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "rekey",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        let sequence = backend
+            .boss
+            .employee(session_id)
+            .and_then(|employee| employee.ticket.map(|ticket| ticket.sequence))
+            .unwrap();
+
+        // Fill the claude pool too, so the reticket has somewhere
+        // provably different to land.
+        let claude_selection = backend
+            .resolve_agent_task_selection(
+                None,
+                &AgentCreateSelection {
+                    provider: Some(ProviderKind::Claude),
+                    model: None,
+                    title: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                },
+                &root.join("repo"),
+                "",
+                false,
+            )
+            .unwrap();
+        let claude_model = claude_selection
+            .model
+            .clone()
+            .or_else(|| claude_selection.concrete_model.clone())
+            .unwrap();
+        hold_model_slot(&backend, ProviderKind::Claude, &claude_model);
+        set_model_policy(&backend, ProviderKind::Claude, &claude_model, 1, 1);
+
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetModel {
+                        provider: ProviderKind::Claude,
+                        model: claude_model.clone(),
+                        reasoning_effort: None,
+                        interrupt: None,
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        let ticket = employee.ticket.as_ref().unwrap();
+        assert_eq!(ticket.provider, ProviderKind::Claude);
+        assert_eq!(ticket.model, claude_model);
+        assert_eq!(ticket.sequence, sequence, "retickets keep their position");
+        assert!(
+            ticket.blocked_by.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
+            )),
+            "the destination pool reports its own wait reason"
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A prompt to a finished employee re-enters admission against
+    /// current policy — a lowered cap keeps the revival queued rather
+    /// than resurrecting around the pool.
+    #[test]
+    fn an_expired_employees_prompt_requeues_for_admission() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-revive-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+
+        // The first summon grants and fails at launch — expired record.
+        let error = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "revive",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Employee launch failed"));
+        let session_id = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .unwrap()
+            .id;
+        assert!(backend.boss.employee(session_id).unwrap().expired);
+
+        // Close the pool, then prompt the expired employee — it queues as
+        // generation two with the prompt as its dispatch envelope.
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "try again".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert!(!employee.expired);
+        let ticket = employee.ticket.as_ref().unwrap();
+        assert_eq!(ticket.generation, 2);
+        // The session already ran — the revive prompt replays as a turn,
+        // not as a fresh envelope.
+        assert_eq!(ticket.pending_prompts, vec!["try again".to_owned()]);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `requestId` dedupes retries: same request returns the same
+    /// employee; a mutated request with the id is rejected.
+    #[test]
+    fn a_request_id_retries_the_same_admission() {
+        use waku_protocol::boss::{BossOperation, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-dedupe-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let request_id = Uuid::new_v4();
+        let mut op = summon_op(
+            &backend,
+            &root,
+            "first",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon {
+            request_id: slot, ..
+        } = &mut op
+        {
+            *slot = Some(request_id);
+        }
+        let waku_protocol::boss::BossResult::Summoned {
+            session_id, state, ..
+        } = backend
+            .handle_boss_operation(Some(boss), op.clone(), &EventSink::detached())
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+
+        // Same request id + same payload: the retry returns the ticket,
+        // not a second employee.
+        let waku_protocol::boss::BossResult::Summoned {
+            session_id: retried,
+            ..
+        } = backend
+            .handle_boss_operation(Some(boss), op, &EventSink::detached())
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(retried, session_id);
+        assert_eq!(backend.boss.document().employees.len(), 1);
+
+        // Same id, different ask: a genuine mismatch errors.
+        let mut altered = summon_op(
+            &backend,
+            &root,
+            "different",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon {
+            request_id: slot, ..
+        } = &mut altered
+        {
+            *slot = Some(request_id);
+        }
+        assert!(
+            backend
+                .handle_boss_operation(Some(boss), altered, &EventSink::detached())
+                .is_err()
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Durable tickets survive a daemon restart: the reopened document
+    /// still queues the employee (it never lands on the interrupted
+    /// list), with the goal, group, priority, and parked prompts intact.
+    #[test]
+    fn queued_tickets_survive_restart_with_their_goals() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-restart-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let goal = Uuid::new_v4();
+        let mut op = summon_op(
+            &backend,
+            &root,
+            "restart",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon {
+            goal_id,
+            group_id,
+            priority,
+            ..
+        } = &mut op
+        {
+            *goal_id = Some(goal);
+            *group_id = Some("wave-1".into());
+            *priority = Some(5);
+        }
+        let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(Some(boss), op, &EventSink::detached())
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued follow-up".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+
+        let reopened = crate::boss::BossService::open(root.join("boss")).unwrap();
+        let employee = reopened.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert!(!employee.expired);
+        let ticket = employee.ticket.as_ref().unwrap();
+        assert_eq!(ticket.goal_id, Some(goal));
+        assert_eq!(ticket.group_id.as_deref(), Some("wave-1"));
+        assert_eq!(ticket.priority, Some(5));
+        assert_eq!(ticket.pending_prompts, vec!["queued follow-up".to_owned()]);
+        // The record is not interrupted — a queued ticket holds nothing
+        // to clean up, so the roster reads it straight after reopening.
+        assert!(reopened.require_active(session_id).is_ok());
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Dispatch notifications are durable and dedupe: delivery parks the
+    /// supervisor-side message once, however many times the outbox is
+    /// re-driven.
+    #[test]
+    fn dispatch_notifications_dedupe_across_deliveries() {
+        use waku_protocol::boss::EmployeeLifecycle;
+        let root = std::env::temp_dir().join(format!("summon-outbox-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+
+        // Build a "working" employee without a real launch: queue the
+        // ticket under a held slot, grant its reservation id, then walk
+        // dispatching → working through the durable transitions.
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+        let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "notify",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+        let attempt = backend
+            .resource_broker()
+            .unwrap()
+            .try_admission(
+                session_id,
+                reservation,
+                waku_protocol::resources::ResourceSet::default(),
+                "summon dispatch".into(),
+                waku_protocol::resources::AdmissionClaim {
+                    daemon: backend.boss.document().identity.id,
+                    provider: ProviderKind::Codex.id().into(),
+                    model: "gpt-5.5".into(),
+                    // One slot is held — this grant goes into the burst
+                    // half of the pool.
+                    live_limit: 1,
+                    hard_cap: 2,
+                    allow_burst: true,
+                },
+            )
+            .unwrap();
+        assert!(attempt.granted);
+        assert!(
+            backend
+                .boss
+                .mark_dispatching(session_id, 1, Some(reservation))
+                .unwrap()
+        );
+        assert!(backend.boss.mark_working(session_id, 1).unwrap());
+        assert_eq!(
+            backend.boss.employee_lifecycle(session_id),
+            Some(EmployeeLifecycle::Working)
+        );
+        backend
+            .boss
+            .outbox_push(session_id, 1, ProviderKind::Codex, "gpt-5.5".into(), None)
+            .unwrap();
+
+        // Point the supervisor at a capture driver so deliveries land
+        // somewhere countable.
+        let capture = Arc::new(CaptureDriver::default());
+        backend.sessions.lock().insert(
+            boss,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.to_path_buf(),
+            },
+        );
+        backend.deliver_dispatch_notifications();
+        assert_eq!(capture.prompts.lock().len(), 1);
+        assert!(backend.boss.outbox_pending().is_empty());
+        backend.deliver_dispatch_notifications();
+        assert_eq!(
+            capture.prompts.lock().len(),
+            1,
+            "the note id dedupes a re-driven delivery"
+        );
+        let _ = (held_task, held);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

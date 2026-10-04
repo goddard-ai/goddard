@@ -679,6 +679,11 @@ pub struct AgentLaunchEnv {
     /// Whether this credential belongs to the Boss — its `search` scans
     /// every project's tasks rather than only its own project's.
     pub boss: bool,
+    /// The resource reservation the daemon already holds for this session —
+    /// a summon admission ticket's granted id, exported as
+    /// `GODDARD_RESOURCE_RESERVATION` so the agent's `resource` calls
+    /// attach to the session's set instead of re-queueing.
+    pub resource_reservation: Option<Uuid>,
 }
 
 impl AgentLaunchEnv {
@@ -749,8 +754,12 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
             .parent_task_id
             .map(|id| format!(" {}='{id}'", waku_protocol::AGENT_PARENT_TASK_ENV))
             .unwrap_or_default();
+        let reservation = env
+            .resource_reservation
+            .map(|id| format!(" {}='{id}'", waku_protocol::AGENT_RESOURCE_RESERVATION_ENV))
+            .unwrap_or_default();
         let script = format!(
-            "#!/bin/sh\nexec env {}='{}' {}='{}' {}='{}'{} '{}' \"$@\"\n",
+            "#!/bin/sh\nexec env {}='{}' {}='{}' {}='{}'{}{} '{}' \"$@\"\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
             shell_quote_escape(&env.daemon_address),
             waku_protocol::AGENT_TOKEN_ENV,
@@ -758,6 +767,7 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
             waku_protocol::AGENT_TASK_ENV,
             env.task_id,
             parent,
+            reservation,
             shell_quote_escape(&env.cli_path.display().to_string()),
         );
         write_private_executable(&path, script.as_bytes())?;
@@ -770,8 +780,17 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
             .parent_task_id
             .map(|id| format!("set \"{}={id}\"\r\n", waku_protocol::AGENT_PARENT_TASK_ENV))
             .unwrap_or_default();
+        let reservation = env
+            .resource_reservation
+            .map(|id| {
+                format!(
+                    "set \"{}={id}\"\r\n",
+                    waku_protocol::AGENT_RESOURCE_RESERVATION_ENV
+                )
+            })
+            .unwrap_or_default();
         let script = format!(
-            "@echo off\r\nset \"{}={}\"\r\nset \"{}={}\"\r\nset \"{}={}\"\r\n{}\"{}\" %*\r\n",
+            "@echo off\r\nset \"{}={}\"\r\nset \"{}={}\"\r\nset \"{}={}\"\r\n{}{}\"{}\" %*\r\n",
             waku_protocol::DAEMON_ADDRESS_ENV,
             env.daemon_address,
             waku_protocol::AGENT_TOKEN_ENV,
@@ -779,6 +798,7 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
             waku_protocol::AGENT_TASK_ENV,
             env.task_id,
             parent,
+            reservation,
             env.cli_path.display(),
         );
         write_private_executable(&path, script.as_bytes())?;
@@ -1343,6 +1363,7 @@ mod tests {
             task_tools: true,
             settings_writes: true,
             boss: false,
+            resource_reservation: None,
         }
     }
 
