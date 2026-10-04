@@ -428,7 +428,9 @@ fn assemble_push_envelope(
 /// Turn-grouped index lines for one segment: `lines_of` yields each item's
 /// `(line, scored)` pairs — scored lines cap at [`INDEX_SPANS_PER_TURN`]
 /// per turn, always-kept user text never does. Returns the rendered body
-/// plus the `turns="low-high"` attribute for the envelope tag.
+/// plus the `turns="low-high"` attribute for the envelope tag — the same
+/// deterministic render the daemon stores as the session's transcript-index
+/// chunk, so the pushed envelope and the canonical index cannot drift.
 fn index_body(
     segment: &[ContextItem],
     lines_of: impl Fn(&ContextItem) -> Vec<(String, bool)>,
@@ -453,29 +455,11 @@ fn index_body(
             }
         }
     }
-    let mut body = String::new();
-    for (turn, lines, ..) in &groups {
-        // Unturned content — markers, legacy rows — has no `read` address;
-        // it lists plainly rather than pointing at a turn that is not its.
-        if let Some(turn) = turn {
-            body.push_str(&format!("turn {turn}\n"));
-        }
-        for line in lines {
-            body.push_str("  ");
-            body.push_str(line);
-            body.push('\n');
-        }
-        body.push('\n');
-    }
-    let range = match (
-        groups.iter().filter_map(|(turn, ..)| *turn).min(),
-        groups.iter().filter_map(|(turn, ..)| *turn).max(),
-    ) {
-        (Some(low), Some(high)) if low == high => format!(" turns=\"{low}\""),
-        (Some(low), Some(high)) => format!(" turns=\"{low}-{high}\""),
-        _ => String::new(),
-    };
-    (body, range)
+    let groups: Vec<(Option<usize>, Vec<String>)> = groups
+        .into_iter()
+        .map(|(turn, lines, ..)| (turn, lines))
+        .collect();
+    waku_protocol::model::render_transcript_index(&groups)
 }
 
 /// The pull-model handoff: the user's own messages verbatim plus a per-turn
@@ -684,6 +668,16 @@ impl Waku {
                     } else {
                         compaction_eval(&segment)
                     };
+                    // The daemon inserts the session's transcript index
+                    // into the memory engine — the same render the envelope
+                    // carries — so this switch and every later handoff read
+                    // one canonical record. Failure only skips the durable
+                    // copy; the envelope still goes out.
+                    let _ = client.request(
+                        session_id,
+                        Uuid::nil(),
+                        waku_client::Command::IndexSession,
+                    );
                     let asked = questions.len();
                     let evaluate =
                         should_evaluate && asked > 0 && eval_payload_fits(&state, &questions);

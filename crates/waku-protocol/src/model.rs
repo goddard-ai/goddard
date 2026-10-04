@@ -3584,6 +3584,37 @@ const AGENT_INDEX_USER_CAP: usize = 2_000;
 const AGENT_INDEX_CUE_CAP: usize = 320;
 const AGENT_INDEX_CUES_PER_TURN: usize = 8;
 
+/// The deterministic render shared by every context handoff that carries a
+/// transcript index — provider switches, side chats, employee reports, and
+/// the memory engine's stored index chunks. Given identical `(turn, lines)`
+/// groups it emits identical bytes, so a handoff rendered from a stored
+/// chunk and one rendered inline cannot drift apart. Unturned groups list
+/// plainly: their content has no `turn` read address. Returns the body plus
+/// the ` turns="low-high"` envelope attribute when turns span a range.
+pub fn render_transcript_index(groups: &[(Option<usize>, Vec<String>)]) -> (String, String) {
+    let mut body = String::new();
+    for (turn, lines) in groups {
+        if let Some(turn) = turn {
+            body.push_str(&format!("turn {turn}\n"));
+        }
+        for line in lines {
+            body.push_str("  ");
+            body.push_str(line);
+            body.push('\n');
+        }
+        body.push('\n');
+    }
+    let range = match (
+        groups.iter().filter_map(|(turn, ..)| *turn).min(),
+        groups.iter().filter_map(|(turn, ..)| *turn).max(),
+    ) {
+        (Some(low), Some(high)) if low == high => format!(" turns=\"{low}\""),
+        (Some(low), Some(high)) => format!(" turns=\"{low}-{high}\""),
+        _ => String::new(),
+    };
+    (body, range)
+}
+
 /// Clip `text` to `cap` characters on a char boundary, marking the cut.
 pub fn truncate_chars(text: &str, cap: usize) -> String {
     if text.chars().count() <= cap {

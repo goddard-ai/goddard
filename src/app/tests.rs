@@ -6058,7 +6058,7 @@ fn memory_log_entries_parse_structure() {
     assert_eq!(entry.shas, ["87af0eb1", "ebad430e"]);
     assert!(entry.injection_candidate);
 
-    // A doubled stamp — the distiller's own date ahead of append_notes' —
+    // A doubled stamp — the distiller's own date ahead of the appender's —
     // folds into the first date's group, and status words get ranges.
     let doubled = parse_memory_log_entry("2026-09-25 2026-09-24 landed on dev", 20, 20);
     assert_eq!(doubled.date, chrono::NaiveDate::from_ymd_opt(2026, 9, 25));

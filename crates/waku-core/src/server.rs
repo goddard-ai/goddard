@@ -2622,6 +2622,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::RemoveSession => "removeSession",
         Command::RemoveProject { .. } => "removeProject",
         Command::HydrateSession { .. } => "hydrateSession",
+        Command::IndexSession => "indexSession",
         Command::SearchSessionMessages { .. } => "searchSessionMessages",
         Command::ListProviderSessions { .. } => "listProviderSessions",
         Command::LoadProviderSession { .. } => "loadProviderSession",

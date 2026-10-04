@@ -1061,6 +1061,7 @@ impl BossService {
                             &cue,
                             &body,
                             &source_id,
+                            "detail",
                         )?);
                     }
                     MemoryOperation::ImportFolder { folder, collection } => {

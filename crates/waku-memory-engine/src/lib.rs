@@ -120,6 +120,18 @@ pub fn shadow_verdict(evaluation: &Evaluation) -> Value {
     Value::Object(verdict)
 }
 
+/// The daemon's internal writer principal: daemon-owned work (transcript
+/// indexing, project distillation) writes scopes it owns rather than
+/// borrowing a user-facing identity.
+pub const DAEMON_PRINCIPAL: &str = "daemon";
+/// Session scopes carry one rendered transcript index under this
+/// collection.
+pub const SESSION_INDEX_COLLECTION: &str = "index";
+/// Project scopes carry the curated overview under `memory` and dated
+/// notes under `notes`.
+pub const PROJECT_MEMORY_COLLECTION: &str = "memory";
+pub const PROJECT_NOTES_COLLECTION: &str = "notes";
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Scope {
@@ -129,6 +141,32 @@ pub struct Scope {
     pub kind: String,
     pub owner_id: String,
     pub acl_revision: u64,
+}
+impl Scope {
+    /// The scope one session's derived records — its transcript index —
+    /// live under. The daemon owns it; readers hold explicit grants.
+    pub fn session(session_id: Uuid, daemon_id: &str) -> Self {
+        Self {
+            version: 1,
+            scope_id: format!("session:{session_id}"),
+            daemon_id: daemon_id.to_owned(),
+            kind: "session".into(),
+            owner_id: DAEMON_PRINCIPAL.into(),
+            acl_revision: 0,
+        }
+    }
+    /// The scope one project's memory lives under. The daemon owns it;
+    /// the project's sessions read it through grants.
+    pub fn project(project_id: Uuid, daemon_id: &str) -> Self {
+        Self {
+            version: 1,
+            scope_id: format!("project:{project_id}"),
+            daemon_id: daemon_id.to_owned(),
+            kind: "project".into(),
+            owner_id: DAEMON_PRINCIPAL.into(),
+            acl_revision: 0,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +180,23 @@ pub struct Grant {
     pub grantor: String,
     pub revision: u64,
     pub expires_at: Option<u64>,
+}
+impl Grant {
+    /// A read-only grant the daemon extends to a scope it owns — a session
+    /// reading its own index, a side chat's export manifest, a project
+    /// session reading its project's memory.
+    pub fn reader(principal: impl Into<String>, scope: &str, collections: &[&str]) -> Self {
+        Self {
+            principal_id: principal.into(),
+            scope_id: scope.to_owned(),
+            collections: collections.iter().map(|c| (*c).to_owned()).collect(),
+            read: true,
+            write: false,
+            grantor: DAEMON_PRINCIPAL.into(),
+            revision: 0,
+            expires_at: None,
+        }
+    }
 }
 pub type Chunk = waku_protocol::boss::MemoryChunk;
 
@@ -207,6 +262,7 @@ impl Store {
         }
         write_atomic(&dir.join("SCOPE.json"), &bytes)
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &self,
         acl: &Acl,
@@ -217,6 +273,7 @@ impl Store {
         cue: &str,
         body: &str,
         source_id: &str,
+        layer: &str,
     ) -> Result<Chunk> {
         Self::require(acl, principal, scope, collection, true)?;
         validate_component(collection)?;
@@ -248,7 +305,7 @@ impl Store {
             chunk_id: stable,
             scope_id: scope.into(),
             collection_id: collection.into(),
-            layer: "detail".into(),
+            layer: layer.into(),
             revision: 1,
             title: title.into(),
             cue: cue.into(),
@@ -271,6 +328,112 @@ impl Store {
         self.rebuild_indexes(scope)?;
         Ok(chunk)
     }
+    /// Insert a new revision of `source_id`'s record, marking earlier active
+    /// revisions superseded. An unchanged body returns the existing chunk
+    /// without reviving superseded history.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert(
+        &self,
+        acl: &Acl,
+        principal: &str,
+        scope: &str,
+        collection: &str,
+        title: &str,
+        cue: &str,
+        body: &str,
+        source_id: &str,
+        layer: &str,
+    ) -> Result<Chunk> {
+        let chunk = self.insert(
+            acl, principal, scope, collection, title, cue, body, source_id, layer,
+        )?;
+        let collection_dir = self.scope_dir(scope)?.join("collections").join(collection);
+        let mut others = Vec::new();
+        collect_chunks(&collection_dir, &mut others)?;
+        let mut superseded = false;
+        for mut old in others {
+            if old.chunk_id == chunk.chunk_id
+                || old.source_id != source_id
+                || old.status != "active"
+            {
+                continue;
+            }
+            let Some(path) = find_chunk_file(&collection_dir, &old.chunk_id)? else {
+                continue;
+            };
+            old.status = "superseded".into();
+            old.revision = old.revision.saturating_add(1);
+            write_atomic(
+                &path,
+                format!("---\n{}---\n{}\n", serde_yaml_frontmatter(&old)?, old.body).as_bytes(),
+            )?;
+            superseded = true;
+        }
+        if superseded {
+            self.rebuild_indexes(scope)?;
+        }
+        Ok(chunk)
+    }
+    /// Deterministic render of a chunk selection for a new reader. Each
+    /// section renders its chunk bodies verbatim — under a `##` header when
+    /// one is named, flat otherwise; chunks the budget cannot hold whole
+    /// are never cut — they move to a pull-pointer tail instead.
+    /// Unauthorized chunks are filtered out before anything renders, so a
+    /// denied title or cue cannot leak. Identical inputs render identical
+    /// bytes.
+    pub fn handoff(
+        &self,
+        acl: &Acl,
+        reader: &str,
+        sections: &[(Option<&str>, Vec<Chunk>)],
+        budget: usize,
+    ) -> Result<String> {
+        let mut out = String::new();
+        let mut omitted: Vec<&Chunk> = Vec::new();
+        for (header, chunks) in sections {
+            let mut section = String::new();
+            for chunk in chunks {
+                if !acl.allows(reader, &chunk.scope_id, &chunk.collection_id, false) {
+                    continue;
+                }
+                let piece = chunk.body.trim_end();
+                let needed = piece.len() + usize::from(!section.is_empty());
+                if out.len() + section.len() + needed > budget {
+                    omitted.push(chunk);
+                    continue;
+                }
+                if !section.is_empty() {
+                    section.push('\n');
+                }
+                section.push_str(piece);
+            }
+            if section.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            match header {
+                Some(header) => out.push_str(&format!("## {header}\n\n{section}")),
+                None => out.push_str(&section),
+            }
+        }
+        if !omitted.is_empty() {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("## Omitted — pull to read\n");
+            for chunk in omitted {
+                out.push_str(&format!(
+                    "\n- {} — {} (chunk {})",
+                    chunk.cue.trim(),
+                    chunk.title.trim(),
+                    chunk.chunk_id
+                ));
+            }
+        }
+        Ok(out)
+    }
     pub fn rebuild_indexes(&self, scope: &str) -> Result<()> {
         let base = self.scope_dir(scope)?;
         let mut entries = Vec::new();
@@ -284,6 +447,7 @@ impl Store {
                 let c = col.file_name().to_string_lossy().into_owned();
                 let mut rows = Vec::new();
                 collect_chunks(&col.path(), &mut rows)?;
+                rows.retain(active);
                 rows.sort_by(|a, b| a.title.cmp(&b.title).then(a.chunk_id.cmp(&b.chunk_id)));
                 let mut text = String::from("# Collection index\n\n");
                 for ch in &rows {
@@ -379,6 +543,7 @@ impl Store {
         collect_chunks(&self.scope_dir(s)?.join("collections").join(c), &mut chunks)?;
         Ok(chunks
             .into_iter()
+            .filter(active)
             .filter(|x| {
                 x.body.contains(needle) || x.title.contains(needle) || x.cue.contains(needle)
             })
@@ -396,6 +561,7 @@ impl Store {
         validate_component(c)?;
         let mut chunks = Vec::new();
         collect_chunks(&self.scope_dir(s)?.join("collections").join(c), &mut chunks)?;
+        chunks.retain(active);
         chunks.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)
@@ -418,6 +584,7 @@ impl Store {
         validate_component(topic)?;
         let mut chunks = Vec::new();
         collect_chunks(&root.join("topics").join(topic), &mut chunks)?;
+        chunks.retain(active);
         chunks.sort_by(|a, b| a.title.cmp(&b.title).then(a.chunk_id.cmp(&b.chunk_id)));
         Ok(chunks)
     }
@@ -463,6 +630,7 @@ impl Store {
                     "Imported legacy memory",
                     &body,
                     &source_id,
+                    "detail",
                 )
                 .is_ok()
             {
@@ -574,6 +742,23 @@ fn collect_chunks_in(root: &Path, scope_root: &Path, out: &mut Vec<Chunk>) -> Re
         }
     }
     Ok(())
+}
+/// Locate one chunk's file beneath a collection directory — chunks live
+/// under `topics/<topic>/` and a manual reorganization may have filed one
+/// somewhere other than `inbox`.
+fn find_chunk_file(collection_dir: &Path, chunk_id: &str) -> Result<Option<PathBuf>> {
+    let mut files = Vec::new();
+    collect_files(collection_dir, &mut files)?;
+    let wanted = format!("{chunk_id}.md");
+    Ok(files.into_iter().find(|path| {
+        path.file_name()
+            .is_some_and(|name| name.to_string_lossy() == wanted)
+    }))
+}
+/// A chunk participates in reads only while active — superseded and
+/// tombstoned revisions stay on disk for provenance and repair.
+fn active(chunk: &Chunk) -> bool {
+    chunk.status == "active"
 }
 fn collect_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     if !root.exists() {
@@ -697,7 +882,8 @@ mod tests {
         assert!(
             store
                 .insert(
-                    &acl, "employee", "boss", "private", "secret", "cue", "body", "src"
+                    &acl, "employee", "boss", "private", "secret", "cue", "body", "src",
+                    "detail",
                 )
                 .is_err()
         );
@@ -711,6 +897,7 @@ mod tests {
                 "classified cue",
                 "classified body",
                 "private-source",
+                "detail",
             )
             .unwrap();
         let authorized_index = store.list_index(&acl, "employee", "boss").unwrap();
@@ -768,6 +955,160 @@ mod tests {
                 .count(),
             1
         );
+        let _ = fs::remove_dir_all(t);
+    }
+    #[test]
+    fn upsert_supersedes_prior_revisions_and_reads_skip_them() {
+        let t = std::env::temp_dir().join(format!("memory-{}", Uuid::new_v4()));
+        let store = Store::open(t.join("store")).unwrap();
+        let scope = Scope::project(Uuid::new_v4(), "d");
+        store.create_scope(&scope).unwrap();
+        let acl = Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![Grant::reader("session-1", &scope.scope_id, &[])],
+            now: unix_time(),
+        };
+        let first = store
+            .upsert(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "memory",
+                "Project memory",
+                "overview",
+                "first body",
+                "memory-md",
+                "overview",
+            )
+            .unwrap();
+        let second = store
+            .upsert(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "memory",
+                "Project memory",
+                "overview",
+                "second body",
+                "memory-md",
+                "overview",
+            )
+            .unwrap();
+        assert_ne!(first.chunk_id, second.chunk_id);
+        // Provenance: the superseded revision is still readable by id.
+        let old = store
+            .read_chunk(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "memory",
+                &first.chunk_id,
+            )
+            .unwrap();
+        assert_eq!(old.status, "superseded");
+        assert_eq!(old.revision, 2);
+        // Readers only surface the active revision.
+        let surfaced = store
+            .surface_fallback(&acl, "session-1", &scope.scope_id, "memory", 10)
+            .unwrap();
+        assert_eq!(surfaced.len(), 1);
+        assert_eq!(surfaced[0].chunk_id, second.chunk_id);
+        assert!(store
+            .search(&acl, "session-1", &scope.scope_id, "memory", "first body")
+            .unwrap()
+            .is_empty());
+        assert!(!store
+            .list_index(&acl, "session-1", &scope.scope_id)
+            .unwrap()
+            .contains("first body"));
+        // Re-upserting the same body stays idempotent and does not revive history.
+        let again = store
+            .upsert(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "memory",
+                "Project memory",
+                "overview",
+                "second body",
+                "memory-md",
+                "overview",
+            )
+            .unwrap();
+        assert_eq!(again.chunk_id, second.chunk_id);
+        assert_eq!(
+            store
+                .surface_fallback(&acl, "session-1", &scope.scope_id, "memory", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        let _ = fs::remove_dir_all(t);
+    }
+    #[test]
+    fn handoff_filters_acls_is_deterministic_and_reports_omissions() {
+        let t = std::env::temp_dir().join(format!("memory-{}", Uuid::new_v4()));
+        let store = Store::open(t.join("store")).unwrap();
+        let scope = Scope::session(Uuid::new_v4(), "d");
+        store.create_scope(&scope).unwrap();
+        let acl = Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![Grant::reader(
+                "side-chat",
+                &scope.scope_id,
+                &["index"],
+            )],
+            now: unix_time(),
+        };
+        let index = store
+            .insert(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "index",
+                "Transcript index",
+                "turns 1-2",
+                "turn 1\n  hello\nturn 2\n  world",
+                "transcript-index",
+                "detail",
+            )
+            .unwrap();
+        let denied = store
+            .insert(
+                &acl,
+                DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                "secrets",
+                "Denied",
+                "hidden cue",
+                "hidden body",
+                "secret-src",
+                "detail",
+            )
+            .unwrap();
+        let sections = vec![
+            (Some("Transcript index"), vec![index.clone()]),
+            (Some("Hidden"), vec![denied]),
+        ];
+        let first = store
+            .handoff(&acl, "side-chat", &sections, usize::MAX)
+            .unwrap();
+        let second = store
+            .handoff(&acl, "side-chat", &sections, usize::MAX)
+            .unwrap();
+        assert_eq!(first, second);
+        assert!(first.starts_with("## Transcript index\n\nturn 1"));
+        assert!(!first.contains("hidden"));
+        // A stranger principal sees nothing at all.
+        assert!(store
+            .handoff(&acl, "intruder", &sections, usize::MAX)
+            .unwrap()
+            .is_empty());
+        // A tight budget never truncates mid-chunk — it emits pull pointers.
+        let tight = store.handoff(&acl, "side-chat", &sections, 1).unwrap();
+        assert!(!tight.contains("turn 1"));
+        assert!(tight.contains("## Omitted — pull to read"));
+        assert!(tight.contains(&index.chunk_id));
         let _ = fs::remove_dir_all(t);
     }
 }

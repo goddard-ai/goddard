@@ -114,8 +114,8 @@ fn memory_log_date(entry: &str) -> Option<&str> {
 
 /// Split one `LOG.txt` line into its row parts. `index` is the line's
 /// newest-first position, which `injection_window` turns into the "a new
-/// session may see this" flag — with eval, `rank_notes` picks from the
-/// newest `MEMORY_RANK_WINDOW` lines; without it the newest
+/// session may see this" flag — with eval, the engine's surface pick draws
+/// from the newest `MEMORY_RANK_WINDOW` lines; without it the newest
 /// `MEMORY_RECENT_FALLBACK` are injected verbatim.
 pub(super) fn parse_memory_log_entry(
     line: &str,
@@ -124,8 +124,9 @@ pub(super) fn parse_memory_log_entry(
 ) -> MemoryLogEntry {
     let mut rest = line.trim();
     let mut date = None;
-    // The distiller occasionally writes its own stamp before the one
-    // `append_notes` prepends — collapse doubled dates into one group.
+    // The distiller occasionally writes its own stamp before the one the
+    // daemon's note appender prepends — collapse doubled dates into one
+    // group.
     for _ in 0..2 {
         let Some(stamp) = memory_log_date(rest) else {
             break;

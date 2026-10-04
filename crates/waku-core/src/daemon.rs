@@ -608,6 +608,8 @@ impl WakuBackend {
                 task_state.clone(),
                 task_store.clone(),
                 inference_secrets.clone(),
+                data_dir.join("boss/files/memory-engine"),
+                boss.document().identity.id.to_string(),
             ),
             settings,
             wake: Mutex::new(None),
@@ -2766,6 +2768,28 @@ impl Backend for WakuBackend {
                 };
                 trim_resident_transcripts(&mut state, &pinned);
                 Ok(ResponsePayload::Session { session })
+            }
+            Command::IndexSession => {
+                // Best-effort durability: the session's transcript index
+                // lands in its memory-engine scope so switches, side chats,
+                // and finish reports read one canonical record. A store the
+                // request cannot reach — a removed session, an oversized
+                // index — answers Ack all the same; every context path has
+                // its inline fallback.
+                let mut state = self.task_state.lock();
+                if let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                {
+                    self.task_store.hydrate(session)?;
+                    let (body, _) =
+                        crate::model::render_transcript_index(&session.transcript_index());
+                    if !body.is_empty() {
+                        self.index_session_transcript(session, &body);
+                    }
+                }
+                Ok(ResponsePayload::Ack)
             }
             Command::SearchSessionMessages {
                 query,
@@ -6073,13 +6097,86 @@ impl WakuBackend {
         driver.steer(steer);
     }
 
+    /// The daemon-owned memory store: session transcript indexes and
+    /// project memory sit beside the boss scope under one file-canonical
+    /// root.
+    fn memory_store(&self) -> anyhow::Result<crate::memory_engine::Store> {
+        crate::memory_engine::Store::open(self.data_dir.join("boss/files/memory-engine"))
+    }
+
+    /// Insert one session's rendered transcript index into the daemon-owned
+    /// session scope so every handoff — side chats, employee reports,
+    /// provider switches — and later reads share one canonical, ACL-checked
+    /// record with the session id as its source reference. The insert is
+    /// idempotent on identical bytes and revises in place as the transcript
+    /// grows; callers keep their deterministic inline render whenever the
+    /// store cannot take it (empty index, oversized body, I/O failure), so
+    /// a memory-engine outage never drops context.
+    fn index_session_transcript(
+        &self,
+        session: &AgentSession,
+        body: &str,
+    ) -> Option<crate::memory_engine::Chunk> {
+        use crate::memory_engine as engine;
+        let store = self.memory_store().ok()?;
+        let daemon = self.boss.document().identity.id.to_string();
+        let scope = engine::Scope::session(session.id, &daemon);
+        store.create_scope(&scope).ok()?;
+        let acl = engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: Vec::new(),
+            now: waku_protocol::model::unix_time(),
+        };
+        store
+            .upsert(
+                &acl,
+                engine::DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                engine::SESSION_INDEX_COLLECTION,
+                "Transcript index",
+                &format!("Session {}", session.id),
+                body,
+                "transcript-index",
+                "detail",
+            )
+            .ok()
+    }
+
+    /// The ACL a daemon-owned session scope hands a named reader — the
+    /// explicit export manifest a handoff travels under. Readers get the
+    /// `index` collection and nothing else; the boss reads the whole scope.
+    /// An absent grant means no authority at all rather than a defaulted
+    /// one.
+    fn session_scope_acl(&self, session_id: Uuid, reader: &str) -> crate::memory_engine::Acl {
+        use crate::memory_engine as engine;
+        let daemon = self.boss.document().identity.id.to_string();
+        let scope = engine::Scope::session(session_id, &daemon);
+        let collections: &[&str] = if reader == "boss" {
+            &[]
+        } else {
+            &[engine::SESSION_INDEX_COLLECTION]
+        };
+        engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![engine::Grant::reader(
+                reader,
+                &scope.scope_id,
+                collections,
+            )],
+            now: waku_protocol::model::unix_time(),
+        }
+    }
+
     /// A side chat's context block: the parent task's user messages verbatim
     /// plus a per-turn cue index — extractive pointers, never a summary —
-    /// snapshot at the side chat's first prompt. When the session's launch
-    /// carried the `goddard-agent` surface the block names the `read`
-    /// invocations that reach the parent's current text; without it the
-    /// index degrades to plain context. `None` for ordinary sessions and
-    /// parents with nothing to show.
+    /// snapshot at the side chat's first prompt. The snapshot inserts into
+    /// the parent's session scope and the block renders through the
+    /// engine's handoff under the side chat's own grant; a store that
+    /// cannot take it falls back to the identical inline render. When the
+    /// session's launch carried the `goddard-agent` surface the block names
+    /// the `read` invocations that reach the parent's current text; without
+    /// it the index degrades to plain context. `None` for ordinary sessions
+    /// and parents with nothing to show.
     fn side_chat_parent_block(&self, session_id: Uuid) -> Option<String> {
         if !self.agent.parent_index_owed(session_id) {
             return None;
@@ -6102,26 +6199,18 @@ impl WakuBackend {
         if groups.is_empty() {
             return None;
         }
-        let mut body = String::new();
-        for (turn, lines) in &groups {
-            if let Some(turn) = turn {
-                body.push_str(&format!("turn {turn}\n"));
-            }
-            for line in lines {
-                body.push_str("  ");
-                body.push_str(line);
-                body.push('\n');
-            }
-            body.push('\n');
-        }
-        let range = match (
-            groups.iter().filter_map(|(turn, ..)| *turn).min(),
-            groups.iter().filter_map(|(turn, ..)| *turn).max(),
-        ) {
-            (Some(low), Some(high)) if low == high => format!(" turns=\"{low}\""),
-            (Some(low), Some(high)) => format!(" turns=\"{low}-{high}\""),
-            _ => String::new(),
-        };
+        let (body, range) = crate::model::render_transcript_index(&groups);
+        let body = self
+            .index_session_transcript(&parent, &body)
+            .and_then(|chunk| {
+                let reader = format!("session:{session_id}");
+                let acl = self.session_scope_acl(parent.id, &reader);
+                self.memory_store()
+                    .ok()?
+                    .handoff(&acl, &reader, &[(None, vec![chunk])], usize::MAX)
+                    .ok()
+            })
+            .unwrap_or_else(|| body.trim_end().to_owned());
         let read_note = if self.agent.has_surface(session_id) {
             format!(
                 " — a snapshot taken now; `goddard-agent read \
@@ -6849,7 +6938,7 @@ impl WakuBackend {
             sink.end_session_runtime();
         }
         drop_detached(removed);
-        let (index, failed) = {
+        let (body, failed, chunk) = {
             let mut state = self.task_state.lock();
             let session = state
                 .sessions
@@ -6865,20 +6954,19 @@ impl WakuBackend {
                 session.status = SessionStatus::Idle;
             }
             session.queued_messages.clear();
-            let index = session.transcript_index();
+            // The report carries the transcript index — a pointer map, never
+            // a summary — and the same render is the index the memory
+            // engine keeps under this session's scope. Durable promotion of
+            // anything the employee claimed stays a separate authorized
+            // insert; finishing alone changes no fact.
+            let (body, _) = crate::model::render_transcript_index(&session.transcript_index());
+            let chunk = (!body.is_empty())
+                .then(|| self.index_session_transcript(session, &body))
+                .flatten();
             state.mark_session_dirty(session_id);
             self.task_store.save(&mut state)?;
-            (index, failed)
+            (body.trim_end().to_owned(), failed, chunk)
         };
-        let mut body = String::new();
-        for (turn, cues) in index {
-            if let Some(turn) = turn {
-                body.push_str(&format!("Turn {turn}:\n"));
-            }
-            for cue in cues {
-                body.push_str(&format!("  {cue}\n"));
-            }
-        }
         // The work kind the summon fixed decides whether a clean finish
         // reports: an errand's lands with the supervisor (escalating to
         // the boss when the supervisor cannot take prompts), while a
@@ -6896,6 +6984,25 @@ impl WakuBackend {
                 .as_deref()
                 .map(|note| format!(" It flagged a blocker: {note}"))
                 .unwrap_or_default();
+            // The report hands the supervisor the engine-rendered index
+            // under its own export grant — the boss reads the whole session
+            // scope, another employee only the `index` collection — falling
+            // back to the identical inline render when the store could not
+            // take it.
+            let reader = if self.boss.is_boss(supervisor) {
+                "boss".to_owned()
+            } else {
+                format!("session:{supervisor}")
+            };
+            let body = chunk
+                .and_then(|chunk| {
+                    let acl = self.session_scope_acl(session_id, &reader);
+                    self.memory_store()
+                        .ok()?
+                        .handoff(&acl, &reader, &[(None, vec![chunk])], usize::MAX)
+                        .ok()
+                })
+                .unwrap_or(body);
             let prompt = format!(
                 "Employee {} ({session_id}) has finished and expired.{blocker} Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
                 employee.identity.name
@@ -8237,6 +8344,7 @@ fn handle_driver_command(
         | Command::RemoveSession
         | Command::RemoveProject { .. }
         | Command::HydrateSession { .. }
+        | Command::IndexSession
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
         | Command::LoadProviderSession { .. }
@@ -11981,6 +12089,8 @@ mod tests {
                 task_state,
                 task_store,
                 crate::integrations::SecretStore::new(root.to_path_buf()),
+                root.join("memory-engine"),
+                "test-daemon".into(),
             ),
             Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
         );
@@ -12056,6 +12166,8 @@ mod tests {
                 task_state,
                 task_store,
                 crate::integrations::SecretStore::new(root.to_path_buf()),
+                root.join("memory-engine"),
+                "test-daemon".into(),
             ),
             Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
         );
@@ -12886,8 +12998,47 @@ mod tests {
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains(&employee_id.to_string()));
         assert!(prompts[0].contains("flagged a blocker: needs a release call"));
-        assert!(prompts[0].contains("Turn 1"));
+        assert!(prompts[0].contains("turn 1"));
         assert!(prompts[0].contains("Tests passed"));
+        drop(prompts);
+
+        // The index also landed as the canonical record under the
+        // employee's session scope — readable through a grant, invisible
+        // to a principal without one, and stable across the second finish.
+        let daemon = backend.boss.document().identity.id.to_string();
+        let scope = crate::memory_engine::Scope::session(employee_id, &daemon);
+        let acl = crate::memory_engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![crate::memory_engine::Grant::reader(
+                "boss",
+                &scope.scope_id,
+                &[],
+            )],
+            now: waku_protocol::model::unix_time(),
+        };
+        let engine = backend.memory_store().unwrap();
+        let chunks = engine
+            .surface_fallback(
+                &acl,
+                "boss",
+                &scope.scope_id,
+                crate::memory_engine::SESSION_INDEX_COLLECTION,
+                10,
+            )
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].body.contains("turn 1"));
+        assert!(
+            engine
+                .surface_fallback(
+                    &acl,
+                    "session:stranger",
+                    &scope.scope_id,
+                    crate::memory_engine::SESSION_INDEX_COLLECTION,
+                    10,
+                )
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

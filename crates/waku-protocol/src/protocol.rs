@@ -366,6 +366,12 @@ pub enum Command {
     HydrateSession {
         session_id: Uuid,
     },
+    /// Insert the request session's rendered transcript index into the
+    /// daemon-owned memory store — the canonical record provider switches,
+    /// side chats, and employee reports hand off from. Idempotent on
+    /// identical content and best-effort: the caller's own context path is
+    /// unaffected when indexing fails.
+    IndexSession,
     SearchSessionMessages {
         query: String,
         limit: usize,

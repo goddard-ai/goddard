@@ -1,12 +1,18 @@
 //! Project memory: a per-project store the daemon maintains so new sessions
 //! start with relevant prior context instead of zero.
 //!
-//! The store is two files under `<project>/.goddard/memory/` — `MEMORY.md`
-//! (the curated, injectable summary) and `LOG.txt` (append-only raw notes).
-//! The daemon is the only writer: a serialized background job distills
-//! finished turns into new notes through a headless provider driver, with
-//! eval triage bounding what the LLM has to read. Agents never write memory;
-//! they read `LOG.txt` with the file tools they already have.
+//! The store has two faces. `<project>/.goddard/memory/` keeps the
+//! human-readable export — `MEMORY.md` (the curated summary) and `LOG.txt`
+//! (append-only raw notes) — while the daemon-owned memory engine holds the
+//! canonical records under one `project:<id>` scope per project: the
+//! overview chunk revises with `MEMORY.md`, each `LOG.txt` line is a note
+//! chunk carrying its file position as its source reference, and reads go
+//! through the engine's surface selection and deterministic handoff under
+//! the reading session's grant. The daemon is the only writer: a
+//! serialized background job distills finished turns into new notes
+//! through a headless provider driver, with eval triage bounding what the
+//! LLM has to read. Agents never write memory; they read `LOG.txt` with
+//! the file tools they already have.
 //!
 //! Everything here runs on dedicated threads — eval calls and provider
 //! drivers block on subprocesses and the network, so none of this may reach
@@ -49,6 +55,10 @@ const RANK_CANDIDATES: usize = 60;
 const MAX_INJECTED_NOTES: usize = 15;
 /// The recency fallback when eval is unavailable or finds nothing relevant.
 const RECENT_NOTES_FALLBACK: usize = 20;
+/// How much of a pre-engine `LOG.txt` migrates into the project scope on
+/// first contact — the recent window, not the whole history. The file
+/// stays the complete export either way.
+const LOG_IMPORT_CAP: usize = 500;
 /// The minimum new transcript content that justifies a provider call.
 const MIN_NEW_MESSAGES: usize = 4;
 /// One segment is one rendered message, capped so a paste or a huge tool
@@ -109,6 +119,14 @@ pub struct MemoryService {
     /// The inference credential store `eval` resolutions read — the settings
     /// document only carries the provider pick and configured flags.
     secrets: crate::integrations::SecretStore,
+    /// The daemon-owned memory store project scopes live in — one
+    /// file-canonical root shared with the boss scope, with `project:<id>`
+    /// scopes beside it. Project agents reach their project's scope and
+    /// never the boss scope.
+    engine_root: PathBuf,
+    /// Scope provenance: every `project:<id>` scope names this daemon as
+    /// its owner.
+    daemon_id: String,
     /// Projects with a worker running — one distillation at a time per
     /// project, since two writers on `LOG.txt` would interleave.
     in_flight: Mutex<HashSet<Uuid>>,
@@ -132,12 +150,16 @@ impl MemoryService {
         task_state: Arc<Mutex<PersistedState>>,
         task_store: Arc<StateStore>,
         secrets: crate::integrations::SecretStore,
+        engine_root: PathBuf,
+        daemon_id: String,
     ) -> Arc<Self> {
         Arc::new(Self {
             settings,
             task_state,
             task_store,
             secrets,
+            engine_root,
+            daemon_id,
             in_flight: Mutex::new(HashSet::new()),
             pending: Mutex::new(HashSet::new()),
         })
@@ -208,6 +230,135 @@ impl MemoryService {
         let _ = save_state(&store, &memory_state);
     }
 
+    /// The daemon-owned engine store project scopes live under.
+    fn engine_store(&self) -> anyhow::Result<crate::memory_engine::Store> {
+        crate::memory_engine::Store::open(self.engine_root.clone())
+    }
+
+    /// The project scope's ACL for one reading session: the daemon owns
+    /// and writes the scope; the session reads it through a whole-scope
+    /// grant minted here — the project scope only, never the boss scope.
+    fn project_acl(
+        &self,
+        project_id: Uuid,
+        reader: &str,
+    ) -> (crate::memory_engine::Acl, crate::memory_engine::Scope) {
+        use crate::memory_engine as engine;
+        let scope = engine::Scope::project(project_id, &self.daemon_id);
+        let acl = engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![engine::Grant::reader(reader, &scope.scope_id, &[])],
+            now: waku_protocol::model::unix_time(),
+        };
+        (acl, scope)
+    }
+
+    /// First-contact migration: a `.goddard/memory` directory that predates
+    /// the engine becomes records in the project scope — `MEMORY.md` as the
+    /// overview revision and the recent `LOG.txt` window as note records
+    /// carrying their file positions as source references. Inserts are
+    /// content-keyed, so repeat imports settle idempotently; the export
+    /// files stay authoritative for `grep` and deletion.
+    fn import_project_legacy(
+        &self,
+        engine: &crate::memory_engine::Store,
+        acl: &crate::memory_engine::Acl,
+        scope: &crate::memory_engine::Scope,
+        store: &Path,
+    ) {
+        use crate::memory_engine as engine_mod;
+        let memory_md = read_memory(store);
+        if !memory_md.trim().is_empty() {
+            let _ = engine.upsert(
+                acl,
+                engine_mod::DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                engine_mod::PROJECT_MEMORY_COLLECTION,
+                "Project memory",
+                "Curated project memory",
+                memory_md.trim_end(),
+                "memory-md",
+                "overview",
+            );
+        }
+        let lines = read_log_lines(store);
+        let first = lines.len().saturating_sub(LOG_IMPORT_CAP);
+        for (offset, line) in lines.iter().enumerate().skip(first) {
+            let _ = engine.insert(
+                acl,
+                engine_mod::DAEMON_PRINCIPAL,
+                &scope.scope_id,
+                engine_mod::PROJECT_NOTES_COLLECTION,
+                &waku_protocol::model::truncate_chars(line, 80),
+                line,
+                line,
+                &format!("log:{:08}", offset + 1),
+                "detail",
+            );
+        }
+    }
+
+    /// The engine's surface selection over the project's notes: Jev scores
+    /// the bounded candidate window against the task when an eval backend
+    /// resolves, and the deterministic recent window answers otherwise —
+    /// the same two paths every surface takes. Candidates arrive
+    /// newest-first and leave chronological.
+    fn surface_notes(
+        &self,
+        eval: Option<&waku_protocol::eval::EvalSettings>,
+        task: &str,
+        candidates: Vec<crate::memory_engine::Chunk>,
+    ) -> Vec<crate::memory_engine::Chunk> {
+        use crate::memory_engine as engine;
+        let recent = |candidates: Vec<engine::Chunk>| {
+            let mut kept = candidates;
+            kept.truncate(RECENT_NOTES_FALLBACK);
+            kept.reverse();
+            kept
+        };
+        let Some(settings) = eval else {
+            return recent(candidates);
+        };
+        let (state, questions) = engine::surface_eval(task, &candidates);
+        let mut record = EvalDecisionRecord::empty(engine::SURFACE_FEATURE);
+        let evaluation = match crate::eval::evaluate(settings, &state, &questions) {
+            Ok(evaluation) => {
+                record.model = Some(evaluation.model.clone());
+                record.latency_ms = Some(evaluation.latency_ms);
+                record.usage = Some(evaluation.usage.clone());
+                record.answers = Some(evaluation.answers.clone());
+                Some(evaluation)
+            }
+            Err(error) => {
+                record.error = Some(format!("{error:#}"));
+                None
+            }
+        };
+        crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
+        let Some(evaluation) = evaluation else {
+            return recent(candidates);
+        };
+        let mut kept: Vec<engine::Chunk> = candidates
+            .iter()
+            .filter(|chunk| {
+                evaluation
+                    .answers
+                    .get(&format!("relevant:{}", chunk.chunk_id))
+                    .is_some_and(|answer| match answer {
+                        waku_protocol::eval::EvalAnswer::Noul { noul } => *noul >= 0.5,
+                        _ => false,
+                    })
+            })
+            .take(MAX_INJECTED_NOTES)
+            .cloned()
+            .collect();
+        if kept.is_empty() {
+            return recent(candidates);
+        }
+        kept.reverse();
+        kept
+    }
+
     /// Compose the injection block, or `None` when nothing should ship.
     /// `mark` decides whether a successful composition flags the session
     /// injected immediately — the prepend path's single shot — or waits for
@@ -221,7 +372,8 @@ impl MemoryService {
         if self.session_incognito(session_id) {
             return None;
         }
-        let project_path = self.project_path(self.session_project(session_id)?)?;
+        let project_id = self.session_project(session_id)?;
+        let project_path = self.project_path(project_id)?;
         let store = memory_dir(&project_path);
         if !store.join(MEMORY_FILE).exists() && !store.join(LOG_FILE).exists() {
             return None;
@@ -235,13 +387,65 @@ impl MemoryService {
             return None;
         }
 
-        let memory_md = read_memory(&store);
-        let notes = rank_notes(
+        // Reads go through the engine: the project's own scope — imported
+        // from the export files on first contact — surfaces its memory and
+        // notes under this session's grant, and the block renders through
+        // the deterministic handoff. The files stay the human-readable
+        // export; the scope is the canonical record.
+        let principal = format!("session:{session_id}");
+        let engine = self.engine_store().ok()?;
+        let (acl, scope) = self.project_acl(project_id, &principal);
+        engine.create_scope(&scope).ok()?;
+        self.import_project_legacy(&engine, &acl, &scope, &store);
+
+        let memory = engine
+            .surface_fallback(
+                &acl,
+                &principal,
+                &scope.scope_id,
+                crate::memory_engine::PROJECT_MEMORY_COLLECTION,
+                1,
+            )
+            .ok()
+            .and_then(|mut chunks| chunks.pop());
+        let candidates = engine
+            .surface_fallback(
+                &acl,
+                &principal,
+                &scope.scope_id,
+                crate::memory_engine::PROJECT_NOTES_COLLECTION,
+                RANK_CANDIDATES,
+            )
+            .unwrap_or_default();
+        let notes = self.surface_notes(
             crate::inference::resolve_eval(&settings, &self.secrets).as_ref(),
             task,
-            &read_log_lines(&store),
+            candidates,
         );
-        let block = compose_block(&memory_md, &notes, &store.join(LOG_FILE))?;
+        let memory = memory.into_iter().collect::<Vec<_>>();
+        if memory.is_empty() && notes.is_empty() {
+            return None;
+        }
+        let rendered = engine
+            .handoff(
+                &acl,
+                &principal,
+                &[(Some("Memory"), memory), (Some("Notes"), notes)],
+                usize::MAX,
+            )
+            .ok()?;
+        if rendered.is_empty() {
+            return None;
+        }
+        let block = format!(
+            "<project-memory>\n\
+             This project has persistent memory distilled from earlier sessions.\n\
+             \n{rendered}\n\
+             \nFull history lives in {} — grep it when unsure. These notes are \
+             context, not ground truth; verify anything that looks stale.\n\
+             </project-memory>",
+            store.join(LOG_FILE).display()
+        );
         if mark {
             memory_state
                 .sessions
@@ -397,7 +601,7 @@ impl MemoryService {
                     })
                 })
                 .collect();
-            append_notes(&store, &corrections)?;
+            self.append_project_notes(project_id, &store, &corrections)?;
         }
         let prompt = distill_prompt(&memory_md, &log_tail(&store, 30), &excerpts, &commit_refs);
 
@@ -405,8 +609,11 @@ impl MemoryService {
         let output = headless_prompt(source.provider, binary, project_path.clone(), model, prompt)?;
         let (notes, memory_md) = parse_distill_output(&output)?;
 
-        append_notes(&store, &notes)?;
+        self.append_project_notes(project_id, &store, &notes)?;
         write_memory(&store, &memory_md)?;
+        // The engine's overview chunk revises one-for-one with the export —
+        // capped identically so the file and the record cannot drift.
+        self.record_project_overview(project_id, &cap_memory(&memory_md));
 
         for (session_id, slice) in &slices {
             memory_state
@@ -417,6 +624,97 @@ impl MemoryService {
         }
         save_state(&store, &memory_state)?;
         Ok(())
+    }
+
+    /// The notes write path every pass shares: scrub and date each line
+    /// into `LOG.txt`, then mirror the appended lines into the project's
+    /// engine scope with their file positions as source references —
+    /// pull-based readers can verify a note against the raw export. The
+    /// file is the human-readable export; the scope is the surfaceable
+    /// record. A failed engine write never fails the pass.
+    fn append_project_notes(
+        &self,
+        project_id: Uuid,
+        store: &Path,
+        notes: &[String],
+    ) -> anyhow::Result<()> {
+        use crate::memory_engine as engine;
+        let today = chrono::Utc::now().format("%Y-%m-%d");
+        // Secret-looking candidates drop here as the last line of defense —
+        // only the scrubbed, dated line exists in either store.
+        let lines: Vec<String> = notes
+            .iter()
+            .filter_map(|note| scrub_note(note).map(|clean| format!("{today} {clean}")))
+            .collect();
+        if lines.is_empty() {
+            return Ok(());
+        }
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(store.join(LOG_FILE))?;
+            for line in &lines {
+                writeln!(file, "{line}")?;
+            }
+        }
+        let base = read_log_lines(store).len().saturating_sub(lines.len());
+        if let Ok(engine_store) = self.engine_store()
+            && engine_store
+                .create_scope(&engine::Scope::project(project_id, &self.daemon_id))
+                .is_ok()
+        {
+            let scope = engine::Scope::project(project_id, &self.daemon_id);
+            let acl = engine::Acl {
+                scopes: vec![scope.clone()],
+                grants: Vec::new(),
+                now: waku_protocol::model::unix_time(),
+            };
+            for (offset, line) in lines.iter().enumerate() {
+                let _ = engine_store.insert(
+                    &acl,
+                    engine::DAEMON_PRINCIPAL,
+                    &scope.scope_id,
+                    engine::PROJECT_NOTES_COLLECTION,
+                    &waku_protocol::model::truncate_chars(line, 80),
+                    line,
+                    line,
+                    &format!("log:{:08}", base + offset + 1),
+                    "detail",
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// `MEMORY.md`'s revision becomes the project scope's one overview
+    /// chunk — the file stays the export, the chunk is what sessions
+    /// surface. Best-effort like the notes path.
+    fn record_project_overview(&self, project_id: Uuid, memory_md: &str) {
+        use crate::memory_engine as engine;
+        let Ok(engine_store) = self.engine_store() else {
+            return;
+        };
+        let scope = engine::Scope::project(project_id, &self.daemon_id);
+        if engine_store.create_scope(&scope).is_err() {
+            return;
+        }
+        let acl = engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: Vec::new(),
+            now: waku_protocol::model::unix_time(),
+        };
+        let _ = engine_store.upsert(
+            &acl,
+            engine::DAEMON_PRINCIPAL,
+            &scope.scope_id,
+            engine::PROJECT_MEMORY_COLLECTION,
+            "Project memory",
+            "Curated project memory",
+            memory_md,
+            "memory-md",
+            "overview",
+        );
     }
 }
 
@@ -963,143 +1261,24 @@ fn read_log_lines(store: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Pick the log lines worth injecting ahead of `task`. With eval configured,
-/// each of the last `RANK_CANDIDATES` lines gets a Noul score against the
-/// task; without it (or on failure), the newest lines win — recency is the
-/// honest default when relevance is unknown.
-fn rank_notes(
-    eval: Option<&waku_protocol::eval::EvalSettings>,
-    task: &str,
-    lines: &[String],
-) -> Vec<String> {
-    let candidates: Vec<String> = lines
-        .iter()
-        .rev()
-        .take(RANK_CANDIDATES)
-        .rev()
-        .cloned()
-        .collect();
-    let Some(settings) = eval else {
-        return recent_notes(&candidates);
-    };
-
-    let state = json!({ "task": task, "notes": candidates });
-    let questions: BTreeMap<String, EvalQuestion> = candidates
-        .iter()
-        .enumerate()
-        .map(|(index, _)| {
-            (
-                format!("note_{index}"),
-                EvalQuestion::Noul {
-                    instructions: format!(
-                        "Is `notes[{index}]` relevant to the task in `task` — could it \
-                         change what the agent should do or avoid? Answer no for generic \
-                         facts unrelated to the request."
-                    ),
-                    criteria: None,
-                },
-            )
-        })
-        .collect();
-    let mut record = EvalDecisionRecord::empty("memory-rank");
-    match crate::eval::evaluate(settings, &state, &questions) {
-        Ok(evaluation) => {
-            record.model = Some(evaluation.model.clone());
-            record.latency_ms = Some(evaluation.latency_ms);
-            record.usage = Some(evaluation.usage.clone());
-            record.answers = Some(evaluation.answers.clone());
-            crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
-            let ranked: Vec<String> = candidates
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| {
-                    evaluation
-                        .answers
-                        .get(&format!("note_{index}"))
-                        .is_some_and(|answer| match answer {
-                            waku_protocol::eval::EvalAnswer::Noul { noul } => *noul >= 0.5,
-                            _ => false,
-                        })
-                })
-                .take(MAX_INJECTED_NOTES)
-                .map(|(_, line)| line.clone())
-                .collect();
-            if ranked.is_empty() {
-                recent_notes(&candidates)
-            } else {
-                ranked
-            }
-        }
-        Err(error) => {
-            record.error = Some(format!("{error:#}"));
-            crate::eval::append_decision_log(&crate::eval::default_log_path(), &record);
-            recent_notes(&candidates)
-        }
-    }
-}
-
-fn recent_notes(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .rev()
-        .take(RECENT_NOTES_FALLBACK)
-        .rev()
-        .cloned()
-        .collect()
-}
-
-/// The hidden block prepended to a session's first prompt. `None` when both
-/// sections would be empty — an empty store should not inject a shell.
-fn compose_block(memory_md: &str, notes: &[String], log_path: &Path) -> Option<String> {
-    let mut block = String::from(
-        "<project-memory>\n\
-         This project has persistent memory distilled from earlier sessions.\n",
-    );
-    if !memory_md.trim().is_empty() {
-        block.push_str(&format!("\n## Memory\n{}\n", memory_md.trim_end()));
-    }
-    if !notes.is_empty() {
-        block.push_str(&format!("\n## Notes\n{}\n", notes.join("\n")));
-    }
-    if memory_md.trim().is_empty() && notes.is_empty() {
-        return None;
-    }
-    block.push_str(&format!(
-        "\nFull history lives in {} — grep it when unsure. These notes are \
-         context, not ground truth; verify anything that looks stale.\n\
-         </project-memory>",
-        log_path.display()
-    ));
-    Some(block)
-}
-
-/// Append scrubbed, dated notes to `LOG.txt`. Secret-looking candidates are
-/// dropped here as the last line of defense.
-fn append_notes(store: &Path, notes: &[String]) -> anyhow::Result<()> {
-    let today = chrono::Utc::now().format("%Y-%m-%d");
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(store.join(LOG_FILE))?;
-    for note in notes {
-        if let Some(clean) = scrub_note(note) {
-            writeln!(file, "{today} {clean}")?;
-        }
-    }
-    Ok(())
+/// The line budget `MEMORY.md` and its engine record share — applied once
+/// in the write path so the file and the chunk carry identical text.
+fn cap_memory(content: &str) -> String {
+    content
+        .lines()
+        .take(MAX_MEMORY_LINES)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_owned()
 }
 
 /// Replace `MEMORY.md` atomically; the file is read on every session start,
 /// so a torn write must never be observable.
 fn write_memory(store: &Path, content: &str) -> anyhow::Result<()> {
-    let capped: String = content
-        .lines()
-        .take(MAX_MEMORY_LINES)
-        .collect::<Vec<_>>()
-        .join("\n");
     let target = store.join(MEMORY_FILE);
     let temporary = store.join(".MEMORY.md.tmp");
-    std::fs::write(&temporary, format!("{}\n", capped.trim_end()))?;
+    std::fs::write(&temporary, format!("{}\n", cap_memory(content)))?;
     std::fs::rename(temporary, target)?;
     Ok(())
 }
@@ -1356,14 +1535,24 @@ mod tests {
     fn notes_append_scrubbed_and_dated() {
         let store = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&store).unwrap();
-        append_notes(
-            &store,
-            &[
-                "uses bun for scripts".to_owned(),
-                "the password is hunter2".to_owned(),
-            ],
-        )
-        .unwrap();
+        let service = MemoryService::new(
+            Arc::new(DaemonSettingsStore::open(store.join("settings.json")).unwrap()),
+            Arc::new(Mutex::new(PersistedState::fresh(store.clone()))),
+            Arc::new(StateStore::daemon(store.join("app.db"))),
+            crate::integrations::SecretStore::file_only(store.join("secrets")),
+            store.join("memory-engine"),
+            "test-daemon".into(),
+        );
+        service
+            .append_project_notes(
+                Uuid::new_v4(),
+                &store,
+                &[
+                    "uses bun for scripts".to_owned(),
+                    "the password is hunter2".to_owned(),
+                ],
+            )
+            .unwrap();
         let lines = log_tail(&store, 10);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].ends_with("uses bun for scripts"));
@@ -1443,26 +1632,140 @@ mod tests {
     }
 
     #[test]
-    fn rank_falls_back_to_recent_without_eval() {
-        let lines: Vec<String> = (0..40).map(|i| format!("note {i}")).collect();
-        let ranked = rank_notes(None, "fix the login bug", &lines);
+    fn surface_notes_falls_back_to_recent_without_eval() {
+        let root = std::env::temp_dir().join(format!("waku-memory-{}", Uuid::new_v4()));
+        let engine = crate::memory_engine::Store::open(root.join("engine")).unwrap();
+        let scope = crate::memory_engine::Scope::project(Uuid::new_v4(), "d");
+        engine.create_scope(&scope).unwrap();
+        let acl = crate::memory_engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: Vec::new(),
+            now: waku_protocol::model::unix_time(),
+        };
+        // `surface_fallback` hands `surface_notes` newest-first candidates.
+        let mut candidates: Vec<crate::memory_engine::Chunk> = (0..40)
+            .map(|i| {
+                engine
+                    .insert(
+                        &acl,
+                        crate::memory_engine::DAEMON_PRINCIPAL,
+                        &scope.scope_id,
+                        crate::memory_engine::PROJECT_NOTES_COLLECTION,
+                        &format!("note {i}"),
+                        &format!("note {i}"),
+                        &format!("note {i}"),
+                        &format!("log:{i:08}"),
+                        "detail",
+                    )
+                    .unwrap()
+            })
+            .collect();
+        candidates.reverse();
+        let service = MemoryService::new(
+            Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap()),
+            Arc::new(Mutex::new(PersistedState::fresh(root.clone()))),
+            Arc::new(StateStore::daemon(root.join("app.db"))),
+            crate::integrations::SecretStore::file_only(root.join("secrets")),
+            root.join("engine"),
+            "d".into(),
+        );
+        let ranked = service.surface_notes(None, "fix the login bug", candidates);
         assert_eq!(ranked.len(), RECENT_NOTES_FALLBACK);
-        assert_eq!(ranked.first().unwrap(), "note 20");
-        assert_eq!(ranked.last().unwrap(), "note 39");
+        // Newest-first in, chronological out.
+        assert_eq!(ranked.first().unwrap().body, "note 20");
+        assert_eq!(ranked.last().unwrap().body, "note 39");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn compose_block_omits_empty_sections() {
-        let log = Path::new("/tmp/proj/.goddard/memory/LOG.txt");
-        let block =
-            compose_block("# Facts\n- uses bun", &["2026-01-01 decided x".into()], log).unwrap();
-        assert!(block.contains("## Memory\n# Facts\n- uses bun"));
-        assert!(block.contains("## Notes\n2026-01-01 decided x"));
-        assert!(block.contains(log.to_str().unwrap()));
-        let notes_only = compose_block("", &["2026-01-01 y".into()], log).unwrap();
-        assert!(!notes_only.contains("## Memory"));
-        assert!(notes_only.contains("## Notes"));
-        assert!(compose_block("  ", &[], log).is_none());
+    fn memory_block_imports_legacy_files_and_scopes_them_to_the_project() {
+        let root = std::env::temp_dir().join(format!("waku-memory-svc-{}", Uuid::new_v4()));
+        let project_path = root.join("repo");
+        std::fs::create_dir_all(&project_path).unwrap();
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut current = settings.get();
+        current.memory_experiment_enabled = true;
+        settings.replace(current).unwrap();
+
+        let store = memory_dir(&project_path);
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join(MEMORY_FILE), "# Facts\n- uses bun").unwrap();
+        std::fs::write(store.join(LOG_FILE), "2026-01-01 decided x\n").unwrap();
+
+        let task_store = Arc::new(StateStore::daemon(root.join("app.db")));
+        let state = PersistedState::fresh(project_path.clone());
+        let session_id = state.sessions[0].id;
+        let project_id = state.sessions[0].project_id;
+
+        let service = MemoryService::new(
+            Arc::new(settings),
+            Arc::new(Mutex::new(state)),
+            task_store,
+            crate::integrations::SecretStore::file_only(root.join("secrets")),
+            root.join("memory-engine"),
+            "test-daemon".into(),
+        );
+        let block = service
+            .context_block(session_id, "keep working")
+            .expect("legacy files import into the project scope");
+        assert!(block.contains("<project-memory>"));
+        assert!(block.contains("## Memory\n\n# Facts\n- uses bun"));
+        assert!(block.contains("## Notes\n\n2026-01-01 decided x"));
+        assert!(block.contains(store.join(LOG_FILE).to_str().unwrap()));
+
+        // The records landed under `project:<id>` — a session of the
+        // project reads them; a principal with no grant sees none of it.
+        let engine = crate::memory_engine::Store::open(root.join("memory-engine")).unwrap();
+        let scope = crate::memory_engine::Scope::project(project_id, "test-daemon");
+        let acl = crate::memory_engine::Acl {
+            scopes: vec![scope.clone()],
+            grants: vec![crate::memory_engine::Grant::reader(
+                format!("session:{session_id}"),
+                &scope.scope_id,
+                &[],
+            )],
+            now: waku_protocol::model::unix_time(),
+        };
+        let surfaced = engine
+            .surface_fallback(
+                &acl,
+                &format!("session:{session_id}"),
+                &scope.scope_id,
+                crate::memory_engine::PROJECT_MEMORY_COLLECTION,
+                10,
+            )
+            .unwrap();
+        assert_eq!(surfaced.len(), 1);
+        assert!(surfaced[0].body.contains("uses bun"));
+        // A principal with no grant on the project scope reads nothing.
+        assert!(
+            engine
+                .surface_fallback(
+                    &acl,
+                    "session:stranger",
+                    &scope.scope_id,
+                    crate::memory_engine::PROJECT_MEMORY_COLLECTION,
+                    10,
+                )
+                .is_err()
+        );
+        // Re-import settles idempotently — one overview, one note.
+        let (acl2, scope2) = service.project_acl(project_id, &format!("session:{session_id}"));
+        service.import_project_legacy(&engine, &acl2, &scope2, &store);
+        assert_eq!(
+            engine
+                .surface_fallback(
+                    &acl2,
+                    &format!("session:{session_id}"),
+                    &scope2.scope_id,
+                    crate::memory_engine::PROJECT_NOTES_COLLECTION,
+                    10,
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -1498,6 +1801,8 @@ mod tests {
             Arc::new(Mutex::new(state)),
             task_store,
             crate::integrations::SecretStore::file_only(root.join("secrets")),
+            root.join("memory-engine"),
+            "test-daemon".into(),
         );
         assert_eq!(service.prompt_with_memory(incognito_id, "do it"), "do it");
         assert!(
