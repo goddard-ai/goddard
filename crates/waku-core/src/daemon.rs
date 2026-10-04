@@ -13753,6 +13753,7 @@ mod tests {
                     workspace: None,
                     base_branch: None,
                     permissions: None,
+                    work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                 },
                 &EventSink::detached(),
             )

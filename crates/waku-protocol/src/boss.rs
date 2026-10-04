@@ -277,6 +277,7 @@ pub enum BossOperation {
         url: String,
         #[serde(default)]
         title: Option<String>,
+    },
     /// Ask the connected desktop app to create a pinned, standalone terminal.
     /// Terminals belong to the app rather than the daemon; the daemon records
     /// this intent on the caller's event stream for the app to fulfill.
