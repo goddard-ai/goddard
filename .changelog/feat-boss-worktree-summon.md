@@ -1,1 +1,1 @@
-- Boss employees can now be summoned into a dedicated Git worktree — summon accepts `workspace: "worktree"` and `baseBranch`, so delegated work runs in its own checkout instead of the project's primary directory.
+- Boss employees can now be summoned into a dedicated Git worktree — summon accepts `workspace: "worktree"` and `baseBranch`, so delegated work runs in its own checkout instead of the project's primary directory. Bosses are instructed to rely on those summon fields and never create worktrees themselves with `git worktree`.
