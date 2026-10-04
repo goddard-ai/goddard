@@ -334,6 +334,27 @@ impl Waku {
         self.select_session(session_id, cx);
     }
 
+    /// Employee sessions the selected transcript's `boss_summon` markers
+    /// reference — the summon cards stream their live status and latest
+    /// line, so these details stay hydrated and pinned while the boss chat
+    /// is on screen.
+    pub(super) fn summon_card_employees(&self) -> Vec<Uuid> {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| Some(session.id) == self.state.selected_session)
+        else {
+            return Vec::new();
+        };
+        session
+            .transcript_blocks
+            .iter()
+            .flat_map(|block| &block.activities)
+            .filter_map(transcript_view::boss_summon_session_id)
+            .collect()
+    }
+
     /// Whether a "Sent by agent" chip's source task can still be opened: it
     /// exists and isn't archived. Deleted tasks are gone from `sessions`, and
     /// an archived one stays put — tapping the chip is provenance, not intent
@@ -638,6 +659,12 @@ impl Waku {
         // Landing on a boss chat consents to whatever voice it was holding.
         if let Some(key) = self.boss_chat_key() {
             self.flush_pending_boss_speech_for(key, cx);
+        }
+        // The summon cards in a boss transcript stream their employees'
+        // status and latest line — hydrate those details now; the marker
+        // scan is empty for every ordinary session.
+        for employee_id in self.summon_card_employees() {
+            self.ensure_session_loaded(employee_id, cx);
         }
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
@@ -4548,6 +4575,7 @@ impl Waku {
         }
         pinned.extend(self.side_chat_views.keys().copied());
         pinned.extend(self.big_picture.slot_session_ids());
+        pinned.extend(self.summon_card_employees());
         pinned.extend(self.session_hydrations.iter().copied());
         pinned.extend(self.submission_preparations.iter().copied());
         pinned.extend(self.pending_queue_drains.iter().copied());

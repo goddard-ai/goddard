@@ -3250,6 +3250,12 @@ pub struct SuspendedProviderSession {
 pub const MESSAGE_ATOM_OPEN: char = '\u{FFF9}';
 pub const MESSAGE_ATOM_END: char = '\u{FFFA}';
 
+/// The `tool_name` the daemon stamps on the transcript activity it records
+/// into a supervisor's session when a `BossOperation::Summon` succeeds. The
+/// employee's session id rides in `arguments`; the desktop renders that
+/// activity as the live summon card instead of a tool row.
+pub const BOSS_SUMMON_TOOL_NAME: &str = "boss_summon";
+
 /// The character range carrying a session id inside an atom span: one
 /// variation selector per hex nibble, in byte order — 32 chars for the 16
 /// id bytes. Variation selectors are invisible text, so the encoding leaks

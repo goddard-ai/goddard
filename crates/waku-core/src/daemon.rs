@@ -6063,6 +6063,10 @@ impl WakuBackend {
                     .boss
                     .prepare_employee(supervisor, persona_id, job_title)?;
                 let id = employee.session_id;
+                // Kept for the supervisor's transcript marker — `employee`
+                // itself moves into the task creation below.
+                let employee_name = employee.identity.name.clone();
+                let employee_title = employee.job_title.clone();
                 let selection = AgentCreateSelection {
                     provider,
                     model,
@@ -6081,7 +6085,31 @@ impl WakuBackend {
                     events,
                     Some(employee),
                 ) {
-                    Ok(session_id) => Ok(BossResult::Summoned { session_id }),
+                    Ok(session_id) => {
+                        // A summon marker lands in the supervisor's own
+                        // transcript at this turn's anchor — the desktop
+                        // renders it as the live employee card instead of a
+                        // plain activity row, with the employee's session id
+                        // in `arguments`.
+                        let mut marker = crate::model::ActivityItem::new(
+                            None,
+                            crate::model::ActivityKind::Tool,
+                            format!("Summoned {employee_name} — {employee_title}"),
+                            None,
+                            true,
+                        )
+                        .with_tool_name(Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME));
+                        marker.arguments = Some(session_id.to_string());
+                        let event = DriverEvent::RichActivity(marker);
+                        record_boss_event(
+                            &self.task_state,
+                            &self.task_store,
+                            supervisor,
+                            &event,
+                        )?;
+                        let _ = events.send(event_to_wire(event)?);
+                        Ok(BossResult::Summoned { session_id })
+                    }
                     Err(error) => {
                         // A failed launch may already have persisted a task.
                         if self.boss.is_employee(id) {

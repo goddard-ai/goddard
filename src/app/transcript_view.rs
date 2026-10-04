@@ -3336,6 +3336,40 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // A `boss_summon` marker lands in the supervisor's transcript when
+        // the daemon completes a summon — it renders as the live employee
+        // card and is lifted out of the activity fold entirely.
+        let summons: Vec<Uuid> = activities
+            .iter()
+            .filter_map(boss_summon_session_id)
+            .collect();
+        if !summons.is_empty()
+            && activities
+                .iter()
+                .all(|activity| boss_summon_session_id(activity).is_some())
+        {
+            return div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .children(summons.iter().map(|&employee_id| {
+                    self.render_summon_card(session_id, employee_id, theme, cx)
+                }))
+                .into_any_element();
+        }
+        let plain: Vec<ActivityItem>;
+        let activities: &[ActivityItem] = if summons.is_empty() {
+            activities
+        } else {
+            plain = activities
+                .iter()
+                .filter(|activity| boss_summon_session_id(activity).is_none())
+                .cloned()
+                .collect();
+            &plain
+        };
         // A completed child is not a group boundary: providers commonly emit
         // the next tool after the previous result. The group leaves the live
         // tail only when answer text is appended (so `after_message` falls
@@ -3435,7 +3469,11 @@ impl Waku {
                     })),
             );
         if !expanded {
-            return cluster.into_any_element();
+            return cluster
+                .children(summons.iter().map(|&employee_id| {
+                    self.render_summon_card(session_id, employee_id, theme, cx)
+                }))
+                .into_any_element();
         }
         // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
         let activity_surface = theme.surface.blend(theme.overlay.opacity(0.7));
@@ -3993,7 +4031,183 @@ impl Waku {
             }
             items = items.child(item);
         }
-        cluster.child(items).into_any_element()
+        cluster
+            .child(items)
+            .children(summons.iter().map(|&employee_id| {
+                self.render_summon_card(session_id, employee_id, theme, cx)
+            }))
+            .into_any_element()
+    }
+
+    /// The live card a `boss_summon` transcript marker becomes: avatar,
+    /// name, job title, current status, and the employee's freshest
+    /// assistant commentary clamped to two lines. The whole card opens the
+    /// employee's chat — the same route the mention chips take.
+    pub(super) fn render_summon_card(
+        &self,
+        owner_session: Uuid,
+        employee_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let employee = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id);
+        let identity = self.boss_session_identity(employee_id);
+        let name = identity
+            .as_ref()
+            .map(|identity| identity.name.clone())
+            .or_else(|| employee.map(|session| session.title.clone()))
+            .unwrap_or_else(|| employee_id.to_string());
+        let job_title = self
+            .boss_ui
+            .job_titles
+            .get(&employee_id)
+            .cloned()
+            .unwrap_or_default();
+        // Latest assistant line, tail-first: while the employee streams its
+        // newest message lands here chunk by chunk.
+        let commentary = employee
+            .and_then(|session| {
+                session
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| {
+                        message.role == MessageRole::Assistant
+                            && !message.hidden
+                            && !message.visible_content().trim().is_empty()
+                    })
+                    .map(|message| {
+                        let tail: Vec<&str> = message
+                            .visible_content()
+                            .lines()
+                            .filter(|line| !line.trim().is_empty())
+                            .collect();
+                        tail[tail.len().saturating_sub(2)..].join("\n")
+                    })
+            })
+            .unwrap_or_default();
+        let status_label = if self.boss_ui.expired.contains(&employee_id) {
+            tr!("boss.employee_finished")
+        } else {
+            match employee.map(|session| session.status) {
+                Some(SessionStatus::Working | SessionStatus::Connecting) => {
+                    tr!("sidebar.status_working")
+                }
+                Some(SessionStatus::Waiting) => tr!("sidebar.status_waiting"),
+                Some(SessionStatus::Background) => tr!("sidebar.status_background"),
+                Some(SessionStatus::Failed) => tr!("sidebar.status_failed"),
+                _ => tr!("boss.employee_finished"),
+            }
+        };
+        let status_indicator =
+            employee.and_then(|session| self.session_status_indicator(session, theme));
+        let card_id = format!("summon-card-{owner_session}-{employee_id}");
+        let focus = self.transcript_control_focus(card_id.clone(), cx);
+        let card_surface = theme.surface.blend(theme.overlay.opacity(0.7));
+        div()
+            .id(SharedString::from(card_id))
+            .track_focus(&focus)
+            .tab_index(0)
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
+            .rounded(px(11.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(card_surface)
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|style| style.bg(theme.surface.blend(theme.overlay)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_sent_by_task(employee_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.open_sent_by_task(employee_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        identity
+                            .as_ref()
+                            .map(|identity| self.boss_avatar(identity, 28.0, cx))
+                            .unwrap_or_else(|| div().size(px(28.0)).into_any_element()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .truncate()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(sp(13.0))
+                                    .line_height(sp(16.0))
+                                    .child(SharedString::from(name)),
+                            )
+                            .when(!job_title.is_empty(), |row| {
+                                row.child(icon(boss::job_title_icon(&job_title), 11.0, theme.text_tertiary))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(12.0))
+                                            .line_height(sp(15.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(SharedString::from(job_title)),
+                                    )
+                            }),
+                    )
+                    .children(status_indicator)
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(status_label)),
+                    ),
+            )
+            .child(
+                // A fixed two-line slot keeps the row height stable — the
+                // commentary text repaints in place as the employee streams.
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .pl(px(36.0))
+                    .h(px(32.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .overflow_hidden()
+                    .child(SharedString::from(if commentary.is_empty() {
+                        "…".to_string()
+                    } else {
+                        commentary
+                    })),
+            )
+            .into_any_element()
     }
 
     /// The diff for an expanded file-change activity.
@@ -4422,6 +4636,18 @@ fn render_activity_image(
     .rounded(px(4.0))
     .object_fit(ObjectFit::Contain)
     .into_any_element()
+}
+
+/// The employee session id a `boss_summon` marker activity carries in
+/// `arguments` — `None` for every ordinary activity item.
+pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
+    if activity.tool_name.as_deref() != Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME) {
+        return None;
+    }
+    activity
+        .arguments
+        .as_deref()
+        .and_then(|arguments| Uuid::parse_str(arguments).ok())
 }
 
 fn decode_activity_image(image_url: &str) -> Option<std::sync::Arc<gpui::Image>> {

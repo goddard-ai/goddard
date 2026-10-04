@@ -5982,6 +5982,8 @@ boss.saved:
   en: Saved
 boss.loading:
   en: Loading…
+boss.employee_finished:
+  en: Finished
 boss.finished_now:
   en: "%{name} finished just now"
 boss.finished_ago:
