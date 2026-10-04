@@ -7290,7 +7290,7 @@ pub(super) fn sidebar_session_selected(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waku_client::boss::{BossDeliverable, BossIdentity, BossState};
+    use waku_client::boss::{BossDeliverable, BossIdentity, BossResourcePolicy, BossState};
 
     fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
@@ -7307,6 +7307,10 @@ mod tests {
             deliverables,
             goals_viewed_at: None,
             planning: Vec::new(),
+            resource_policy: BossResourcePolicy::default(),
+            next_sequence: 0,
+            next_event_id: 0,
+            outbox: Vec::new(),
             revision: 0,
         }
     }
