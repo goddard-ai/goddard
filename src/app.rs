@@ -870,6 +870,8 @@ enum RightPanelSurface {
     /// rendered read-only. The tab opens itself with the session and never
     /// closes — `plan_file` is the daemon-normalized `plans/<name>.md`.
     Plan { session_id: Uuid, plan_file: String },
+    /// The employee roster and goal status for the owning Boss chat.
+    Goals,
 }
 
 /// A planning session's fetched plan document. `revision` is the Boss
@@ -1905,6 +1907,7 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::SideChat(session_id) => {
             Some(PersistedRightPanelSurface::SideChat(*session_id))
         }
+        RightPanelSurface::Goals => None,
         RightPanelSurface::Terminal(terminal_id) => {
             Some(PersistedRightPanelSurface::Terminal(*terminal_id))
         }

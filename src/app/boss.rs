@@ -43,6 +43,10 @@ pub(super) enum BossTab {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    pub(super) goal_rows: HashMap<DaemonKey, Arc<Vec<BossGoalRow>>>,
+    pub(super) goals_list: ListState,
+    pub(super) goals_scrollbar: Rc<ScrollbarState>,
+    pub(super) goals_list_owner: Option<DaemonKey>,
     pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
@@ -96,6 +100,10 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            goal_rows: HashMap::new(),
+            goals_list: ListState::new(0, ListAlignment::Top, px(640.0)),
+            goals_scrollbar: ScrollbarState::new(),
+            goals_list_owner: None,
             projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),
@@ -132,6 +140,16 @@ impl Default for BossUi {
             focus: None,
         }
     }
+}
+
+#[derive(Clone)]
+pub(super) struct BossGoalRow {
+    pub session_id: Uuid,
+    pub name: String,
+    pub job_title: String,
+    pub work_goal: waku_protocol::boss::EmployeeGoal,
+    pub expired: bool,
+    pub blocked: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -203,6 +221,21 @@ impl Waku {
             }) {
                 continue;
             }
+            let rows = Arc::new(
+                state
+                    .employees
+                    .iter()
+                    .map(|employee| BossGoalRow {
+                        session_id: employee.session_id,
+                        name: employee.identity.name.clone(),
+                        job_title: employee.job_title.clone(),
+                        work_goal: employee.work_goal,
+                        expired: employee.expired,
+                        blocked: employee.blocker.is_some(),
+                    })
+                    .collect(),
+            );
+            self.boss_ui.goal_rows.insert(key, rows);
             self.boss_ui.states.insert(key, state);
             changed = true;
         }

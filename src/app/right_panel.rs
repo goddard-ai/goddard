@@ -1161,6 +1161,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "github",
             Self::SideChat(_) => "side_chat",
             Self::Plan { .. } => "plan",
+            Self::Goals => "goals",
         }
     }
 
@@ -1191,6 +1192,7 @@ impl RightPanelSurface {
             Self::Plan { plan_file, .. } => {
                 plan_file.rsplit('/').next().unwrap_or(plan_file).to_owned()
             }
+            Self::Goals => tr!("right_panel.goals"),
         }
     }
 
@@ -1206,6 +1208,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "icons/github.svg",
             Self::SideChat(_) => "icons/chat.svg",
             Self::Plan { plan_file, .. } => file_icon_for_path(plan_file),
+            Self::Goals => "icons/target.svg",
         }
     }
 }
@@ -1264,6 +1267,9 @@ pub(super) fn reusable_surface_index(
         RightPanelSurface::SideChat(session_id) => surfaces.iter().position(|surface| {
             matches!(surface, RightPanelSurface::SideChat(candidate) if candidate == session_id)
         }),
+        RightPanelSurface::Goals => surfaces
+            .iter()
+            .position(|surface| matches!(surface, RightPanelSurface::Goals)),
         RightPanelSurface::Files
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
@@ -2343,7 +2349,12 @@ impl Waku {
     /// surface take nothing.
     fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
         if self.managed_panel_owner() {
-            return managed_panel_surface(surface);
+            return match surface {
+                RightPanelSurface::Goals => {
+                    self.boss_ui.page.is_none() && self.boss_chat_key().is_some()
+                }
+                _ => managed_panel_surface(surface),
+            };
         }
         match self.active_right_panel_owner() {
             RightPanelOwner::Session(_) | RightPanelOwner::Terminal(_) | RightPanelOwner::Bare => {
@@ -2357,9 +2368,12 @@ impl Waku {
                     | RightPanelSurface::FileAtRef { .. }
             ),
             RightPanelOwner::Inbox => matches!(surface, RightPanelSurface::GitHub(_)),
-            RightPanelOwner::Boss(_) | RightPanelOwner::Drafts | RightPanelOwner::Automations => {
-                false
+            RightPanelOwner::Boss(key) => {
+                self.boss_ui.page.is_none()
+                    && self.boss_chat_key() == Some(key)
+                    && matches!(surface, RightPanelSurface::Goals)
             }
+            RightPanelOwner::Drafts | RightPanelOwner::Automations => false,
         }
     }
 
@@ -2375,10 +2389,11 @@ impl Waku {
             let active = state
                 .active_surface
                 .and_then(|index| state.surfaces.get(index).cloned());
-            state.surfaces.retain(managed_panel_surface);
-            state.active_surface = active.and_then(|surface| {
-                state.surfaces.iter().position(|entry| *entry == surface)
-            });
+            state
+                .surfaces
+                .retain(|surface| self.right_panel_owner_allows(surface));
+            state.active_surface = active
+                .and_then(|surface| state.surfaces.iter().position(|entry| *entry == surface));
             state.git_panel_open = false;
             state.git_panel = None;
             state.git_panel_commit_diff = None;
@@ -3387,6 +3402,7 @@ impl Waku {
             }) => self
                 .render_plan_preview(session_id, &plan_file, cx)
                 .into_any_element(),
+            Some(RightPanelSurface::Goals) => self.render_boss_goals_panel(cx).into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
                 if self
@@ -5016,6 +5032,7 @@ impl Waku {
                 RightPanelSurface::new_terminal(),
                 RightPanelSurface::Files,
                 RightPanelSurface::Diff,
+                RightPanelSurface::Goals,
             ]
             .into_iter()
             .filter(|surface| self.right_panel_owner_allows(surface))
@@ -5185,6 +5202,10 @@ impl Waku {
             (
                 RightPanelSurface::Diff,
                 tr!("right_panel.diff_description"),
+            ),
+            (
+                RightPanelSurface::Goals,
+                tr!("right_panel.goals_description"),
             ),
         ]
         .into_iter()
@@ -8187,6 +8208,164 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }))
+    }
+
+    fn render_boss_goals_panel(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let rows = self
+            .boss_chat_key()
+            .and_then(|key| self.boss_ui.goal_rows.get(&key))
+            .cloned()
+            .unwrap_or_else(|| Arc::new(Vec::new()));
+        if rows.is_empty() {
+            return div()
+                .id("boss-goals-panel")
+                .flex_1()
+                .min_h_0()
+                .p(px(12.0))
+                .child(
+                    div()
+                        .w_full()
+                        .py(px(20.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("boss.goals_empty")),
+                );
+        }
+        let list_state = self.boss_ui.goals_list.clone();
+        let owner = self.boss_chat_key();
+        if self.boss_ui.goals_list_owner != owner || list_state.item_count() != rows.len() {
+            self.boss_ui.goals_list_owner = owner;
+            list_state.reset_with_uniform_height(rows.len(), px(64.0));
+        }
+        let scrollbar = self.boss_ui.goals_scrollbar.clone();
+        let entity = cx.entity().downgrade();
+        div()
+            .id("boss-goals-panel")
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .p(px(12.0))
+            .child(
+                list(list_state.clone(), move |index, _window, cx| {
+                    let Some(row) = rows.get(index).cloned() else {
+                        return div().into_any_element();
+                    };
+                    entity
+                        .upgrade()
+                        .map(|entity| {
+                            entity.update(cx, |this, cx| {
+                                this.render_boss_goal_row(&row, cx).into_any_element()
+                            })
+                        })
+                        .unwrap_or_else(|| div().into_any_element())
+                })
+                .size_full(),
+            )
+            .child(scrollbar::vertical(&list_state, &scrollbar))
+    }
+
+    fn render_boss_goal_row(&self, row: &boss::BossGoalRow, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == row.session_id);
+        let goal = session.and_then(|session| session.thread_goal.as_ref());
+        let failed = session
+            .is_some_and(|session| session.status == crate::model::SessionStatus::Failed);
+        let complete = row.expired || goal.is_some_and(|goal| goal.status.is_terminal());
+        let status = if row.expired {
+            if failed {
+                tr!("boss.goals_status_failed")
+            } else if row.blocked {
+                tr!("boss.goals_status_blocked")
+            } else {
+                tr!("boss.goals_status_complete")
+            }
+        } else if goal.is_some_and(|goal| {
+            goal.status == crate::model::ThreadGoalStatus::Complete
+        }) {
+            tr!("boss.goals_status_complete")
+        } else if failed {
+            tr!("boss.goals_status_failed")
+        } else if row.blocked {
+            tr!("boss.goals_status_blocked")
+        } else if let Some(goal) = goal {
+            match goal.status {
+                crate::model::ThreadGoalStatus::Active => match session.map(|s| s.status) {
+                    Some(crate::model::SessionStatus::Connecting) => {
+                        tr!("boss.goals_status_starting")
+                    }
+                    Some(
+                        crate::model::SessionStatus::Working
+                        | crate::model::SessionStatus::Background,
+                    ) => tr!("boss.goals_status_working"),
+                    Some(crate::model::SessionStatus::Waiting) => tr!("boss.goals_status_waiting"),
+                    _ => tr!("boss.goals_status_active"),
+                },
+                crate::model::ThreadGoalStatus::Paused => tr!("boss.goals_status_paused"),
+                crate::model::ThreadGoalStatus::Blocked => tr!("boss.goals_status_blocked"),
+                crate::model::ThreadGoalStatus::UsageLimited => {
+                    tr!("boss.goals_status_usage_limited")
+                }
+                crate::model::ThreadGoalStatus::BudgetLimited => {
+                    tr!("boss.goals_status_budget_limited")
+                }
+                crate::model::ThreadGoalStatus::Complete => tr!("boss.goals_status_complete"),
+            }
+        } else {
+            match session.map(|s| s.status) {
+                Some(crate::model::SessionStatus::Connecting) => {
+                    tr!("boss.goals_status_starting")
+                }
+                Some(
+                    crate::model::SessionStatus::Working
+                    | crate::model::SessionStatus::Background,
+                ) => tr!("boss.goals_status_working"),
+                Some(crate::model::SessionStatus::Waiting) => tr!("boss.goals_status_waiting"),
+                _ => tr!("boss.goals_status_active"),
+            }
+        };
+        let work_kind = match row.work_goal {
+            waku_protocol::boss::EmployeeGoal::Errand => tr!("boss.goals_errand"),
+            waku_protocol::boss::EmployeeGoal::Goal => tr!("boss.goals_goal"),
+        };
+        let category = if complete {
+            tr!("boss.goals_completed")
+        } else {
+            tr!("boss.goals_in_progress")
+        };
+        let job = if row.job_title.is_empty() {
+            row.name.clone()
+        } else {
+            format!("{} · {}", row.name, row.job_title)
+        };
+        div()
+            .w_full()
+            .mb(px(6.0))
+            .px(px(10.0))
+            .py(px(9.0))
+            .rounded(px(8.0))
+            .bg(theme.raised)
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(div().text_size(sp(12.5)).text_color(theme.text).child(job))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .child(work_kind)
+                    .child("·")
+                    .child(category)
+                    .child("·")
+                    .child(status),
+            )
     }
 
     fn expand_right_panel_diff_gap(

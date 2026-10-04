@@ -651,7 +651,7 @@ mod tests {
                     // An omitted kind is an errand: its finish reports.
                     && work_goal == super::EmployeeGoal::Errand
         ));
-        let summon: super::BossOperation = serde_json::from_value(serde_json::json!({
+        let goal: super::BossOperation = serde_json::from_value(serde_json::json!({
             "type": "summon",
             "personaId": "00000000-0000-0000-0000-000000000001",
             "jobTitle": "Watcher",
@@ -661,7 +661,7 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(
-            summon,
+            goal,
             super::BossOperation::Summon { work_goal: super::EmployeeGoal::Goal, .. }
         ));
         let action: EmployeeControl = serde_json::from_value(serde_json::json!({

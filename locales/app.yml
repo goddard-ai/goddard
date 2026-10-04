@@ -3929,6 +3929,10 @@ right_panel.files_description:
   en: Browse and read workspace files
 right_panel.diff_description:
   en: Review file changes
+right_panel.goals:
+  en: Goals
+right_panel.goals_description:
+  en: Track employee work in progress and completed work
 right_panel.terminal_unavailable:
   en: Terminal unavailable
 right_panel.terminal_unavailable_description:
@@ -5982,8 +5986,36 @@ boss.delegate:
   en: May summon employees
 boss.computer:
   en: Computer use
-boss.always_report:
-  en: Always report when finished
+boss.goals_in_progress:
+  en: In progress
+boss.goals_completed:
+  en: Completed
+boss.goals_empty:
+  en: No employee work yet
+boss.goals_errand:
+  en: Errand · reports when finished
+boss.goals_goal:
+  en: Goal · finishes quietly
+boss.goals_status_active:
+  en: In progress
+boss.goals_status_starting:
+  en: Starting
+boss.goals_status_working:
+  en: Working
+boss.goals_status_waiting:
+  en: Waiting
+boss.goals_status_paused:
+  en: Paused
+boss.goals_status_blocked:
+  en: Needs attention
+boss.goals_status_usage_limited:
+  en: Usage limited
+boss.goals_status_budget_limited:
+  en: Budget reached
+boss.goals_status_complete:
+  en: Completed
+boss.goals_status_failed:
+  en: Failed
 boss.select_document:
   en: Select a file or persona to view and edit it.
 boss.save:
