@@ -277,6 +277,8 @@ const ICONS: &[(&str, &[u8])] = icons![
     "rotate-cw",
     "search",
     "send",
+    "send-chrome-arrow",
+    "send-chrome-underlay",
     "server",
     "settings",
     "settings-hexagon",
