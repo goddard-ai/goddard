@@ -6026,3 +6026,13 @@ boss.greeting:
   en: What should we do today?
 boss.new_face:
   en: New face
+boss.planning_label:
+  en: Planning
+boss.plan_seed_opener:
+  en: This planning session is yours for the request above. Explain your understanding of it, then draft and revise the plan at %{path} with `writeFile`. When the plan is ready for the user's approval, call `finalizePlan` — approval freezes the document.
+boss.plan_finalize_title:
+  en: Finalize plan?
+boss.plan_finalize_detail:
+  en: Freeze %{file} ("%{idea}") as approved? The document becomes read-only and this planning session archives once its grace period ends.
+boss.plan_finalize:
+  en: Finalize plan

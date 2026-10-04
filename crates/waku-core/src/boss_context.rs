@@ -386,6 +386,7 @@ mod tests {
             personas: Vec::new(),
             employees: Vec::new(),
             bundles: Vec::new(),
+            planning: Vec::new(),
             revision: 0,
         }
     }

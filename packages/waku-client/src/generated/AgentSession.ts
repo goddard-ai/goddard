@@ -12,6 +12,7 @@ import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionEnvironment } from "./SessionEnvironment";
 import type { SessionPhase } from "./SessionPhase";
+import type { SessionPlanning } from "./SessionPlanning";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
 import type { SuspendedProviderSession } from "./SuspendedProviderSession";
@@ -178,7 +179,13 @@ agent_rename_allowed?: boolean,
  * the ordinary rows; it opens through the boss transcript as an
  * ordinary task.
  */
-boss_managed?: boolean, provider_cursor: ProviderResumeCursor | null,
+boss_managed?: boolean,
+/**
+ * The planning-session kind marker — `Some` only on boss-managed
+ * sessions opened through `createPlan`. Daemon-owned like
+ * `boss_managed`: client saves can never unset it or unfreeze a plan.
+ */
+planning?: SessionPlanning | null, provider_cursor: ProviderResumeCursor | null,
 /**
  * Provider conversations this session ran on before switching away.
  * Each holds a resumable cursor and the transcript boundary the return

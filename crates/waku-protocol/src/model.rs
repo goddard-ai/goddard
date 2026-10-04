@@ -1579,6 +1579,36 @@ pub struct RuntimeEventCursor {
     pub sequence: u64,
 }
 
+/// The planning-session kind marker: present only on managed sessions the
+/// boss opened through `createPlan`. It carries everything a task list
+/// needs to render the row — the idea and plan file — without the Boss
+/// document or a hydrate.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPlanning {
+    /// The plan document, relative to `memory/` in the Boss files root —
+    /// always `plans/<name>.md`.
+    pub plan_file: String,
+    /// What the session is planning — the session's title carries the same
+    /// text.
+    pub idea: String,
+    /// The i18n key clients render as the row's planning label.
+    pub label: crate::protocol::WireTranslation,
+    /// Frozen once the user approves `finalizePlan`: the plan document
+    /// rejects writes and the session archives after a grace period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalized_at: Option<u64>,
+}
+
+impl SessionPlanning {
+    /// Monotonic union for skeleton/detail merges: once a record exists or
+    /// once it is frozen, no older copy can take the flags back — the same
+    /// rule `boss_managed` follows.
+    pub fn absorb(&mut self, other: &SessionPlanning) {
+        self.finalized_at = self.finalized_at.max(other.finalized_at);
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct AgentSession {
     pub id: Uuid,
@@ -1726,6 +1756,11 @@ pub struct AgentSession {
     /// ordinary task.
     #[serde(default, skip_serializing_if = "is_false")]
     pub boss_managed: bool,
+    /// The planning-session kind marker — `Some` only on boss-managed
+    /// sessions opened through `createPlan`. Daemon-owned like
+    /// `boss_managed`: client saves can never unset it or unfreeze a plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning: Option<SessionPlanning>,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Provider conversations this session ran on before switching away.
@@ -1886,6 +1921,7 @@ impl AgentSession {
             incognito: false,
             agent_rename_allowed: false,
             boss_managed: false,
+            planning: None,
             detail_loaded: true,
             provider_cursor: None,
             suspended_provider_sessions: Vec::new(),
@@ -1955,6 +1991,8 @@ impl AgentSession {
             // A list column: the sidebar keeps a retired employee's task
             // out of the ordinary rows without consulting the roster.
             boss_managed: self.boss_managed,
+            // A list column: planning rows badge and order on it.
+            planning: self.planning.clone(),
             // Incognito sessions persist nowhere, so the client's skeleton
             // may be the only surviving copy after a daemon restart — it
             // must carry the resume cursor, or survival depends on whether
@@ -2023,6 +2061,12 @@ impl AgentSession {
     /// from task lists and deleted when the parent is archived or removed.
     pub fn is_side_chat(&self) -> bool {
         self.side_chat_of.is_some()
+    }
+
+    /// Whether this session is a boss planning session — the kind marker a
+    /// task list reads to badge, label, and order the row.
+    pub fn is_planning(&self) -> bool {
+        self.planning.is_some()
     }
 
     /// The provider-facing note a side chat prepends to its first outbound

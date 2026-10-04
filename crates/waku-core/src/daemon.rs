@@ -1295,8 +1295,10 @@ impl WakuBackend {
     /// retire their runtimes, exactly what a client's own archive does to
     /// daemon state. Side chats leave with their parent — deleted, as the
     /// save path's cascade enforces — and every attached client learns the
-    /// change through the task-state bump the request returns under.
-    fn archive_sessions(&self, session_ids: &[Uuid]) -> anyhow::Result<()> {
+    /// change through the task-state bump the request returns under. Also
+    /// the planning-grace sweep's archive path: `BossService` reaches it
+    /// through its bound backend handle.
+    pub(crate) fn archive_sessions(&self, session_ids: &[Uuid]) -> anyhow::Result<()> {
         let mut archived_ids = Vec::new();
         let mut removed_ids;
         let workspace_roots: Vec<PathBuf>;
@@ -1835,8 +1837,12 @@ impl Backend for WakuBackend {
             .name("waku-idle-reaper".into())
             .spawn(move || {
                 let retire_employees = || {
-                    if let Err(error) = boss.retire_expired(crate::model::unix_time()) {
+                    let now = crate::model::unix_time();
+                    if let Err(error) = boss.retire_expired(now) {
                         eprintln!("could not retire finished Boss employees: {error:#}");
+                    }
+                    if let Err(error) = boss.archive_graced_plans(now) {
+                        eprintln!("could not archive graced Boss plans: {error:#}");
                     }
                 };
                 // A pressure shed pass just ran — shed at most once per
@@ -3377,7 +3383,7 @@ impl Backend for WakuBackend {
                     agent.context("resource reservations require a scoped task credential")?;
                 // An acquire can park its caller in a wait for minutes; the
                 // human-facing boss delegates waits to employees instead.
-                if self.boss.is_boss(owner)
+                if self.boss.is_boss_principal(owner)
                     && matches!(
                         operation,
                         waku_protocol::resources::ResourceOperation::Acquire { .. }
@@ -3722,6 +3728,10 @@ fn merge_session_list_columns(
     existing.side_chat_of = incoming.side_chat_of;
     // The stamp is monotonic; a client's older copy must not clear it.
     existing.boss_managed |= incoming.boss_managed;
+    // Same daemon-owned monotonic rule for the planning marker.
+    if existing.planning.is_none() {
+        existing.planning = incoming.planning;
+    }
     true
 }
 
@@ -3747,6 +3757,13 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
     }
     // The stamp is monotonic; a client's older copy must not clear it.
     existing.boss_managed |= incoming.boss_managed;
+    // Planning metadata is daemon-owned too: adopt a marker the daemon
+    // copy lacks, never replace or unfreeze one it holds.
+    match (&mut existing.planning, incoming.planning) {
+        (None, incoming) => existing.planning = incoming,
+        (Some(current), Some(incoming)) => current.absorb(&incoming),
+        (Some(_), None) => {}
+    }
     if incoming.detail_loaded {
         // A detail-loaded projection carries the client's queue edits:
         // every save of a managed session lands here, so a user-owned
@@ -4598,6 +4615,16 @@ impl WakuBackend {
             .any(|session| session.id == session_id)
     }
 
+    /// Still open for prompts — present and unarchived. `BossService` reads
+    /// it to decide whether a planning supervisor can take a report.
+    pub(crate) fn session_active(&self, session_id: Uuid) -> bool {
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.archived_at.is_none())
+    }
+
     /// The whole agent surface sits behind this daemon-level setting. While
     /// it is off the commands are rejected for every caller — scoped
     /// credentials included — and nothing is minted or injected.
@@ -4867,6 +4894,249 @@ impl WakuBackend {
         }
     }
 
+    /// `createPlan`: open a boss-attached planning session on an idea. Only
+    /// a boss principal or a human may start one — employees never spawn
+    /// sibling plans, and there is no user-initiated creation path beyond
+    /// this operation. The session joins the Boss project, is stamped
+    /// `boss_managed` with its `planning` marker, and its transcript seeds
+    /// with the user request plus a localized opener asking the boss to
+    /// explain its understanding.
+    fn create_plan(
+        &self,
+        caller: Option<Uuid>,
+        title: String,
+        plan_file: String,
+        prompt: String,
+        provider: Option<ProviderKind>,
+        model: Option<String>,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::BossResult;
+        if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+            bail!("only the boss can start a planning session");
+        }
+        let _lock = self.boss.operation_lock.lock();
+        let title = title.trim().to_owned();
+        if title.is_empty() {
+            bail!("a planning session needs a title");
+        }
+        if prompt.trim().is_empty() {
+            bail!("a planning session needs the user prompt that prompted it");
+        }
+        let plan_file = crate::boss::normalize_plan_file(&plan_file)?;
+        let boss = self.boss.document();
+        // Two sessions cannot share one document — a name the registry
+        // already holds would fork writes across both.
+        if self.boss.plan_for_file(&plan_file).is_some() {
+            bail!("a plan named {plan_file} already exists");
+        }
+        // The planning session lives in the Boss project with the boss
+        // chat. `create_agent_task_inner` resolves projects by path, so the
+        // Boss project must already name this path — register it the same
+        // way `Open` does when it has not been.
+        let workspace = dunce::canonicalize(&self.boss.owned_workspace()?)?;
+        let project = {
+            let mut state = self.task_state.lock();
+            let found = state
+                .projects
+                .iter_mut()
+                .find(|entry| {
+                    entry.id == boss.identity.id
+                        || dunce::canonicalize(&entry.path)
+                            .is_ok_and(|path| path == workspace)
+                })
+                .cloned();
+            match found {
+                Some(project) => project,
+                None => {
+                    let mut project = Project::from_path(workspace.clone());
+                    project.id = boss.identity.id;
+                    project.name = "Boss".into();
+                    state.projects.push(project.clone());
+                    project
+                }
+            }
+        };
+        let sender = caller.or(boss.session_id);
+        let plan = waku_protocol::boss::BossPlan {
+            session_id: Uuid::new_v4(),
+            plan_file: plan_file.clone(),
+            idea: title.clone(),
+            finalized_at: None,
+        };
+        let (opener, _) = localized!("boss.plan_seed_opener", path = format!("memory/{plan_file}"));
+        let seed = format!("{}\n\n{}", prompt.trim(), opener);
+        let selection = AgentCreateSelection {
+            provider,
+            model,
+            title: Some(title),
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        };
+        let session_id = self.create_agent_task_inner(
+            sender,
+            selection,
+            workspace,
+            AgentWorkspace::Local,
+            None,
+            AgentTaskPrompt::Fixed(seed),
+            events,
+            None,
+            Some(plan),
+        )?;
+        let session = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("planning session {session_id} is missing"))?;
+        Ok(BossResult::Session {
+            session: Box::new(session),
+            project: Box::new(project),
+        })
+    }
+
+    /// `finalizePlan`: freeze a plan document once the user approves. A
+    /// planning session finalizes its own plan; the boss chat or a human
+    /// names the file. Scoped callers park a daemon-owned approval card on
+    /// their session — the same contract `agentProposeArchive` uses — and
+    /// only the `finalize` answer stamps `finalized_at`, freezes writes,
+    /// and starts the post-approval grace period before archival. A human
+    /// caller is the approver, so a master-token call finalizes directly.
+    fn finalize_plan(
+        &self,
+        caller: Option<Uuid>,
+        plan_file: Option<String>,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::BossResult;
+        if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+            bail!("only the boss can finalize a plan");
+        }
+        // Resolve the plan: an explicit file names the record, while a
+        // planning session's bare `finalizePlan` means its own.
+        let plan = match plan_file {
+            Some(plan_file) => {
+                let plan_file = crate::boss::normalize_plan_file(&plan_file)?;
+                if let Some(caller) = caller
+                    && self.boss.is_planning(caller)
+                    && self.boss.plan(caller).is_some_and(|own| own.plan_file != plan_file)
+                {
+                    bail!("a planning session finalizes only its own plan");
+                }
+                self.boss
+                    .plan_for_file(&plan_file)
+                    .ok_or_else(|| anyhow!("no plan named {plan_file}"))?
+            }
+            None => {
+                let caller = caller.ok_or_else(|| {
+                    anyhow!("finalizePlan needs a plan file when it does not come from a planning session")
+                })?;
+                self.boss
+                    .plan(caller)
+                    .ok_or_else(|| anyhow!("this session owns no plan to finalize"))?
+            }
+        };
+        if plan.finalized_at.is_some() {
+            bail!("plan {} is already finalized", plan.plan_file);
+        }
+        {
+            let state = self.task_state.lock();
+            if !state
+                .sessions
+                .iter()
+                .any(|session| session.id == plan.session_id && session.archived_at.is_none())
+            {
+                bail!("planning session for {} is gone", plan.plan_file);
+            }
+        }
+        // The approver: a human caller already is one; a boss caller parks
+        // a card on its own session — live, because the call is mid-turn.
+        if let Some(caller) = caller {
+            let runtime_id = self
+                .sessions
+                .lock()
+                .get(&caller)
+                .map(|entry| entry.runtime_id)
+                .ok_or_else(|| {
+                    anyhow!("session {caller} has no running runtime to show the request")
+                })?;
+            let request_id = format!(
+                "{}{}",
+                waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX,
+                Uuid::new_v4()
+            );
+            let (title_text, title_i18n) = localized!("boss.plan_finalize_title");
+            let (detail_text, detail_i18n) = localized!(
+                "boss.plan_finalize_detail",
+                file = format!("memory/{}", plan.plan_file),
+                idea = plan.idea,
+            );
+            let wire = event_to_wire(DriverEvent::Permission {
+                request_id: request_id.clone(),
+                title: title_text,
+                title_i18n: Some(title_i18n),
+                detail: detail_text,
+                detail_i18n: Some(detail_i18n),
+                options: vec![
+                    PermissionOption::keyed("finalize", localized!("boss.plan_finalize"), true),
+                    PermissionOption::keyed("deny", localized!("common.deny"), false),
+                ],
+            })?;
+            let (settled, settle_rx) = crossbeam_channel::bounded(1);
+            // One parked request per session — same card contract as the
+            // archive proposal.
+            if !self
+                .agent
+                .try_park_permission(caller, request_id.clone(), settled)
+            {
+                bail!("session {caller} already has a request waiting on the user");
+            }
+            let events = events.for_session(caller, runtime_id);
+            if let Err(error) = events.send(wire) {
+                self.agent.remove_permission(caller, &request_id);
+                return Err(error);
+            }
+            let option = settle_rx.recv().unwrap_or_default();
+            self.agent.remove_permission(caller, &request_id);
+            let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
+            match option.as_deref() {
+                Some("finalize") => {}
+                Some(_) => bail!("the plan finalization was declined"),
+                None => bail!("the finalization request went unanswered"),
+            }
+        }
+        let finalized = self
+            .boss
+            .finalize_plan(&plan.plan_file, crate::model::unix_time())?;
+        {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == plan.session_id)
+            {
+                if let Some(planning) = session.planning.as_mut() {
+                    planning.finalized_at = finalized.finalized_at;
+                }
+                session.updated_at = crate::model::unix_time();
+                state.mark_session_dirty(plan.session_id);
+                self.task_store.save(&mut state)?;
+            }
+        }
+        // The next prompt re-injects the persona block so the agent learns
+        // the plan froze.
+        self.boss.reset_context(plan.session_id);
+        Ok(BossResult::PlanFinalized {
+            session_id: plan.session_id,
+            plan_file: finalized.plan_file,
+            finalized_at: finalized.finalized_at.unwrap_or_default(),
+        })
+    }
+
     /// The settings surface is gated separately from task creation and only
     /// for scoped credentials — a client holding the master token already has
     /// full `updateSettings` access, so the flag must not gate it.
@@ -4977,7 +5247,7 @@ impl WakuBackend {
             // OpenCode registers MCP servers by directory on its shared
             // native service. Other employees retain the ordinary task cwd;
             // sandbox guests already have an isolated provider service.
-            if self.boss.is_boss(session_id)
+            if self.boss.is_boss_principal(session_id)
                 || (provider == ProviderKind::OpenCode && !environment.is_sandbox())
             {
                 options.cwd = self.boss.workspace(session_id)?;
@@ -5289,7 +5559,7 @@ impl WakuBackend {
             shim_directory,
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
-            boss: self.boss.is_boss(session_id),
+            boss: self.boss.is_boss_principal(session_id),
         })
     }
 
@@ -5453,6 +5723,7 @@ impl WakuBackend {
             AgentTaskPrompt::Fixed(prompt),
             events,
             None,
+            None,
         )
     }
 
@@ -5466,6 +5737,7 @@ impl WakuBackend {
         prompt: AgentTaskPrompt,
         events: &EventSink,
         employee: Option<waku_protocol::boss::BossEmployee>,
+        planning: Option<waku_protocol::boss::BossPlan>,
     ) -> anyhow::Result<Uuid> {
         if prompt.is_blank() {
             bail!("agent sessions require a prompt");
@@ -5653,6 +5925,14 @@ impl WakuBackend {
             // employee's task stays out of the ordinary lists.
             session.boss_managed = true;
         }
+        if let Some(plan) = &planning {
+            session.id = plan.session_id;
+            // Same stamp story as an employee: the planning kind marker
+            // rides the session so a list row badges it without the Boss
+            // document, and archiving cannot remove the freeze.
+            session.boss_managed = true;
+            session.planning = Some(plan.session_planning());
+        }
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
@@ -5667,6 +5947,16 @@ impl WakuBackend {
             // subscriber can immediately open the new employee's transcript.
             self.boss.update(|state| {
                 state.employees.push(employee);
+                Ok(())
+            })?;
+        }
+        if let Some(plan) = planning {
+            // Same ordering as the roster push: the plan registers only
+            // after its task exists, and a failed launch leaves both the
+            // record and the session behind — retrying the prompt revives
+            // it like any managed session.
+            self.boss.update(|state| {
+                state.planning.push(plan);
                 Ok(())
             })?;
         }
@@ -6119,6 +6409,16 @@ impl WakuBackend {
                     project: Box::new(project),
                 })
             }
+            BossOperation::CreatePlan {
+                title,
+                plan_file,
+                prompt,
+                provider,
+                model,
+            } => self.create_plan(caller, title, plan_file, prompt, provider, model, events),
+            BossOperation::FinalizePlan { plan_file } => {
+                self.finalize_plan(caller, plan_file, events)
+            }
             BossOperation::Summon {
                 persona_id,
                 job_title,
@@ -6159,6 +6459,7 @@ impl WakuBackend {
                     AgentTaskPrompt::Assignment(prompt),
                     events,
                     Some(employee),
+                    None,
                 ) {
                     Ok(session_id) => {
                         // A summon marker lands in the supervisor's own
@@ -6372,7 +6673,7 @@ impl WakuBackend {
                 Ok(BossResult::Speak { delivered })
             }
             BossOperation::Context => {
-                if caller.is_some_and(|id| !self.boss.is_boss(id)) {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can read the work digest");
                 }
                 Ok(BossResult::Context {
@@ -6380,7 +6681,7 @@ impl WakuBackend {
                 })
             }
             BossOperation::Eval { script } => {
-                if caller.is_some_and(|id| !self.boss.is_boss(id)) {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can eval boss scripts");
                 }
                 // The scope keys on the boss session, so a human client and
@@ -6944,7 +7245,7 @@ impl WakuBackend {
         // Resolve the boss's `project:` filters up front so a misspelling
         // errors like the scoped branch instead of silently scanning
         // nothing.
-        let project_scope = if self.boss.is_boss(caller) {
+        let project_scope = if self.boss.is_boss_principal(caller) {
             let parsed = parse_session_message_search(query);
             let state = self.task_state.lock();
             for value in &parsed.projects {
@@ -13120,5 +13421,383 @@ mod tests {
         );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `createPlan` builds a boss-attached managed session: the registry
+    /// record, the planning marker, the Boss project, and the seeded
+    /// transcript all land before the provider launch is attempted — so a
+    /// missing test binary fails the call but leaves the session, like a
+    /// failed summon.
+    #[test]
+    fn create_plan_opens_a_seeded_managed_planning_session() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-plan-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let events = EventSink::detached();
+        let create = |caller, title: &str, plan_file: &str, prompt: &str| {
+            backend.handle_boss_operation(
+                caller,
+                BossOperation::CreatePlan {
+                    title: title.into(),
+                    plan_file: plan_file.into(),
+                    prompt: prompt.into(),
+                    provider: Some(ProviderKind::Codex),
+                    model: None,
+                },
+                &events,
+            )
+        };
+        // Only a boss principal or a human may open a plan.
+        assert!(create(Some(Uuid::new_v4()), "Auth", "auth.md", "plan it").is_err());
+        // The launch fails on the missing binary; the session and its
+        // registry record still landed.
+        assert!(create(None, "Auth", "auth.md", "plan the auth migration").is_err());
+        let plan = backend.boss.plan_for_file("plans/auth.md").unwrap();
+        assert_eq!(plan.idea, "Auth");
+        assert_eq!(plan.finalized_at, None);
+        let session = {
+            let mut state = backend.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == plan.session_id)
+                .unwrap();
+            backend
+                .task_store
+                .hydrate(&mut state.sessions[index])
+                .unwrap();
+            state.sessions[index].clone()
+        };
+        assert!(session.boss_managed);
+        assert!(session.is_planning());
+        assert_eq!(session.title, "Auth");
+        assert_eq!(session.project_id, backend.boss.document().identity.id);
+        let planning = session.planning.clone().unwrap();
+        assert_eq!(planning.plan_file, "plans/auth.md");
+        assert_eq!(planning.idea, "Auth");
+        assert_eq!(planning.finalized_at, None);
+        assert_eq!(planning.label.key, "boss.planning_label");
+        let seed = &session.messages[0].content;
+        assert!(seed.contains("plan the auth migration"));
+        assert!(seed.contains("memory/plans/auth.md"));
+        // A second plan on the same document is refused; a different idea
+        // runs alongside it.
+        assert!(create(None, "Auth again", "memory/plans/auth.md", "dup").is_err());
+        assert!(create(None, "Billing", "billing.md", "plan billing").is_err());
+        assert!(backend.boss.plan_for_file("plans/billing.md").is_some());
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A human `finalizePlan` is its own approver — no card parks — and the
+    /// stamp lands on the registry record, the session marker, and the
+    /// document freeze. After the grace sweep the session is archived like
+    /// any managed task and can no longer summon.
+    #[test]
+    fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
+        use waku_protocol::boss::{BossOperation, BossResult};
+        let root = std::env::temp_dir().join(format!("boss-plan-final-{}", Uuid::new_v4()));
+        // The grace sweep reaches the backend through the weak binding
+        // `start_automations` installs in production — bind it directly.
+        let (backend, boss) = surface_test_backend(&root);
+        let backend = Arc::new(backend);
+        backend.boss.bind_backend(&backend);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let events = EventSink::detached();
+        assert!(
+            backend
+                .handle_boss_operation(
+                    None,
+                    BossOperation::CreatePlan {
+                        title: "Auth".into(),
+                        plan_file: "auth.md".into(),
+                        prompt: "plan the auth migration".into(),
+                        provider: Some(ProviderKind::Codex),
+                        model: None,
+                    },
+                    &events,
+                )
+                .is_err()
+        );
+        let plan = backend.boss.plan_for_file("plans/auth.md").unwrap();
+        let BossResult::PlanFinalized {
+            session_id,
+            plan_file,
+            finalized_at,
+        } = backend
+            .handle_boss_operation(
+                None,
+                BossOperation::FinalizePlan {
+                    plan_file: Some("memory/plans/auth.md".into()),
+                },
+                &events,
+            )
+            .unwrap()
+        else {
+            panic!("expected the finalized result")
+        };
+        assert_eq!(session_id, plan.session_id);
+        assert_eq!(plan_file, "plans/auth.md");
+        assert!(finalized_at > 0);
+        assert_eq!(
+            backend
+                .boss
+                .plan_for_file("plans/auth.md")
+                .unwrap()
+                .finalized_at,
+            Some(finalized_at)
+        );
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == plan.session_id)
+                .unwrap();
+            assert_eq!(
+                session.planning.as_ref().unwrap().finalized_at,
+                Some(finalized_at)
+            );
+            assert!(session.archived_at.is_none());
+        }
+        // The document is frozen and re-finalizing is refused.
+        assert!(
+            backend
+                .boss
+                .handle(
+                    None,
+                    BossOperation::WriteFile {
+                        path: "memory/plans/auth.md".into(),
+                        content: "edit".into(),
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            backend
+                .handle_boss_operation(
+                    None,
+                    BossOperation::FinalizePlan {
+                        plan_file: Some("auth.md".into()),
+                    },
+                    &events,
+                )
+                .is_err()
+        );
+        // During grace the planning session can still summon an employee;
+        // its reports route back to it.
+        let persona = backend.boss.document().personas[0].id;
+        let employee = backend
+            .boss
+            .prepare_employee(plan.session_id, persona, "Follow-up".into(), None)
+            .unwrap();
+        assert_eq!(backend.boss.report_target(&employee), Some(plan.session_id));
+        // Elapse the window and the sweep archives the session; afterwards
+        // it is a plain archived managed task — no more summons, and a
+        // report would escalate to the boss session instead.
+        backend
+            .boss
+            .update(|state| {
+                state.planning[0].finalized_at = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            backend
+                .boss
+                .archive_graced_plans(crate::model::unix_time())
+                .unwrap(),
+            1
+        );
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == plan.session_id)
+                .unwrap();
+            assert!(session.archived_at.is_some());
+        }
+        assert!(
+            backend
+                .boss
+                .prepare_employee(plan.session_id, persona, "Follow-up".into(), None)
+                .is_err()
+        );
+        assert_eq!(backend.boss.report_target(&employee), Some(boss));
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A boss caller approves `finalizePlan` through a parked request card
+    /// — the same contract `agentProposeArchive` uses — and a denial leaves
+    /// the document unfrozen.
+    #[test]
+    fn a_boss_caller_finalizes_through_a_parked_request_card() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-plan-card-{}", Uuid::new_v4()));
+        let (backend, boss) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        backend.sessions.lock().insert(
+            boss,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.join("repo"),
+            },
+        );
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let events = EventSink::detached();
+        for plan_file in ["auth.md", "billing.md"] {
+            assert!(
+                backend
+                    .handle_boss_operation(
+                        Some(boss),
+                        BossOperation::CreatePlan {
+                            title: plan_file.into(),
+                            plan_file: plan_file.into(),
+                            prompt: format!("plan {plan_file}"),
+                            provider: Some(ProviderKind::Codex),
+                            model: None,
+                        },
+                        &events,
+                    )
+                    .is_err()
+            );
+        }
+        let finalize = |plan_file: &'static str| {
+            let backend = &backend;
+            let events = events.clone();
+            move || {
+                backend.handle_boss_operation(
+                    Some(boss),
+                    BossOperation::FinalizePlan {
+                        plan_file: Some(plan_file.into()),
+                    },
+                    &events,
+                )
+            }
+        };
+        std::thread::scope(|scope| {
+            let call = scope.spawn(finalize("auth.md"));
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_permission_request(boss) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert!(request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX));
+            backend.agent.resolve_permission(
+                boss,
+                &Command::Respond {
+                    request_id: request_id.clone(),
+                    option_id: "finalize".into(),
+                },
+            );
+            assert!(call.join().unwrap().is_ok());
+            assert_eq!(
+                backend
+                    .boss
+                    .plan_for_file("plans/auth.md")
+                    .unwrap()
+                    .finalized_at
+                    .is_some(),
+                true
+            );
+            let call = scope.spawn(finalize("billing.md"));
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_permission_request(boss) {
+                    break request_id;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            backend.agent.resolve_permission(
+                boss,
+                &Command::Respond {
+                    request_id,
+                    option_id: "deny".into(),
+                },
+            );
+            assert!(call.join().unwrap().is_err());
+            assert!(
+                backend
+                    .boss
+                    .plan_for_file("plans/billing.md")
+                    .unwrap()
+                    .finalized_at
+                    .is_none()
+            );
+        });
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The planning marker is daemon-owned: a stale client save can neither
+    /// unfinalize a frozen plan nor drop the marker, while a marker the
+    /// daemon copy lacks is adopted.
+    #[test]
+    fn a_stale_client_save_cannot_unfreeze_a_planning_session() {
+        use waku_protocol::model::SessionPlanning;
+        let marker = |finalized_at: Option<u64>| {
+            Some(SessionPlanning {
+                plan_file: "plans/auth.md".into(),
+                idea: "Auth".into(),
+                label: waku_protocol::WireTranslation::new("boss.planning_label", []),
+                finalized_at,
+            })
+        };
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.planning = marker(Some(10));
+        let mut incoming = existing.clone();
+        incoming.planning.as_mut().unwrap().finalized_at = None;
+        incoming.updated_at = existing.updated_at + 1;
+        merge_stale_session_metadata(&mut existing, incoming);
+        assert_eq!(existing.planning.as_ref().unwrap().finalized_at, Some(10));
+
+        let mut incoming = existing.clone();
+        incoming.planning = None;
+        incoming.updated_at = existing.updated_at + 1;
+        merge_stale_session_metadata(&mut existing, incoming);
+        assert!(existing.planning.is_some());
+
+        let mut skeleton = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let mut incoming = skeleton.clone();
+        incoming.planning = marker(Some(10));
+        incoming.updated_at = skeleton.updated_at + 1;
+        assert!(merge_session_list_columns(&mut skeleton, incoming, false));
+        assert_eq!(skeleton.planning.unwrap().finalized_at, Some(10));
     }
 }

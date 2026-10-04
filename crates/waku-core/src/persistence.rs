@@ -32,7 +32,7 @@ use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, Checkpoint, CheckpointStatus, ContextMark, FavoriteModel, Message, MessageAtom,
     MessageAttachment, MessageRole, Project, ProviderKind, RuntimeEventCursor, RuntimeMode,
-    SessionWorkspace, TranscriptNotice,
+    SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1490,7 +1490,7 @@ impl StateStore {
                 "SELECT id, project_id, title, auto_title, provider, model, status,
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-                        agent_rename_allowed, boss_managed, runtime_event_cursor,
+                        agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
                         friend_peer_id, friend_peer_name
                  FROM sessions ORDER BY updated_at",
             )
@@ -1521,6 +1521,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(19)?,
                     row.get::<_, Option<String>>(20)?,
                     row.get::<_, Option<String>>(21)?,
+                    row.get::<_, Option<String>>(22)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2183,6 +2184,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2211,6 +2213,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         side_chat_of,
         agent_rename_allowed,
         boss_managed,
+        planning,
         runtime_event_cursor,
         friend_peer_id,
         friend_peer_name,
@@ -2226,6 +2229,10 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
     // dedup from the column without hydrating the session.
     let runtime_event_cursor = runtime_event_cursor
         .and_then(|cursor| serde_json::from_str::<RuntimeEventCursor>(&cursor).ok());
+    // Same duplication story as `workspace`: the sidebar badges and orders
+    // planning rows from the column without hydrating the session.
+    let planning = planning
+        .and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         title,
@@ -2241,6 +2248,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         friend_peer_name,
         agent_rename_allowed,
         boss_managed,
+        planning,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
         model,
         pending_model_switch: None,
@@ -2318,6 +2326,14 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     // The stamp is monotonic and the column may be ahead of an older blob —
     // a skeleton save refreshes the column without rewriting detail.
     session.boss_managed |= stored.boss_managed;
+    // Same monotonic rule as `boss_managed`: the daemon owns the planning
+    // record and its freeze, so merge forward only — never unset, never
+    // unfinalize, whatever the older blob carried.
+    match (&mut session.planning, stored.planning) {
+        (None, stored) => session.planning = stored,
+        (Some(current), Some(stored)) => current.absorb(&stored),
+        (Some(_), None) => {}
+    }
     session.environment = stored_environment;
     session.messages = stored.messages;
     // A queue entry whose id already runs in the transcript was delivered —
@@ -2698,9 +2714,9 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
-         agent_rename_allowed, boss_managed, runtime_event_cursor,
+         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
          friend_peer_id, friend_peer_name
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -2720,6 +2736,7 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          side_chat_of  = excluded.side_chat_of,
          agent_rename_allowed = excluded.agent_rename_allowed,
          boss_managed = excluded.boss_managed,
+         planning = excluded.planning,
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
          friend_peer_name = excluded.friend_peer_name";
@@ -2794,6 +2811,13 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, |id| Value::Text(id.to_string())),
         Value::Integer(i64::from(session.agent_rename_allowed)),
         Value::Integer(i64::from(session.boss_managed)),
+        // NULL for ordinary tasks, like the workspace column: duplicated
+        // detail so planning rows badge and order without a hydrate.
+        session
+            .planning
+            .as_ref()
+            .and_then(|planning| serde_json::to_string(planning).ok())
+            .map_or(Value::Null, Value::Text),
         // NULL until the session first streams events, like the workspace
         // column: duplicated detail so attach need not hydrate.
         session

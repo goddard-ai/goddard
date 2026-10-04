@@ -854,11 +854,11 @@ impl Waku {
     }
 
     /// Managed-session kinds that are boss surfaces rather than employee
-    /// tasks. `AgentSession` carries no managed-kind marker yet — when the
-    /// planning kind lands this arm reads `session.is_planning()`, and
-    /// `session_is_boss_owned` covers planning transcripts unchanged.
-    fn session_kind_is_boss_owned(_session: &AgentSession) -> bool {
-        false
+    /// tasks. Planning sessions read the `planning` marker on the session
+    /// skeleton, so `session_is_boss_owned` covers planning transcripts
+    /// without a hydrate.
+    fn session_kind_is_boss_owned(session: &AgentSession) -> bool {
+        session.is_planning()
     }
 
     fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {

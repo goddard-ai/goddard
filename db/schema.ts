@@ -89,6 +89,12 @@ export const sessions = sqliteTable(
      */
     bossManaged: integer("boss_managed", { mode: "boolean" }).notNull().default(false),
     /**
+     * JSON-serialized SessionPlanning, duplicated from `session_details.data`
+     * so sidebar rows can badge and order planning sessions — idea, plan
+     * file, freeze state — without hydrating. NULL for ordinary tasks.
+     */
+    planning: text("planning"),
+    /**
      * JSON-serialized RuntimeEventCursor, duplicated from `session_details.data`
      * so a runtime attach can resume its replay dedup without hydrating the
      * session. NULL before the session first streams events.

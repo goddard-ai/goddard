@@ -8,8 +8,8 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
-    BossBundle, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossResult,
-    BossState, PermissionOverrides, PersonaPermissions,
+    BossBundle, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPlan,
+    BossResult, BossState, PermissionOverrides, PersonaPermissions,
 };
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
@@ -42,6 +42,13 @@ const MAX_SPEECH_PARTS: usize = 8;
 const MAX_SPEECH_PART_CHARS: usize = 160;
 const MAX_SPEECH_TOTAL_CHARS: usize = 480;
 const EMPLOYEE_RETIREMENT_SECONDS: u64 = 60 * 60;
+/// A finalized planning session stays active this long before the daemon
+/// archives it — the grace window in which the boss can still converse in
+/// the planning context and summon employees from it. One hour matches the
+/// reuse window a finished employee gets, so both managed lifetimes sweep
+/// on the same cadence. After the sweep the session is a plain archived
+/// managed task; only its frozen plan record marks what it was.
+const PLANNING_GRACE_SECONDS: u64 = 60 * 60;
 /// A blocker report is one bounded attention item, not an essay — long
 /// context belongs in the transcript the finish report indexes.
 const MAX_BLOCKER_CHARS: usize = 1_000;
@@ -181,6 +188,13 @@ impl BossService {
         self.state.lock().session_id == Some(session)
     }
 
+    /// The boss chat itself — a planning session is the same principal
+    /// working in a dedicated session, so owner-level operations and the
+    /// boss persona apply to both.
+    pub fn is_boss_principal(&self, session: Uuid) -> bool {
+        self.is_boss(session) || self.is_planning(session)
+    }
+
     pub fn is_employee(&self, session: Uuid) -> bool {
         self.state
             .lock()
@@ -189,8 +203,98 @@ impl BossService {
             .any(|employee| employee.session_id == session)
     }
 
+    /// A planning session the boss opened — registered whether or not its
+    /// plan has been finalized.
+    pub fn is_planning(&self, session: Uuid) -> bool {
+        self.state
+            .lock()
+            .planning
+            .iter()
+            .any(|plan| plan.session_id == session)
+    }
+
     pub fn is_managed(&self, session: Uuid) -> bool {
-        self.is_boss(session) || self.is_employee(session)
+        self.is_boss(session) || self.is_employee(session) || self.is_planning(session)
+    }
+
+    /// The planning record for a session, or for a plan file when the
+    /// caller names `memory/`-relative `plans/<name>.md`.
+    pub fn plan(&self, session: Uuid) -> Option<BossPlan> {
+        self.state
+            .lock()
+            .planning
+            .iter()
+            .find(|plan| plan.session_id == session)
+            .cloned()
+    }
+
+    pub fn plan_for_file(&self, plan_file: &str) -> Option<BossPlan> {
+        self.state
+            .lock()
+            .planning
+            .iter()
+            .find(|plan| plan.plan_file == plan_file)
+            .cloned()
+    }
+
+    /// Freeze the named plan at `now`. Callers validate the record exists
+    /// and is not already frozen; the stamp is monotonic.
+    pub fn finalize_plan(&self, plan_file: &str, now: u64) -> anyhow::Result<BossPlan> {
+        let mut finalized = None;
+        self.update(|state| {
+            let plan = state
+                .planning
+                .iter_mut()
+                .find(|plan| plan.plan_file == plan_file)
+                .ok_or_else(|| anyhow!("unknown plan {plan_file}"))?;
+            if plan.finalized_at.is_none() {
+                plan.finalized_at = Some(now);
+            }
+            finalized = Some(plan.clone());
+            Ok(())
+        })?;
+        Ok(finalized.unwrap())
+    }
+
+    /// Whether `path` — a files-root-relative Boss path — names a finalized
+    /// plan document. Frozen plans reject writes; reads stay open.
+    fn plan_file_frozen(&self, path: &str) -> bool {
+        let normalized = normalize_plan_path(path);
+        let Some(rest) = normalized.strip_prefix("memory/") else {
+            return false;
+        };
+        self.state
+            .lock()
+            .planning
+            .iter()
+            .any(|plan| plan.plan_file == rest && plan.finalized_at.is_some())
+    }
+
+    /// Archive planning sessions whose post-finalization grace period has
+    /// elapsed. Runs beside the hourly employee-retirement sweep: the grace
+    /// window is the boss's last chance to converse in the planning context
+    /// and summon employees from it, then the session becomes a plain
+    /// archived managed task.
+    pub fn archive_graced_plans(&self, now: u64) -> anyhow::Result<usize> {
+        let due: Vec<Uuid> = self
+            .state
+            .lock()
+            .planning
+            .iter()
+            .filter(|plan| {
+                plan.finalized_at
+                    .is_some_and(|at| at.saturating_add(PLANNING_GRACE_SECONDS) <= now)
+            })
+            .map(|plan| plan.session_id)
+            .collect();
+        if due.is_empty() {
+            return Ok(0);
+        }
+        let Some(backend) = self.backend.lock().upgrade() else {
+            return Ok(0);
+        };
+        backend.archive_sessions(&due)?;
+        Ok(due.len())
     }
 
     pub fn employee(&self, session: Uuid) -> Option<BossEmployee> {
@@ -216,7 +320,7 @@ impl BossService {
         let employee = self
             .employee(target)
             .ok_or_else(|| anyhow!("not a Boss employee"))?;
-        if caller.is_some_and(|caller| !self.is_boss(caller) && employee.supervisor_id != caller) {
+        if caller.is_some_and(|caller| !self.is_boss_principal(caller) && employee.supervisor_id != caller) {
             bail!("only the boss or this employee's supervisor can control it");
         }
         if let Some(caller) = caller {
@@ -229,7 +333,7 @@ impl BossService {
         let Some(caller) = caller else {
             return Ok(());
         };
-        if caller == target || self.is_boss(caller) {
+        if caller == target || self.is_boss_principal(caller) {
             return Ok(());
         }
         let state = self.document();
@@ -270,7 +374,19 @@ impl BossService {
             self.validate_memory_folders(overrides.memory_folders.as_deref().unwrap_or(&[]))?;
             overrides.apply_to(&mut permissions);
         }
-        if state.session_id != Some(caller) {
+        if self.is_planning(caller)
+            && !self
+                .backend
+                .lock()
+                .upgrade()
+                .map(|backend| backend.session_active(caller))
+                .unwrap_or(true)
+        {
+            // Grace is over — an archived planning session is a plain
+            // managed task and cannot summon any more.
+            bail!("this planning session is archived");
+        }
+        if !self.is_boss_principal(caller) {
             let parent = state
                 .employees
                 .iter()
@@ -329,7 +445,7 @@ impl BossService {
     ) -> anyhow::Result<()> {
         self.validate_memory_folders(overrides.memory_folders.as_deref().unwrap_or(&[]))?;
         let ceiling = match caller {
-            Some(caller) if !self.is_boss(caller) => Some(
+            Some(caller) if !self.is_boss_principal(caller) => Some(
                 self.employee(caller)
                     .ok_or_else(|| anyhow!("this task is not a Boss employee"))?
                     .permissions,
@@ -365,7 +481,7 @@ impl BossService {
     }
 
     pub fn workspace(&self, session: Uuid) -> anyhow::Result<PathBuf> {
-        let path = if self.is_boss(session) {
+        let path = if self.is_boss_principal(session) {
             return self.owned_workspace();
         } else {
             self.root.join("workspaces").join(session.to_string())
@@ -465,7 +581,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak, eval. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees finish silently — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish reaches you only when the employee flagged a blocker through its `reportBlocker` operation or its persona grants `alwaysReport`. A blocker report also interrupts your running turn when it can. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak, eval, createPlan, finalizePlan. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees finish silently — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish reaches you only when the employee flagged a blocker through its `reportBlocker` operation or its persona grants `alwaysReport`. A blocker report also interrupts your running turn when it can. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -474,10 +590,23 @@ impl BossService {
         let project_context = self.projects.lock().get(&session)
             .map(|path| format!("Project context: {}. For a job in another project, supply its absolute path when summoning. If this path is unavailable inside a sandbox, the guest's current working directory is the assigned project.", path.display()))
             .unwrap_or_default();
+        let planning = state
+            .planning
+            .iter()
+            .find(|plan| plan.session_id == session)
+            .map(|plan| {
+                if plan.finalized_at.is_some() {
+                    format!("\nThis planning session's plan memory/{} is finalized and frozen — the document can no longer be edited.", plan.plan_file)
+                } else {
+                    format!("\nThis is a planning session for \"{}\". Draft and revise the plan document at memory/{} with `writeFile`; when the plan is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes.", plan.idea, plan.plan_file)
+                }
+            })
+            .unwrap_or_default();
         format!(
-            "<boss-persona>\n{}\n\n{}\nPinned memory files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
+            "<boss-persona>\n{}\n\n{}{}\nPinned memory files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
             persona.markdown,
             role,
+            planning,
             pinned_paths(
                 employee
                     .map(|entry| entry.pinned_files.as_slice())
@@ -596,11 +725,20 @@ impl BossService {
 
     /// Where an employee's report lands: its live supervisor, escalating to
     /// the boss session when the supervisor cannot take prompts — expired,
-    /// retired from the roster, or never an employee.
+    /// retired from the roster, archived after finalization, or never an
+    /// employee.
     pub fn report_target(&self, employee: &BossEmployee) -> Option<Uuid> {
+        let supervisor_is_planning = self.is_planning(employee.supervisor_id)
+            && self
+                .backend
+                .lock()
+                .upgrade()
+                .map(|backend| backend.session_active(employee.supervisor_id))
+                .unwrap_or(true);
         if self
             .employee(employee.supervisor_id)
             .is_some_and(|entry| !entry.expired)
+            || supervisor_is_planning
         {
             Some(employee.supervisor_id)
         } else {
@@ -659,7 +797,7 @@ impl BossService {
     }
 
     fn require_owner(&self, caller: Option<Uuid>) -> anyhow::Result<()> {
-        if caller.is_some_and(|id| !self.is_boss(id)) {
+        if caller.is_some_and(|id| !self.is_boss_principal(id)) {
             bail!("only the boss or a human can change personas and Boss files");
         }
         Ok(())
@@ -673,7 +811,7 @@ impl BossService {
         caller: Option<Uuid>,
         parts: Vec<String>,
     ) -> anyhow::Result<Vec<String>> {
-        if caller.is_some_and(|caller| !self.is_boss(caller)) {
+        if caller.is_some_and(|caller| !self.is_boss_principal(caller)) {
             bail!("only the boss or a human can speak");
         }
         if parts.is_empty() || parts.len() > MAX_SPEECH_PARTS {
@@ -740,6 +878,8 @@ impl BossService {
         match operation {
             BossOperation::Context
             | BossOperation::Open { .. }
+            | BossOperation::CreatePlan { .. }
+            | BossOperation::FinalizePlan { .. }
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
             | BossOperation::ReportBlocker { .. }
@@ -750,7 +890,7 @@ impl BossService {
             }
             BossOperation::View => {
                 let mut state = self.document();
-                if let Some(caller) = caller.filter(|id| !self.is_boss(*id)) {
+                if let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) {
                     let employee = state
                         .employees
                         .iter()
@@ -780,7 +920,7 @@ impl BossService {
                 use waku_protocol::boss::MemoryOperation;
 
                 let state = self.document();
-                let boss_principal = caller.is_none_or(|id| self.is_boss(id));
+                let boss_principal = caller.is_none_or(|id| self.is_boss_principal(id));
                 let principal = if boss_principal {
                     "boss".to_owned()
                 } else {
@@ -1028,6 +1168,9 @@ impl BossService {
                 if path.starts_with("personas/") && path.ends_with("/PERSONA.md") {
                     bail!("edit persona Markdown using upsertPersona");
                 }
+                if self.plan_file_frozen(&path) {
+                    bail!("this plan is finalized — its document is frozen");
+                }
                 let file = self.file_path(&path, false)?;
                 if let Some(parent) = file.parent() {
                     fs::create_dir_all(parent)?;
@@ -1202,7 +1345,7 @@ impl BossService {
         directory: bool,
     ) -> anyhow::Result<()> {
         validate_relative(path, directory)?;
-        if caller.is_none() || caller.is_some_and(|id| self.is_boss(id)) {
+        if caller.is_none() || caller.is_some_and(|id| self.is_boss_principal(id)) {
             return Ok(());
         }
         let state = self.state.lock();
@@ -1285,6 +1428,40 @@ fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
         bail!("Boss paths must be relative and cannot contain traversal");
     }
     Ok(())
+}
+
+/// Collapse separators in a validated Boss path so `"memory//plans/x.md"`
+/// and `"memory/plans/x.md"` compare equal — the freeze check cannot be
+/// dodged by spelling the same file another way.
+fn normalize_plan_path(path: &str) -> String {
+    Path::new(path)
+        .components()
+        .filter_map(|part| match part {
+            Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Canonical `plans/<name>.md` beneath the memory root, from whatever the
+/// caller sent — `auth.md`, `plans/auth.md`, and `memory/plans/auth.md`
+/// all name the same document. Nested subdirectories beneath `plans/`
+/// stay nested; traversal, absolute paths, and non-Markdown names fail.
+/// Validation runs before normalization so a `..` fails loudly instead of
+/// collapsing into an unrelated plan name; the normalized-then-stripped
+/// order matches `plan_file_frozen`, so every spelling of one document
+/// freezes together.
+pub fn normalize_plan_file(raw: &str) -> anyhow::Result<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    validate_relative(trimmed, false)?;
+    let cleaned = normalize_plan_path(trimmed);
+    let rest = cleaned.strip_prefix("memory/").unwrap_or(&cleaned);
+    let rest = rest.strip_prefix("plans/").unwrap_or(rest);
+    if rest.is_empty() || !rest.ends_with(".md") {
+        bail!("plan files are named like `auth.md` under plans/");
+    }
+    Ok(format!("plans/{rest}"))
 }
 
 fn employee_human_name<'a>(id: Uuid, existing_names: impl IntoIterator<Item = &'a str>) -> String {
@@ -1539,6 +1716,7 @@ fn fresh_state() -> BossState {
         ],
         employees: Vec::new(),
         bundles: Vec::new(),
+        planning: Vec::new(),
         revision: 0,
     }
 }
@@ -2895,6 +3073,183 @@ mod memory_op_tests {
             panic!("an expired employee's index still renders, minus every cue");
         };
         assert!(!index.contains("Launch owner"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn normalize_plan_file_maps_every_spelling_to_the_canonical_document() {
+        for spelling in [
+            "auth.md",
+            "plans/auth.md",
+            "memory/plans/auth.md",
+            "memory//plans/auth.md",
+            "  plans/auth.md  ",
+        ] {
+            assert_eq!(
+                normalize_plan_file(spelling).unwrap(),
+                "plans/auth.md",
+                "{spelling}"
+            );
+        }
+        assert_eq!(
+            normalize_plan_file("plans/deep/auth.md").unwrap(),
+            "plans/deep/auth.md"
+        );
+    }
+
+    #[test]
+    fn normalize_plan_file_rejects_traversal_absolute_and_non_markdown() {
+        for spelling in [
+            "../auth.md",
+            "plans/../auth.md",
+            "memory/../../etc/x.md",
+            "/etc/x.md",
+            "C:/x.md",
+            "auth.txt",
+            "plans/",
+            "",
+        ] {
+            assert!(normalize_plan_file(spelling).is_err(), "{spelling}");
+        }
+    }
+
+    /// A planning session is the same principal as the boss chat for
+    /// file-owner authority; finalization stamps once, then every spelling
+    /// of the document refuses writes while reads stay open.
+    #[test]
+    fn a_planning_principal_writes_files_and_its_finalized_document_freezes() {
+        let root = std::env::temp_dir().join(format!("boss-plan-freeze-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        let planning = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                state.planning.push(BossPlan {
+                    session_id: planning,
+                    plan_file: "plans/auth.md".into(),
+                    idea: "Auth".into(),
+                    finalized_at: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        assert!(!service.is_boss(planning));
+        assert!(service.is_boss_principal(planning));
+        assert!(service.is_managed(planning));
+        assert_eq!(service.plan(planning).unwrap().plan_file, "plans/auth.md");
+        assert_eq!(
+            service.plan_for_file("plans/auth.md").unwrap().session_id,
+            planning
+        );
+        service
+            .handle(
+                Some(planning),
+                BossOperation::WriteFile {
+                    path: "memory/notes.md".into(),
+                    content: "boss-owned".into(),
+                },
+            )
+            .unwrap();
+        assert!(
+            service
+                .handle(
+                    Some(Uuid::new_v4()),
+                    BossOperation::WriteFile {
+                        path: "memory/notes.md".into(),
+                        content: "nope".into(),
+                    },
+                )
+                .is_err()
+        );
+        service
+            .handle(
+                None,
+                BossOperation::WriteFile {
+                    path: "memory/plans/auth.md".into(),
+                    content: "draft".into(),
+                },
+            )
+            .unwrap();
+        let stamped = service.finalize_plan("plans/auth.md", 100).unwrap();
+        assert_eq!(stamped.finalized_at, Some(100));
+        // The stamp is monotonic: re-finalizing cannot re-time it.
+        assert_eq!(
+            service
+                .finalize_plan("plans/auth.md", 200)
+                .unwrap()
+                .finalized_at,
+            Some(100)
+        );
+        for spelling in ["memory/plans/auth.md", "memory//plans/auth.md"] {
+            assert!(
+                service
+                    .handle(
+                        None,
+                        BossOperation::WriteFile {
+                            path: spelling.into(),
+                            content: "edit".into(),
+                        },
+                    )
+                    .is_err(),
+                "{spelling}"
+            );
+        }
+        let BossResult::File { content, .. } = service
+            .handle(
+                None,
+                BossOperation::ReadFile {
+                    path: "memory/plans/auth.md".into(),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("the frozen document still reads")
+        };
+        assert_eq!(content, "draft");
+        service
+            .handle(
+                None,
+                BossOperation::WriteFile {
+                    path: "memory/work/notes.md".into(),
+                    content: "unrelated".into(),
+                },
+            )
+            .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Reports for employees a planning session summoned land back on it
+    /// while it is active; an archived supervisor escalates to the boss
+    /// session. `session_active` comes from the bound backend — unbound,
+    /// a service still answers for live planning sessions.
+    #[test]
+    fn a_planning_supervisor_takes_reports_while_active() {
+        let root = std::env::temp_dir().join(format!("boss-plan-report-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        let planning = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                state.planning.push(BossPlan {
+                    session_id: planning,
+                    plan_file: "plans/auth.md".into(),
+                    idea: "Auth".into(),
+                    finalized_at: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        let mut employee = service
+            .prepare_employee(planning, service.document().personas[0].id, "Job".into(), None)
+            .unwrap();
+        employee.supervisor_id = planning;
+        assert_eq!(service.report_target(&employee), Some(planning));
+        // An employee the planning session did not summon still reports to
+        // its own supervisor's chain.
+        employee.supervisor_id = Uuid::new_v4();
+        assert_eq!(service.report_target(&employee), Some(boss));
         fs::remove_dir_all(root).unwrap();
     }
 }

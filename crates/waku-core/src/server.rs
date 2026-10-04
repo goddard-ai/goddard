@@ -1409,9 +1409,16 @@ impl RequestDispatcher {
         let failed_outgoing = outgoing.clone();
         // An ask parks until the user answers — minutes, not subprocess
         // time — and spawns nothing itself, so no bounded worker may hold
-        // it. The backend already refuses a second parked ask per task,
-        // which bounds these threads on its own.
-        if matches!(request.command, Command::AgentAsk { .. }) {
+        // it. `finalizePlan` parks on the same kind of user answer — the
+        // plan-approval card. The backend already refuses a second parked
+        // request per task, which bounds these threads on its own.
+        if matches!(
+            request.command,
+            Command::AgentAsk { .. }
+                | Command::Boss {
+                    operation: waku_protocol::boss::BossOperation::FinalizePlan { .. }
+                }
+        ) {
             if let Err(error) = std::thread::Builder::new()
                 .name("goddard-daemon-ask".into())
                 .spawn(move || {
@@ -2322,6 +2329,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::Workspace { .. }
             | Command::Boss {
                 operation: waku_protocol::boss::BossOperation::Summon { .. }
+                    | waku_protocol::boss::BossOperation::CreatePlan { .. }
                     | waku_protocol::boss::BossOperation::Control { .. }
                     | waku_protocol::boss::BossOperation::ReportBlocker { .. }
                     | waku_protocol::boss::BossOperation::Eval { .. }
@@ -2816,6 +2824,8 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         }
         Command::Boss { operation: waku_protocol::boss::BossOperation::Open { .. }
             | waku_protocol::boss::BossOperation::Summon { .. }
+            | waku_protocol::boss::BossOperation::CreatePlan { .. }
+            | waku_protocol::boss::BossOperation::FinalizePlan { .. }
             | waku_protocol::boss::BossOperation::Control { .. }
             | waku_protocol::boss::BossOperation::ReportBlocker { .. }
             | waku_protocol::boss::BossOperation::Eval { .. }

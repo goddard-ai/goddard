@@ -3,5 +3,11 @@ import type { BossBundle } from "./BossBundle";
 import type { BossEmployee } from "./BossEmployee";
 import type { BossIdentity } from "./BossIdentity";
 import type { BossPersona } from "./BossPersona";
+import type { BossPlan } from "./BossPlan";
 
-export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>, bundles: Array<BossBundle>, revision: number, };
+export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>, bundles: Array<BossBundle>,
+/**
+ * Open planning sessions and their plan documents. Records stay after
+ * finalization and archive — the freeze they carry is permanent.
+ */
+planning: Array<BossPlan>, revision: number, };

@@ -5,7 +5,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::AgentWorkspace;
-use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode};
+use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode, SessionPlanning};
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +154,36 @@ pub struct BossBundle {
     pub viewed_at: Option<u64>,
 }
 
+/// A planning session the boss opened with `createPlan`: the managed task
+/// it drafts in and the plan document that task owns. `plan_file` is
+/// relative to `memory/` in the Boss files root — always `plans/<name>.md`.
+/// `finalized_at` freezes the document once the user approves
+/// `finalizePlan`; the daemon archives the session after a grace period.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossPlan {
+    pub session_id: Uuid,
+    pub plan_file: String,
+    /// What the session is planning — the session's title carries the same
+    /// text so the sidebar row reads as the idea.
+    pub idea: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalized_at: Option<u64>,
+}
+
+impl BossPlan {
+    /// The session-facing half of the record — everything the task list
+    /// needs to badge and order a planning row without the Boss document.
+    pub fn session_planning(&self) -> SessionPlanning {
+        SessionPlanning {
+            plan_file: self.plan_file.clone(),
+            idea: self.idea.clone(),
+            label: crate::protocol::WireTranslation::new("boss.planning_label", []),
+            finalized_at: self.finalized_at,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
@@ -164,6 +194,10 @@ pub struct BossState {
     pub employees: Vec<BossEmployee>,
     #[serde(default)]
     pub bundles: Vec<BossBundle>,
+    /// Open planning sessions and their plan documents. Records stay after
+    /// finalization and archive — the freeze they carry is permanent.
+    #[serde(default)]
+    pub planning: Vec<BossPlan>,
     pub revision: u64,
 }
 
@@ -189,6 +223,29 @@ pub enum BossOperation {
         provider: ProviderKind,
         model: Option<String>,
         mode: RuntimeMode,
+    },
+    /// Open a dedicated planning session on an idea. The session is a
+    /// managed boss principal — the boss identity agents it — seeded with
+    /// `prompt` (the user request that prompted planning) plus a canned
+    /// opener. `plan_file` names the plan document under `plans/` in the
+    /// Boss memory root; `title` is the idea the sidebar row displays.
+    /// Boss-only; the user never creates one directly.
+    CreatePlan {
+        title: String,
+        plan_file: String,
+        prompt: String,
+        #[serde(default)]
+        provider: Option<ProviderKind>,
+        #[serde(default)]
+        model: Option<String>,
+    },
+    /// Freeze a plan document after user approval. A planning session
+    /// finalizes its own plan (`plan_file` omitted); the boss chat or a
+    /// human names the file. Approval lands on a daemon-owned request card;
+    /// the session archives once the grace period elapses.
+    FinalizePlan {
+        #[serde(default)]
+        plan_file: Option<String>,
     },
     Summon {
         persona_id: Uuid,
@@ -409,6 +466,14 @@ pub enum BossResult {
         session: Box<AgentSession>,
         project: Box<Project>,
     },
+    /// A plan document froze on user approval: its path beneath `memory/`
+    /// in the Boss files root and the freeze stamp. The owning session
+    /// archives once the grace period elapses.
+    PlanFinalized {
+        session_id: Uuid,
+        plan_file: String,
+        finalized_at: u64,
+    },
     Summoned {
         session_id: Uuid,
     },
@@ -517,5 +582,63 @@ mod tests {
                 if permissions.integration_ids == Some(Vec::new())
                     && permissions.summon_employees.is_none()
         ));
+    }
+
+    #[test]
+    fn plan_operations_and_results_decode_camel_case_wire_payloads() {
+        let create: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "createPlan",
+            "title": "Auth migration",
+            "planFile": "auth.md",
+            "prompt": "Plan the auth migration"
+        }))
+        .unwrap();
+        assert!(matches!(
+            create,
+            super::BossOperation::CreatePlan { title, plan_file, prompt, provider, model }
+                if title == "Auth migration" && plan_file == "auth.md"
+                    && prompt == "Plan the auth migration"
+                    && provider.is_none() && model.is_none()
+        ));
+        // A planning session finalizes its own plan by omitting the file.
+        let finalize: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "finalizePlan"
+        }))
+        .unwrap();
+        assert!(matches!(
+            finalize,
+            super::BossOperation::FinalizePlan { plan_file: None }
+        ));
+        let result: super::BossResult = serde_json::from_value(serde_json::json!({
+            "type": "planFinalized",
+            "sessionId": "00000000-0000-0000-0000-000000000001",
+            "planFile": "plans/auth.md",
+            "finalizedAt": 1_700_000_000
+        }))
+        .unwrap();
+        assert!(matches!(
+            result,
+            super::BossResult::PlanFinalized { plan_file, finalized_at, .. }
+                if plan_file == "plans/auth.md" && finalized_at == 1_700_000_000
+        ));
+    }
+
+    #[test]
+    fn a_boss_state_saved_before_planning_decodes_with_an_empty_registry() {
+        let state: super::BossState = serde_json::from_value(serde_json::json!({
+            "identity": {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Boss",
+                "avatarSeed": "seed"
+            },
+            "personaId": "00000000-0000-0000-0000-000000000002",
+            "sessionId": null,
+            "personas": [],
+            "employees": [],
+            "bundles": [],
+            "revision": 0
+        }))
+        .unwrap();
+        assert!(state.planning.is_empty());
     }
 }

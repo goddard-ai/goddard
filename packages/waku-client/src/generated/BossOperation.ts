@@ -8,7 +8,7 @@ import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "view" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
+export type BossOperation = { "type": "view" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, } | { "type": "finalizePlan", planFile: string | null, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
 /**
  * Where the employee's checkout runs; `None` uses the project
  * itself, `worktree` forks a daemon-managed Git worktree.
