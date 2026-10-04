@@ -4606,10 +4606,10 @@ transcript.sent_by_agent:
   en: Sent by agent
 transcript.sent_by_boss:
   en: "Sent by %{name}"
-transcript.context_mark:
-  en: context
-transcript.context_mark_focus:
-  en: "context · focus: %{name}"
+transcript.jev_attached:
+  en: Jev attached
+transcript.work_digest:
+  en: work digest
 transcript.mcp_server_start_failed:
   en: "MCP server %{name} failed to start. Its tools may be unavailable in this session."
 transcript.copy_diagnostic_details:

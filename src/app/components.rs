@@ -1056,6 +1056,61 @@ fn render_work_item_ref_chips(
     row.into_any_element()
 }
 
+/// The context router's mark under a routed boss prompt: a muted "Jev
+/// attached" label, then one chip per thing the verdict attached — the
+/// work digest, plus the focus project when the router's attention
+/// inference held one. Opaque metadata, so the chips share the file-chip
+/// shell but stay inert: no hover, focus, or menu.
+fn render_context_mark_chips(mark: &ContextMark, theme: &Theme) -> AnyElement {
+    let chip = |icon_path: Option<&'static str>, label: SharedString| {
+        div()
+            .h(px(22.0))
+            .max_w(px(280.0))
+            .pl(px(6.0))
+            .pr(px(8.0))
+            .rounded(px(7.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .when_some(icon_path, |chip, path| {
+                chip.child(icon(path, 11.0, theme.text_tertiary))
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(label),
+            )
+    };
+    div()
+        .max_w(px(540.0))
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .justify_end()
+        .gap(px(6.0))
+        .child(
+            div()
+                .flex_none()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(tr!("transcript.jev_attached")),
+        )
+        .child(chip(
+            None,
+            SharedString::from(tr!("transcript.work_digest")),
+        ))
+        .when_some(mark.focus.clone(), |row, focus| {
+            row.child(chip(Some("icons/folder.svg"), focus.into()))
+        })
+        .into_any_element()
+}
+
 fn mcp_startup_failure_server(message: &str) -> Option<&str> {
     const PREFIX: &str = "MCP client for `";
     const SUFFIX: &str = "` failed to start: MCP startup failed:";
@@ -1629,22 +1684,10 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             }
             // The boss context router's mark: presence means the work digest
             // attached to this prompt, and `focus` names the project the
-            // router's attention inference held — opaque metadata, so it
-            // stays a plain muted line with no hover or expansion.
+            // router's attention inference held — opaque metadata, so the
+            // chips stay inert with no hover or expansion.
             if let Some(mark) = &message.context_mark {
-                column = column.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(match &mark.focus {
-                            Some(focus) => {
-                                tr!("transcript.context_mark_focus", name = focus.clone())
-                            }
-                            None => tr!("transcript.context_mark"),
-                        }),
-                );
+                column = column.child(render_context_mark_chips(mark, theme));
             }
             column
         }
