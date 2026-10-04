@@ -1,0 +1,1 @@
+- Boss and employee avatars no longer render with jagged pixel edges — the sidebar, top bar, and @-mention chips now rasterize each face near the size it displays.

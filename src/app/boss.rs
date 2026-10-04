@@ -7,6 +7,32 @@ use waku_client::boss::{
 };
 use waku_protocol::custom_commands::CustomCommandIcon;
 
+/// The logical size a session-mention chip's avatar occupies in the
+/// transcript — `ATOM_AVATAR_SCALE` of a body-text chip's height.
+const MENTION_AVATAR_SIZE: f32 = 18.0;
+
+/// The `size` the avatar SVG is requested at, which fixes its intrinsic
+/// viewport so [`avatar_scale`] can target an exact raster size.
+const AVATAR_SOURCE_SIZE: f32 = 256.0;
+
+/// Rasters are cached per display-size bucket because GPUI samples sprites
+/// with a bilinear filter and no mipmaps: one shared 256px raster upscaled
+/// into a 54px header loses its edges, and downscaled six-fold into a
+/// mention chip aliases into hard pixel steps. Quantizing requested sizes
+/// keeps the buckets per seed small while each raster lands near the
+/// pixels it actually occupies.
+fn avatar_bucket(size: f32) -> u32 {
+    (size.ceil().max(1.0) as u32).div_ceil(8) * 8
+}
+
+/// The scale passed to `SvgRenderer::render_single_frame` for a bucket.
+/// GPUI multiplies it by its smooth-SVG factor of 2, so the raster comes
+/// out at `2 * bucket` device pixels — a 1:1 sample on Retina displays and
+/// a clean 2:1 minification elsewhere.
+fn avatar_scale(bucket: u32) -> f32 {
+    bucket as f32 / AVATAR_SOURCE_SIZE
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BossTab {
     History,
@@ -53,9 +79,10 @@ pub(super) struct BossUi {
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
-    avatar_queue: RefCell<VecDeque<String>>,
-    avatar_requested: RefCell<HashSet<String>>,
-    avatars: HashMap<String, Arc<gpui::RenderImage>>,
+    avatar_queue: RefCell<VecDeque<(String, u32)>>,
+    avatar_requested: RefCell<HashSet<(String, u32)>>,
+    avatar_svgs: HashMap<String, Arc<Vec<u8>>>,
+    avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
     loaded_file: Option<(DaemonKey, String, String)>,
     focus: Option<FocusHandle>,
@@ -93,6 +120,7 @@ impl Default for BossUi {
             rows: Vec::new(),
             avatar_queue: RefCell::new(VecDeque::new()),
             avatar_requested: RefCell::new(HashSet::new()),
+            avatar_svgs: HashMap::new(),
             avatars: HashMap::new(),
             avatar_active: 0,
             loaded_file: None,
@@ -765,19 +793,10 @@ impl Waku {
             let Some(identity) = self.boss_ui.identities.get(id) else {
                 continue;
             };
-            if let Some(image) = self.boss_ui.avatars.get(&identity.avatar_seed) {
-                avatars.insert(*id, image.clone());
-            } else if self
-                .boss_ui
-                .avatar_requested
-                .borrow_mut()
-                .insert(identity.avatar_seed.clone())
+            if let Some(image) =
+                self.boss_avatar_image(&identity.avatar_seed, MENTION_AVATAR_SIZE)
             {
-                self.boss_ui
-                    .avatar_queue
-                    .borrow_mut()
-                    .push_back(identity.avatar_seed.clone());
-                signal_event_pump(&self.event_wake_tx);
+                avatars.insert(*id, image);
             }
             mentions.push(md::render::SessionMention {
                 name: SharedString::from(identity.name.clone()),
@@ -1153,24 +1172,40 @@ impl Waku {
         self.boss_request(key, operation, BossReply::Saved, cx);
     }
 
-    pub(super) fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
-        if let Some(image) = self.boss_ui.avatars.get(&identity.avatar_seed) {
-            return gpui::img(image.clone())
-                .size(px(size))
-                .rounded(px(6.0))
-                .into_any_element();
+    /// The raster cached for `(seed, size bucket)`, queueing a fetch or a
+    /// re-render when it is missing. Returns `None` while the raster is in
+    /// flight so callers can draw their placeholder.
+    fn boss_avatar_image(&self, seed: &str, size: f32) -> Option<Arc<gpui::RenderImage>> {
+        let bucket = avatar_bucket(size);
+        if let Some(image) = self
+            .boss_ui
+            .avatars
+            .get(seed)
+            .and_then(|buckets| buckets.get(&bucket))
+        {
+            return Some(image.clone());
         }
         if self
             .boss_ui
             .avatar_requested
             .borrow_mut()
-            .insert(identity.avatar_seed.clone())
+            .insert((seed.to_string(), bucket))
         {
             self.boss_ui
                 .avatar_queue
                 .borrow_mut()
-                .push_back(identity.avatar_seed.clone());
+                .push_back((seed.to_string(), bucket));
             signal_event_pump(&self.event_wake_tx);
+        }
+        None
+    }
+
+    pub(super) fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
+        if let Some(image) = self.boss_avatar_image(&identity.avatar_seed, size) {
+            return gpui::img(image)
+                .size(px(size))
+                .rounded(px(6.0))
+                .into_any_element();
         }
         div()
             .size(px(size))
@@ -1185,7 +1220,7 @@ impl Waku {
 
     fn pump_boss_avatars(&mut self, cx: &mut Context<Self>) {
         while self.boss_ui.avatar_active < 4 {
-            let Some(seed) = self.boss_ui.avatar_queue.borrow_mut().pop_front() else {
+            let Some((seed, bucket)) = self.boss_ui.avatar_queue.borrow_mut().pop_front() else {
                 break;
             };
             self.boss_ui.avatar_active += 1;
@@ -1193,17 +1228,32 @@ impl Waku {
             let renderer = cx.svg_renderer();
             let avatar_seed = seed.clone();
             cx.spawn(async move |this, cx| {
+                let cached = this
+                    .update(cx, |this, _| {
+                        this.boss_ui.avatar_svgs.get(&avatar_seed).cloned()
+                    })
+                    .ok()
+                    .flatten();
                 let image = cx.background_executor().spawn(async move {
                     use futures::io::AsyncReadExt;
                     let exchange = async {
-                        let url = format!("https://api.dicebear.com/10.x/moods/svg?backgroundColor=&tags=animation&seed={avatar_seed}");
-                        let request = gpui::http_client::Request::get(url).body(gpui::http_client::AsyncBody::empty())?;
-                        let mut response = http.send(request).await?;
-                        anyhow::ensure!(response.status().is_success(), "avatar unavailable");
-                        let mut bytes = Vec::new();
-                        response.body_mut().take(256 * 1024).read_to_end(&mut bytes).await?;
-                        Ok::<_, anyhow::Error>(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renderer.render_single_frame(&bytes, 1.0)))
-                            .map_err(|_| anyhow::anyhow!("avatar rendering failed"))??)
+                        let bytes = match cached {
+                            Some(bytes) => bytes,
+                            None => {
+                                let url = format!("https://api.dicebear.com/10.x/moods/svg?backgroundColor=&tags=animation&size={AVATAR_SOURCE_SIZE}&seed={avatar_seed}");
+                                let request = gpui::http_client::Request::get(url).body(gpui::http_client::AsyncBody::empty())?;
+                                let mut response = http.send(request).await?;
+                                anyhow::ensure!(response.status().is_success(), "avatar unavailable");
+                                let mut bytes = Vec::new();
+                                response.body_mut().take(256 * 1024).read_to_end(&mut bytes).await?;
+                                Arc::new(bytes)
+                            }
+                        };
+                        let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            renderer.render_single_frame(&bytes, avatar_scale(bucket))
+                        }))
+                        .map_err(|_| anyhow::anyhow!("avatar rendering failed"))??;
+                        Ok::<_, anyhow::Error>((bytes, image))
                     };
                     match futures::future::select(Box::pin(exchange), Box::pin(smol::Timer::after(std::time::Duration::from_secs(10)))).await {
                         futures::future::Either::Left((result, _)) => result.ok(), _ => None,
@@ -1211,14 +1261,64 @@ impl Waku {
                 }).await;
                 let _ = this.update(cx, |this, cx| {
                     this.boss_ui.avatar_active -= 1;
-                    if let Some(image) = image {
-                        if this.boss_ui.avatars.len() >= 256 {
-                            if let Some(old) = this.boss_ui.avatars.keys().next().cloned() {
-                                if let Some(image) = this.boss_ui.avatars.remove(&old) { cx.drop_image(image, None); }
-                                this.boss_ui.avatar_requested.borrow_mut().remove(&old);
+                    if let Some((bytes, image)) = image {
+                        if this.boss_ui.avatar_svgs.len() >= 256 {
+                            if let Some(old) = this
+                                .boss_ui
+                                .avatar_svgs
+                                .keys()
+                                .find(|old| **old != seed)
+                                .cloned()
+                            {
+                                this.boss_ui.avatar_svgs.remove(&old);
                             }
                         }
-                        this.boss_ui.avatars.insert(seed, image);
+                        this.boss_ui.avatar_svgs.insert(seed.clone(), bytes);
+                        let cached: usize = this
+                            .boss_ui
+                            .avatars
+                            .values()
+                            .map(|buckets| buckets.len())
+                            .sum();
+                        if cached >= 256 {
+                            if let Some((old_seed, old_bucket)) = this
+                                .boss_ui
+                                .avatars
+                                .iter()
+                                .find_map(|(seed, buckets)| {
+                                    buckets
+                                        .keys()
+                                        .next()
+                                        .map(|bucket| (seed.clone(), *bucket))
+                                })
+                            {
+                                if let Some(image) = this
+                                    .boss_ui
+                                    .avatars
+                                    .get_mut(&old_seed)
+                                    .and_then(|buckets| buckets.remove(&old_bucket))
+                                {
+                                    cx.drop_image(image, None);
+                                }
+                                if this
+                                    .boss_ui
+                                    .avatars
+                                    .get(&old_seed)
+                                    .is_some_and(|buckets| buckets.is_empty())
+                                {
+                                    this.boss_ui.avatars.remove(&old_seed);
+                                }
+                                this.boss_ui
+                                    .avatar_requested
+                                    .borrow_mut()
+                                    .remove(&(old_seed, old_bucket));
+                            }
+                        }
+                        this.boss_ui
+                            .avatars
+                            .entry(seed)
+                            .or_default()
+                            .insert(bucket, image);
                     }
                     signal_event_pump(&this.event_wake_tx); cx.notify();
                 });
@@ -2867,4 +2967,35 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
         .bg(theme.inset)
         .p(px(8.0))
         .child(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn avatar_buckets_round_up_to_eights() {
+        assert_eq!(avatar_bucket(1.0), 8);
+        assert_eq!(avatar_bucket(16.0), 16);
+        assert_eq!(avatar_bucket(18.0), 24);
+        assert_eq!(avatar_bucket(54.0), 56);
+    }
+
+    /// The scale handed to the SVG rasterizer must land each bucket's
+    /// raster on twice its logical size — GPUI multiplies by its smooth-SVG
+    /// factor of 2, so drift here reintroduces the avatar aliasing the
+    /// buckets exist to prevent.
+    #[gpui::test]
+    fn avatar_rasters_render_at_twice_their_bucket(cx: &mut gpui::TestAppContext) {
+        let renderer = cx.update(|cx| cx.svg_renderer());
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256"><rect width="100" height="100" fill="#ffffff"/></svg>"##;
+        for bucket in [16u32, 24, 56] {
+            let image = renderer
+                .render_single_frame(svg.as_bytes(), avatar_scale(bucket))
+                .unwrap();
+            let frame = image.size(0);
+            assert_eq!(frame.width.0, bucket as i32 * 2);
+            assert_eq!(frame.height.0, bucket as i32 * 2);
+        }
+    }
 }
