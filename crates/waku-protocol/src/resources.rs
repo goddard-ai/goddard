@@ -16,6 +16,28 @@ pub struct ResourceSet {
     pub desktop_input: u32,
 }
 
+/// A daemon-owned model-slot claim an admission reservation carries.
+/// Namespaced by stable daemon (boss) identity so one host broker
+/// arbitrates model capacity for every daemon's queue. Limits arrive
+/// with the claim: the daemon's boss-set policy supplies them per attempt,
+/// so a policy change takes effect on the next try without re-writing the
+/// ledger.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AdmissionClaim {
+    /// Stable daemon identity the claim is namespaced under — the Boss
+    /// document's identity id, not a process id.
+    pub daemon: Uuid,
+    pub provider: String,
+    pub model: String,
+    /// Normal concurrent cap for this (daemon, provider, model) pair.
+    pub live_limit: u32,
+    /// Absolute cap reachable only when `allow_burst` is set.
+    pub hard_cap: u32,
+    #[serde(default)]
+    pub allow_burst: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResourceOperation {
@@ -27,6 +49,19 @@ pub enum ResourceOperation {
         wait_seconds: u32,
         #[serde(default)]
         parent: Option<Uuid>,
+    },
+    /// Daemon-owned atomic check-and-grant: the model claim and the
+    /// declared `resources` are granted under one authority lock or not
+    /// at all. Unlike `Acquire` this never parks — a denied admission
+    /// leaves no ledger entry, so ordering stays with the daemon's own
+    /// queue, and an empty `resources` set is valid. `id` is the
+    /// daemon's stable ticket key: retrying a granted id is a no-op, so
+    /// restart recovery re-issues the admission idempotently.
+    Admission {
+        id: Uuid,
+        resources: ResourceSet,
+        purpose: String,
+        claim: AdmissionClaim,
     },
     Attach {
         id: Uuid,
@@ -47,7 +82,7 @@ pub fn default_wait() -> u32 {
     600
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ResourcePolicy {
     pub resident_devices: u32,
@@ -80,6 +115,11 @@ pub struct Reservation {
     pub granted_at: Option<u64>,
     pub cancelled: bool,
     pub released: bool,
+    /// The model-slot claim this reservation holds, when it came through
+    /// `Admission`. Ledger entries written before admission tickets
+    /// deserialize as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission: Option<AdmissionClaim>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
@@ -91,6 +131,10 @@ pub struct ResourceStatus {
     pub observation_errors: Vec<String>,
     pub request_id: Option<Uuid>,
     pub borrowed: bool,
+    /// Why a denied `Admission` could not take capacity this pass —
+    /// empty for granted admissions and every other operation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub admission_blockers: Vec<crate::boss::AdmissionBlocker>,
 }
 
 #[cfg(test)]

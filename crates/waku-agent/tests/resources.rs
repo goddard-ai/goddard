@@ -113,6 +113,7 @@ impl Daemon {
                                 granted_at: Some(1),
                                 cancelled: false,
                                 released: false,
+                                admission: None,
                             });
                         }
                     }
@@ -152,6 +153,9 @@ impl Daemon {
                                 r.cancelled = true;
                             }
                         }
+                    }
+                    ResourceOperation::Admission { .. } => {
+                        unreachable!("admission reservations are daemon-internal")
                     }
                 }
                 let message = if refused {

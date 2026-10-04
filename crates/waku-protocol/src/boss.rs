@@ -108,6 +108,185 @@ pub enum EmployeeGoal {
     Goal,
 }
 
+/// Where an employee sits in the summon queue's admission lifecycle.
+/// `dispatching` and `finishing` are explicit accounting states: the
+/// daemon persists them so capacity is released exactly once, after the
+/// runtime's termination is known rather than while teardown is a race
+/// window. Records written before the queue existed deserialize as
+/// `working`; `BossEmployee::expired` remains the wire-compat projection
+/// (`state == expired`).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmployeeLifecycle {
+    /// Accepted but not launched — holds zero capacity: no model slot,
+    /// no worktree, no runtime, no device claims.
+    Queued,
+    /// Granted a model slot and any declared host resources; the launch
+    /// intent is persisted but the provider may not have started yet.
+    Dispatching,
+    /// The assignment reached the provider — or the employee is an idle
+    /// admitted worker holding its slot for the next prompt.
+    #[default]
+    Working,
+    /// Teardown begun; the model slot stays held until runtime
+    /// termination settles the release.
+    Finishing,
+    /// Done — the roster keeps the record for reuse until retirement.
+    Expired,
+}
+
+/// The durable admission ticket a summon persists before it returns.
+/// Everything the deferred launch needs lives here so a restart re-creates
+/// the pending admission idempotently rather than re-asking the boss.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SummonTicket {
+    /// Queue order across the daemon — monotonic, never reused. The boss's
+    /// oldest queued sequence is the only entry that may dispatch.
+    pub sequence: u64,
+    /// Admission generation — bumped each time the employee re-enters
+    /// admission (resurrection, setModel requeue). Launch completion
+    /// settles against it so a concurrent stop or model change cannot
+    /// start stale work.
+    pub generation: u64,
+    /// The resolved provider and concrete model id the ticket counts
+    /// against — routing ran at admission, never at dispatch.
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reasoning_effort: Option<String>,
+    /// The assignment as the summoner wrote it — dispatch resolves the
+    /// Boss employee wrapper and appends `pending_prompts` in order.
+    pub prompt: String,
+    pub project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<AgentWorkspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_branch: Option<String>,
+    /// Host resources the summon declared for the assignment's lifetime —
+    /// claimed atomically with the model slot at dispatch.
+    #[serde(default)]
+    pub resources: crate::resources::ResourceSet,
+    /// The summon may spend burst slots above `liveLimit` up to
+    /// `hardCap`; without it admission stops at `liveLimit`.
+    #[serde(default)]
+    pub allow_burst: bool,
+    /// Prompts parked while the ticket waits — they join the dispatch
+    /// envelope in submission order and survive restart.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_prompts: Vec<String>,
+    /// Optional wave/group id — reserved for the queue-grouping phase;
+    /// carried now so admission records do not need a schema change then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub group_id: Option<String>,
+    /// Optional dispatch priority — reserved for the same phase; dispatch
+    /// remains strict FIFO today.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub priority: Option<i64>,
+    /// The daemon-owned goal this assignment projects onto, when the
+    /// summoner linked one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub goal_id: Option<Uuid>,
+    /// The broker reservation holding this admission's claims once
+    /// granted — released exactly once when the generation expires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reservation: Option<Uuid>,
+    /// Why the head-of-line entry is still waiting — refreshed by the
+    /// scheduler, empty while a dispatch path exists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<AdmissionBlocker>,
+    /// The outbox event id recorded for this generation's dispatch
+    /// notification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dispatch_event: Option<u64>,
+}
+
+/// Why an accepted ticket cannot dispatch yet — a wait reason, never an
+/// RPC error.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AdmissionBlocker {
+    /// The provider+model cap is full.
+    ModelLimit { used: u32, limit: u32 },
+    /// A declared host resource set cannot be granted right now.
+    HostResources { detail: String },
+}
+
+/// Admission status attached to `Summoned` and control results — the
+/// resolved selection plus, while queued, the position and wait reasons.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SummonAdmission {
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queue_position: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<AdmissionBlocker>,
+}
+
+/// One provider+model rule in the boss-set resource policy. `liveLimit`
+/// is the normal cap; `hardCap` is reachable only by summons that carry
+/// `allowBurst`. `0 <= liveLimit <= hardCap`; an explicit zero pauses the
+/// model's queue and a missing rule imposes no model cap.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelLimit {
+    pub provider: ProviderKind,
+    pub model: String,
+    pub live_limit: u32,
+    pub hard_cap: u32,
+}
+
+/// The boss-configured admission policy — daemon state the boss never has
+/// to remember in its persona. `revision` increments on each accepted
+/// `setResourcePolicy` and guards lost-update races through
+/// `expectedRevision`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BossResourcePolicy {
+    pub revision: u64,
+    pub model_limits: Vec<ModelLimit>,
+    /// Desired host broker policy — reapplied to the host broker every
+    /// time the Boss service activates, so a daemon restart reconciles a
+    /// policy write that crashed between the two stores.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub host: Option<crate::resources::ResourcePolicy>,
+}
+
+/// A dispatch notification the daemon owes a supervisor — durable so a
+/// restart neither drops nor duplicates it. Delivery dedupes on `id`.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchNotification {
+    pub id: u64,
+    pub session_id: Uuid,
+    pub generation: u64,
+    pub provider: ProviderKind,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub goal_id: Option<Uuid>,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivered_at: Option<u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossEmployee {
@@ -145,6 +324,52 @@ pub struct BossEmployee {
     /// resurrection clears it with the job that raised it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocker: Option<String>,
+    /// Admission lifecycle — `queued`, `dispatching`, `working`,
+    /// `finishing`, or `expired`. Records written before the queue
+    /// deserialize as `working`; `expired` stays the wire projection.
+    #[serde(default)]
+    pub state: EmployeeLifecycle,
+    /// The employee's admission ticket — present from a queued summon
+    /// through dispatch, and retained afterward for accounting and
+    /// re-admission. Legacy employees predate it and run uncapped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ticket: Option<SummonTicket>,
+    /// When the current queued stint began — `None` once dispatched or
+    /// for employees that never queued.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queued_at: Option<u64>,
+    /// Idempotency key the summoner supplied; a retry with the same
+    /// fields returns this record instead of a second employee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_id: Option<Uuid>,
+    /// Canonical fingerprint of the summon fields `request_id` covers —
+    /// reusing the id with different fields is an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_fingerprint: Option<String>,
+}
+
+impl BossEmployee {
+    /// Move the employee to `lifecycle`, keeping the `expired` wire
+    /// projection and its timestamp in step.
+    pub fn set_lifecycle(&mut self, lifecycle: EmployeeLifecycle, now: u64) {
+        self.state = lifecycle;
+        self.expired = lifecycle == EmployeeLifecycle::Expired;
+        if self.expired && self.expired_at.is_none() {
+            self.expired_at = Some(now);
+        }
+    }
+
+    /// The lifecycle derived for records too old to carry `state`.
+    pub fn lifecycle(&self) -> EmployeeLifecycle {
+        if self.expired && self.state != EmployeeLifecycle::Expired {
+            return EmployeeLifecycle::Expired;
+        }
+        self.state
+    }
 }
 
 /// A file or folder of employee output the boss published to the user's
@@ -230,6 +455,22 @@ pub struct BossState {
     /// same contract `BossDeliverable::viewed_at` gives its row.
     #[serde(default)]
     pub goals_viewed_at: Option<u64>,
+    /// The boss-set admission policy — provider+model caps and the
+    /// desired host broker policy. Missing from older documents: no model
+    /// caps until the boss sets rules.
+    #[serde(default)]
+    pub resource_policy: BossResourcePolicy,
+    /// Next admission sequence number (1-based) — monotonic across
+    /// restarts so a queued ticket's FIFO position survives.
+    #[serde(default)]
+    pub next_sequence: u64,
+    /// Next dispatch-notification event id (1-based).
+    #[serde(default)]
+    pub next_event_id: u64,
+    /// Durable dispatch notifications awaiting delivery to supervisors —
+    /// drained by id so restart can neither drop nor duplicate one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outbox: Vec<DispatchNotification>,
     pub revision: u64,
 }
 
@@ -334,6 +575,54 @@ pub enum BossOperation {
         /// on the client's Goals page.
         #[serde(default)]
         work_goal: EmployeeGoal,
+        /// Host resources the assignment reserves for its lifetime — the
+        /// employee's own `resource run` calls borrow subsets of the
+        /// granted set rather than re-queuing. Empty means the job claims
+        /// no host resources. A set larger than total host capacity fails
+        /// the summon at submission.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        resources: Option<crate::resources::ResourceSet>,
+        /// Authorize this summon to spend burst slots above the model
+        /// rule's `liveLimit` — it still cannot pass `hardCap`. Without
+        /// it the ticket waits at `liveLimit`.
+        #[serde(default)]
+        allow_burst: bool,
+        /// Wave grouping seam — carried on the admission record now;
+        /// grouped dispatch lands in a later phase.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        group_id: Option<String>,
+        /// Scheduling hint seam — stored on the admission record; the
+        /// strict-FIFO scheduler does not reorder on it yet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        priority: Option<i64>,
+        /// Link the assignment to a daemon-owned goal projection — the
+        /// Goals page shows it as pending work before any provider thread
+        /// exists.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        goal_id: Option<Uuid>,
+        /// Idempotency key: a retry that lost its response returns the
+        /// original employee rather than a duplicate. Reusing the id with
+        /// different summon fields is an error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        request_id: Option<Uuid>,
+    },
+    /// Replace the boss-set admission policy atomically. `expectedRevision`
+    /// must match the current `resource_policy.revision`. Boss/human only —
+    /// employees cannot raise caps. Lowering a cap never kills running
+    /// work; it blocks new admissions until usage drains.
+    SetResourcePolicy {
+        expected_revision: u64,
+        model_limits: Vec<ModelLimit>,
+        /// Optional host section — updates the resource broker's policy
+        /// file under its authority lock in the same accepted update.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        host: Option<crate::resources::ResourcePolicy>,
     },
     Control {
         session_id: Uuid,
@@ -574,8 +863,21 @@ pub enum BossResult {
         title: String,
         cwd: String,
     },
+    /// `Summoned` always means accepted — a `queued` state is a ticket
+    /// that starts when capacity frees, never an error. `state` and
+    /// `admission` default for results read by older clients.
     Summoned {
         session_id: Uuid,
+        #[serde(default)]
+        state: EmployeeLifecycle,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        admission: Option<SummonAdmission>,
+    },
+    /// The accepted resource policy — both effective policies after the
+    /// atomic replace.
+    ResourcePolicySet {
+        policy: BossResourcePolicy,
     },
     Transcript {
         transcript: crate::model::AgentSessionTranscript,

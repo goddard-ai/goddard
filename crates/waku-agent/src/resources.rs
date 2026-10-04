@@ -18,7 +18,7 @@ fn interrupted() -> bool {
     INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-const PARENT_ENV: &str = "GODDARD_RESOURCE_RESERVATION";
+const PARENT_ENV: &str = waku_protocol::AGENT_RESOURCE_RESERVATION_ENV;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Acquire {

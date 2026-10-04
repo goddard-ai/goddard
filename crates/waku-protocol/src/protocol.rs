@@ -47,6 +47,10 @@ pub const AGENT_TASK_ENV: &str = "GODDARD_TASK_ID";
 /// sessions, so their agents can discover the linkage without parsing the
 /// intro note out of a prompt.
 pub const AGENT_PARENT_TASK_ENV: &str = "GODDARD_PARENT_TASK_ID";
+/// The resource reservation the daemon already holds for this session —
+/// a summon admission ticket's granted id. `goddard-agent resource`
+/// attaches to it instead of re-queueing behind its own owner's work.
+pub const AGENT_RESOURCE_RESERVATION_ENV: &str = "GODDARD_RESOURCE_RESERVATION";
 /// Markdown-link target prefix for referencing a task in transcript text:
 /// `[title](goddard://task/<task-id>)` renders as a link that opens that
 /// task. Surfaced to agents through `goddard-agent` so a reply can point at
