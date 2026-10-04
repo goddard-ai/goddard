@@ -1260,6 +1260,12 @@ impl Waku {
         else {
             return;
         };
+        // Boss-owned sessions never render the chips, so the verdict could
+        // not act — skip the call rather than paying for answers nothing
+        // displays and journaling verdicts that can never resolve.
+        if self.session_is_boss_owned(session) {
+            return;
+        }
         let state = turn_eval_state(session, turn_id, summary.as_deref());
         let questions = status_marker_questions();
         let tx = self.status_marker_tx.clone();
@@ -1428,12 +1434,20 @@ impl Waku {
 
     /// The marker chips a settled turn's response footer shows, if the
     /// evaluation answered and at least one marker cleared its threshold.
+    /// Boss-owned sessions never carry the chips — the verdict judges a
+    /// turn for the human reviewing an employee's work.
     #[track_caller]
     pub(super) fn render_status_marker_row(
         &self,
         turn_id: Uuid,
         theme: &Theme,
     ) -> Option<AnyElement> {
+        if self
+            .selected_session()
+            .is_some_and(|session| self.session_is_boss_owned(session))
+        {
+            return None;
+        }
         let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
         if cleared.is_empty() {
             return None;
@@ -1520,7 +1534,11 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let turn_id = self.selected_session()?.turns.last()?.id;
+        let session = self.selected_session()?;
+        if self.session_is_boss_owned(session) {
+            return None;
+        }
+        let turn_id = session.turns.last()?.id;
         let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
         if cleared.is_empty() {
             return None;

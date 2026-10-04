@@ -1,0 +1,1 @@
+- The boss's own chat and boss planning sessions no longer show turn status markers (Complete, Aligned, Awaiting input, and friends) in the transcript or the floating pill; the verdict chips still appear on ordinary tasks and employee transcripts.

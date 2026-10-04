@@ -840,6 +840,27 @@ impl Waku {
         session.boss_managed || self.boss_ui.managed.contains(&session.id)
     }
 
+    /// Whether the session is a boss-owned surface rather than an
+    /// employee's task — the boss's own chat or a managed session in a
+    /// boss-owned kind. The boss chat never joins `managed`, so it
+    /// matches on the boss state's `session_id`; managed kinds read
+    /// through `session_kind_is_boss_owned`.
+    pub(super) fn session_is_boss_owned(&self, session: &AgentSession) -> bool {
+        self.boss_ui
+            .states
+            .values()
+            .any(|state| state.session_id == Some(session.id))
+            || Self::session_kind_is_boss_owned(session)
+    }
+
+    /// Managed-session kinds that are boss surfaces rather than employee
+    /// tasks. `AgentSession` carries no managed-kind marker yet — when the
+    /// planning kind lands this arm reads `session.is_planning()`, and
+    /// `session_is_boss_owned` covers planning transcripts unchanged.
+    fn session_kind_is_boss_owned(_session: &AgentSession) -> bool {
+        false
+    }
+
     fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
         self.boss_ui
             .states
