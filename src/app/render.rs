@@ -855,7 +855,7 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
-                        } else if self.boss_ui.page.is_some() {
+                        } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some() {
                             self.render_boss_page(cx)
                         } else if let Some(bundle_page) = bundle_page {
                             bundle_page

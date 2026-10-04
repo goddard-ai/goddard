@@ -245,6 +245,19 @@ fn attach_driver(
 fn load_remote_boss_state(
     client: &waku_client::DaemonClient,
 ) -> Option<waku_client::boss::BossState> {
+    let waku_client::ResponsePayload::Settings { settings } = client
+        .request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::GetSettings,
+        )
+        .ok()?
+    else {
+        return None;
+    };
+    if !settings.boss_experiment_enabled {
+        return None;
+    }
     match client
         .request(
             Uuid::nil(),
@@ -2451,6 +2464,12 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
+        if !self.state.boss_experiment_enabled {
+            self.boss_ui.page = None;
+            self.boss_ui.bundle_page = None;
+            self.boss_ui.command_bundle = None;
+            self.boss_ui.pending_bundle = None;
+        }
         // Inference-provider config rides the same document — the first
         // settings broadcast is the earliest the editor can seed from.
         self.seed_inference_inputs(cx);

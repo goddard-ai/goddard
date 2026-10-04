@@ -84,6 +84,10 @@ pub struct DaemonSettings {
     /// in the background, and injects it into each session's first prompt.
     /// Defaults on in development builds, opt-in in release builds.
     pub memory_experiment_enabled: bool,
+    /// Experimental opt-in for the Boss assistant, employee management,
+    /// personas, and plans surfaces. Defaults on in development builds and
+    /// opt-in in release builds.
+    pub boss_experiment_enabled: bool,
     /// Opt-in for daemon-side Boss session rotation. Disabled by default.
     #[serde(default)]
     pub boss_rotation_enabled: bool,
@@ -184,6 +188,7 @@ impl Default for DaemonSettings {
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_enabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             boss_rotation_cache_ttl_secs: HashMap::new(),

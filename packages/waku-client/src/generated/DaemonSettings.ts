@@ -88,6 +88,12 @@ auto_prompts: Array<AutoPromptRule>,
  */
 memory_experiment_enabled: boolean,
 /**
+ * Experimental opt-in for the Boss assistant, employee management,
+ * personas, and plans surfaces. Defaults on in development builds and
+ * opt-in in release builds.
+ */
+boss_experiment_enabled: boolean,
+/**
  * Opt-in for daemon-side Boss session rotation. Disabled by default.
  */
 boss_rotation_enabled: boolean,

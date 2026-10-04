@@ -899,6 +899,10 @@ experiments.subagents_description:
   en: Let a session delegate runs to named subagents with per-provider tiers and cost-labeled routing, shown legibly in the transcript. Claude Code, GitHub Copilot, and Pi support the full roster; Codex and OpenCode are advisory-only, and other providers remain disabled. Read-only helpers are enforced only where the provider exposes a tool policy. Applies to sessions started after turning it on.
 experiments.computer_use_title:
   en: Computer Use
+experiments.boss_title:
+  en: Boss and employees
+experiments.boss_description:
+  en: Enable the Boss assistant, employee tasks, personas, and plans.
 experiments.computer_use_description:
   en: Reveal the Computer Use settings page and let sessions drive Cua Driver capture and input through the bundled helper. Turning it off also turns Computer Use itself off.
 experiments.friends_title:

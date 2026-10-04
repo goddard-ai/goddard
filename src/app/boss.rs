@@ -348,6 +348,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
         self.settings_page = None;
         self.projects_page = None;
         self.drafts_page = false;
@@ -390,6 +393,9 @@ impl Waku {
         reply: BossReply,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
         if self.boss_ui.pending {
             return;
         }
@@ -521,6 +527,9 @@ impl Waku {
     }
 
     pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
+        if !self.state.boss_experiment_enabled {
+            return None;
+        }
         let id = self.state.selected_session?;
         self.boss_ui
             .states
@@ -837,7 +846,8 @@ impl Waku {
     /// `managed` membership does not; the set still answers for daemons
     /// that predate the stamp.
     pub(super) fn session_is_boss_managed(&self, session: &AgentSession) -> bool {
-        session.boss_managed || self.boss_ui.managed.contains(&session.id)
+        self.state.boss_experiment_enabled
+            && (session.boss_managed || self.boss_ui.managed.contains(&session.id))
     }
 
     /// Whether the session is a boss-owned surface rather than an
@@ -846,6 +856,9 @@ impl Waku {
     /// matches on the boss state's `session_id`; managed kinds read
     /// through `session_kind_is_boss_owned`.
     pub(super) fn session_is_boss_owned(&self, session: &AgentSession) -> bool {
+        if !self.state.boss_experiment_enabled {
+            return false;
+        }
         self.boss_ui
             .states
             .values()
@@ -1048,6 +1061,9 @@ impl Waku {
     }
 
     pub(super) fn chat_with_boss(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
         let provider = self
             .selected_session()
             .map(|session| session.provider)

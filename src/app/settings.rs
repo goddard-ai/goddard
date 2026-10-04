@@ -5329,6 +5329,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "boss-experiment-toggle",
+                icon: "icons/brain.svg",
+                title_key: "experiments.boss_title",
+                description_key: "experiments.boss_description",
+                enabled: self.state.boss_experiment_enabled,
+                set: Self::set_boss_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "composer-drafts-experiment-toggle",
                 icon: "icons/file-text.svg",
                 title_key: "experiments.composer_drafts_title",
@@ -7273,6 +7284,18 @@ impl Waku {
 
     fn set_subagents_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.subagents_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_boss_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.boss_experiment_enabled = enabled;
+        if !enabled {
+            self.boss_ui.page = None;
+            self.boss_ui.bundle_page = None;
+            self.boss_ui.command_bundle = None;
+            self.boss_ui.pending_bundle = None;
+        }
         self.save();
         cx.notify();
     }
@@ -9828,9 +9851,15 @@ impl Waku {
         let content_matches = (self.archived_message_matches_query.as_deref()
             == Some(query.as_str()))
         .then_some(&self.archived_message_matches);
+        let no_boss_managed_sessions = HashSet::new();
+        let boss_managed_sessions = if self.state.boss_experiment_enabled {
+            &self.boss_ui.managed
+        } else {
+            &no_boss_managed_sessions
+        };
         let visible = filter_archived_sessions(
             &archived,
-            &self.boss_ui.managed,
+            boss_managed_sessions,
             &query,
             project_filter,
             &project_names,

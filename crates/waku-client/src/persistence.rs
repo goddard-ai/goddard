@@ -2186,6 +2186,9 @@ pub struct PersistedState {
     /// owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    /// Experimental Boss surface and daemon feature flag, mirrored from the daemon.
+    #[serde(default = "default_experiment_enabled")]
+    pub boss_experiment_enabled: bool,
     /// Daemon-owned Boss rotation policy mirrored for the settings UI.
     #[serde(default)]
     pub boss_rotation_enabled: bool,
@@ -2502,6 +2505,7 @@ impl PersistedState {
             qa_branch: default_qa_branch(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_enabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             boss_rotation_cache_ttl_secs: Default::default(),
@@ -2759,6 +2763,7 @@ impl PersistedState {
             qa_branch: self.qa_branch.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
+            boss_experiment_enabled: self.boss_experiment_enabled,
             boss_rotation_enabled: self.boss_rotation_enabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
@@ -2797,6 +2802,7 @@ impl PersistedState {
         self.qa_branch = settings.qa_branch;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.boss_experiment_enabled = settings.boss_experiment_enabled;
         self.boss_rotation_enabled = settings.boss_rotation_enabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;

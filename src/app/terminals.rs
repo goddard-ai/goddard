@@ -747,7 +747,8 @@ impl Waku {
                 // Managed sessions keep no terminal tabs — the terminal
                 // spawns unbound rather than claiming a slot their strip
                 // cannot host.
-                && !self.boss_ui.managed.contains(session_id)
+                && (!self.state.boss_experiment_enabled
+                    || !self.boss_ui.managed.contains(session_id))
         });
         // A terminal created at its owning session's workspace tracks the
         // workspace (`None` resolves to it at spawn); any other directory

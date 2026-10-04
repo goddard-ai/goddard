@@ -355,6 +355,8 @@ pub struct PersistedState {
     /// from the settings document.
     #[serde(default = "default_experiment_enabled")]
     pub memory_experiment_enabled: bool,
+    #[serde(default = "default_experiment_enabled")]
+    pub boss_experiment_enabled: bool,
     /// Boss rotation opt-in mirrored from daemon settings; release default off.
     #[serde(default)]
     pub boss_rotation_enabled: bool,
@@ -516,6 +518,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
+            boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_enabled: false,
             boss_rotation_context_threshold: 0.8,
             boss_rotation_cache_ttl_secs: Default::default(),
@@ -676,6 +679,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
+            boss_experiment_enabled: self.boss_experiment_enabled,
             boss_rotation_enabled: self.boss_rotation_enabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
@@ -743,6 +747,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
+        self.boss_experiment_enabled = settings.boss_experiment_enabled;
         self.boss_rotation_enabled = settings.boss_rotation_enabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;

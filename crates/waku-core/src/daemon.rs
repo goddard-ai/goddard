@@ -584,7 +584,11 @@ impl WakuBackend {
             AutomationService::open(data_dir.join("automations.json"))
                 .context("could not load Goddard automations")?,
         );
-        let boss = Arc::new(crate::boss::BossService::open(data_dir.join("boss"))?);
+        let boss = Arc::new(if settings.get().boss_experiment_enabled {
+            crate::boss::BossService::open(data_dir.join("boss"))?
+        } else {
+            crate::boss::BossService::disabled(data_dir.join("boss"))
+        });
         let auto_prompts = Arc::new(
             AutoPromptService::open(data_dir.join("auto-prompts.json"))
                 .context("could not load Goddard auto prompt history")?,
@@ -645,7 +649,7 @@ impl WakuBackend {
         // the roster still names them, so mark them now — once an employee
         // retires its record is gone and the task would leak back into the
         // ordinary lists.
-        {
+        if backend.settings.get().boss_experiment_enabled {
             let document = backend.boss.document();
             let managed: HashSet<Uuid> = document
                 .session_id
@@ -2113,6 +2117,7 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::UpdateSettings { settings } => {
+                let boss_was_enabled = self.settings.get().boss_experiment_enabled;
                 let revoked_app_grant =
                     self.settings
                         .get()
@@ -2136,6 +2141,9 @@ impl Backend for WakuBackend {
                 // or echoes back to clients.
                 crate::inference::absorb(&mut settings, &self.inference_secrets);
                 self.settings.replace(settings)?;
+                if boss_was_enabled && !self.settings.get().boss_experiment_enabled {
+                    self.boss.deactivate();
+                }
                 self.apply_wake_setting();
                 crate::integrations::deliver::sync_file_providers(
                     &self.settings.get(),
@@ -6349,6 +6357,11 @@ impl WakuBackend {
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
+        anyhow::ensure!(
+            self.settings.get().boss_experiment_enabled,
+            "Boss is disabled by the experiment setting"
+        );
+        self.boss.activate()?;
         match operation {
             BossOperation::Open {
                 provider,

@@ -3775,7 +3775,8 @@ impl Waku {
                     && session.archived_at.is_none()
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
-                    && !self.session_is_boss_managed(session)
+                    && (!self.state.boss_experiment_enabled
+                        || !self.session_is_boss_managed(session))
             })
             .collect::<Vec<_>>();
         // A focused project narrows the whole history to its tasks — the
@@ -3831,7 +3832,7 @@ impl Waku {
         }
         rows.push(SidebarRow::GroupSpacer);
 
-        if !self.boss_ui.hosts.is_empty() {
+        if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
             for key in &self.boss_ui.hosts {
                 rows.push(SidebarRow::Boss(*key));
                 if let Some(active) = self.boss_ui.active.get(key) {
@@ -3864,7 +3865,11 @@ impl Waku {
         // section directly above Pinned in either grouping. Under project
         // grouping they keep this dedicated group rather than folding into a
         // project — a bundle's detail line names its file, not a project.
-        let (recent_bundles, dormant_bundles) = sidebar_recent_bundles(&self.boss_ui.states, now);
+        let (recent_bundles, dormant_bundles) = if self.state.boss_experiment_enabled {
+            sidebar_recent_bundles(&self.boss_ui.states, now)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         if !recent_bundles.is_empty() || !dormant_bundles.is_empty() {
             rows.push(SidebarRow::Header(SidebarGroup::Bundles));
             if !self
@@ -5143,7 +5148,7 @@ impl Waku {
         }
         // Managed names live in the daemon's Boss document; the operation
         // retitles the session there as well.
-        if self.boss_ui.managed.contains(&session_id) {
+        if self.state.boss_experiment_enabled && self.boss_ui.managed.contains(&session_id) {
             self.rename_managed_session(session_id, title, cx);
             cx.notify();
             return;

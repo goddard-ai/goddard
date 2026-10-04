@@ -65,6 +65,7 @@ struct BossEval {
 
 pub struct BossService {
     root: PathBuf,
+    active: std::sync::atomic::AtomicBool,
     state: Mutex<BossState>,
     notifier: Mutex<Option<crate::share::TaskNotifier>>,
     pub(crate) operation_lock: Mutex<()>,
@@ -77,6 +78,72 @@ pub struct BossService {
 }
 
 impl BossService {
+    /// A process-local empty service used when the Boss experiment is off.
+    /// It deliberately does not inspect or create the Boss data directory.
+    pub fn disabled(root: PathBuf) -> Self {
+        Self {
+            root,
+            active: std::sync::atomic::AtomicBool::new(false),
+            state: Mutex::new(disabled_state()),
+            notifier: Mutex::new(None),
+            operation_lock: Mutex::new(()),
+            backend: Mutex::new(std::sync::Weak::new()),
+            interrupted: Mutex::new(Vec::new()),
+            projects: Mutex::new(std::collections::HashMap::new()),
+            injected: Mutex::new(std::collections::HashSet::new()),
+            router: Mutex::new(BossRouter::default()),
+            evals: Mutex::new(BossEval::default()),
+        }
+    }
+
+    /// Load durable Boss data on the first enabled operation. A daemon that
+    /// starts with the experiment off never reads or creates the Boss store.
+    pub fn activate(&self) -> anyhow::Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.active.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let mut state = {
+            fs::create_dir_all(self.root.join("files/memory"))?;
+            let path = self.root.join("boss.json");
+            match fs::read(&path) {
+                Ok(bytes) => serde_json::from_slice(&bytes).context("invalid Boss document")?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => fresh_state(),
+                Err(error) => return Err(error.into()),
+            }
+        };
+        let now = waku_protocol::model::unix_time();
+        for employee in &mut state.employees {
+            if employee.expired && employee.expired_at.is_none() {
+                employee.expired_at = Some(now);
+            }
+        }
+        *self.state.lock() = state;
+        *self.interrupted.lock() = self
+            .state
+            .lock()
+            .employees
+            .iter()
+            .filter(|entry| !entry.expired)
+            .map(|entry| entry.session_id)
+            .collect();
+        self.migrate_legacy_pins();
+        self.save(&self.state.lock())?;
+        self.active.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn deactivate(&self) {
+        use std::sync::atomic::Ordering;
+        *self.state.lock() = disabled_state();
+        self.interrupted.lock().clear();
+        self.projects.lock().clear();
+        self.injected.lock().clear();
+        *self.router.lock() = BossRouter::default();
+        *self.evals.lock() = BossEval::default();
+        self.active.store(false, Ordering::Release);
+    }
+
     pub fn open(root: PathBuf) -> anyhow::Result<Self> {
         fs::create_dir_all(root.join("files/memory"))?;
         let path = root.join("boss.json");
@@ -112,6 +179,7 @@ impl BossService {
         }
         let service = Self {
             root,
+            active: std::sync::atomic::AtomicBool::new(true),
             interrupted: Mutex::new(
                 state
                     .employees
@@ -1743,11 +1811,36 @@ fn fresh_state() -> BossState {
     }
 }
 
+fn disabled_state() -> BossState {
+    BossState {
+        identity: BossIdentity {
+            id: Uuid::nil(),
+            name: String::new(),
+            avatar_seed: String::new(),
+        },
+        persona_id: Uuid::nil(),
+        session_id: None,
+        personas: Vec::new(),
+        employees: Vec::new(),
+        bundles: Vec::new(),
+        revision: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use waku_protocol::boss::BossEmployee;
     use waku_protocol::custom_commands::CustomCommandIcon;
+
+    #[test]
+    fn disabled_service_does_not_read_or_create_boss_storage() {
+        let root = std::env::temp_dir().join(format!("boss-disabled-{}", Uuid::new_v4()));
+        let service = BossService::disabled(root.clone());
+        assert!(service.document().session_id.is_none());
+        assert!(service.document().identity.id.is_nil());
+        assert!(!root.exists());
+    }
 
     #[test]
     fn retirement_releases_employee_name_and_keeps_roster_persisted() {
