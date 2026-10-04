@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use waku_protocol::automations::{AutomationSchedule, AutomationsState};
 use waku_protocol::boss::BossState;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{AgentSession, SessionStatus, truncate_chars, unix_time};
+use waku_protocol::model::{AgentSession, Project, SessionStatus, SessionWorkspace, truncate_chars, unix_time};
 
 use crate::persistence::PersistedState;
 
@@ -59,6 +59,112 @@ pub struct WorkContext {
     pub digest: String,
     /// User-project names in digest order — the `focus` Choice's option set.
     pub projects: Vec<String>,
+}
+
+/// Render a cheap employee overview from the persisted boss and task
+/// snapshots used by `view()`. This deliberately reads no transcript data.
+pub fn employee_roster(
+    boss: &BossState,
+    sessions: &[AgentSession],
+    projects: &[Project],
+) -> String {
+    let now = unix_time();
+    let mut rows = boss.employees.iter().map(|employee| {
+        let session = sessions.iter().find(|session| session.id == employee.session_id);
+        let status = if employee.expired {
+            "expired"
+        } else if employee.blocker.is_some() {
+            "blocked"
+        } else {
+            match session.map(|session| session.status) {
+                Some(SessionStatus::Connecting | SessionStatus::Working) => "working",
+                Some(SessionStatus::Waiting | SessionStatus::Background) => "finishing",
+                Some(SessionStatus::Failed) => "blocked",
+                _ => "idle",
+            }
+        };
+        let queued = session.is_some_and(|session| !session.queued_messages.is_empty());
+        let rank = if status == "working" {
+            0
+        } else if queued {
+            1
+        } else if status == "expired" {
+            3
+        } else {
+            2
+        };
+        let project = session
+            .and_then(|session| projects.iter().find(|project| project.id == session.project_id))
+            .map(|project| project.name.as_str())
+            .unwrap_or("unknown project");
+        let branch = session.and_then(|session| match &session.workspace {
+            SessionWorkspace::Worktree {
+                branch,
+                base_branch,
+                ..
+            } => branch.as_deref().or(base_branch.as_deref()),
+            SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
+            SessionWorkspace::Local => None,
+        });
+        let provider = session
+            .map(|session| {
+                serde_json::to_value(session.provider)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "unknown".into())
+            })
+            .unwrap_or_else(|| "unknown".into());
+        let model = session.and_then(|session| session.model.as_deref()).unwrap_or("auto");
+        let state_since = employee
+            .expired_at
+            .or_else(|| session.map(|session| session.updated_at))
+            .unwrap_or(now);
+        let elapsed = compact_duration(now.saturating_sub(state_since));
+        let location = branch
+            .map_or_else(|| project.to_owned(), |branch| format!("{project}/{branch}"));
+        let flags = match (employee.blocker.is_some(), queued) {
+            (true, true) => " [blocker, queued]",
+            (true, false) => " [blocker]",
+            (false, true) => " [queued]",
+            (false, false) => "",
+        };
+        (
+            rank,
+            employee.identity.name.to_lowercase(),
+            format!(
+                "{} ({}) — {provider}/{model}, {status} {elapsed}, {location}{flags}",
+                employee.identity.name, employee.job_title
+            ),
+            status,
+            queued,
+            employee.expired,
+        )
+    }).collect::<Vec<_>>();
+    rows.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    let live = rows.iter().filter(|row| !row.5).count();
+    let count = |status: &str| rows.iter().filter(|row| !row.5 && row.3 == status).count();
+    let queued = rows.iter().filter(|row| !row.5 && row.4).count();
+    let mut digest = format!(
+        "{live} live: {} working, {} idle, {} finishing, {} blocked, {queued} queued",
+        count("working"), count("idle"), count("finishing"), count("blocked")
+    );
+    for row in rows {
+        digest.push('\n');
+        digest.push_str(&row.2);
+    }
+    digest
+}
+
+fn compact_duration(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3_600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h", seconds / 3_600)
+    } else {
+        format!("{}d", seconds / 86_400)
+    }
 }
 
 /// Render the daemon's view of the user's work: every registered project
@@ -371,7 +477,7 @@ pub fn apply_verdict(evaluation: &Evaluation) -> RouterVerdict {
 mod tests {
     use super::*;
     use uuid::Uuid;
-    use waku_protocol::boss::BossIdentity;
+    use waku_protocol::boss::{BossEmployee, BossIdentity, PersonaPermissions};
     use waku_protocol::model::{AgentSession, Project, ProviderKind};
 
     fn boss_state() -> BossState {
@@ -414,6 +520,36 @@ mod tests {
         // A stored row the daemon never hydrated: started, by definition.
         session.detail_loaded = false;
         session
+    }
+
+    #[test]
+    fn employee_roster_sorts_working_before_expired_and_includes_project_and_model() {
+        let mut boss = boss_state();
+        let project = project("workspace");
+        let active = session(&project, "active", SessionStatus::Working);
+        let mut done = session(&project, "done", SessionStatus::Idle);
+        done.id = Uuid::new_v4();
+        let supervisor_id = boss.session_id.unwrap();
+        let employee = |session_id, name: &str, expired| BossEmployee {
+            session_id,
+            supervisor_id,
+            identity: BossIdentity { id: Uuid::new_v4(), name: name.into(), avatar_seed: String::new() },
+            job_title: "Engineer".into(),
+            persona_id: Uuid::new_v4(),
+            icon: None,
+            permissions: PersonaPermissions::default(),
+            pinned_files: Vec::new(),
+            expired,
+            expired_at: expired.then(unix_time),
+            blocker: None,
+        };
+        boss.employees = vec![employee(done.id, "Zed", true), employee(active.id, "Ada", false)];
+
+        let digest = employee_roster(&boss, &[active], &[project]);
+        assert!(digest.starts_with("1 live: 1 working, 0 idle"));
+        assert!(digest.find("Ada (Engineer)").unwrap() < digest.find("Zed (Engineer)").unwrap());
+        assert!(digest.contains("claude/auto, working"));
+        assert!(digest.contains("workspace"));
     }
 
     #[test]

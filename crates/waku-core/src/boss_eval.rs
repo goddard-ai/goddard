@@ -45,6 +45,7 @@ payload (state maps, strings, ids); Saved operations return (). Variables
 persist between eval calls for this boss session.
 
   view()                                    boss state map
+  roster()                                  compact employee status digest
   context()                                 work digest string
   summon(#{personaId,jobTitle,prompt,project,provider?,model?,workspace?,baseBranch?,workGoal?})
                                             employee session id
@@ -258,6 +259,12 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
         let tx = tx.clone();
         move || -> Result<Dynamic, Box<EvalAltResult>> {
             call(&tx, tagged("view", serde_json::json!({}))).and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("roster", {
+        let tx = tx.clone();
+        move || -> Result<Dynamic, Box<EvalAltResult>> {
+            call(&tx, tagged("roster", serde_json::json!({}))).and_then(unwrap_result)
         }
     });
     engine.register_fn("context", {
@@ -670,6 +677,12 @@ mod tests {
     fn bound_operations_dispatch_and_unwrap() {
         let outcome = eval_with("let seen = view(); seen == ()", Scope::new(), &dispatch_ok);
         assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(true)));
+
+        let outcome = eval_with("roster()", Scope::new(), &|operation| match operation {
+            BossOperation::Roster => Ok(BossResult::Roster { roster: "1 live".into() }),
+            other => bail!("unexpected operation {other:?}"),
+        });
+        assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!("1 live")));
 
         let outcome = eval_with(
             "op(#{type: \"dismissBundle\", id: \"00000000-0000-0000-0000-000000000000\"})",

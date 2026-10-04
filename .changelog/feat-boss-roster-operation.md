@@ -1,0 +1,1 @@
+- Check employee status quickly with `roster`; use `view` when you need the full boss state and employee details.

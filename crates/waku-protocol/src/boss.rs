@@ -242,6 +242,8 @@ pub struct BossFile {
 )]
 pub enum BossOperation {
     View,
+    /// A compact text summary of employee state, without session transcripts.
+    Roster,
     /// A bounded digest of the user's projects, tasks, and automations —
     /// the same snapshot the context router attaches to boss prompts.
     Context,
@@ -484,6 +486,9 @@ pub struct MemoryChunk {
 pub enum BossResult {
     State {
         state: BossState,
+    },
+    Roster {
+        roster: String,
     },
     Context {
         context: String,

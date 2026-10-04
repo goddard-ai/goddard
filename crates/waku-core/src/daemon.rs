@@ -6749,6 +6749,20 @@ impl WakuBackend {
                     context: self.boss_work_context().digest,
                 })
             }
+            BossOperation::Roster => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can read the employee roster");
+                }
+                let boss = self.boss.document();
+                let state = self.task_state.lock();
+                Ok(BossResult::Roster {
+                    roster: crate::boss_context::employee_roster(
+                        &boss,
+                        &state.sessions,
+                        &state.projects,
+                    ),
+                })
+            }
             BossOperation::Eval { script } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can eval boss scripts");
