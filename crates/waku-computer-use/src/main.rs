@@ -22,7 +22,18 @@ fn main() -> Result<()> {
     // macOS uses the Swift AppKit host; this portable entrypoint only enables
     // native overlay threads on Windows/Linux. Diagnostics never open an overlay.
     let cursor = mode.as_deref() == Some("mcp") && !cfg!(target_os = "macos");
-    let mut driver = sdk::Driver::load(&directory.join(library_name()), cursor)?;
+    // `--grant <name>` declares SDK launch grants the task approval already
+    // authorized (e.g. existing-profile); the same argv convention reaches the
+    // macOS host's mcp-child through its Launch Services bridge.
+    let grants: Vec<String> = {
+        let args: Vec<String> = std::env::args().collect();
+        args.iter()
+            .zip(args.iter().skip(1))
+            .filter(|(name, _)| name.as_str() == "--grant")
+            .map(|(_, grant)| grant.clone())
+            .collect()
+    };
+    let mut driver = sdk::Driver::load(&directory.join(library_name()), cursor, &grants)?;
     match mode.as_deref() {
         Some("mcp") => serve(&driver)?,
         // Diagnostic entrypoint used by packaging checks; no capture or input.
@@ -230,6 +241,6 @@ mod tests {
 
     #[test]
     fn missing_sdk_fails_without_searching_the_environment() {
-        assert!(sdk::Driver::load(Path::new("/nonexistent/waku-cua-sdk"), false).is_err());
+        assert!(sdk::Driver::load(Path::new("/nonexistent/waku-cua-sdk"), false, &[]).is_err());
     }
 }

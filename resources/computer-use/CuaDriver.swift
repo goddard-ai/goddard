@@ -8,7 +8,7 @@ final class CuaDriver: @unchecked Sendable {
     private var operation: OpaquePointer?
     private var disconnected = false
 
-    init(cursorEnabled: Bool = false) throws {
+    init(cursorEnabled: Bool = false, launchGrants: [String] = []) throws {
         var version = CuaDriverAbiVersion()
         version.struct_size = UInt32(MemoryLayout<CuaDriverAbiVersion>.size)
         guard cua_driver_abi_version_v1(&version) == 0,
@@ -17,7 +17,18 @@ final class CuaDriver: @unchecked Sendable {
         }
         var error = CuaDriverBuffer()
         defer { cua_driver_buffer_free_v1(&error) }
-        let status = waku_cua_driver_create_v1(cursorEnabled, nil, 0, &handle, &error)
+        var options: [String: Any] = [:]
+        if !launchGrants.isEmpty { options["launch_grants"] = launchGrants }
+        let optionsData = try JSONSerialization.data(withJSONObject: options)
+        let status = optionsData.withUnsafeBytes { bytes in
+            waku_cua_driver_create_v1(
+                cursorEnabled,
+                bytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                bytes.count,
+                &handle,
+                &error
+            )
+        }
         guard status == 0 else { throw nativeError(status, error) }
     }
 

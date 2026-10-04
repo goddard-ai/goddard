@@ -1075,6 +1075,7 @@ computer_use.always_allow_app: 始终允许此应用
 computer_use.allow_control: 允许 Goddard 控制“%{app}”吗？
 computer_use.approval_app: 智能体可以查看和操控“%{app}”的窗口。
 computer_use.approval_browser: 智能体可以查看和操控浏览器标签页。
+computer_use.approval_existing_profile: 智能体可以连接到浏览器已登录的个人资料，包括已登录账号和 Cookie。
 computer_use.approval_clipboard: 智能体可以读取或修改剪贴板。
 computer_use.approval_desktop: 智能体可以查看或操控整个桌面。
 computer_use.screenshot_shared: 此窗口的截图将发送给当前使用的模型

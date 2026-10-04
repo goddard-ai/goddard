@@ -72,9 +72,22 @@ Each helper connection owns one SDK runtime. Native tool refusals preserve the
 connection and the full result, including error codes, snapshot tokens, capture
 metadata, and action outcomes. REPL reset and disconnect close the connection;
 Stop cancels native work and ends the host. Interrupted actions are never
-automatically retried. The `bring_to_front` tool is omitted from the exposed
-API. Other tool arguments pass through to Cua unchanged. All SDK and IPC work
-occurs outside the GUI process.
+automatically retried — the one exception is a request whose newline frame
+never reached the helper (a dead helper's write fails before delivery), which
+the kernel resends once on a fresh helper since it cannot have run. The
+`bring_to_front` tool is omitted from the exposed API. Other tool arguments
+pass through to Cua unchanged. All SDK and IPC work occurs outside the GUI
+process.
+
+Task approvals map to Cua launch grants: a `browser_prepare` call with
+`strategy.kind=existing_profile` is gated under the `browser:existing-profile`
+approval scope (never an "always" app grant), and an approved scope adds
+`--grant existing-profile` to the next helper spawn — argv on the portable
+host, forwarded `--args` to the Launch Services `mcp-child` on macOS, then
+`launch_grants` inside `waku_cua_driver_create_v1`'s options JSON, which calls
+`configure_launch_grants` before the runtime exists. A helper that predates the
+approval is replaced on the next call; the SDK's own R2 gate stays enforced
+either way.
 
 Goddard's preview decodes each PNG from the agent's `get_window_state` result on
 a background worker. The previous decoded frame stays visible until the latest

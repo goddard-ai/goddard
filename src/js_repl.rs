@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -935,6 +935,28 @@ fn image_mime_type(path: &Path, bytes: &[u8]) -> anyhow::Result<&'static str> {
     }
 }
 
+/// Approval scope for attaching to a browser's real signed-in profile. It is
+/// deliberately separate from the generic "browser" scope: the blast radius
+/// (live accounts, cookies) is categorically larger, and only this scope maps
+/// to the SDK's `existing_profile` launch grant.
+const EXISTING_PROFILE_SCOPE: &str = "browser:existing-profile";
+
+/// Cua launch grants a specific tool call requires, in the SDK's `--grant`
+/// vocabulary. The task approval in `authorize` is the consent gate; these
+/// tell a freshly spawned helper which capabilities to declare.
+fn required_launch_grants(arguments: &JsonValue) -> BTreeSet<String> {
+    let mut required = BTreeSet::new();
+    if arguments.get("name").and_then(JsonValue::as_str) == Some("browser_prepare")
+        && arguments
+            .pointer("/arguments/strategy/kind")
+            .and_then(JsonValue::as_str)
+            == Some("existing_profile")
+    {
+        required.insert("existing_profile".to_owned());
+    }
+    required
+}
+
 struct NativeComputerUseClient {
     connection: Option<HelperConnection>,
     config: Option<SessionConfig>,
@@ -981,14 +1003,44 @@ impl NativeComputerUseClient {
             .ok_or_else(|| anyhow!("Computer Use has no task-scoped approval channel"))
     }
 
+    /// SDK launch grants already approved for this task, expressed in Cua's
+    /// `--grant` vocabulary. They ride the next helper spawn; a running helper
+    /// keeps the grants it launched with until it is replaced.
+    fn launch_grants(&self) -> BTreeSet<String> {
+        let mut grants = BTreeSet::new();
+        if self.grants.contains(EXISTING_PROFILE_SCOPE) {
+            grants.insert("existing_profile".to_owned());
+        }
+        grants
+    }
+
+    fn spawn_connection(&mut self, deadline: Option<Instant>) -> anyhow::Result<()> {
+        self.connection = None;
+        self.connection = Some(HelperConnection::start(
+            deadline,
+            self.config.as_ref(),
+            self.launch_grants(),
+        )?);
+        Ok(())
+    }
+
     fn call_unchecked(
         &mut self,
         method: &str,
         arguments: JsonValue,
         deadline: Option<Instant>,
     ) -> anyhow::Result<JsonValue> {
+        if self.connection.as_mut().is_some_and(|connection| {
+            connection.exited()
+                || !required_launch_grants(&arguments).is_subset(&connection.grants)
+        }) {
+            // A dead helper cannot accept requests, and a helper launched
+            // before this call's grant was approved would fail the SDK's own
+            // gate; replace either with a fresh spawn.
+            self.connection = None;
+        }
         if self.connection.is_none() {
-            self.connection = Some(HelperConnection::start(deadline, self.config.as_ref())?);
+            self.spawn_connection(deadline)?;
         }
         // Preserve Cua's complete envelope, including isError, stable error
         // codes, image metadata and action completion. A tool refusal must not
@@ -997,7 +1049,22 @@ impl NativeComputerUseClient {
             .connection
             .as_mut()
             .expect("initialized above")
-            .request(method, arguments, deadline);
+            .request(method, &arguments, deadline);
+        let result = match result {
+            Err(HelperFailure::Undelivered(_)) => {
+                // The newline-framed request never reached the helper, so it
+                // cannot have run; one resend on a fresh helper cannot replay
+                // a completed action. Anything else — a lost response, a
+                // helper error — keeps the no-replay rule.
+                self.spawn_connection(deadline)?;
+                self.connection
+                    .as_mut()
+                    .expect("initialized above")
+                    .request(method, &arguments, deadline)
+                    .map_err(HelperFailure::into_error)
+            }
+            result => result.map_err(HelperFailure::into_error),
+        };
         if result.is_err() {
             self.connection = None;
         }
@@ -1013,7 +1080,36 @@ impl NativeComputerUseClient {
             return Ok(());
         }
         let args = call.get("arguments").unwrap_or(&JsonValue::Null);
-        let (scope, app_name, bundle_id) = if name.starts_with("clipboard_") {
+        let (scope, app_name, bundle_id) = if name == "browser_prepare"
+            && args.pointer("/strategy/kind").and_then(JsonValue::as_str)
+                == Some("existing_profile")
+        {
+            // Resolve the browser's display name for the approval title. A
+            // helper that cannot answer still gets a prompt with a generic
+            // name; the real call retries the spawn after approval.
+            let app_name = args
+                .get("pid")
+                .and_then(JsonValue::as_u64)
+                .and_then(|pid| {
+                    self.call_unchecked(
+                        "tools/call",
+                        json!({"name":"list_apps","arguments":{}}),
+                        deadline,
+                    )
+                    .ok()?
+                    .pointer("/structuredContent/apps")?
+                    .as_array()?
+                    .iter()
+                    .find(|app| app.get("pid").and_then(JsonValue::as_u64) == Some(pid))?
+                    .get("name")?
+                    .as_str()
+                    .map(str::to_owned)
+                })
+                .unwrap_or_else(|| "the browser's signed-in profile".to_owned());
+            // No bundle_id: an existing-profile grant stays task-scoped and
+            // never becomes an "always allow" app grant.
+            (EXISTING_PROFILE_SCOPE.to_owned(), app_name, None)
+        } else if name.starts_with("clipboard_") {
             ("clipboard".to_owned(), "the clipboard".to_owned(), None)
         } else if name.starts_with("browser_") || name == "page" || name == "get_browser_state" {
             ("browser".to_owned(), "browser tabs".to_owned(), None)
@@ -1111,8 +1207,26 @@ impl NativeComputerUseClient {
     }
 }
 
+/// Whether a failed helper request may be resent on a fresh connection. Only
+/// a frame that never reached the helper is safe to repeat; a lost response
+/// may have already changed the user's app, matching the daemon's no-replay
+/// rule in waku-core's computer_use cli service.
+enum HelperFailure {
+    Undelivered(anyhow::Error),
+    Failed(anyhow::Error),
+}
+
+impl HelperFailure {
+    fn into_error(self) -> anyhow::Error {
+        match self {
+            Self::Undelivered(error) | Self::Failed(error) => error,
+        }
+    }
+}
+
 struct HelperConnection {
     child: Child,
+    grants: BTreeSet<String>,
     input: Option<BufWriter<ChildStdin>>,
     output: BufReader<ChildStdout>,
     next_id: u64,
@@ -1183,7 +1297,11 @@ impl Drop for RequestWatchdog {
 }
 
 impl HelperConnection {
-    fn start(deadline: Option<Instant>, config: Option<&SessionConfig>) -> anyhow::Result<Self> {
+    fn start(
+        deadline: Option<Instant>,
+        config: Option<&SessionConfig>,
+        launch_grants: BTreeSet<String>,
+    ) -> anyhow::Result<Self> {
         let command = config
             .map(|config| config.server_path.clone())
             .or_else(|| std::env::var_os("GODDARD_COMPUTER_USE_SERVER").map(PathBuf::from))
@@ -1214,6 +1332,7 @@ impl HelperConnection {
         }
         let mut child = helper
             .arg("mcp")
+            .args(launch_grants.iter().flat_map(|grant| ["--grant", grant]))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1238,53 +1357,72 @@ impl HelperConnection {
         }
         let mut connection = Self {
             child,
+            grants: launch_grants,
             input: Some(BufWriter::new(input)),
             output: BufReader::new(output),
             next_id: 1,
         };
-        connection.request(
-            "initialize",
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "goddard_js_repl", "version": env!("CARGO_PKG_VERSION")}
-            }),
-            deadline,
-        )?;
+        connection
+            .request(
+                "initialize",
+                &json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "goddard_js_repl", "version": env!("CARGO_PKG_VERSION")}
+                }),
+                deadline,
+            )
+            .map_err(HelperFailure::into_error)?;
         connection.notify("notifications/initialized", json!({}))?;
         Ok(connection)
+    }
+
+    fn exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
     fn request(
         &mut self,
         method: &str,
-        params: JsonValue,
+        params: &JsonValue,
         deadline: Option<Instant>,
-    ) -> anyhow::Result<JsonValue> {
+    ) -> Result<JsonValue, HelperFailure> {
         let id = self.next_id;
         self.next_id += 1;
-        let watchdog = RequestWatchdog::start(self.child.id(), deadline)?;
-        let result = (|| -> anyhow::Result<JsonValue> {
+        let watchdog = RequestWatchdog::start(self.child.id(), deadline)
+            .map_err(HelperFailure::Failed)?;
+        let result = (|| -> Result<JsonValue, HelperFailure> {
             write_message(
-                self.input
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("Computer Use connection closed"))?,
+                self.input.as_mut().ok_or_else(|| {
+                    HelperFailure::Undelivered(anyhow!("Computer Use connection closed"))
+                })?,
                 &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
-            )?;
+            )
+            .map_err(HelperFailure::Undelivered)?;
             loop {
                 let mut line = String::new();
-                let bytes = self.output.read_line(&mut line)?;
+                let bytes = self
+                    .output
+                    .read_line(&mut line)
+                    .map_err(|error| HelperFailure::Failed(error.into()))?;
                 if bytes == 0 {
-                    let status = self.child.try_wait()?;
-                    bail!(
+                    let status = self
+                        .child
+                        .try_wait()
+                        .map_err(|error| HelperFailure::Failed(error.into()))?;
+                    return Err(HelperFailure::Failed(anyhow!(
                         "Computer Use helper closed its session{}",
                         status
                             .map(|status| format!(" ({status})"))
                             .unwrap_or_default()
-                    );
+                    )));
                 }
-                let message: JsonValue = serde_json::from_str(line.trim())
-                    .context("Computer Use helper returned invalid JSON")?;
+                let message: JsonValue = serde_json::from_str(line.trim()).map_err(|error| {
+                    HelperFailure::Failed(
+                        anyhow::Error::from(error)
+                            .context("Computer Use helper returned invalid JSON"),
+                    )
+                })?;
                 if message.get("id").and_then(JsonValue::as_u64) != Some(id) {
                     continue;
                 }
@@ -1293,16 +1431,19 @@ impl HelperConnection {
                         .get("message")
                         .and_then(JsonValue::as_str)
                         .unwrap_or("Computer Use request failed");
-                    bail!("{detail}");
+                    return Err(HelperFailure::Failed(anyhow!("{detail}")));
                 }
                 return message
                     .get("result")
                     .cloned()
-                    .ok_or_else(|| anyhow!("Computer Use response has no result"));
+                    .ok_or_else(|| anyhow!("Computer Use response has no result"))
+                    .map_err(HelperFailure::Failed);
             }
         })();
         if watchdog.finish() {
-            bail!("Computer Use request timed out");
+            return Err(HelperFailure::Failed(anyhow!(
+                "Computer Use request timed out"
+            )));
         }
         result
     }
@@ -1769,6 +1910,186 @@ mod tests {
                 )
                 .is_err()
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn existing_profile_calls_require_their_scope_and_launch_grant() {
+        assert!(
+            required_launch_grants(&json!({
+                "name": "browser_prepare",
+                "arguments": {"strategy": {"kind": "existing_profile"}}
+            }))
+            .contains("existing_profile")
+        );
+        assert!(
+            required_launch_grants(&json!({"name": "browser_click", "arguments": {}})).is_empty()
+        );
+    }
+
+    /// Helper fixture: records each run's argv in `run-<n>`, and — when the
+    /// `close-after-notify` marker exists and it is run 1 — closes its stdin
+    /// after the initialized notification so the next request's write fails.
+    #[cfg(unix)]
+    const HELPER_FIXTURE: &str = r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+
+root = os.environ["GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"]
+runs = len([name for name in os.listdir(root) if name.startswith("run-")]) + 1
+with open(os.path.join(root, f"run-{runs}"), "w") as record:
+    record.write(" ".join(sys.argv[1:]))
+close_after_notify = runs == 1 and os.path.exists(
+    os.path.join(root, "close-after-notify")
+)
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("method") == "initialize":
+        result = {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fixture", "version": "1"},
+        }
+    elif "id" not in request:
+        if close_after_notify:
+            os.close(sys.stdin.fileno())
+            open(os.path.join(root, "closed"), "w").close()
+            time.sleep(60)
+        continue
+    else:
+        name = request["params"]["name"]
+        if name == "list_apps":
+            result = {"content": [{"type": "text", "text": "ok"}], "structuredContent": {"apps": []}}
+        else:
+            result = {"content": [{"type": "text", "text": "ok"}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+"#;
+
+    #[cfg(unix)]
+    fn helper_fixture(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = directory.join("helper-fixture");
+        fs::write(&path, HELPER_FIXTURE).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    fn test_client(directory: &Path) -> NativeComputerUseClient {
+        NativeComputerUseClient {
+            connection: None,
+            config: Some(SessionConfig {
+                server_path: helper_fixture(directory),
+                process_directory: directory.to_path_buf(),
+                cwd: directory.to_path_buf(),
+            }),
+            grants: HashSet::new(),
+            grants_revision: None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn await_file(path: &Path) -> PathBuf {
+        (0..200)
+            .find(|_| {
+                if path.exists() {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(10));
+                false
+            })
+            .map(|_| path.to_path_buf())
+            .unwrap_or_else(|| panic!("timed out waiting for {}", path.display()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_profile_approval_adds_the_sdk_launch_grant() {
+        let directory = std::env::temp_dir().join(format!("waku-repl-grant-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let mut client = test_client(&directory);
+        let call = json!({
+            "name": "browser_prepare",
+            "arguments": {"pid": 4242, "window_id": 7, "strategy": {"kind": "existing_profile"}}
+        });
+        let worker = thread::spawn(move || {
+            let result = client.authorize(&call, Some(Instant::now() + Duration::from_secs(5)));
+            (result, client)
+        });
+        let request = (0..500)
+            .find_map(|_| {
+                let path = fs::read_dir(&directory)
+                    .unwrap()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .starts_with("approval-request-")
+                    });
+                if path.is_none() {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                path
+            })
+            .expect("approval request was never written");
+        let approval: ComputerApprovalId =
+            serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
+        assert_eq!(approval.scope, EXISTING_PROFILE_SCOPE);
+        assert!(approval.app_grant().is_none());
+        fs::write(
+            directory.join(format!("approval-response-{}.txt", approval.nonce)),
+            "task",
+        )
+        .unwrap();
+        let (result, mut client) = worker.join().unwrap();
+        result.unwrap();
+        assert!(client.grants.contains(EXISTING_PROFILE_SCOPE));
+
+        // The helper authorized during approval predates the grant; the real
+        // call replaces it with one that declares existing_profile.
+        client
+            .call(
+                "tools/call",
+                json!({
+                    "name": "browser_prepare",
+                    "arguments": {"pid": 4242, "window_id": 7, "strategy": {"kind": "existing_profile"}}
+                }),
+                Some(Instant::now() + Duration::from_secs(10)),
+            )
+            .unwrap();
+        let argv = fs::read_to_string(directory.join("run-2")).unwrap();
+        assert!(
+            argv.contains("--grant") && argv.contains("existing_profile"),
+            "granted helper argv was: {argv}"
+        );
+        drop(client);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_undelivered_request_retries_once_on_a_fresh_helper() {
+        let directory =
+            std::env::temp_dir().join(format!("waku-repl-retry-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("close-after-notify"), "").unwrap();
+        let mut client = test_client(&directory);
+        client.spawn_connection(None).unwrap();
+        await_file(&directory.join("closed"));
+        let result = client
+            .call_unchecked(
+                "tools/call",
+                json!({"name": "clipboard_read", "arguments": {}}),
+                Some(Instant::now() + Duration::from_secs(10)),
+            )
+            .unwrap();
+        assert_eq!(result["content"][0]["text"], "ok");
+        assert!(directory.join("run-1").exists() && directory.join("run-2").exists());
+        drop(client);
         fs::remove_dir_all(directory).unwrap();
     }
 }

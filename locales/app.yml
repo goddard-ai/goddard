@@ -3037,6 +3037,8 @@ computer_use.approval_app:
   en: The agent can inspect and control %{app} windows.
 computer_use.approval_browser:
   en: The agent can inspect and control browser tabs.
+computer_use.approval_existing_profile:
+  en: The agent can attach to the browser's signed-in profile, including its logged-in accounts and cookies.
 computer_use.approval_clipboard:
   en: The agent can read or change the clipboard.
 computer_use.approval_desktop:

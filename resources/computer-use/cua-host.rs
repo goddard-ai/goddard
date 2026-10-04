@@ -18,7 +18,28 @@ pub unsafe extern "C" fn waku_cua_driver_create_v1(
         let options = if bytes.is_empty() {
             AbiDriverOptions::default()
         } else {
-            serde_json::from_slice(bytes).map_err(|error| {
+            // `launch_grants` is Goddard's own option: the task-scoped approval
+            // decides it before the helper spawns, and declaring it here keeps
+            // the SDK's own resource gate consistent. It must be stripped
+            // before AbiDriverOptions' deny_unknown_fields sees it.
+            let mut options: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+                AbiFailure::new(CuaDriverStatus::InvalidArgument, error.to_string())
+            })?;
+            let grants = options
+                .as_object_mut()
+                .and_then(|fields| fields.remove("launch_grants"))
+                .map(serde_json::from_value::<Vec<String>>)
+                .transpose()
+                .map_err(|error| {
+                    AbiFailure::new(CuaDriverStatus::InvalidArgument, error.to_string())
+                })?
+                .unwrap_or_default();
+            if !grants.is_empty() {
+                cua_driver_core::authorization::configure_launch_grants(&grants).map_err(
+                    |error| AbiFailure::new(CuaDriverStatus::InvalidArgument, error),
+                )?;
+            }
+            serde_json::from_value(options).map_err(|error| {
                 AbiFailure::new(CuaDriverStatus::InvalidArgument, error.to_string())
             })?
         };

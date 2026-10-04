@@ -49,6 +49,13 @@ The first access to an app, browser tabs, the clipboard, or the whole desktop
 may pause until the user approves it in Goddard. A denial ends that call;
 do not retry it without a new user request. Full access does not skip this gate.
 
+`browser_prepare` with `strategy: { kind: "existing_profile" }` attaches to a
+browser's real signed-in profile. It requires both `pid` and `window_id` —
+find them with `list_apps` and `list_windows` — and its own approval naming the
+signed-in profile; the browser-tabs approval does not cover it. Prefer
+`profile: { mode: "isolated_new" }` or a named isolated profile when the task
+does not need the user's logged-in sessions.
+
 Use `jsRepl.write(value)` for text or structured output and
 `await jsRepl.emitImage(image)` to return an image path and show it in Goddard. Prefer top-level `var`
 for names reused across calls. Calls allow up to 5 minutes so a user can answer

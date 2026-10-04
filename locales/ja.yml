@@ -1093,6 +1093,7 @@ computer_use.always_allow_app: このアプリを常に許可
 computer_use.allow_control: Goddard に「%{app}」の操作を許可しますか？
 computer_use.approval_app: エージェントは「%{app}」のウインドウを確認・操作できます。
 computer_use.approval_browser: エージェントはブラウザーのタブを確認・操作できます。
+computer_use.approval_existing_profile: エージェントはログイン済みアカウントや Cookie を含むブラウザーのプロフィールに接続できます。
 computer_use.approval_clipboard: エージェントはクリップボードの内容を読み取り・変更できます。
 computer_use.approval_desktop: エージェントはデスクトップ全体を確認・操作できます。
 computer_use.screenshot_shared: このウインドウのスクリーンショットが、使用中のモデルと共有されます

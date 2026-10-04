@@ -68,7 +68,7 @@ pub struct Driver {
 }
 
 impl Driver {
-    pub fn load(path: &Path, cursor_enabled: bool) -> Result<Self> {
+    pub fn load(path: &Path, cursor_enabled: bool, launch_grants: &[String]) -> Result<Self> {
         // Load only an absolute, packaged path, never a library from PATH/cwd.
         let path = path
             .canonicalize()
@@ -108,7 +108,18 @@ impl Driver {
             });
             let mut handle = ptr::null_mut();
             let mut error = Buffer::default();
-            let status = create(cursor_enabled, ptr::null(), 0, &mut handle, &mut error);
+            let options = if launch_grants.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::to_vec(&serde_json::json!({"launch_grants": launch_grants}))?
+            };
+            let status = create(
+                cursor_enabled,
+                options.as_ptr(),
+                options.len(),
+                &mut handle,
+                &mut error,
+            );
             check(status, take_buffer(&api, &mut error))?;
             Ok(Self {
                 api,

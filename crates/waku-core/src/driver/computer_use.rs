@@ -279,6 +279,8 @@ impl ComputerUsePreviewMonitor {
                                         localized!("computer_use.approval_desktop")
                                     } else if approval.scope == "browser" {
                                         localized!("computer_use.approval_browser")
+                                    } else if approval.scope == "browser:existing-profile" {
+                                        localized!("computer_use.approval_existing_profile")
                                     } else {
                                         localized!(
                                             "computer_use.approval_app",

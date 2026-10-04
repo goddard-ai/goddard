@@ -64,7 +64,7 @@ struct WakuComputerUse {
     @MainActor
     private static func runNativeHost() throws {
         let channel = try connectToBridge()
-        let driver = try CuaDriver(cursorEnabled: true)
+        let driver = try CuaDriver(cursorEnabled: true, launchGrants: commandLineArguments("--grant"))
         Task.detached {
             do {
                 try await serveMCP(channel, driver: driver)
@@ -101,6 +101,12 @@ struct WakuComputerUse {
         if prompt { arguments.append("request-permissions") }
         if let directory = ProcessInfo.processInfo.environment["GODDARD_COMPUTER_USE_PROCESS_DIRECTORY"], !directory.isEmpty {
             arguments.append(contentsOf: ["--process-directory", directory])
+        }
+        // Goddard's task approval adds SDK launch grants (e.g. --grant
+        // existing-profile). They reach the child only through argv — Launch
+        // Services does not inherit the bridge's environment.
+        for grant in commandLineArguments("--grant") {
+            arguments.append(contentsOf: ["--grant", grant])
         }
         let launcher = try launchSelfThroughLaunchServices(arguments: arguments, background: !prompt)
         defer { if launcher.isRunning { launcher.terminate() } }
@@ -218,8 +224,20 @@ private func registerBridge() -> URL? {
 }
 
 private func commandLineArgument(_ name: String) -> String? {
-    guard let index = CommandLine.arguments.firstIndex(of: name), CommandLine.arguments.indices.contains(index + 1) else { return nil }
-    return CommandLine.arguments[index + 1]
+    commandLineArguments(name).first
+}
+
+private func commandLineArguments(_ name: String) -> [String] {
+    var values: [String] = []
+    var index = 0
+    while index + 1 < CommandLine.arguments.count {
+        if CommandLine.arguments[index] == name {
+            values.append(CommandLine.arguments[index + 1])
+            index += 1
+        }
+        index += 1
+    }
+    return values
 }
 
 // Buffered reads matter: a window image is often several megabytes.
