@@ -1823,6 +1823,8 @@ fn disabled_state() -> BossState {
         personas: Vec::new(),
         employees: Vec::new(),
         bundles: Vec::new(),
+        planning: Vec::new(),
+        goals_viewed_at: None,
         revision: 0,
     }
 }
