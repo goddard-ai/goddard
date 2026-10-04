@@ -1064,6 +1064,9 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return;
         }
+        // Re-opening the boss chat hands the bundle preview page back to
+        // the chat transcript it covers, even when it was already selected.
+        self.boss_ui.bundle_page = None;
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -1437,16 +1440,7 @@ impl Waku {
             .when(selected, |row| row.bg(theme.sidebar_item_background))
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .on_activation(cx, move |this, _, cx| {
-                // Clicking the boss also folds a finished-employee list the
-                // user expanded back down, and hands the bundle preview
-                // page back to the chat transcript it covers.
-                if this.boss_ui.sidebar_idle_visible.remove(&key).is_some() {
-                    this.sidebar_rows_fingerprint.set(None);
-                }
-                this.boss_ui.bundle_page = None;
-                this.chat_with_boss(key, cx)
-            })
+            .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
             .child(self.boss_avatar(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),

@@ -659,6 +659,12 @@ impl Waku {
         // Landing on a boss chat consents to whatever voice it was holding.
         if let Some(key) = self.boss_chat_key() {
             self.flush_pending_boss_speech_for(key, cx);
+            // Every landing on a boss chat — sidebar click, project
+            // switcher, open intent, history navigation — folds a
+            // finished-employee list the user expanded back down.
+            if self.boss_ui.sidebar_idle_visible.remove(&key).is_some() {
+                self.sidebar_rows_fingerprint.set(None);
+            }
         }
         // The summon cards in a boss transcript stream their employees'
         // status and latest line — hydrate those details now; the marker
