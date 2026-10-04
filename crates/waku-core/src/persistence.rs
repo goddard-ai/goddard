@@ -30,7 +30,7 @@ use crate::computer_use::ComputerAppGrant;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, FavoriteModel, Message, MessageAtom,
+    AgentSession, Checkpoint, CheckpointStatus, ContextMark, FavoriteModel, Message, MessageAtom,
     MessageAttachment, MessageRole, Project, ProviderKind, RuntimeEventCursor, RuntimeMode,
     SessionWorkspace, TranscriptNotice,
 };
@@ -1599,7 +1599,7 @@ impl StateStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments, atoms,
-                        created_at, streaming, sent_by_task, hidden, notice
+                        created_at, streaming, sent_by_task, hidden, notice, context_mark
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1618,6 +1618,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2333,6 +2334,7 @@ type MessageColumns = (
     Option<String>,
     i64,
     Option<String>,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -2349,6 +2351,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         sent_by_task,
         hidden,
         notice,
+        context_mark,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
@@ -2365,6 +2368,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         sent_by_task: sent_by_task
             .as_deref()
             .and_then(|id| Uuid::parse_str(id).ok()),
+        context_mark: context_mark.and_then(|json| serde_json::from_str::<ContextMark>(&json).ok()),
         hidden: hidden != 0,
     })
 }
@@ -2442,8 +2446,9 @@ fn is_terminal_checkpoint(checkpoint: &Checkpoint) -> bool {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, atoms, created_at, streaming, sent_by_task, hidden, notice
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         attachments, atoms, created_at, streaming, sent_by_task, hidden, notice,
+         context_mark
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -2457,7 +2462,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          streaming  = excluded.streaming,
          sent_by_task = excluded.sent_by_task,
          hidden     = excluded.hidden,
-         notice     = excluded.notice";
+         notice     = excluded.notice,
+         context_mark = excluded.context_mark";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -2505,6 +2511,12 @@ fn write_messages(
             .map(serde_json::to_string)
             .transpose()
             .map_err(to_io_error)?;
+        let context_mark = message
+            .context_mark
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(to_io_error)?;
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -2530,6 +2542,7 @@ fn write_messages(
                         .map_or(Value::Null, |id| Value::Text(id.to_string())),
                     Value::Integer(i64::from(message.hidden)),
                     notice.map_or(Value::Null, Value::Text),
+                    context_mark.map_or(Value::Null, Value::Text),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -2605,11 +2618,19 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     } else {
         fold(0);
     }
-    // Notices are rare enough that serializing one to compare beats hashing
-    // every message's empty case differently.
+    // Notices and context marks are rare enough that serializing one to
+    // compare beats hashing every message's empty case differently.
     if let Some(notice) = &message.notice {
         fold(1);
         if let Ok(json) = serde_json::to_string(notice) {
+            fold(fingerprint(&json));
+        }
+    } else {
+        fold(0);
+    }
+    if let Some(mark) = &message.context_mark {
+        fold(1);
+        if let Ok(json) = serde_json::to_string(mark) {
             fold(fingerprint(&json));
         }
     } else {
@@ -4485,6 +4506,9 @@ mod tests {
         state.sessions[0].begin_hidden_turn("Continue the current task if able.");
         state.sessions[0].push_message(MessageRole::Assistant, "kept going");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        // A boss context router mark persists beside the row it names.
+        let marked_id = state.sessions[0].messages[1].id;
+        state.sessions[0].mark_prompt_context(marked_id, Some("app".into()));
         let expected = state.sessions[0].messages.clone();
         store.save(&mut state).unwrap();
 
@@ -4517,6 +4541,7 @@ mod tests {
             assert_eq!(restored.created_at, expected.created_at);
             assert_eq!(restored.streaming, expected.streaming);
             assert_eq!(restored.hidden, expected.hidden);
+            assert_eq!(restored.context_mark, expected.context_mark);
         }
         assert!(messages[3].hidden, "the continue nudge survives the save");
 

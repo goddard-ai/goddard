@@ -1784,6 +1784,8 @@ transcript.turn_label: "ターン %{number}：%{prompt}"
 transcript.edit_message: メッセージを編集
 transcript.sent_by_agent: エージェントから送信
 transcript.sent_by_boss: "%{name} から送信"
+transcript.context_mark: コンテキスト
+transcript.context_mark_focus: "コンテキスト · フォーカス: %{name}"
 transcript.mcp_server_start_failed: "MCP サーバー %{name} の起動に失敗しました。このセッションではそのツールを利用できない可能性があります。"
 transcript.copy_diagnostic_details: 診断情報をコピー
 transcript.landed: "%{base} に取り込みました"

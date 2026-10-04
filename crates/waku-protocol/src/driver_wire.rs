@@ -127,6 +127,10 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "steerAccepted",
             json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden }),
         ),
+        DriverEvent::PromptContextMarked { message_id, focus } => (
+            "promptContextMarked",
+            json!({ "messageId": message_id, "focus": focus }),
+        ),
         DriverEvent::QueuedMessagesChanged { messages } => {
             ("queuedMessagesChanged", json!({ "messages": messages }))
         }
@@ -261,6 +265,13 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 hidden: steer.hidden,
             }
         }
+        "promptContextMarked" => {
+            let mark: ContextMarkWire = serde_json::from_value(payload)?;
+            DriverEvent::PromptContextMarked {
+                message_id: mark.message_id,
+                focus: mark.focus,
+            }
+        }
         "queuedMessagesChanged" => {
             #[derive(Deserialize)]
             struct QueueWire {
@@ -374,6 +385,14 @@ struct ComputerUseWire {
     phase: ComputerUsePhase,
     visible: bool,
     image_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextMarkWire {
+    message_id: Uuid,
+    #[serde(default)]
+    focus: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -724,5 +743,38 @@ mod tests {
             };
             assert!(!hidden, "{kind} without the flag decodes visible");
         }
+    }
+
+    #[test]
+    fn the_context_mark_round_trips_with_and_without_focus() {
+        let message_id = Uuid::new_v4();
+        let wire = event_to_wire(DriverEvent::PromptContextMarked {
+            message_id,
+            focus: Some("app".into()),
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "promptContextMarked");
+        assert_eq!(wire.payload["messageId"], message_id.to_string());
+        assert_eq!(wire.payload["focus"], "app");
+        let DriverEvent::PromptContextMarked {
+            message_id: decoded,
+            focus,
+        } = event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(decoded, message_id);
+        assert_eq!(focus.as_deref(), Some("app"));
+
+        // An attach with no project focus still carries the mark.
+        let wire = event_to_wire(DriverEvent::PromptContextMarked {
+            message_id,
+            focus: None,
+        })
+        .unwrap();
+        let DriverEvent::PromptContextMarked { focus, .. } = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert!(focus.is_none());
     }
 }

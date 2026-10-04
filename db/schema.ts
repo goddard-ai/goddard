@@ -126,6 +126,9 @@ export const messages = sqliteTable(
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
     /** Goddard task that submitted the message through an agent credential. */
     sentByTask: text("sent_by_task"),
+    /** JSON-serialized ContextMark — set when the boss context router attached
+     *  the work digest to this prompt. */
+    contextMark: text("context_mark"),
     /** Provider-facing text no client renders — the internal "continue" nudge. */
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
   },

@@ -1740,6 +1740,8 @@ transcript.turn_label: "第 %{number} 轮：%{prompt}"
 transcript.edit_message: 编辑消息
 transcript.sent_by_agent: 由智能体发送
 transcript.sent_by_boss: "由 %{name} 发送"
+transcript.context_mark: 上下文
+transcript.context_mark_focus: "上下文 · 焦点: %{name}"
 transcript.mcp_server_start_failed: "MCP 服务器 %{name} 启动失败。本次会话可能无法使用其工具。"
 transcript.copy_diagnostic_details: 复制诊断信息
 transcript.landed: 已合入 %{base}

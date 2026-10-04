@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `context_mark` text;

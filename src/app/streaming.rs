@@ -342,6 +342,16 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
+            DriverEvent::PromptContextMarked { message_id, focus } => {
+                // The boss context router's verdict landed after the prompt's
+                // own event: mark the row so the transcript can note the
+                // routing. A session without the message ignores it.
+                if let Some(session) = self.state.session_mut(session_id)
+                    && session.mark_prompt_context(message_id, focus)
+                {
+                    self.state.mark_session_dirty(session_id);
+                }
+            }
             DriverEvent::QueuedMessagesChanged { messages } => {
                 // The daemon owns the agent-sourced slice of the follow-up
                 // queue — a parked prompt appeared, delivered, or was

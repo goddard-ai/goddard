@@ -188,6 +188,32 @@ describe('promptSubmitted', () => {
   })
 })
 
+describe('promptContextMarked', () => {
+  test('a routed prompt gains the mark and a missing message is a no-op', () => {
+    const session = apply(idleSession(), 'promptContextMarked', {
+      messageId: 'message',
+      focus: 'goddard',
+    })
+    expect(session.messages[0]?.context_mark).toEqual({ focus: 'goddard' })
+
+    // No message under that id — the verdict references a row this client
+    // never held, so nothing changes.
+    const untouched = apply(idleSession(), 'promptContextMarked', {
+      messageId: 'missing',
+      focus: 'goddard',
+    })
+    expect(untouched.messages).toEqual(idleSession().messages)
+  })
+
+  test('an attach without a project focus still carries the mark', () => {
+    const session = apply(idleSession(), 'promptContextMarked', {
+      messageId: 'message',
+      focus: null,
+    })
+    expect(session.messages[0]?.context_mark).toEqual({ focus: null })
+  })
+})
+
 describe('queuedMessagesChanged', () => {
   test('the daemon’s agent slice replaces itself without touching user entries', () => {
     const session: AgentSession = {

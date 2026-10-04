@@ -3446,10 +3446,11 @@ impl Backend for WakuBackend {
                     // knew the provider's `turnStarted` used to persist a
                     // projection without it, erasing the message for everyone.
                     self.boss.require_active(session_id)?;
+                    let submitted_message_id = message_id.unwrap_or_else(Uuid::new_v4);
                     let submitted = DriverEvent::PromptSubmitted {
                         message: prompt.clone(),
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
-                        message_id: message_id.unwrap_or_else(Uuid::new_v4),
+                        message_id: submitted_message_id,
                         sent_by_task: None,
                         hidden: *hidden,
                     };
@@ -3463,7 +3464,7 @@ impl Backend for WakuBackend {
                     }
                     events.send(event_to_wire(submitted)?)?;
                     if !*hidden && self.boss.is_boss(session_id) {
-                        self.route_boss_prompt(session_id, prompt);
+                        self.route_boss_prompt(session_id, prompt, submitted_message_id, &events);
                     }
                 }
                 let mut command = command;
@@ -5878,8 +5879,15 @@ impl WakuBackend {
     /// continuity, evaluate it against the current focus inference and the
     /// work snapshot, then apply the verdict off-thread. Jev decides, code
     /// applies — an unconfigured or failed evaluation attaches nothing and
-    /// changes nothing.
-    fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
+    /// changes nothing. An attaching verdict also marks the prompt's message
+    /// (`PromptContextMarked`) so transcripts can note the routing.
+    fn route_boss_prompt(
+        &self,
+        session_id: Uuid,
+        prompt: &str,
+        message_id: Uuid,
+        events: &EventSink,
+    ) {
         let (focus, recent_prompts) = self.boss.router_snapshot(session_id);
         self.boss.router_note_prompt(session_id, prompt);
         let work = self.boss_work_context();
@@ -5896,7 +5904,9 @@ impl WakuBackend {
         let agent = self.agent.clone();
         let sessions = self.sessions.clone();
         let task_state = self.task_state.clone();
+        let task_store = self.task_store.clone();
         let automations = self.automations.clone();
+        let events = events.clone();
         let _ = std::thread::Builder::new()
             .name("boss-context-router".into())
             .spawn(move || {
@@ -5911,11 +5921,34 @@ impl WakuBackend {
                     return;
                 };
                 let verdict = crate::boss_context::apply_verdict(&evaluation);
-                if let Some(focus) = verdict.focus {
-                    boss.router_set_focus(session_id, focus);
+                // The focus the verdict leaves standing: its own transition
+                // when the choice cleared the bar, otherwise the sticky
+                // inference the question was judged against. Computed here
+                // rather than re-read from the router so a later prompt's
+                // verdict cannot rewrite this one's mark.
+                let applied_focus = match &verdict.focus {
+                    Some(next) => next.clone(),
+                    None => focus,
+                };
+                if let Some(next) = verdict.focus {
+                    boss.router_set_focus(session_id, next);
                 }
                 if !verdict.attach {
                     return;
+                }
+                // The verdict alone routes the prompt — a deferred digest
+                // still attached — so the mark publishes before the delivery
+                // details below.
+                let marked = DriverEvent::PromptContextMarked {
+                    message_id,
+                    focus: applied_focus,
+                };
+                if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &marked)
+                {
+                    eprintln!("could not record Boss context mark for {session_id}: {error:#}");
+                }
+                if let Ok(wire) = event_to_wire(marked) {
+                    let _ = events.send(wire);
                 }
                 // Rebuild rather than reuse the evaluated snapshot — work may
                 // have moved during the call, and the attachment should
@@ -7859,6 +7892,9 @@ fn record_boss_event(
             hidden,
         } => {
             session.adopt_submitted_prompt(message, *turn_id, *message_id, *sent_by_task, *hidden);
+        }
+        DriverEvent::PromptContextMarked { message_id, focus } => {
+            session.mark_prompt_context(*message_id, focus.clone());
         }
         DriverEvent::TurnStarted => {
             if session.active_turn_id().is_none() {

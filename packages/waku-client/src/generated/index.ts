@@ -63,6 +63,7 @@ export type { ComposerDraftTarget } from "./ComposerDraftTarget";
 export type { ComposerDrafts } from "./ComposerDrafts";
 export type { ComputerAppGrant } from "./ComputerAppGrant";
 export type { ComputerPermissions } from "./ComputerPermissions";
+export type { ContextMark } from "./ContextMark";
 export type { ContextUsage } from "./ContextUsage";
 export type { CostQuality } from "./CostQuality";
 export type { CreateIssueInput } from "./CreateIssueInput";

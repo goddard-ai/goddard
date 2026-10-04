@@ -1627,6 +1627,25 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     theme,
                 ));
             }
+            // The boss context router's mark: presence means the work digest
+            // attached to this prompt, and `focus` names the project the
+            // router's attention inference held — opaque metadata, so it
+            // stays a plain muted line with no hover or expansion.
+            if let Some(mark) = &message.context_mark {
+                column = column.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(match &mark.focus {
+                            Some(focus) => {
+                                tr!("transcript.context_mark_focus", name = focus.clone())
+                            }
+                            None => tr!("transcript.context_mark"),
+                        }),
+                );
+            }
             column
         }
         MessageRole::Assistant => {

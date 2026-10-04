@@ -212,6 +212,20 @@ export function reduceRuntimeEvent(
       )
       break
     }
+    case 'promptContextMarked': {
+      // The boss context router's verdict landed after the prompt's own
+      // event: mark the row so transcripts can note the routing. A session
+      // without the message ignores it. Mirrors
+      // `AgentSession::mark_prompt_context`.
+      const value = asRecord(payload)
+      if (!value || typeof value.messageId !== 'string') break
+      const marked = session.messages.find((message) => message.id === value.messageId)
+      if (!marked) break
+      const focus = typeof value.focus === 'string' ? value.focus : null
+      if (marked.context_mark != null && marked.context_mark.focus === focus) break
+      marked.context_mark = { focus }
+      break
+    }
     case 'queuedMessagesChanged': {
       // The daemon owns the agent-sourced slice of the follow-up queue — a
       // parked prompt appeared, delivered, or was cancelled. Composer-queued
