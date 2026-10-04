@@ -49,7 +49,7 @@ persist between eval calls for this boss session.
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,workspace?,baseBranch?,workGoal?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?})
                                             employee session id
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel,...})

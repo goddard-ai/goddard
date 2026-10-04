@@ -5865,6 +5865,23 @@ impl WakuBackend {
                 .find(|entry| entry.is_default)
                 .or_else(|| catalog.first()),
         };
+        // A summon's explicit effort is machine-written configuration like
+        // `setModel`'s: fail the summon when the resolved model's catalog
+        // lists efforts and does not include it, rather than silently run
+        // the employee at another effort. `agent create` keeps its
+        // pass-through for ids a stale catalog may not list yet.
+        if employee.is_some()
+            && let Some(effort) = selection.reasoning_effort.as_deref().map(str::trim)
+            && !matches!(effort, "" | "default")
+            && let Some(model) = catalog_model
+            && !model.reasoning_efforts.is_empty()
+            && !model
+                .reasoning_efforts
+                .iter()
+                .any(|option| option.id == effort)
+        {
+            bail!("reasoning effort {effort:?} is not supported by model {:?}", model.id);
+        }
         let reasoning_effort = resolve_agent_trait(
             selection.reasoning_effort.or_else(|| {
                 routed
@@ -6585,6 +6602,7 @@ impl WakuBackend {
                 project,
                 provider,
                 model,
+                reasoning_effort,
                 workspace,
                 base_branch,
                 permissions,
@@ -6610,7 +6628,7 @@ impl WakuBackend {
                     provider,
                     model,
                     title: Some(employee.identity.name.clone()),
-                    reasoning_effort: None,
+                    reasoning_effort,
                     service_tier: None,
                     context_window: None,
                 };
@@ -13632,6 +13650,7 @@ mod tests {
                 project: project.display().to_string(),
                 provider: Some(ProviderKind::Codex),
                 model: None,
+                reasoning_effort: None,
                 workspace: Some(AgentWorkspace::Worktree),
                 base_branch: Some("main".into()),
                 permissions: None,
@@ -13667,6 +13686,79 @@ mod tests {
         assert!(backend.boss.is_employee(session.id));
         assert!(session.boss_managed);
         drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A summon's `reasoningEffort` pins the employee's session effort like
+    /// `setModel` does: the resolved model's catalog bounds it, and an
+    /// unsupported id fails the summon before the task persists — it does
+    /// not silently launch the employee at another effort. The missing
+    /// provider binary fails the launch after a valid summon persists its
+    /// session, so the assertions read the persisted record.
+    #[test]
+    fn boss_summon_validates_the_requested_reasoning_effort() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-effort-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (backend, boss) = surface_test_backend(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+
+        let persona = backend.boss.document().personas[0].id;
+        let summon = |effort: Option<&str>| {
+            backend.handle_boss_operation(
+                Some(boss),
+                BossOperation::Summon {
+                    persona_id: persona,
+                    job_title: "Verify".into(),
+                    prompt: "Check the build".into(),
+                    project: project.display().to_string(),
+                    provider: Some(ProviderKind::Codex),
+                    model: Some("gpt-5.5".into()),
+                    reasoning_effort: effort.map(str::to_owned),
+                    workspace: None,
+                    base_branch: None,
+                    permissions: None,
+                },
+                &EventSink::detached(),
+            )
+        };
+
+        // The fallback catalog's gpt-5.5 lists low/medium/high/xhigh.
+        let error = summon(Some("bogus")).unwrap_err().to_string();
+        assert!(
+            error.contains("reasoning effort \"bogus\" is not supported by model \"gpt-5.5\""),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            backend.task_state.lock().sessions.len(),
+            1,
+            "a rejected summon persists no employee task"
+        );
+
+        assert!(summon(Some("high")).is_err());
+        let session = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .expect("the employee task persisted before the failed launch")
+            .clone();
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

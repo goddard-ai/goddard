@@ -300,6 +300,11 @@ pub enum BossOperation {
         provider: Option<ProviderKind>,
         #[serde(default)]
         model: Option<String>,
+        /// Optional effort pin for the employee's session, validated
+        /// against the resolved model's catalog — an unsupported id fails
+        /// the summon rather than silently applying another effort.
+        #[serde(default)]
+        reasoning_effort: Option<String>,
         /// Where the employee's checkout runs; `None` uses the project
         /// itself, `worktree` forks a daemon-managed Git worktree.
         #[serde(default)]
@@ -655,15 +660,17 @@ mod tests {
             "jobTitle": "Verifier",
             "prompt": "Check the build",
             "project": "/project",
+            "reasoningEffort": "high",
             "permissions": {"memoryFolders": ["work"], "computerUse": true}
         }))
         .unwrap();
         assert!(matches!(
             summon,
-            super::BossOperation::Summon { permissions: Some(overrides), work_goal, .. }
+            super::BossOperation::Summon { permissions: Some(overrides), reasoning_effort, work_goal, .. }
                 if overrides.memory_folders.as_deref() == Some(&["work".to_string()][..])
                     && overrides.computer_use == Some(true)
                     && overrides.integration_ids.is_none()
+                    && reasoning_effort.as_deref() == Some("high")
                     // An omitted kind is an errand: its finish reports.
                     && work_goal == super::EmployeeGoal::Errand
         ));

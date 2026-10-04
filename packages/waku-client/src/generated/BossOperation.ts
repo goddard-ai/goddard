@@ -12,6 +12,12 @@ import type { RuntimeMode } from "./RuntimeMode";
 
 export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "finalizePlan", planFile: string | null, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
 /**
+ * Optional effort pin for the employee's session, validated
+ * against the resolved model's catalog — an unsupported id fails
+ * the summon rather than silently applying another effort.
+ */
+reasoningEffort: string | null,
+/**
  * Where the employee's checkout runs; `None` uses the project
  * itself, `worktree` forks a daemon-managed Git worktree.
  */
