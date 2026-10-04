@@ -37,7 +37,7 @@ use crate::md;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
-    ContextMark, ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
+    ContextUsage, DriverEvent, FavoriteModel, Message, MessageAttachment, MessageRole,
     PendingModelSwitch, PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe,
     ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
     ProviderSessionSummary, QueuedMessage, ReasoningBlock, RuntimeEventCursor, RuntimeMode,

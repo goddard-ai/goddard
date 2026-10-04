@@ -331,6 +331,35 @@ pub(super) fn render_message_footer(
     }
 
     if align_right {
+        // The context router's mark lost its row under the prompt; when its
+        // focus inference held a project, that project rides the footer's
+        // hover reveal instead — flat icon + name matching the timestamp.
+        if let Some(focus) = message
+            .context_mark
+            .as_ref()
+            .and_then(|mark| mark.focus.clone())
+        {
+            footer = footer.child(
+                div()
+                    .h(px(27.0))
+                    .max_w(px(280.0))
+                    .min_w_0()
+                    .px(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .child(icon("icons/folder.svg", 11.0, footer_color))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .line_height(sp(14.0))
+                            .text_color(footer_color)
+                            .child(focus),
+                    ),
+            );
+        }
         footer = footer.child(timestamp).child(copy_button);
     } else {
         footer = footer.child(copy_button);
@@ -1056,61 +1085,6 @@ fn render_work_item_ref_chips(
     row.into_any_element()
 }
 
-/// The context router's mark under a routed boss prompt: a muted "Jev
-/// attached" label, then one chip per thing the verdict attached — the
-/// work digest, plus the focus project when the router's attention
-/// inference held one. Opaque metadata, so the chips share the file-chip
-/// shell but stay inert: no hover, focus, or menu.
-fn render_context_mark_chips(mark: &ContextMark, theme: &Theme) -> AnyElement {
-    let chip = |icon_path: Option<&'static str>, label: SharedString| {
-        div()
-            .h(px(22.0))
-            .max_w(px(280.0))
-            .pl(px(6.0))
-            .pr(px(8.0))
-            .rounded(px(7.0))
-            .border(hairline())
-            .border_color(theme.border)
-            .bg(theme.inset)
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .when_some(icon_path, |chip, path| {
-                chip.child(icon(path, 11.0, theme.text_tertiary))
-            })
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_secondary)
-                    .child(label),
-            )
-    };
-    div()
-        .max_w(px(540.0))
-        .flex()
-        .flex_wrap()
-        .items_center()
-        .justify_end()
-        .gap(px(6.0))
-        .child(
-            div()
-                .flex_none()
-                .text_size(sp(12.5))
-                .text_color(theme.text_tertiary)
-                .child(tr!("transcript.jev_attached")),
-        )
-        .child(chip(
-            None,
-            SharedString::from(tr!("transcript.work_digest")),
-        ))
-        .when_some(mark.focus.clone(), |row, focus| {
-            row.child(chip(Some("icons/folder.svg"), focus.into()))
-        })
-        .into_any_element()
-}
-
 fn mcp_startup_failure_server(message: &str) -> Option<&str> {
     const PREFIX: &str = "MCP client for `";
     const SUFFIX: &str = "` failed to start: MCP startup failed:";
@@ -1681,13 +1655,6 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     &work_item_refs,
                     theme,
                 ));
-            }
-            // The boss context router's mark: presence means the work digest
-            // attached to this prompt, and `focus` names the project the
-            // router's attention inference held — opaque metadata, so the
-            // chips stay inert with no hover or expansion.
-            if let Some(mark) = &message.context_mark {
-                column = column.child(render_context_mark_chips(mark, theme));
             }
             column
         }
