@@ -1196,17 +1196,19 @@ pub(super) fn folded_transcript_row_kinds(
             .iter()
             .copied()
             .filter(|row| {
-                !matches!(row, TranscriptRowKind::TurnBlock(index)
-                if session
-                    .transcript_blocks
-                    .get(*index)
-                    .is_some_and(|block| {
-                        !block.activities.is_empty()
-                            && block
-                                .activities
-                                .iter()
-                                .all(crate::model::is_context_compaction)
-                    }))
+                let TranscriptRowKind::TurnBlock(index) = row else {
+                    return true;
+                };
+                let Some(block) = session.transcript_blocks.get(*index) else {
+                    return true;
+                };
+                let compaction = !block.activities.is_empty()
+                    && block
+                        .activities
+                        .iter()
+                        .all(crate::model::is_context_compaction);
+                let durable_card = block.activities.iter().any(is_boss_transcript_card);
+                !compaction && !durable_card
             })
             .collect();
         let Some(anchor) = hidden.first().copied() else {
@@ -1319,6 +1321,13 @@ pub(super) fn folded_transcript_row_kinds(
     }
 
     rows
+}
+
+fn is_boss_transcript_card(activity: &crate::model::ActivityItem) -> bool {
+    matches!(
+        activity.tool_name.as_deref(),
+        Some(crate::model::BOSS_SUMMON_TOOL_NAME)
+    )
 }
 
 /// The rows the turn *produced*, in transcript order: its assistant text parts
