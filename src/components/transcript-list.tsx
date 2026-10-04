@@ -8,17 +8,19 @@ import {
   useState,
 } from 'octane';
 
-import { Absolute, Pressable, ScrollView, Text, View } from '@octane-xplat/ui';
+import { Absolute, View } from '@octane-xplat/ui';
 
 import { useMarkdownStyles, VeilRegistry } from '@/components/md-block-row';
 import { RowAnchorProvider } from '@/components/transcript-anchor';
+import { TranscriptScrollView } from '@/components/transcript-scroll-view';
+import type { TranscriptScrollHandle } from '@/components/transcript-scroll-view.types';
 import {
   SessionEmpty,
   TranscriptRowView,
   WorkingStrip,
 } from '@/components/transcript-rows';
 
-import { useTheme } from '@/lib/use-theme';
+import { dismissKeyboard } from '@/lib/keyboard';
 import {
   buildTranscriptPipeline,
   expandTranscriptRows,
@@ -33,6 +35,7 @@ import {
 
 import type { MarkdownStyles } from '@/md/render.tsrx';
 import { TranscriptMarkdownCache } from '@/md/transcript-cache';
+import type { KeepRowTop } from '@/components/transcript-anchor';
 
 /** Content column cap (iPad). */
 const MAX_CONTENT_WIDTH = 736;
@@ -59,15 +62,13 @@ export interface TranscriptDevSample {
 /**
  * The transcript.
  *
- * FLAGGED FRAMEWORK GAP: the reference is an inverted ScrollView with
- * `maintainVisibleContentPosition` — offset 0 is the visual bottom, so the
- * streaming tail is pinned by layout, not scroll commands. xplat's
- * ScrollView exposes no scroll events, no imperative scrollTo, and no
- * content-position anchor, so none of that engine can be expressed here.
- * This build renders rows in natural order inside a ScrollView and degrades
- * the follow/jump/reveal machinery to no-ops; the "earlier" control replaces
- * scroll-triggered window extension. Restoring the engine needs scroll
- * primitives (offset, size, scrollTo, anchor) in the framework.
+ * The scroll engine lives in the TranscriptScrollView leaf: on native it is
+ * the inverted-scroll port of the reference engine (scaleY -1 scrollview,
+ * bottom-anchored streaming, jump-to-latest, scroll-triggered history
+ * extension); on web it keeps the original natural-order scroller with a
+ * manual "Earlier messages" control. This file owns what both share — the
+ * pipeline, the mounted window, folds, seeded reveals — plus the imperative
+ * handle plumbing.
  */
 export function TranscriptList({
   onHandle,
@@ -93,8 +94,8 @@ export function TranscriptList({
   onRewindTurn?: (turnId: string) => void;
   onForkTurn?: (turnId: string) => void;
 }) {
-  const theme = useTheme();
   const markdownStyles = useMarkdownStyles();
+  const scrollHandle = useRef<TranscriptScrollHandle | null>(null);
 
   // Parse + veil state live as long as this list does (keyed per session).
   const [md] = useState(() => new TranscriptMarkdownCache());
@@ -111,7 +112,8 @@ export function TranscriptList({
 
   // The mounted window: pipeline rows from `windowStart` to the end. Fixed
   // once the real transcript is known so streaming never shifts it, and only
-  // ever grows toward older history.
+  // ever grows toward older history — new rows mount at the native end where
+  // they cannot move the offset.
   const [windowStart, setWindowStart] = useState<number | null>(
     () => hydrated ? initialWindowStart(pipeline.length) : null,
   );
@@ -147,9 +149,14 @@ export function TranscriptList({
     });
   }, []);
 
+  const extendTail = useCallback(() => {
+    setWindowStart((value) => extendedWindowStart(value ?? start));
+  }, [start]);
+
   const revealRow = useCallback((rowKey: string, turnId?: string | null) => {
-    // Unfold + mount history so the row exists. Without scroll primitives the
-    // reveal can't move the viewport — the row is at least rendered.
+    // Unfold + mount history so the row exists; the leaf then scrolls it to
+    // just under the header once its layout lands.
+    dismissKeyboard();
     if (turnId) {
       setExpandedFolds((current) => (current.has(turnId) ? current : new Set(current).add(turnId)));
     }
@@ -162,30 +169,34 @@ export function TranscriptList({
       });
 
       if (pipelineIndex < 0) {
+        // Folded-away rows are absent until the expansion lands; reach the
+        // turn's position so a deep match still mounts its history.
         if (turnId == null) {return false;}
         const foldIndex = pipeline.findIndex((row) => row.turnId === turnId);
         if (foldIndex < 0) {return false;}
         if (foldIndex < start) {
-          setWindowStart(foldIndex);
+          setWindowStart((value) => Math.min(value ?? foldIndex, foldIndex));
         }
 
+        scrollHandle.current?.revealRow(rowKey);
         return true;
       }
 
       if (pipelineIndex < start) {
-        setWindowStart(pipelineIndex);
+        setWindowStart((value) => Math.min(value ?? pipelineIndex, pipelineIndex));
       }
     }
 
+    scrollHandle.current?.revealRow(rowKey);
     return true;
   }, [pipeline, rows, start]);
 
-  const scrollToLatest = useCallback((_animated = true) => {
-    // No-op: no imperative scroll on xplat ScrollView (see header comment).
+  const scrollToLatest = useCallback((animated = true) => {
+    scrollHandle.current?.scrollToLatest(animated);
   }, []);
 
   const followNextGrowth = useCallback(() => {
-    // No-op (same gap).
+    scrollHandle.current?.followNextGrowth();
   }, []);
 
   useEffect(() => {
@@ -196,37 +207,29 @@ export function TranscriptList({
 
   return (
     <View style={{ flex: 1, overflow: 'hidden', paddingTop: headerInset }}>
-      <ScrollView style={{ flex: 1 }}>
-        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-          {hasEarlier && (
-            <Pressable
-              accessibilityLabel="Load earlier messages"
-              accessibilityRole="button"
-              onPress={() => setWindowStart((value) => extendedWindowStart(value ?? start))}
-              style={{ alignItems: 'center', paddingVertical: 10 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textTertiary }}>
-                Earlier messages…
-              </Text>
-            </Pressable>
-          )}
-          {rows.map((row) => (
-            <TranscriptRowFrame
-              forkTurns={forkTurns}
-              keepRowTop={(apply) => apply()}
-              markdownStyles={markdownStyles}
-              md={md}
-              rewindTurns={rewindTurns}
-              row={row}
-              seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
-              veils={veils}
-              onForkTurn={onForkTurn}
-              onRewindTurn={onRewindTurn}
-              onToggleFold={toggleFold}
-            />
-          ))}
-          {running ? <WorkingStrip session={session} /> : null}
-        </View>
-      </ScrollView>
+      <TranscriptScrollView
+        hasEarlier={hasEarlier}
+        headerInset={headerInset}
+        rows={rows}
+        strip={running ? <WorkingStrip session={session} /> : null}
+        renderRow={(row, helpers) => (
+          <TranscriptRowFrame
+            forkTurns={forkTurns}
+            keepRowTop={helpers.keepRowTop}
+            markdownStyles={markdownStyles}
+            md={md}
+            rewindTurns={rewindTurns}
+            row={row}
+            seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
+            veils={veils}
+            onForkTurn={onForkTurn}
+            onRewindTurn={onRewindTurn}
+            onToggleFold={toggleFold}
+          />
+        )}
+        onExtendTail={extendTail}
+        onScrollHandle={(handle) => { scrollHandle.current = handle; }}
+      />
       {showEmpty && (
         <Absolute
           style={{ bottom: 0, left: 0, right: 0, top: 0, alignItems: 'center', justifyContent: 'center' }}>
@@ -264,7 +267,7 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   onForkTurn,
 }: {
   row: TranscriptRow;
-  keepRowTop: (apply: () => void) => void;
+  keepRowTop: KeepRowTop;
   md: TranscriptMarkdownCache;
   veils: VeilRegistry;
   seeded: boolean;

@@ -22,6 +22,11 @@ declare const WebSocket: {
 };
 
 declare const crypto: { randomUUID(): string };
+
+/** @nativescript/core installs these as globals (globals/index.js); the
+ * types package just never declares them. */
+declare function requestAnimationFrame(cb: (time: number) => void): number;
+declare function cancelAnimationFrame(id: number): void;
 interface Storage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
