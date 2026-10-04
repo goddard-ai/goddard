@@ -52,6 +52,7 @@ pub mod automations;
 pub mod blob_store;
 pub mod boss;
 pub mod boss_context;
+pub mod boss_eval;
 pub mod checkpoint;
 mod claude_metadata;
 pub mod claude_session;

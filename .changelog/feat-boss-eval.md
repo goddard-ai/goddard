@@ -1,0 +1,1 @@
+- The boss can run Rhai scripts inside the daemon with the new `eval` operation — one `goddard-agent boss` call batches operations and chains their results, and variables persist between evals for the session. `goddard-agent schema` documents the bound functions.

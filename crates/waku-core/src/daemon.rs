@@ -6338,6 +6338,20 @@ impl WakuBackend {
                     context: self.boss_work_context().digest,
                 })
             }
+            BossOperation::Eval { script } => {
+                if caller.is_some_and(|id| !self.boss.is_boss(id)) {
+                    bail!("only the boss or a human can eval boss scripts");
+                }
+                // The scope keys on the boss session, so a human client and
+                // the boss itself share it; a replaced boss chat gets a
+                // fresh one.
+                let session = caller
+                    .or_else(|| self.boss.document().session_id)
+                    .unwrap_or_else(Uuid::nil);
+                self.boss.eval(session, &script, &|operation| {
+                    self.handle_boss_operation(caller, operation, events)
+                })
+            }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
                 let employee_rename = match &operation {
@@ -12887,6 +12901,97 @@ mod tests {
         );
         assert!(backend.boss.is_employee(session.id));
         drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The eval surface: scripts chain bound operations in one call,
+    /// variables persist across evals for the boss session's scope, and
+    /// non-boss sessions are refused.
+    #[test]
+    fn boss_eval_batches_operations_and_keeps_session_scope() {
+        use waku_protocol::boss::{BossOperation, BossResult};
+        let root = std::env::temp_dir().join(format!("boss-eval-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let boss = backend.boss.document().identity.id;
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let eval = |script: &str| {
+            backend.handle_boss_operation(
+                None,
+                BossOperation::Eval {
+                    script: script.into(),
+                },
+                &EventSink::detached(),
+            )
+        };
+        let BossResult::Eval { value, .. } = eval("let count = 40; count + 2").unwrap() else {
+            panic!("expected an eval result")
+        };
+        assert_eq!(value, serde_json::json!(42));
+        let BossResult::Eval { value, .. } = eval("count + 1").unwrap() else {
+            panic!("expected an eval result")
+        };
+        assert_eq!(value, serde_json::json!(41));
+        // Bound functions run real boss operations — a file write lands in
+        // the boss's files root, and `view()` unwraps to the state map.
+        let BossResult::Eval { value, .. } = eval(
+            "writeFile(\"memory/eval-note.md\", \"durable fact\"); readFile(\"memory/eval-note.md\")",
+        )
+        .unwrap() else {
+            panic!("expected an eval result")
+        };
+        assert_eq!(value["content"], serde_json::json!("durable fact"));
+        assert_eq!(
+            std::fs::read_to_string(root.join("boss/files/memory/eval-note.md")).unwrap(),
+            "durable fact"
+        );
+        let BossResult::Eval { value, .. } = eval("view().identity.name.len() > 0").unwrap() else {
+            panic!("expected an eval result")
+        };
+        assert_eq!(value, serde_json::json!(true));
+        let BossResult::Eval { output, .. } = eval("print(\"ping\")").unwrap() else {
+            panic!("expected an eval result")
+        };
+        assert!(output.contains("ping"));
+        assert!(eval("loop { }").is_err());
+        // The boss session caller shares that scope; a replaced boss chat
+        // keys a fresh one.
+        let BossResult::Eval { value, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Eval {
+                    script: "count".into(),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected an eval result")
+        };
+        assert_eq!(value, serde_json::json!(40));
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(Uuid::new_v4());
+                Ok(())
+            })
+            .unwrap();
+        assert!(eval("count").is_err());
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(Uuid::new_v4()),
+                    BossOperation::Eval { script: "1".into() },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

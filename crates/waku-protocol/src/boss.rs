@@ -291,6 +291,13 @@ pub enum BossOperation {
         id: Uuid,
         archived: bool,
     },
+    /// Run a Rhai script inside the daemon with the other boss operations
+    /// bound as native functions — one call batches operations and chains
+    /// their results. Variables persist in the boss session's eval scope
+    /// between calls. Boss-only.
+    Eval {
+        script: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -329,6 +336,13 @@ pub enum BossResult {
     /// zero means no client could possibly have heard it.
     Speak {
         delivered: usize,
+    },
+    /// A finished `eval` script's return value plus the text its
+    /// `print`/`debug` calls emitted (bounded). `value` is `null` when the
+    /// script returns `()`.
+    Eval {
+        value: serde_json::Value,
+        output: String,
     },
 }
 
