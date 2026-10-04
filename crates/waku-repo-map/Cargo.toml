@@ -1,0 +1,21 @@
+[package]
+name = "waku-repo-map"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+description = "Token-budgeted tree-sitter workspace maps for agent context requests"
+
+[dependencies]
+anyhow = "1.0"
+ignore = "0.4.33"
+serde = { version = "1.0", features = ["derive"] }
+tree-sitter = "0.25"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-go = "0.25.0"
+tree-sitter-swift = "0.7.3"
+
+[dev-dependencies]
+uuid = { version = "1.18", features = ["v4"] }

@@ -11249,7 +11249,6 @@ dependencies = [
  "dunce",
  "futures",
  "github-copilot-sdk",
- "ignore",
  "libc",
  "mdns-sd",
  "nucleo-matcher",
@@ -11267,19 +11266,13 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "trash",
- "tree-sitter",
- "tree-sitter-go",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-swift",
- "tree-sitter-typescript",
  "tungstenite 0.30.0",
  "url",
  "uuid",
  "waku-client",
  "waku-memory-engine",
  "waku-protocol",
+ "waku-repo-map",
  "waku-share",
  "windows-sys 0.61.2",
  "zip 8.6.0",
@@ -11325,6 +11318,23 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "waku-repo-map"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ignore",
+ "serde",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-swift",
+ "tree-sitter-typescript",
+ "uuid",
 ]
 
 [[package]]

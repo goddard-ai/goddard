@@ -105,7 +105,7 @@ mod pressure;
 pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
-pub mod repo_map;
+pub use waku_repo_map as repo_map;
 pub mod resource_broker;
 pub mod review;
 pub mod routing;
