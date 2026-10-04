@@ -88,6 +88,15 @@ these overrides and incremental reuse.
 
 ## Proposed boundaries and expected benefit
 
+The governing heuristic is rate-of-change, not size. Crate boundaries separate
+hot from cold in both directions: hot coherent domains (Boss today, memory
+engine while under construction) get their own crate so their churn recompiles
+little else; large cold code (provider adapters, storage) gets its own crate so
+everyone else's churn never recompiles it. Both cases are the same
+optimization. When a hot domain stabilizes, its dedicated crate stops earning
+its boundary; conversely a dormant mega-module is always worth isolating.
+
+
 Names below are provisional. Keep contracts small and dependencies directed
 toward foundations; avoid a generic “common” crate that eventually contains
 all implementations again.
