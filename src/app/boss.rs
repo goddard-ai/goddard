@@ -1,4 +1,5 @@
 //! Desktop control plane for daemon-owned Boss roles.
+use super::boss_moods::AVATAR_SOURCE_SIZE;
 use super::*;
 use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
@@ -10,10 +11,6 @@ use waku_protocol::custom_commands::CustomCommandIcon;
 /// The logical size a session-mention chip's avatar occupies in the
 /// transcript — `ATOM_AVATAR_SCALE` of a body-text chip's height.
 const MENTION_AVATAR_SIZE: f32 = 18.0;
-
-/// The `size` the avatar SVG is requested at, which fixes its intrinsic
-/// viewport so [`avatar_scale`] can target an exact raster size.
-const AVATAR_SOURCE_SIZE: f32 = 256.0;
 
 /// Rasters are cached per display-size bucket because GPUI samples sprites
 /// with a bilinear filter and no mipmaps: one shared 256px raster upscaled
@@ -91,7 +88,6 @@ pub(super) struct BossUi {
     rows: Vec<BossItem>,
     avatar_queue: RefCell<VecDeque<(String, u32)>>,
     avatar_requested: RefCell<HashSet<(String, u32)>>,
-    avatar_svgs: HashMap<String, Arc<Vec<u8>>>,
     avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
     loaded_file: Option<(DaemonKey, String, String)>,
@@ -135,7 +131,6 @@ impl Default for BossUi {
             rows: Vec::new(),
             avatar_queue: RefCell::new(VecDeque::new()),
             avatar_requested: RefCell::new(HashSet::new()),
-            avatar_svgs: HashMap::new(),
             avatars: HashMap::new(),
             avatar_active: 0,
             loaded_file: None,
@@ -1295,9 +1290,9 @@ impl Waku {
         self.boss_request(key, operation, BossReply::Saved, cx);
     }
 
-    /// The raster cached for `(seed, size bucket)`, queueing a fetch or a
-    /// re-render when it is missing. Returns `None` while the raster is in
-    /// flight so callers can draw their placeholder.
+    /// The raster cached for `(seed, size bucket)`, queueing a render when
+    /// it is missing. Returns `None` while the raster is in flight so
+    /// callers can draw their placeholder.
     fn boss_avatar_image(&self, seed: &str, size: f32) -> Option<Arc<gpui::RenderImage>> {
         let bucket = avatar_bucket(size);
         if let Some(image) = self
@@ -1347,56 +1342,20 @@ impl Waku {
                 break;
             };
             self.boss_ui.avatar_active += 1;
-            let http = cx.http_client();
             let renderer = cx.svg_renderer();
             let avatar_seed = seed.clone();
             cx.spawn(async move |this, cx| {
-                let cached = this
-                    .update(cx, |this, _| {
-                        this.boss_ui.avatar_svgs.get(&avatar_seed).cloned()
-                    })
-                    .ok()
-                    .flatten();
                 let image = cx.background_executor().spawn(async move {
-                    use futures::io::AsyncReadExt;
-                    let exchange = async {
-                        let bytes = match cached {
-                            Some(bytes) => bytes,
-                            None => {
-                                let url = format!("https://api.dicebear.com/10.x/moods/svg?backgroundColor=&tags=animation&size={AVATAR_SOURCE_SIZE}&seed={avatar_seed}");
-                                let request = gpui::http_client::Request::get(url).body(gpui::http_client::AsyncBody::empty())?;
-                                let mut response = http.send(request).await?;
-                                anyhow::ensure!(response.status().is_success(), "avatar unavailable");
-                                let mut bytes = Vec::new();
-                                response.body_mut().take(256 * 1024).read_to_end(&mut bytes).await?;
-                                Arc::new(bytes)
-                            }
-                        };
-                        let image = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            renderer.render_single_frame(&bytes, avatar_scale(bucket))
-                        }))
-                        .map_err(|_| anyhow::anyhow!("avatar rendering failed"))??;
-                        Ok::<_, anyhow::Error>((bytes, image))
-                    };
-                    match futures::future::select(Box::pin(exchange), Box::pin(smol::Timer::after(std::time::Duration::from_secs(10)))).await {
-                        futures::future::Either::Left((result, _)) => result.ok(), _ => None,
-                    }
+                    let svg = boss_moods::avatar_svg(&avatar_seed);
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        renderer.render_single_frame(&svg, avatar_scale(bucket))
+                    }))
+                    .ok()
+                    .and_then(|result| result.ok())
                 }).await;
                 let _ = this.update(cx, |this, cx| {
                     this.boss_ui.avatar_active -= 1;
-                    if let Some((bytes, image)) = image {
-                        if this.boss_ui.avatar_svgs.len() >= 256 {
-                            if let Some(old) = this
-                                .boss_ui
-                                .avatar_svgs
-                                .keys()
-                                .find(|old| **old != seed)
-                                .cloned()
-                            {
-                                this.boss_ui.avatar_svgs.remove(&old);
-                            }
-                        }
-                        this.boss_ui.avatar_svgs.insert(seed.clone(), bytes);
+                    if let Some(image) = image {
                         let cached: usize = this
                             .boss_ui
                             .avatars
