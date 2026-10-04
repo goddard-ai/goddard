@@ -41,9 +41,18 @@ pub(super) enum BossTab {
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
     pub(super) goal_rows: HashMap<DaemonKey, Arc<Vec<BossGoalRow>>>,
-    pub(super) goals_list: ListState,
-    pub(super) goals_scrollbar: Rc<ScrollbarState>,
+    /// The Goals panel's two scroll regions: a bounded Finished history on
+    /// top and the In progress/Pending sections below. Fold and history
+    /// choices are honored per Boss daemon across snapshots.
+    pub(super) goals_finished_list: ListState,
+    pub(super) goals_finished_scrollbar: Rc<ScrollbarState>,
+    pub(super) goals_ongoing_list: ListState,
+    pub(super) goals_ongoing_scrollbar: Rc<ScrollbarState>,
     pub(super) goals_list_owner: Option<DaemonKey>,
+    pub(super) goals_finished_signature: Option<u64>,
+    pub(super) goals_ongoing_signature: Option<u64>,
+    pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
+    pub(super) goals_history_expanded: HashSet<DaemonKey>,
     pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
@@ -99,9 +108,15 @@ impl Default for BossUi {
         Self {
             states: HashMap::new(),
             goal_rows: HashMap::new(),
-            goals_list: ListState::new(0, ListAlignment::Top, px(640.0)),
-            goals_scrollbar: ScrollbarState::new(),
+            goals_finished_list: ListState::new(0, ListAlignment::Top, px(240.0)),
+            goals_finished_scrollbar: ScrollbarState::new(),
+            goals_ongoing_list: ListState::new(0, ListAlignment::Top, px(640.0)),
+            goals_ongoing_scrollbar: ScrollbarState::new(),
             goals_list_owner: None,
+            goals_finished_signature: None,
+            goals_ongoing_signature: None,
+            goals_collapsed: HashSet::new(),
+            goals_history_expanded: HashSet::new(),
             projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),
@@ -139,30 +154,47 @@ impl Default for BossUi {
     }
 }
 
+/// A Goals panel section, in display order. Only `EmployeeGoal::Goal`
+/// records reach these lists — errands never appear in the tab.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum BossGoalSection {
+    Finished,
+    InProgress,
+    Pending,
+}
+
+/// One employee goal prepared for the Goals panel. Rows carry the boss-owned
+/// record; the render pass joins the cached session snapshot for status,
+/// title, project, workspace, and update time.
 #[derive(Clone)]
 pub(super) struct BossGoalRow {
     pub session_id: Uuid,
     pub name: String,
     pub job_title: String,
     pub lifecycle: waku_protocol::boss::EmployeeLifecycle,
-    pub blocked: bool,
+    /// The attention item the job reported — the row's small reason line.
+    pub blocker: Option<String>,
+    pub created_at: Option<u64>,
+    pub expired_at: Option<u64>,
+    pub queued_at: Option<u64>,
+    /// The queued ticket's first nonempty prompt paragraph — present only
+    /// while the assignment waits; dispatch clears the ticket's prompt.
+    pub queued_objective: Option<String>,
+    /// The project label the summon declared — the Pending row's project
+    /// before its session shell exists.
+    pub queued_project: Option<String>,
+    /// The queued wait reason for the tooltip — the daemon's admission
+    /// blocker or a neutral admission label, never a position number.
+    pub queue_detail: Option<String>,
+    /// 1-based admission order among the daemon's queued employees —
+    /// Pending sorts on it; it is never displayed as a number.
+    pub queue_rank: Option<usize>,
+    /// Reserved wave grouping — retained in the prepared data, never
+    /// displayed as a raw id.
+    #[allow(dead_code)]
+    pub group_id: Option<String>,
 }
 
-/// The Goals panel lists fire-and-forget work only — errands report to
-/// their supervisor, so they never belong on the human's roster.
-fn boss_goal_rows(employees: &[waku_protocol::boss::BossEmployee]) -> Vec<BossGoalRow> {
-    employees
-        .iter()
-        .filter(|employee| employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal)
-        .map(|employee| BossGoalRow {
-            session_id: employee.session_id,
-            name: employee.identity.name.clone(),
-            job_title: employee.job_title.clone(),
-            lifecycle: employee.lifecycle(),
-            blocked: employee.blocker.is_some(),
-        })
-        .collect()
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum BossItem {
@@ -233,7 +265,111 @@ impl Waku {
             }) {
                 continue;
             }
-            let rows = Arc::new(boss_goal_rows(&state.employees));
+            // Queue rank among every queued employee — errands included, so
+            // a goal's neutral wait detail accounts for the hidden work
+            // ahead of it without revealing a position number.
+            let mut queued: Vec<&waku_protocol::boss::BossEmployee> = state
+                .employees
+                .iter()
+                .filter(|employee| {
+                    employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+                })
+                .collect();
+            queued.sort_by_key(|employee| {
+                employee
+                    .ticket
+                    .as_ref()
+                    .map(|ticket| ticket.sequence)
+                    .unwrap_or(u64::MAX)
+            });
+            let queue_rank: HashMap<Uuid, usize> = queued
+                .iter()
+                .enumerate()
+                .map(|(index, employee)| (employee.session_id, index + 1))
+                .collect();
+            let rows = Arc::new(
+                state
+                    .employees
+                    .iter()
+                    .filter(|employee| {
+                        employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
+                    })
+                    .map(|employee| {
+                        let queue_detail = (employee.lifecycle()
+                            == waku_protocol::boss::EmployeeLifecycle::Queued)
+                            .then(|| {
+                                match employee
+                                    .ticket
+                                    .as_ref()
+                                    .and_then(|ticket| ticket.blocked_by.first())
+                                {
+                                    Some(
+                                        waku_protocol::boss::AdmissionBlocker::ModelLimit {
+                                            used,
+                                            limit,
+                                        },
+                                    ) => tr!(
+                                        "boss.goals_queue_model",
+                                        model = employee
+                                            .ticket
+                                            .as_ref()
+                                            .map(|ticket| ticket.model.as_str())
+                                            .unwrap_or_default(),
+                                        used = used,
+                                        limit = limit
+                                    ),
+                                    Some(
+                                        waku_protocol::boss::AdmissionBlocker::HostResources {
+                                            detail,
+                                        },
+                                    ) => detail.clone(),
+                                    None => {
+                                        if queue_rank.get(&employee.session_id)
+                                            == Some(&1)
+                                        {
+                                            tr!("boss.goals_queue_admission")
+                                        } else {
+                                            tr!("boss.goals_queue_earlier")
+                                        }
+                                    }
+                                }
+                            });
+                        BossGoalRow {
+                            session_id: employee.session_id,
+                            name: employee.identity.name.clone(),
+                            job_title: employee.job_title.clone(),
+                            lifecycle: employee.lifecycle(),
+                            blocker: employee.blocker.clone(),
+                            created_at: employee.created_at,
+                            expired_at: employee.expired_at,
+                            queued_at: employee.queued_at,
+                            queued_objective: employee
+                                .ticket
+                                .as_ref()
+                                .and_then(|ticket| {
+                                    ticket
+                                        .prompt
+                                        .split("\n\n")
+                                        .map(str::trim)
+                                        .find(|paragraph| !paragraph.is_empty())
+                                        .map(str::to_owned)
+                                }),
+                            queued_project: employee
+                                .ticket
+                                .as_ref()
+                                .map(|ticket| ticket.project.trim())
+                                .filter(|project| !project.is_empty())
+                                .map(str::to_owned),
+                            queue_detail,
+                            queue_rank: queue_rank.get(&employee.session_id).copied(),
+                            group_id: employee
+                                .ticket
+                                .as_ref()
+                                .and_then(|ticket| ticket.group_id.clone()),
+                        }
+                    })
+                    .collect(),
+            );
             self.boss_ui.goal_rows.insert(key, rows);
             self.boss_ui.states.insert(key, state);
             changed = true;
@@ -1325,7 +1461,11 @@ impl Waku {
     /// The raster cached for `(seed, size bucket)`, queueing a render when
     /// it is missing. Returns `None` while the raster is in flight so
     /// callers can draw their placeholder.
-    fn boss_avatar_image(&self, seed: &str, size: f32) -> Option<Arc<gpui::RenderImage>> {
+    pub(super) fn boss_avatar_image(
+        &self,
+        seed: &str,
+        size: f32,
+    ) -> Option<Arc<gpui::RenderImage>> {
         let bucket = avatar_bucket(size);
         if let Some(image) = self
             .boss_ui
@@ -3388,40 +3528,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn goal_rows_exclude_errands_and_project_lifecycle() {
-        use waku_protocol::boss::{BossEmployee, EmployeeGoal, EmployeeLifecycle};
-
-        let employee = |work_goal: EmployeeGoal| BossEmployee {
-            session_id: Uuid::new_v4(),
-            supervisor_id: Uuid::new_v4(),
-            identity: BossIdentity {
-                id: Uuid::new_v4(),
-                name: "Marl".into(),
-                avatar_seed: String::new(),
-            },
-            job_title: "Builder".into(),
-            persona_id: Uuid::new_v4(),
-            work_goal,
-            created_at: None,
-            icon: None,
-            permissions: PersonaPermissions::default(),
-            pinned_files: Vec::new(),
-            expired: false,
-            expired_at: None,
-            blocker: Some("blocked on input".into()),
-            state: EmployeeLifecycle::Queued,
-            ticket: None,
-            queued_at: None,
-            request_id: None,
-            request_fingerprint: None,
-        };
-        let goal = employee(EmployeeGoal::Goal);
-        let goal_session = goal.session_id;
-        let rows = boss_goal_rows(&[employee(EmployeeGoal::Errand), goal]);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].session_id, goal_session);
-        assert_eq!(rows[0].lifecycle, EmployeeLifecycle::Queued);
-        assert!(rows[0].blocked);
-    }
 }

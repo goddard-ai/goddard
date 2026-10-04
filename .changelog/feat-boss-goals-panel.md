@@ -1,1 +1,1 @@
-- Open Goals in the Boss chat's right panel to see goal employees in progress and completed — fire-and-forget work that finishes quietly without reporting back.
+- Open Goals in the Boss chat's right panel to see employee goals: recent finishes first with Show more for older history, then work in progress and queued assignments, each a compact two-line row that opens its task.

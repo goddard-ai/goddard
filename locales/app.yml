@@ -6014,6 +6014,62 @@ boss.goals_status_complete:
   en: Completed
 boss.goals_status_failed:
   en: Failed
+boss.goals_status_queued:
+  en: Queued
+boss.goals_status_background:
+  en: Background work
+boss.goals_status_needs_input:
+  en: Needs input
+boss.goals_status_attention:
+  en: Attention requested
+boss.goals_status_finishing:
+  en: Finishing
+boss.goals_status_unavailable:
+  en: Status unavailable
+boss.goals_status_finished:
+  en: Finished
+boss.goals_section_finished:
+  en: Finished
+boss.goals_section_pending:
+  en: Pending
+boss.goals_show_older:
+  en: Show more (%{count} older)
+boss.goals_show_less:
+  en: Show less
+boss.goals_needs_attention:
+  en: "%{count} needs attention"
+boss.goals_updated_ago:
+  en: "%{ago} ago"
+boss.goals_empty_title:
+  en: No goals yet
+boss.goals_empty_body:
+  en: Ask your Boss to assign a goal. Goals stay here after they finish.
+boss.goals_loading:
+  en: Loading goals…
+boss.goals_loading_body:
+  en: Waiting for the Boss snapshot to arrive.
+boss.goals_unavailable:
+  en: Goals unavailable
+boss.goals_unavailable_body:
+  en: The Boss snapshot is unavailable — check the host connection.
+boss.goals_offline:
+  en: Offline · last known state
+boss.goals_untitled:
+  en: Untitled goal
+boss.goals_task_unavailable:
+  en: Task unavailable
+boss.goals_project_unavailable:
+  en: Project unavailable
+boss.goals_queue_admission:
+  en: Waiting for admission
+boss.goals_queue_earlier:
+  en: Waiting for earlier work
+boss.goals_queue_model:
+  en: "Waiting for %{model} · %{used}/%{limit} slots"
+boss.goals_worktree:
+  en: worktree
+boss.goals_open_task:
+  en: "Open task: %{title}, %{employee}, %{status}"
 boss.select_document:
   en: Select a file or persona to view and edit it.
 boss.save:

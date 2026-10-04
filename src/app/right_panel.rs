@@ -1,7 +1,10 @@
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 
 use super::*;
+use crate::ui::ActivationExt;
 
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 const REVIEW_DIFF_FILE_HEADER_HEIGHT: f32 = 36.0;
@@ -1399,6 +1402,496 @@ fn tab_scroll_fade(
     .w(px(TAB_SCROLL_FADE_WIDTH))
 }
 
+/// The Goals panel's compact row geometry: a two-line base row, a small
+/// third line only for attention reasons, and a finished-history viewport
+/// bounded to five rows or 45% of the panel body while ongoing work exists.
+const GOALS_PANEL_ROW_HEIGHT: f32 = 48.0;
+const GOALS_PANEL_REASON_HEIGHT: f32 = 16.0;
+const GOALS_PANEL_RECENT_LIMIT: usize = 5;
+const GOALS_PANEL_FINISHED_MAX_HEIGHT: f32 = 240.0;
+const GOALS_PANEL_FINISHED_HEIGHT_FRACTION: f32 = 0.45;
+const GOALS_PANEL_AVATAR: f32 = 16.0;
+const GOALS_PANEL_SECTION_GAP: f32 = 12.0;
+
+/// The coarse execution bucket that decides which Goals section a row
+/// renders under — the specific [`BossGoalStatus`] stays on the row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BossGoalBucket {
+    Finished,
+    Running,
+    Pending,
+}
+
+/// The specific status a goal row reports. Glyphs and tones mirror the
+/// sidebar's session status language; finished goals swap the
+/// unread/completion indicator for a checkmark.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BossGoalStatus {
+    Queued,
+    Starting,
+    Working,
+    BackgroundWork,
+    NeedsInput,
+    Paused,
+    UsageLimited,
+    Blocked,
+    Attention,
+    Finishing,
+    Active,
+    Unavailable,
+    Failed,
+    BudgetReached,
+    Complete,
+    Finished,
+}
+
+impl BossGoalStatus {
+    fn label(self) -> String {
+        match self {
+            Self::Queued => tr!("boss.goals_status_queued"),
+            Self::Starting => tr!("boss.goals_status_starting"),
+            Self::Working => tr!("boss.goals_status_working"),
+            Self::BackgroundWork => tr!("boss.goals_status_background"),
+            Self::NeedsInput => tr!("boss.goals_status_needs_input"),
+            Self::Paused => tr!("boss.goals_status_paused"),
+            Self::UsageLimited => tr!("boss.goals_status_usage_limited"),
+            Self::Blocked => tr!("boss.goals_status_blocked"),
+            Self::Attention => tr!("boss.goals_status_attention"),
+            Self::Finishing => tr!("boss.goals_status_finishing"),
+            Self::Active => tr!("boss.goals_status_active"),
+            Self::Unavailable => tr!("boss.goals_status_unavailable"),
+            Self::Failed => tr!("boss.goals_status_failed"),
+            Self::BudgetReached => tr!("boss.goals_status_budget_limited"),
+            Self::Complete => tr!("boss.goals_status_complete"),
+            Self::Finished => tr!("boss.goals_status_finished"),
+        }
+    }
+
+    /// Icon, tone, and whether it spins — the sidebar task rows' status
+    /// markers, plus the panel's queued/paused/finished additions.
+    fn marker(self) -> (&'static str, BossGoalTone, bool) {
+        match self {
+            Self::Starting | Self::Working => {
+                ("icons/loader-circle.svg", BossGoalTone::Accent, true)
+            }
+            Self::Finishing => ("icons/loader-circle.svg", BossGoalTone::Secondary, true),
+            Self::Queued | Self::Active | Self::BackgroundWork => {
+                ("icons/hourglass.svg", BossGoalTone::Secondary, false)
+            }
+            Self::Unavailable => ("icons/hourglass.svg", BossGoalTone::Tertiary, false),
+            Self::NeedsInput
+            | Self::UsageLimited
+            | Self::Blocked
+            | Self::Attention
+            | Self::BudgetReached => ("icons/alert.svg", BossGoalTone::Warning, false),
+            Self::Paused => ("icons/pause.svg", BossGoalTone::Secondary, false),
+            Self::Failed => ("icons/x-bold.svg", BossGoalTone::Danger, false),
+            Self::Complete => ("icons/check.svg", BossGoalTone::Success, false),
+            Self::Finished => ("icons/check.svg", BossGoalTone::Secondary, false),
+        }
+    }
+
+    /// Whether the status earns the row's small reason line and counts
+    /// toward a section's "needs attention" tally.
+    fn attention(self) -> bool {
+        matches!(
+            self,
+            Self::Failed
+                | Self::Blocked
+                | Self::Attention
+                | Self::NeedsInput
+                | Self::Paused
+                | Self::UsageLimited
+                | Self::BudgetReached
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BossGoalTone {
+    Accent,
+    Secondary,
+    Tertiary,
+    Warning,
+    Danger,
+    Success,
+}
+
+impl BossGoalTone {
+    fn color(self, theme: &Theme) -> Hsla {
+        match self {
+            Self::Accent => theme.accent,
+            Self::Secondary => theme.text_secondary,
+            Self::Tertiary => theme.text_tertiary,
+            Self::Warning => theme.warning,
+            Self::Danger => theme.danger,
+            Self::Success => theme.success,
+        }
+    }
+}
+
+/// Lifecycle plus cached session evidence → section bucket and status, in
+/// the design's precedence order: queue admission, explicit terminal
+/// results, then live session signals.
+fn boss_goal_status(
+    row: &boss::BossGoalRow,
+    session: Option<&AgentSession>,
+) -> (BossGoalBucket, BossGoalStatus) {
+    use waku_protocol::boss::EmployeeLifecycle;
+    let goal_status = session
+        .and_then(|session| session.thread_goal.as_ref())
+        .map(|goal| goal.status);
+    match row.lifecycle {
+        EmployeeLifecycle::Queued => (BossGoalBucket::Pending, BossGoalStatus::Queued),
+        EmployeeLifecycle::Dispatching => {
+            (BossGoalBucket::Running, BossGoalStatus::Starting)
+        }
+        EmployeeLifecycle::Expired => {
+            let status = if session.is_some_and(|session| session.status == SessionStatus::Failed)
+            {
+                BossGoalStatus::Failed
+            } else if row.blocker.is_some() {
+                BossGoalStatus::Attention
+            } else if goal_status == Some(crate::model::ThreadGoalStatus::Complete) {
+                BossGoalStatus::Complete
+            } else if goal_status == Some(crate::model::ThreadGoalStatus::BudgetLimited) {
+                BossGoalStatus::BudgetReached
+            } else {
+                BossGoalStatus::Finished
+            };
+            (BossGoalBucket::Finished, status)
+        }
+        EmployeeLifecycle::Working | EmployeeLifecycle::Finishing => {
+            if session.is_some_and(|session| session.status == SessionStatus::Failed) {
+                return (BossGoalBucket::Running, BossGoalStatus::Failed);
+            }
+            match goal_status {
+                Some(crate::model::ThreadGoalStatus::Complete) => {
+                    return (BossGoalBucket::Finished, BossGoalStatus::Complete);
+                }
+                Some(crate::model::ThreadGoalStatus::BudgetLimited) => {
+                    return (BossGoalBucket::Finished, BossGoalStatus::BudgetReached);
+                }
+                _ => {}
+            }
+            if row.lifecycle == EmployeeLifecycle::Finishing {
+                return (BossGoalBucket::Running, BossGoalStatus::Finishing);
+            }
+            if row.blocker.is_some() {
+                return (BossGoalBucket::Running, BossGoalStatus::Attention);
+            }
+            let status = match goal_status {
+                Some(crate::model::ThreadGoalStatus::Blocked) => BossGoalStatus::Blocked,
+                Some(crate::model::ThreadGoalStatus::Paused) => BossGoalStatus::Paused,
+                Some(crate::model::ThreadGoalStatus::UsageLimited) => {
+                    BossGoalStatus::UsageLimited
+                }
+                _ => match session.map(|session| session.status) {
+                    Some(SessionStatus::Waiting) => BossGoalStatus::NeedsInput,
+                    Some(SessionStatus::Connecting) => BossGoalStatus::Starting,
+                    Some(SessionStatus::Working) => BossGoalStatus::Working,
+                    Some(SessionStatus::Background) => BossGoalStatus::BackgroundWork,
+                    // An unfinished pursuit with no live turn — including an
+                    // admitted employee idle between prompts — reads Active.
+                    Some(_) => BossGoalStatus::Active,
+                    None => BossGoalStatus::Unavailable,
+                },
+            };
+            (BossGoalBucket::Running, status)
+        }
+    }
+}
+
+/// A goal row resolved against the cached session snapshot — everything the
+/// list item builder paints, prepared once per panel refresh so the
+/// virtualized builder touches only prepared data.
+struct BossGoalPanelRow {
+    session_id: Uuid,
+    bucket: BossGoalBucket,
+    status: BossGoalStatus,
+    title: String,
+    employee_name: String,
+    avatar: Option<Arc<gpui::RenderImage>>,
+    project_label: String,
+    worktree: bool,
+    updated_label: Option<String>,
+    reason: Option<String>,
+    reason_attention: bool,
+    aria: String,
+    tooltip: String,
+    updated_sort: u64,
+    created_sort: u64,
+    rank_sort: usize,
+    destination: bool,
+}
+
+enum BossGoalItem {
+    Header {
+        section: boss::BossGoalSection,
+        label: String,
+        count: usize,
+        attention: usize,
+        collapsed: bool,
+        top_gap: bool,
+    },
+    Row(Arc<BossGoalPanelRow>),
+}
+
+/// One disclosure header — chevron, quiet label, count, and the "needs
+/// attention" tally the Finished header always carries and folded sections
+/// carry in place of their hidden rows.
+#[track_caller]
+fn boss_goal_section_header(
+    section: boss::BossGoalSection,
+    label: &str,
+    count: usize,
+    attention: usize,
+    collapsed: bool,
+    top_gap: bool,
+    key: waku_client::DaemonKey,
+    waku: &WeakEntity<Waku>,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let toggle_waku = waku.clone();
+    let arrow_waku = waku.clone();
+    div()
+        .id(SharedString::from(format!(
+            "boss-goal-header-{key:?}-{section:?}"
+        )))
+        .tab_index(0)
+        .when(top_gap, |element| element.mt(px(GOALS_PANEL_SECTION_GAP)))
+        .h(px(28.0))
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .rounded(px(6.0))
+        .cursor_default()
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .hover(|style| style.bg(theme.overlay))
+        .active(|style| style.bg(theme.overlay_strong))
+        .child(icon(
+            if collapsed {
+                "icons/chevron-right.svg"
+            } else {
+                "icons/chevron-down.svg"
+            },
+            11.0,
+            theme.text_tertiary,
+        ))
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(label.to_owned()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(sp(11.0))
+                .text_color(theme.text_tertiary)
+                .child(count.to_string()),
+        )
+        .child(div().flex_1())
+        .when(
+            attention > 0 && (section == boss::BossGoalSection::Finished || collapsed),
+            |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.warning)
+                        .child(tr!("boss.goals_needs_attention", count = attention)),
+                )
+            },
+        )
+        .on_activation_app(move |_, cx| {
+            let _ = toggle_waku.update(cx, |this, cx| {
+                let id = (key, section);
+                if !this.boss_ui.goals_collapsed.remove(&id) {
+                    this.boss_ui.goals_collapsed.insert(id);
+                }
+                cx.notify();
+            });
+        })
+        .on_key_down(move |event, _, cx| {
+            let collapse = match event.keystroke.key.as_str() {
+                "left" => true,
+                "right" => false,
+                _ => return,
+            };
+            let _ = arrow_waku.update(cx, |this, cx| {
+                let id = (key, section);
+                if collapse {
+                    this.boss_ui.goals_collapsed.insert(id);
+                } else {
+                    this.boss_ui.goals_collapsed.remove(&id);
+                }
+                cx.notify();
+            });
+            cx.stop_propagation();
+        })
+}
+
+/// The compact two-line goal row: status icon and task title, then the
+/// employee's avatar and name, project folder and name, the worktree fork
+/// hugging the trailing relative update time. Attention states add a small
+/// reason line. Activation defers to `on_activation_app` so the list item
+/// builder never re-leases Waku.
+#[track_caller]
+fn boss_goal_panel_row_element(
+    row: &Arc<BossGoalPanelRow>,
+    waku: &WeakEntity<Waku>,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = Theme::current(cx);
+    let (icon_path, tone, spin) = row.status.marker();
+    let status_icon = if spin {
+        motion::spin_slow(icon(icon_path, 12.0, tone.color(&theme)))
+    } else {
+        icon(icon_path, 12.0, tone.color(&theme)).into_any_element()
+    };
+    let avatar = row.avatar.clone().map_or_else(
+        || {
+            div()
+                .size(px(GOALS_PANEL_AVATAR))
+                .rounded(px(6.0))
+                .bg(theme.overlay)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(sp(10.0))
+                .text_color(theme.text_secondary)
+                .child(row.employee_name.chars().next().unwrap_or('B').to_string())
+                .into_any_element()
+        },
+        |image| {
+            img(image)
+                .size(px(GOALS_PANEL_AVATAR))
+                .rounded(px(6.0))
+                .into_any_element()
+        },
+    );
+    let reason_color = if row.reason_attention {
+        row.status.marker().1.color(&theme)
+    } else {
+        theme.text_tertiary
+    };
+    let session_id = row.session_id;
+    let activate_waku = waku.clone();
+    div()
+        .id(SharedString::from(format!("boss-goal-{session_id}")))
+        .when(row.destination, |element| element.tab_index(0))
+        .w_full()
+        .px(px(8.0))
+        .py(px(7.0))
+        .rounded(px(8.0))
+        .flex()
+        .flex_col()
+        .gap(px(3.0))
+        .aria_label(row.aria.clone())
+        .tooltip(Tooltip::text(row.tooltip.clone()))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .when(row.destination, |element| {
+            element
+                .cursor_default()
+                .hover(|style| style.bg(theme.overlay))
+                .active(|style| style.bg(theme.overlay_strong))
+                .on_activation_app(move |_, cx| {
+                    let _ = activate_waku.update(cx, |this, cx| {
+                        this.request_session_activation(
+                            session_id,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        );
+                    });
+                })
+        })
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(status_icon),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .line_height(sp(16.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(row.title.clone()),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .child(div().flex_none().child(avatar))
+                .child(
+                    div()
+                        .flex_none()
+                        .max_w(px(112.0))
+                        .truncate()
+                        .text_size(sp(11.5))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_secondary)
+                        .child(row.employee_name.clone()),
+                )
+                .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(11.0))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child(row.project_label.clone()),
+                )
+                .when(row.worktree, |element| {
+                    element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                })
+                .when_some(row.updated_label.clone(), |element, label| {
+                    element.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(label),
+                    )
+                }),
+        )
+        .when_some(row.reason.clone(), |element, reason| {
+            element.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .truncate()
+                    .pl(px(18.0))
+                    .text_size(sp(11.5))
+                    .line_height(sp(14.0))
+                    .text_color(reason_color)
+                    .child(reason),
+            )
+        })
+}
+
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
@@ -2009,6 +2502,137 @@ mod tests {
         assert_eq!(
             fade_safe_tab_offset(px(0.0), px(0.0), px(0.0), px(100.0), px(0.0), px(300.0),),
             px(0.0)
+        );
+    }
+
+    /// The lifecycle contract the Goals panel's sectioning depends on:
+    /// admission outranks stale thread state, a terminal thread goal
+    /// graduates a live row to Finished, and neutral expiry never reads as
+    /// success.
+    #[test]
+    fn goal_status_buckets_follow_lifecycle_then_terminal_evidence() {
+        use waku_protocol::boss::EmployeeLifecycle;
+
+        let goal_row = |lifecycle, blocker: Option<&str>| boss::BossGoalRow {
+            session_id: Uuid::new_v4(),
+            name: "Nina".into(),
+            job_title: "Reviewer".into(),
+            lifecycle,
+            blocker: blocker.map(str::to_owned),
+            created_at: Some(100),
+            expired_at: None,
+            queued_at: None,
+            queued_objective: None,
+            queued_project: None,
+            queue_detail: None,
+            queue_rank: None,
+            group_id: None,
+        };
+        let session = |status| {
+            let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+            session.status = status;
+            session
+        };
+        let thread_goal = |status| crate::model::ThreadGoal {
+            objective: "Ship it".into(),
+            status,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 0,
+        };
+
+        assert_eq!(
+            boss_goal_status(
+                &goal_row(EmployeeLifecycle::Queued, None),
+                Some(&session(SessionStatus::Working))
+            ),
+            (BossGoalBucket::Pending, BossGoalStatus::Queued)
+        );
+        assert_eq!(
+            boss_goal_status(
+                &goal_row(EmployeeLifecycle::Dispatching, None),
+                Some(&session(SessionStatus::Idle))
+            ),
+            (BossGoalBucket::Running, BossGoalStatus::Starting)
+        );
+
+        // Expired rows are always Finished; outcome evidence picks the label.
+        let expired = goal_row(EmployeeLifecycle::Expired, None);
+        let mut failed_session = session(SessionStatus::Failed);
+        failed_session.thread_goal = Some(thread_goal(crate::model::ThreadGoalStatus::Complete));
+        assert_eq!(
+            boss_goal_status(&expired, Some(&failed_session)),
+            (BossGoalBucket::Finished, BossGoalStatus::Failed)
+        );
+        assert_eq!(
+            boss_goal_status(
+                &goal_row(EmployeeLifecycle::Expired, Some("signing identity")),
+                Some(&session(SessionStatus::Idle))
+            ),
+            (BossGoalBucket::Finished, BossGoalStatus::Attention)
+        );
+        let mut complete_session = session(SessionStatus::Idle);
+        complete_session.thread_goal =
+            Some(thread_goal(crate::model::ThreadGoalStatus::Complete));
+        assert_eq!(
+            boss_goal_status(&expired, Some(&complete_session)),
+            (BossGoalBucket::Finished, BossGoalStatus::Complete)
+        );
+        let mut budget_session = session(SessionStatus::Idle);
+        budget_session.thread_goal =
+            Some(thread_goal(crate::model::ThreadGoalStatus::BudgetLimited));
+        assert_eq!(
+            boss_goal_status(&expired, Some(&budget_session)),
+            (BossGoalBucket::Finished, BossGoalStatus::BudgetReached)
+        );
+        assert_eq!(
+            boss_goal_status(&expired, Some(&session(SessionStatus::Idle))),
+            (BossGoalBucket::Finished, BossGoalStatus::Finished)
+        );
+
+        // A terminal thread goal graduates a live row to Finished; teardown
+        // and attention states stay In progress.
+        let working = goal_row(EmployeeLifecycle::Working, None);
+        assert_eq!(
+            boss_goal_status(&working, Some(&complete_session)),
+            (BossGoalBucket::Finished, BossGoalStatus::Complete)
+        );
+        assert_eq!(
+            boss_goal_status(&working, Some(&failed_session)),
+            (BossGoalBucket::Running, BossGoalStatus::Failed)
+        );
+        assert_eq!(
+            boss_goal_status(
+                &goal_row(EmployeeLifecycle::Working, Some("needs a decision")),
+                Some(&session(SessionStatus::Idle))
+            ),
+            (BossGoalBucket::Running, BossGoalStatus::Attention)
+        );
+        assert_eq!(
+            boss_goal_status(
+                &goal_row(EmployeeLifecycle::Finishing, None),
+                Some(&session(SessionStatus::Working))
+            ),
+            (BossGoalBucket::Running, BossGoalStatus::Finishing)
+        );
+        assert_eq!(
+            boss_goal_status(&working, Some(&session(SessionStatus::Waiting))),
+            (BossGoalBucket::Running, BossGoalStatus::NeedsInput)
+        );
+        assert_eq!(
+            boss_goal_status(&working, Some(&session(SessionStatus::Working))),
+            (BossGoalBucket::Running, BossGoalStatus::Working)
+        );
+        assert_eq!(
+            boss_goal_status(&working, Some(&session(SessionStatus::Idle))),
+            (BossGoalBucket::Running, BossGoalStatus::Active)
+        );
+        assert_eq!(
+            boss_goal_status(&working, None),
+            (BossGoalBucket::Running, BossGoalStatus::Unavailable)
         );
     }
 }
@@ -8250,11 +8874,185 @@ impl Waku {
             }))
     }
 
+    /// Resolves one cached goal row against the cached session snapshot —
+    /// title, project, workspace, status, and the relative update label —
+    /// so the list item builders paint only prepared data.
+    fn prepare_boss_goal_row(
+        &self,
+        row: &boss::BossGoalRow,
+        session: Option<&AgentSession>,
+        now: u64,
+    ) -> BossGoalPanelRow {
+        let (bucket, status) = boss_goal_status(row, session);
+        let status_label = status.label();
+        // A meaningful task title wins; the seeded employee-name title must
+        // not suppress the objective fallbacks.
+        let session_title = session.and_then(|session| {
+            let explicit = session.title.trim();
+            if !explicit.is_empty()
+                && explicit != AgentSession::DEFAULT_TITLE
+                && explicit != row.name
+            {
+                return Some(explicit.to_owned());
+            }
+            session
+                .auto_title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty() && *title != row.name)
+                .map(str::to_owned)
+        });
+        let title = session_title
+            .or_else(|| {
+                session
+                    .and_then(|session| session.thread_goal.as_ref())
+                    .map(|goal| goal.objective.trim())
+                    .filter(|objective| !objective.is_empty())
+                    .map(str::to_owned)
+            })
+            .or_else(|| row.queued_objective.clone())
+            .or_else(|| (!row.job_title.is_empty()).then(|| row.job_title.clone()))
+            .unwrap_or_else(|| tr!("boss.goals_untitled"));
+        let project = session.and_then(|session| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+        });
+        // The queued ticket's declared project stands in until the
+        // assignment's session shell exists.
+        let project_label = project
+            .map(Project::display_name)
+            .or_else(|| row.queued_project.clone())
+            .unwrap_or_else(|| tr!("boss.goals_project_unavailable"));
+        let worktree_name = session.and_then(|session| match &session.workspace {
+            SessionWorkspace::Worktree { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        // Last-updated: the task's own stamp, lifted by a newer admission
+        // or finish timestamp when the session snapshot lags.
+        let updated_at = [
+            session.map(|session| session.updated_at),
+            row.expired_at,
+            row.queued_at,
+            row.created_at,
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        let updated_label = updated_at.map(|updated| {
+            let elapsed = now.saturating_sub(updated);
+            if elapsed < 60 {
+                sidebar::format_time_ago(elapsed)
+            } else {
+                tr!(
+                    "boss.goals_updated_ago",
+                    ago = sidebar::format_time_ago(elapsed)
+                )
+            }
+        });
+        let destination = session.is_some();
+        let reason = if row.lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued {
+            // Pending detail stays in the tooltip, never a routine row line.
+            None
+        } else if let Some(blocker) = &row.blocker {
+            Some(blocker.clone())
+        } else if status.attention() {
+            Some(status_label.clone())
+        } else if !destination {
+            Some(tr!("boss.goals_task_unavailable"))
+        } else {
+            None
+        };
+        let avatar = self
+            .boss_ui
+            .identities
+            .get(&row.session_id)
+            .and_then(|identity| {
+                self.boss_avatar_image(&identity.avatar_seed, GOALS_PANEL_AVATAR)
+            });
+        let mut tooltip = title.clone();
+        tooltip.push('\n');
+        tooltip.push_str(&row.name);
+        if !row.job_title.is_empty() {
+            tooltip.push_str(" · ");
+            tooltip.push_str(&row.job_title);
+        }
+        tooltip.push('\n');
+        tooltip.push_str(&project_label);
+        if let Some(name) = &worktree_name {
+            tooltip.push_str(" · ");
+            tooltip.push_str(&tr!("boss.goals_worktree"));
+            tooltip.push(' ');
+            tooltip.push_str(name);
+        }
+        if let Some(path) = project.map(|project| project.path.display().to_string()) {
+            tooltip.push('\n');
+            tooltip.push_str(&path);
+        }
+        tooltip.push('\n');
+        tooltip.push_str(&status_label);
+        if let Some(label) = &updated_label {
+            tooltip.push_str(" · ");
+            tooltip.push_str(label);
+        }
+        if let Some(reason) = &reason {
+            tooltip.push('\n');
+            tooltip.push_str(reason);
+        } else if let Some(detail) = &row.queue_detail {
+            tooltip.push('\n');
+            tooltip.push_str(detail);
+        }
+        BossGoalPanelRow {
+            session_id: row.session_id,
+            bucket,
+            status,
+            title: title.clone(),
+            employee_name: row.name.clone(),
+            avatar,
+            project_label,
+            worktree: worktree_name.is_some(),
+            updated_label,
+            reason,
+            reason_attention: row.blocker.is_some() || status.attention(),
+            aria: tr!(
+                "boss.goals_open_task",
+                title = title,
+                employee = row.name.clone(),
+                status = status_label
+            ),
+            tooltip,
+            updated_sort: updated_at.unwrap_or(0),
+            created_sort: row.created_at.or(row.queued_at).unwrap_or(0),
+            rank_sort: row.queue_rank.unwrap_or(usize::MAX),
+            destination,
+        }
+    }
+
     fn render_boss_goals_panel(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let Some(key) = self.boss_chat_key() else {
+            let (title, description) = if self.boss_ui.states.is_empty() {
+                (tr!("boss.goals_loading"), tr!("boss.goals_loading_body"))
+            } else {
+                (
+                    tr!("boss.goals_unavailable"),
+                    tr!("boss.goals_unavailable_body"),
+                )
+            };
+            return div()
+                .id("boss-goals-panel")
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .px(px(12.0))
+                .child(self.render_right_panel_empty_message(title, description, cx));
+        };
         let rows = self
-            .boss_chat_key()
-            .and_then(|key| self.boss_ui.goal_rows.get(&key))
+            .boss_ui
+            .goal_rows
+            .get(&key)
             .cloned()
             .unwrap_or_else(|| Arc::new(Vec::new()));
         if rows.is_empty() {
@@ -8262,151 +9060,312 @@ impl Waku {
                 .id("boss-goals-panel")
                 .flex_1()
                 .min_h_0()
-                .p(px(12.0))
-                .child(
-                    div()
-                        .w_full()
-                        .py(px(20.0))
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(tr!("boss.goals_empty")),
-                );
+                .flex()
+                .flex_col()
+                .px(px(12.0))
+                .child(self.render_right_panel_empty_message(
+                    tr!("boss.goals_empty_title"),
+                    tr!("boss.goals_empty_body"),
+                    cx,
+                ));
         }
-        let list_state = self.boss_ui.goals_list.clone();
-        let owner = self.boss_chat_key();
-        if self.boss_ui.goals_list_owner != owner || list_state.item_count() != rows.len() {
-            self.boss_ui.goals_list_owner = owner;
-            list_state.reset_with_uniform_height(rows.len(), px(64.0));
-        }
-        let scrollbar = self.boss_ui.goals_scrollbar.clone();
-        let entity = cx.entity().downgrade();
-        div()
-            .id("boss-goals-panel")
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .p(px(12.0))
-            .child(
-                list(list_state.clone(), move |index, _window, cx| {
-                    let Some(row) = rows.get(index).cloned() else {
-                        return div().into_any_element();
-                    };
-                    entity
-                        .upgrade()
-                        .map(|entity| {
-                            entity.update(cx, |this, cx| {
-                                this.render_boss_goal_row(&row, cx).into_any_element()
-                            })
-                        })
-                        .unwrap_or_else(|| div().into_any_element())
-                })
-                .size_full(),
-            )
-            .child(scrollbar::vertical(&list_state, &scrollbar))
-    }
-
-    fn render_boss_goal_row(&self, row: &boss::BossGoalRow, cx: &mut Context<Self>) -> Div {
-        let theme = Theme::current(cx);
-        let session = self
+        let sessions: HashMap<Uuid, &AgentSession> = self
             .state
             .sessions
             .iter()
-            .find(|session| session.id == row.session_id);
-        let goal = session.and_then(|session| session.thread_goal.as_ref());
-        let failed = session
-            .is_some_and(|session| session.status == crate::model::SessionStatus::Failed);
-        let expired = row.lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired;
-        let complete = expired || goal.is_some_and(|goal| goal.status.is_terminal());
-        let status = if expired {
-            if failed {
-                tr!("boss.goals_status_failed")
-            } else if row.blocked {
-                tr!("boss.goals_status_blocked")
-            } else {
-                tr!("boss.goals_status_complete")
+            .map(|session| (session.id, session))
+            .collect();
+        let now = unix_time();
+        let mut finished: Vec<Arc<BossGoalPanelRow>> = Vec::new();
+        let mut running = Vec::new();
+        let mut pending = Vec::new();
+        for row in rows.iter() {
+            let session = sessions.get(&row.session_id).copied();
+            let prepared = self.prepare_boss_goal_row(row, session, now);
+            match prepared.bucket {
+                BossGoalBucket::Finished => finished.push(Arc::new(prepared)),
+                BossGoalBucket::Running => running.push(Arc::new(prepared)),
+                BossGoalBucket::Pending => pending.push(Arc::new(prepared)),
             }
-        } else if matches!(
-            row.lifecycle,
-            waku_protocol::boss::EmployeeLifecycle::Queued
-                | waku_protocol::boss::EmployeeLifecycle::Dispatching
-        ) {
-            tr!("boss.goals_status_starting")
-        } else if goal.is_some_and(|goal| {
-            goal.status == crate::model::ThreadGoalStatus::Complete
-        }) {
-            tr!("boss.goals_status_complete")
-        } else if failed {
-            tr!("boss.goals_status_failed")
-        } else if row.blocked {
-            tr!("boss.goals_status_blocked")
-        } else if let Some(goal) = goal {
-            match goal.status {
-                crate::model::ThreadGoalStatus::Active => match session.map(|s| s.status) {
-                    Some(crate::model::SessionStatus::Connecting) => {
-                        tr!("boss.goals_status_starting")
+        }
+        // Finished is newest first; In progress leads with actionable items
+        // then assignment age; Pending follows daemon admission order.
+        finished.sort_by(|a, b| {
+            b.updated_sort
+                .cmp(&a.updated_sort)
+                .then_with(|| a.session_id.cmp(&b.session_id))
+        });
+        running.sort_by(|a, b| {
+            b.reason
+                .is_some()
+                .cmp(&a.reason.is_some())
+                .then_with(|| a.created_sort.cmp(&b.created_sort))
+                .then_with(|| a.session_id.cmp(&b.session_id))
+        });
+        pending.sort_by(|a, b| {
+            a.rank_sort
+                .cmp(&b.rank_sort)
+                .then_with(|| a.session_id.cmp(&b.session_id))
+        });
+        let finished_collapsed = self
+            .boss_ui
+            .goals_collapsed
+            .contains(&(key, boss::BossGoalSection::Finished));
+        let in_progress_collapsed = self
+            .boss_ui
+            .goals_collapsed
+            .contains(&(key, boss::BossGoalSection::InProgress));
+        let pending_collapsed = self
+            .boss_ui
+            .goals_collapsed
+            .contains(&(key, boss::BossGoalSection::Pending));
+        let history_expanded = self.boss_ui.goals_history_expanded.contains(&key);
+        let recent_limit = if history_expanded {
+            finished.len()
+        } else {
+            GOALS_PANEL_RECENT_LIMIT.min(finished.len())
+        };
+        let visible_finished: Vec<Arc<BossGoalPanelRow>> =
+            finished.iter().take(recent_limit).cloned().collect();
+        let older_count = finished.len().saturating_sub(visible_finished.len());
+        let mut ongoing_items: Vec<BossGoalItem> = Vec::new();
+        for (section, label, section_rows, collapsed) in [
+            (
+                boss::BossGoalSection::InProgress,
+                tr!("boss.goals_in_progress"),
+                &running,
+                in_progress_collapsed,
+            ),
+            (
+                boss::BossGoalSection::Pending,
+                tr!("boss.goals_section_pending"),
+                &pending,
+                pending_collapsed,
+            ),
+        ] {
+            if section_rows.is_empty() {
+                continue;
+            }
+            ongoing_items.push(BossGoalItem::Header {
+                section,
+                label,
+                count: section_rows.len(),
+                attention: section_rows
+                    .iter()
+                    .filter(|row| row.reason.is_some())
+                    .count(),
+                collapsed,
+                top_gap: !ongoing_items.is_empty(),
+            });
+            if !collapsed {
+                ongoing_items.extend(section_rows.iter().cloned().map(BossGoalItem::Row));
+            }
+        }
+        // Reset a viewport only when its item sequence or a row's height
+        // changes — count-preserving reorders reset too, but title and
+        // timestamp ticks never do.
+        let finished_signature = {
+            let mut hasher = DefaultHasher::new();
+            for row in &visible_finished {
+                row.session_id.hash(&mut hasher);
+                row.reason.is_some().hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        let ongoing_signature = {
+            let mut hasher = DefaultHasher::new();
+            for item in &ongoing_items {
+                match item {
+                    BossGoalItem::Header {
+                        section,
+                        count,
+                        attention,
+                        collapsed,
+                        ..
+                    } => {
+                        0u8.hash(&mut hasher);
+                        section.hash(&mut hasher);
+                        count.hash(&mut hasher);
+                        attention.hash(&mut hasher);
+                        collapsed.hash(&mut hasher);
                     }
-                    Some(
-                        crate::model::SessionStatus::Working
-                        | crate::model::SessionStatus::Background,
-                    ) => tr!("boss.goals_status_working"),
-                    Some(crate::model::SessionStatus::Waiting) => tr!("boss.goals_status_waiting"),
-                    _ => tr!("boss.goals_status_active"),
-                },
-                crate::model::ThreadGoalStatus::Paused => tr!("boss.goals_status_paused"),
-                crate::model::ThreadGoalStatus::Blocked => tr!("boss.goals_status_blocked"),
-                crate::model::ThreadGoalStatus::UsageLimited => {
-                    tr!("boss.goals_status_usage_limited")
+                    BossGoalItem::Row(row) => {
+                        1u8.hash(&mut hasher);
+                        row.session_id.hash(&mut hasher);
+                        row.reason.is_some().hash(&mut hasher);
+                    }
                 }
-                crate::model::ThreadGoalStatus::BudgetLimited => {
-                    tr!("boss.goals_status_budget_limited")
-                }
-                crate::model::ThreadGoalStatus::Complete => tr!("boss.goals_status_complete"),
             }
-        } else {
-            match session.map(|s| s.status) {
-                Some(crate::model::SessionStatus::Connecting) => {
-                    tr!("boss.goals_status_starting")
-                }
-                Some(
-                    crate::model::SessionStatus::Working
-                    | crate::model::SessionStatus::Background,
-                ) => tr!("boss.goals_status_working"),
-                Some(crate::model::SessionStatus::Waiting) => tr!("boss.goals_status_waiting"),
-                _ => tr!("boss.goals_status_active"),
-            }
+            hasher.finish()
         };
-        let category = if complete {
-            tr!("boss.goals_completed")
-        } else {
-            tr!("boss.goals_in_progress")
-        };
-        let job = if row.job_title.is_empty() {
-            row.name.clone()
-        } else {
-            format!("{} · {}", row.name, row.job_title)
-        };
-        div()
-            .w_full()
-            .mb(px(6.0))
-            .px(px(10.0))
-            .py(px(9.0))
-            .rounded(px(8.0))
-            .bg(theme.raised)
+        let owner_changed = self.boss_ui.goals_list_owner != Some(key);
+        let finished_list = self.boss_ui.goals_finished_list.clone();
+        let ongoing_list = self.boss_ui.goals_ongoing_list.clone();
+        if owner_changed || self.boss_ui.goals_finished_signature != Some(finished_signature) {
+            self.boss_ui.goals_finished_signature = Some(finished_signature);
+            finished_list
+                .reset_with_uniform_height(visible_finished.len(), px(GOALS_PANEL_ROW_HEIGHT));
+        }
+        if owner_changed || self.boss_ui.goals_ongoing_signature != Some(ongoing_signature) {
+            self.boss_ui.goals_ongoing_signature = Some(ongoing_signature);
+            ongoing_list.reset_with_uniform_height(ongoing_items.len(), px(GOALS_PANEL_ROW_HEIGHT));
+        }
+        self.boss_ui.goals_list_owner = Some(key);
+        let offline = matches!(key, waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
+        let waku = cx.entity().downgrade();
+        let mut panel = div()
+            .id("boss-goals-panel")
+            .flex_1()
+            .min_h_0()
             .flex()
             .flex_col()
-            .gap(px(4.0))
-            .child(div().text_size(sp(12.5)).text_color(theme.text).child(job))
-            .child(
+            .px(px(12.0));
+        if offline {
+            panel = panel.child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_size(sp(11.5))
-                    .text_color(theme.text_secondary)
-                    .child(category)
-                    .child("·")
-                    .child(status),
-            )
+                    .flex_none()
+                    .pb(px(4.0))
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.goals_offline")),
+            );
+        }
+        if !finished.is_empty() {
+            let attention = finished.iter().filter(|row| row.reason.is_some()).count();
+            panel = panel.child(boss_goal_section_header(
+                boss::BossGoalSection::Finished,
+                &tr!("boss.goals_section_finished"),
+                finished.len(),
+                attention,
+                finished_collapsed,
+                false,
+                key,
+                &waku,
+                &theme,
+            ));
+            if !finished_collapsed {
+                // The history viewport caps at five rows or 45% of the panel
+                // body while ongoing work exists; Show more expands history
+                // inside the same bound rather than pushing sections down.
+                let estimate: f32 = visible_finished
+                    .iter()
+                    .map(|row| {
+                        GOALS_PANEL_ROW_HEIGHT
+                            + if row.reason.is_some() {
+                                GOALS_PANEL_REASON_HEIGHT
+                            } else {
+                                0.0
+                            }
+                    })
+                    .sum();
+                let ongoing_exists = !ongoing_items.is_empty();
+                let scrollbar = self.boss_ui.goals_finished_scrollbar.clone();
+                let list_state = finished_list.clone();
+                let items = Arc::new(visible_finished);
+                let weak = waku.clone();
+                panel = panel.child(
+                    div()
+                        .flex_none()
+                        .relative()
+                        .when(ongoing_exists, |element| {
+                            element
+                                .h(px(estimate.min(GOALS_PANEL_FINISHED_MAX_HEIGHT)))
+                                .max_h(gpui::relative(GOALS_PANEL_FINISHED_HEIGHT_FRACTION))
+                        })
+                        .when(!ongoing_exists, |element| element.flex_1().min_h_0())
+                        .child(
+                            list(list_state.clone(), move |index, _window, cx| {
+                                items.get(index).map_or_else(
+                                    || div().into_any_element(),
+                                    |row| {
+                                        boss_goal_panel_row_element(row, &weak, cx)
+                                            .into_any_element()
+                                    },
+                                )
+                            })
+                            .size_full(),
+                        )
+                        .child(scrollbar::vertical(&list_state, &scrollbar)),
+                );
+                if finished.len() > GOALS_PANEL_RECENT_LIMIT {
+                    let weak = waku.clone();
+                    panel = panel.child(
+                        div()
+                            .id("boss-goals-history-toggle")
+                            .tab_index(0)
+                            .flex_none()
+                            .h(px(28.0))
+                            .mt(px(4.0))
+                            .flex()
+                            .items_center()
+                            .cursor_default()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|style| style.text_color(theme.text))
+                            .child(if history_expanded {
+                                tr!("boss.goals_show_less")
+                            } else {
+                                tr!("boss.goals_show_older", count = older_count)
+                            })
+                            .on_activation_app(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    if !this.boss_ui.goals_history_expanded.remove(&key) {
+                                        this.boss_ui.goals_history_expanded.insert(key);
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+            }
+        }
+        if !ongoing_items.is_empty() {
+            let scrollbar = self.boss_ui.goals_ongoing_scrollbar.clone();
+            let list_state = ongoing_list.clone();
+            let items = Arc::new(ongoing_items);
+            let weak = waku.clone();
+            panel = panel.child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .when(!finished.is_empty(), |element| {
+                        element.mt(px(GOALS_PANEL_SECTION_GAP))
+                    })
+                    .child(
+                        list(list_state.clone(), move |index, _window, cx| {
+                            items.get(index).map_or_else(
+                                || div().into_any_element(),
+                                |item| match item {
+                                    BossGoalItem::Header {
+                                        section,
+                                        label,
+                                        count,
+                                        attention,
+                                        collapsed,
+                                        top_gap,
+                                    } => {
+                                        let theme = Theme::current(cx);
+                                        boss_goal_section_header(
+                                            *section, label, *count, *attention, *collapsed,
+                                            *top_gap, key, &weak, &theme,
+                                        )
+                                        .into_any_element()
+                                    }
+                                    BossGoalItem::Row(row) => {
+                                        boss_goal_panel_row_element(row, &weak, cx)
+                                            .into_any_element()
+                                    }
+                                },
+                            )
+                        })
+                        .size_full(),
+                    )
+                    .child(scrollbar::vertical(&list_state, &scrollbar)),
+            );
+        }
+        panel
     }
 
     fn expand_right_panel_diff_gap(
