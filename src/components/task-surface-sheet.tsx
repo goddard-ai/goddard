@@ -13,6 +13,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'octane';
@@ -27,6 +28,7 @@ import {
   Text,
   TextArea,
   TextInput,
+  useColorScheme,
   useSafeAreaInsets,
   View,
   RichText,
@@ -35,7 +37,10 @@ import {
 
 import { AppSymbol } from '@/components/app-symbol';
 import { DiffView } from '@/components/diff-view';
+import { TerminalView } from '@/components/terminal-view';
 import { MonoFont, NativeTint } from '@/lib/theme-platform';
+import type { TerminalViewHandle } from '@/lib/terminal-page';
+import { randomUUID } from '@/lib/uuid';
 import { Radius } from '@/lib/theme-colors';
 import { useTheme } from '@/lib/use-theme';
 import {
@@ -164,7 +169,7 @@ function SurfaceBody({
 }) {
   const root = project ? sessionCwd(session, project) : null;
   if (surface === 'terminal') {
-    return <TerminalSurface root={root} />;
+    return <TerminalSurface root={root} sessionId={session.id} />;
   }
 
   if (surface === 'files') {
@@ -221,21 +226,141 @@ function SurfaceHeader({
   );
 }
 
-/** The reference hosts expo-libghostty — a native terminal widget with no
- * xplat equivalent. FLAGGED: the protocol (openTerminal/writeTerminal/
- * resizeTerminal + terminalOutput events) is wired in daemon-api, but there
- * is no shared terminal renderer to drive it with. */
-function TerminalSurface({ root }: { root: string | null }) {
+function TerminalSurface({
+  root,
+  sessionId,
+}: {
+  root: string | null;
+  sessionId: string;
+}) {
   const theme = useTheme();
   return (
     <View style={[styles.fill, { backgroundColor: theme.surface }]}>
       <SurfaceHeader surface="terminal" />
-      <PanelMessage
-        detail={root
-          ? 'The native terminal widget is not available in this build yet.'
-          : 'This task does not have an available workspace.'}
-        title={root ? 'Terminal unavailable' : 'No workspace'}
+      {root ? (
+        <TerminalSession root={root} sessionId={sessionId} />
+      ) : (
+        <PanelMessage
+          detail="This task does not have an available workspace."
+          title="No workspace"
+        />
+      )}
+    </View>
+  );
+}
+
+/** xterm.js inside a framework WebView (see components/terminal-view) wired
+ * to the daemon's openTerminal/writeTerminal/resizeTerminal protocol, the
+ * same event flow the reference drives expo-libghostty with. */
+function TerminalSession({ root, sessionId }: { root: string; sessionId: string }) {
+  const daemon = useDaemon();
+  const theme = useTheme();
+  const colorScheme = useColorScheme();
+  const terminal = useRef<TerminalViewHandle | null>(null);
+  const terminalId = useRef(randomUUID()).current;
+  const [error, setError] = useState<string | null>(null);
+  const [exited, setExited] = useState(false);
+
+  useEffect(() => {
+    const client = daemon.client;
+    if (!client || daemon.phase !== 'connected') {return;}
+    let disposed = false;
+    setError(null);
+    setExited(false);
+    const unsubscribe = client.subscribe(terminalId, terminalId, (event) => {
+      if (event.event.kind === 'terminalOutput') {
+        const payload = event.event.payload as { data?: unknown };
+        if (typeof payload.data !== 'string') {return;}
+        terminal.current?.write(payload.data);
+      } else if (event.event.kind === 'terminalExited') {
+        setExited(true);
+        terminal.current?.finish(0);
+      } else if (event.event.kind === 'terminalError') {
+        setError(
+          typeof event.event.payload === 'string'
+            ? event.event.payload
+            : 'The terminal connection failed.',
+        );
+      }
+    });
+
+    void client
+      .request(
+        { type: 'openTerminal', cwd: root, cols: 80, rows: 24, owner: sessionId },
+        terminalId,
+        terminalId,
+      )
+      .catch((cause) => {
+        if (!disposed) {setError(errorMessage(cause));}
+      });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+      void client
+        .notify({ type: 'closeTerminal' }, terminalId, terminalId)
+        .catch(() => {});
+    };
+  }, [daemon.client, daemon.phase, root, sessionId, terminalId]);
+
+  const status =
+    error ?? (exited ? 'Shell exited' : daemon.phase !== 'connected' ? 'Reconnecting…' : null);
+
+  const terminalTheme = useMemo(
+    () => ({
+      background: theme.inset,
+      foreground: theme.text,
+      cursor: theme.text,
+      selectionBackground: colorScheme === 'dark' ? '#40546f' : '#c8d8ee',
+    }),
+    [theme.inset, theme.text, colorScheme],
+  );
+
+  return (
+    <View style={styles.terminalBody}>
+      <TerminalView
+        bind={(handle) => {
+          terminal.current = handle;
+        }}
+        bridgeId={terminalId}
+        fontFamily={`${MonoFont}, monospace`}
+        fontSize={13}
+        onInput={(data) => {
+          const client = daemon.client;
+          if (!client || daemon.phase !== 'connected' || exited) {return;}
+          void client
+            .notify({ type: 'writeTerminal', data }, terminalId, terminalId)
+            .catch((cause) => setError(errorMessage(cause)));
+        }}
+        onResize={(cols, rows) => {
+          const client = daemon.client;
+          if (!client || daemon.phase !== 'connected') {return;}
+          void client
+            .notify(
+              { type: 'resizeTerminal', cols: clampU16(cols), rows: clampU16(rows) },
+              terminalId,
+              terminalId,
+            )
+            .catch(() => {});
+        }}
+        style={styles.fill}
+        theme={terminalTheme}
       />
+      {status ? (
+        <Text
+          numberOfLines={2}
+          style={[
+            styles.terminalStatus,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              color: error ? theme.danger : theme.textSecondary,
+            },
+          ]}
+        >
+          {status}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -1277,6 +1402,10 @@ function PanelMessage({ title, detail }: { title: string; detail: string }) {
   );
 }
 
+function clampU16(value: number): number {
+  return Math.min(65_535, Math.max(1, Math.round(value)));
+}
+
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
@@ -1315,6 +1444,13 @@ const styles = {
     paddingHorizontal: 15,
   },
   backLabel: { fontSize: 15.5, fontWeight: '500' },
+  terminalBody: { flex: 1, minHeight: 0 },
+  terminalStatus: {
+    borderTopWidth: hairline,
+    fontSize: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
   headerActions: { alignItems: 'center', flexDirection: 'row', gap: 14 },
   fileContent: { flex: 1, paddingHorizontal: 14, paddingTop: 4 },
   fileText: { fontFamily: MonoFont, fontSize: 12.5, lineHeight: '17px' },
