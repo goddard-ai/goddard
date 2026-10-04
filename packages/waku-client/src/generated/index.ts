@@ -117,6 +117,8 @@ export type { IssueTemplate } from "./IssueTemplate";
 export type { IssueTemplateKind } from "./IssueTemplateKind";
 export type { LandOutcome } from "./LandOutcome";
 export type { LandTarget } from "./LandTarget";
+export type { MemoryChunk } from "./MemoryChunk";
+export type { MemoryOperation } from "./MemoryOperation";
 export type { Message } from "./Message";
 export type { MessageAtom } from "./MessageAtom";
 export type { MessageAttachment } from "./MessageAttachment";

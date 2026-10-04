@@ -1,0 +1,1 @@
+- The boss can file durable facts into a structured memory store and pull them back by collection, exact search, or recency. Employees read only the collections their persona's memory folders grant; all writes stay with the boss.

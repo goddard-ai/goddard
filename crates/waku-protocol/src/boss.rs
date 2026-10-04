@@ -282,6 +282,10 @@ pub enum BossOperation {
     DismissBundle {
         id: Uuid,
     },
+    /// Direct deterministic access to the Boss's file-canonical memory store.
+    Memory {
+        operation: MemoryOperation,
+    },
     /// Pin or unpin a bundle's sidebar row; pinned bundles lead the group
     /// and never age out of it.
     PinBundle {
@@ -312,6 +316,72 @@ pub enum BossOperation {
     MarkBundleViewed {
         id: Uuid,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum MemoryOperation {
+    Insert {
+        collection: String,
+        title: String,
+        cue: String,
+        body: String,
+        source_id: String,
+    },
+    ImportFolder {
+        folder: String,
+        collection: String,
+    },
+    Surface {
+        collection: String,
+        limit: usize,
+    },
+    ListIndex,
+    Search {
+        collection: String,
+        query: String,
+    },
+    ReadChunk {
+        collection: String,
+        chunk_id: String,
+    },
+    Zoom {
+        collection: String,
+        target: String,
+    },
+}
+
+/// One immutable memory record. The daemon's file store persists it as a
+/// Markdown file: snake_case frontmatter (the field aliases) plus `body` as
+/// the file's text, while the wire form is camelCase like every other
+/// protocol type.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryChunk {
+    pub version: u32,
+    #[serde(alias = "chunk_id")]
+    pub chunk_id: String,
+    #[serde(alias = "scope_id")]
+    pub scope_id: String,
+    #[serde(alias = "collection_id")]
+    pub collection_id: String,
+    pub layer: String,
+    pub revision: u64,
+    pub title: String,
+    pub cue: String,
+    pub status: String,
+    #[serde(alias = "source_id")]
+    pub source_id: String,
+    #[serde(alias = "source_digest")]
+    pub source_digest: String,
+    #[serde(alias = "created_at")]
+    pub created_at: u64,
+    #[serde(default)]
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -358,13 +428,27 @@ pub enum BossResult {
         value: serde_json::Value,
         output: String,
     },
+    Memory {
+        index: Option<String>,
+        chunks: Vec<MemoryChunk>,
+        inserted: Option<MemoryChunk>,
+        imported: Option<usize>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum EmployeeControl {
-    Prompt { prompt: String },
-    Steer { prompt: String },
+    Prompt {
+        prompt: String,
+    },
+    Steer {
+        prompt: String,
+    },
     /// Apply a catalog-listed provider/model selection to the next turn.
     SetModel {
         provider: crate::model::ProviderKind,

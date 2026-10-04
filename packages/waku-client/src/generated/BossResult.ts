@@ -3,7 +3,8 @@ import type { AgentSession } from "./AgentSession";
 import type { AgentSessionTranscript } from "./AgentSessionTranscript";
 import type { BossFile } from "./BossFile";
 import type { BossState } from "./BossState";
+import type { MemoryChunk } from "./MemoryChunk";
 import type { Project } from "./Project";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type BossResult = { "type": "state", state: BossState, } | { "type": "context", context: string, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "summoned", sessionId: string, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, };
+export type BossResult = { "type": "state", state: BossState, } | { "type": "context", context: string, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "summoned", sessionId: string, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", index: string | null, chunks: Array<MemoryChunk>, inserted: MemoryChunk | null, imported: number | null, };

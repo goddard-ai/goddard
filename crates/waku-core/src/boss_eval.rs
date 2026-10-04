@@ -63,6 +63,9 @@ persist between eval calls for this boss session.
   rename(name)                              the boss's name
   renameEmployee(sessionId, name)
   regenerateAvatar([sessionId])             omit for the boss's own face
+  memory(#{type,...})                       memory store op: insert/importFolder/
+                                            surface/listIndex/search/readChunk/
+                                            zoom — returns its filled fields
   op(#{type,...})                           escape hatch: any operation by its
                                             JSON form, result returned whole
                                             (e.g. pinBundle/sweepBundle/archiveBundle)
@@ -483,6 +486,19 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
                     "regenerateAvatar",
                     serde_json::json!({ "sessionId": session_id.as_str() }),
                 ),
+            )
+            .and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("memory", {
+        let tx = tx.clone();
+        move |operation: Map| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                serde_json::json!({
+                    "type": "memory",
+                    "operation": dynamic_to_json(&Dynamic::from_map(operation)),
+                }),
             )
             .and_then(unwrap_result)
         }

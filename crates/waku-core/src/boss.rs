@@ -775,6 +775,124 @@ impl BossService {
                     state: self.document(),
                 })
             }
+            BossOperation::Memory { operation } => {
+                use crate::memory_engine::{Acl, Grant, Scope, Store};
+                use waku_protocol::boss::MemoryOperation;
+
+                let state = self.document();
+                let boss_principal = caller.is_none_or(|id| self.is_boss(id));
+                let principal = if boss_principal {
+                    "boss".to_owned()
+                } else {
+                    caller.context("missing Boss caller")?.to_string()
+                };
+                let mut grants = Vec::new();
+                if let Some(caller) = caller.filter(|_| !boss_principal) {
+                    if let Some(employee) = state.employees.iter().find(|e| e.session_id == caller)
+                    {
+                        for folder in &employee.permissions.memory_folders {
+                            grants.push(Grant {
+                                principal_id: principal.clone(),
+                                scope_id: "boss".into(),
+                                collections: vec![folder.clone()],
+                                read: true,
+                                write: false,
+                                grantor: "boss".into(),
+                                revision: state.revision,
+                                expires_at: employee.expired.then_some(0),
+                            });
+                        }
+                    }
+                }
+                let scope = Scope {
+                    version: 1,
+                    scope_id: "boss".into(),
+                    daemon_id: state.identity.id.to_string(),
+                    kind: "boss".into(),
+                    owner_id: "boss".into(),
+                    acl_revision: state.revision,
+                };
+                let acl = Acl {
+                    scopes: vec![scope.clone()],
+                    grants,
+                    now: waku_protocol::model::unix_time(),
+                };
+                let store = Store::open(self.root.join("files/memory-engine"))?;
+                store.create_scope(&scope)?;
+                let mut index = None;
+                let mut chunks = Vec::new();
+                let mut inserted = None;
+                let mut imported = None;
+                match operation {
+                    MemoryOperation::Insert {
+                        collection,
+                        title,
+                        cue,
+                        body,
+                        source_id,
+                    } => {
+                        inserted = Some(store.insert(
+                            &acl,
+                            &principal,
+                            "boss",
+                            &collection,
+                            &title,
+                            &cue,
+                            &body,
+                            &source_id,
+                        )?);
+                    }
+                    MemoryOperation::ImportFolder { folder, collection } => {
+                        let source = Path::new(&folder);
+                        if folder.is_empty()
+                            || source
+                                .components()
+                                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+                        {
+                            bail!("invalid Boss memory folder");
+                        }
+                        let source = self.root.join("files/memory").join(source);
+                        imported = Some(store.import_folder(
+                            &acl,
+                            &principal,
+                            "boss",
+                            source.to_str().context("invalid Boss memory path")?,
+                            &collection,
+                        )?);
+                    }
+                    MemoryOperation::Surface { collection, limit } => {
+                        chunks =
+                            store.surface_fallback(&acl, &principal, "boss", &collection, limit)?;
+                    }
+                    MemoryOperation::ListIndex => {
+                        index = Some(store.list_index(&acl, &principal, "boss")?)
+                    }
+                    MemoryOperation::Search { collection, query } => {
+                        chunks = store.search(&acl, &principal, "boss", &collection, &query)?;
+                    }
+                    MemoryOperation::ReadChunk {
+                        collection,
+                        chunk_id,
+                    } => {
+                        chunks.push(store.read_chunk(
+                            &acl,
+                            &principal,
+                            "boss",
+                            &collection,
+                            &chunk_id,
+                        )?);
+                    }
+                    MemoryOperation::Zoom { collection, target } => {
+                        chunks = store.zoom(&acl, &principal, "boss", &collection, &target)?;
+                    }
+                }
+                Ok(BossResult::Memory {
+                    index,
+                    chunks,
+                    inserted,
+                    imported,
+                })
+            }
             BossOperation::RenameEmployee { session_id, name } => {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
@@ -2640,6 +2758,143 @@ mod tests {
             "moved"
         );
         drop(migrated);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod memory_op_tests {
+    use super::*;
+    use waku_protocol::boss::MemoryOperation;
+
+    #[test]
+    fn memory_ops_follow_collection_grants() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let boss_memory = |operation| {
+            service.handle(Some(boss), BossOperation::Memory { operation })
+        };
+        let insert = |collection: &str, title: &str, cue: &str, body: &str, source: &str| {
+            MemoryOperation::Insert {
+                collection: collection.into(),
+                title: title.into(),
+                cue: cue.into(),
+                body: body.into(),
+                source_id: source.into(),
+            }
+        };
+        let BossResult::Memory {
+            inserted: Some(work),
+            ..
+        } = boss_memory(insert("work", "Launch owner", "launch owner", "Alec owns the launch.", "t:1"))
+            .unwrap()
+        else {
+            panic!("boss insert returns the chunk");
+        };
+        boss_memory(insert(
+            "private",
+            "Private note",
+            "boss-only cue",
+            "boss-only body",
+            "t:2",
+        ))
+        .unwrap();
+        // The same scope/collection/source/body is an idempotent retry.
+        let BossResult::Memory {
+            inserted: Some(again),
+            ..
+        } = boss_memory(insert("work", "Launch owner", "launch owner", "Alec owns the launch.", "t:1"))
+            .unwrap()
+        else {
+            panic!("repeat insert returns the existing chunk");
+        };
+        assert_eq!(again.chunk_id, work.chunk_id);
+
+        let persona = service.document().personas[0].id;
+        let employee = service
+            .prepare_employee(
+                boss,
+                persona,
+                "Review".into(),
+                Some(PermissionOverrides {
+                    memory_folders: Some(vec!["work".into()]),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        let employee_id = employee.session_id;
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let employee_memory = |operation| {
+            service.handle(Some(employee_id), BossOperation::Memory { operation })
+        };
+
+        let BossResult::Memory {
+            index: Some(index),
+            ..
+        } = employee_memory(MemoryOperation::ListIndex).unwrap()
+        else {
+            panic!("employee index read succeeds");
+        };
+        assert!(index.contains("Launch owner"));
+        assert!(!index.contains("Private note") && !index.contains("boss-only"));
+        let BossResult::Memory { chunks, .. } = employee_memory(MemoryOperation::Search {
+            collection: "work".into(),
+            query: "launch".into(),
+        })
+        .unwrap()
+        else {
+            panic!("employee search inside a granted collection succeeds");
+        };
+        assert_eq!(chunks.len(), 1);
+        assert!(employee_memory(MemoryOperation::ReadChunk {
+            collection: "private".into(),
+            chunk_id: work.chunk_id.clone(),
+        })
+        .is_err());
+        assert!(employee_memory(MemoryOperation::Search {
+            collection: "private".into(),
+            query: "boss-only".into(),
+        })
+        .is_err());
+        assert!(employee_memory(MemoryOperation::Surface {
+            collection: "private".into(),
+            limit: 10,
+        })
+        .is_err());
+        assert!(employee_memory(MemoryOperation::Zoom {
+            collection: "private".into(),
+            target: "topic:inbox".into(),
+        })
+        .is_err());
+        assert!(employee_memory(insert("work", "sneaky", "sneaky", "sneaky", "t:3")).is_err());
+
+        // Expiry revokes even the granted collection.
+        service.expire(employee_id).unwrap();
+        assert!(employee_memory(MemoryOperation::Search {
+            collection: "work".into(),
+            query: "launch".into(),
+        })
+        .is_err());
+        let BossResult::Memory {
+            index: Some(index),
+            ..
+        } = employee_memory(MemoryOperation::ListIndex).unwrap()
+        else {
+            panic!("an expired employee's index still renders, minus every cue");
+        };
+        assert!(!index.contains("Launch owner"));
         fs::remove_dir_all(root).unwrap();
     }
 }
