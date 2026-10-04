@@ -4148,8 +4148,8 @@ impl Waku {
             .get(&employee_id)
             .cloned()
             .unwrap_or_default();
-        // Latest assistant line, tail-first: while the employee streams its
-        // newest message lands here chunk by chunk.
+        // Freshest assistant message, tail-first: while the employee streams
+        // its newest message lands here chunk by chunk.
         let commentary = employee
             .and_then(|session| {
                 session
@@ -4161,14 +4161,7 @@ impl Waku {
                             && !message.hidden
                             && !message.visible_content().trim().is_empty()
                     })
-                    .map(|message| {
-                        let tail: Vec<&str> = message
-                            .visible_content()
-                            .lines()
-                            .filter(|line| !line.trim().is_empty())
-                            .collect();
-                        tail[tail.len().saturating_sub(2)..].join("\n")
-                    })
+                    .map(|message| first_message_paragraph(message.visible_content()))
             })
             .unwrap_or_default();
         let status_label = if self.boss_ui.expired.contains(&employee_id) {
@@ -4247,17 +4240,29 @@ impl Waku {
                                     .child(SharedString::from(name)),
                             )
                             .when(!job_title.is_empty(), |row| {
-                                row.child(icon(boss::job_title_icon(&job_title), 11.0, theme.text_tertiary))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .truncate()
-                                            .text_size(sp(12.0))
-                                            .line_height(sp(15.0))
-                                            .text_color(theme.text_tertiary)
-                                            .child(SharedString::from(job_title)),
+                                row.child(
+                                    icon(
+                                        boss::job_title_icon(&job_title),
+                                        11.0,
+                                        theme.text_tertiary,
                                     )
+                                    // gpui reports no text baselines to
+                                    // taffy, so `items_baseline` sits the
+                                    // icon's bottom edge on the shared
+                                    // line — center it on the text line
+                                    // instead.
+                                    .self_center(),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(12.0))
+                                        .line_height(sp(15.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(SharedString::from(job_title)),
+                                )
                             }),
                     )
                     .children(status_indicator)
@@ -4273,14 +4278,20 @@ impl Waku {
             .child(
                 // A fixed two-line slot keeps the row height stable — the
                 // commentary text repaints in place as the employee streams.
+                // The hard clamp caps shaped lines at two and truncates what
+                // doesn't fit; soft overflow let a third line's glyph tops
+                // bleed into the slot's spare pixels.
                 div()
                     .w_full()
                     .min_w_0()
                     .pl(px(36.0))
-                    .h(px(32.0))
+                    .h(sp(30.0))
                     .text_size(sp(12.5))
                     .line_height(sp(15.0))
                     .text_color(theme.text_tertiary)
+                    .whitespace_normal()
+                    .line_clamp(2)
+                    .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .overflow_hidden()
                     .child(SharedString::from(if commentary.is_empty() {
                         "…".to_string()
@@ -4719,6 +4730,19 @@ fn render_activity_image(
     .into_any_element()
 }
 
+/// The opening paragraph of a message flattened to one line — the summon
+/// card previews it, and the two-line clamp keeps as many leading words as
+/// fit.
+fn first_message_paragraph(content: &str) -> String {
+    content
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| line.is_empty())
+        .take_while(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The employee session id a `boss_summon` marker activity carries in
 /// `arguments` — `None` for every ordinary activity item.
 pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
@@ -4945,5 +4969,32 @@ mod live_reasoning_window_tests {
     fn window_below_the_threshold_keeps_the_cached_start() {
         let content = "a".repeat(LIVE_REASONING_WINDOW_MAX);
         assert_eq!(live_reasoning_window_anchor(7, &content), 7);
+    }
+}
+
+#[cfg(test)]
+mod summon_card_paragraph_tests {
+    use super::first_message_paragraph;
+
+    #[test]
+    fn multi_paragraph_messages_keep_only_the_first() {
+        assert_eq!(
+            first_message_paragraph("first paragraph\n\nsecond paragraph\n\nthird"),
+            "first paragraph"
+        );
+    }
+
+    #[test]
+    fn leading_blank_lines_are_skipped_and_soft_breaks_join() {
+        assert_eq!(
+            first_message_paragraph("\n  \nfirst line\nsecond line\n\nrest"),
+            "first line second line"
+        );
+    }
+
+    #[test]
+    fn empty_and_blank_content_yield_empty() {
+        assert_eq!(first_message_paragraph(""), "");
+        assert_eq!(first_message_paragraph("  \n\n"), "");
     }
 }
