@@ -1086,6 +1086,13 @@ pub enum ServerMessage {
         request_id: Uuid,
         parts: Vec<String>,
     },
+    /// The boss asked its clients to open a URL in its managed chat panel.
+    BossBrowseRequested {
+        request_id: Uuid,
+        session_id: Uuid,
+        url: String,
+        title: Option<String>,
+    },
     /// The pairing document changed — a pair request arrived or resolved,
     /// or a paired client was revoked. Carries the whole document.
     PairingChanged {

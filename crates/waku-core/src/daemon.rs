@@ -6564,6 +6564,17 @@ impl WakuBackend {
                 provider,
                 model,
             } => self.create_plan(caller, title, plan_file, prompt, provider, model, events),
+            BossOperation::Browse { url, title } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can open browser tabs for the user");
+                }
+                crate::boss::validate_browse_url(&url)?;
+                let session_id = caller
+                    .or(self.boss.document().session_id)
+                    .ok_or_else(|| anyhow!("open the boss before browsing"))?;
+                events.boss_browse_requested(Uuid::new_v4(), session_id, url.clone(), title.clone());
+                Ok(BossResult::Browse { session_id, url, title })
+            }
             BossOperation::FinalizePlan { plan_file } => {
                 self.finalize_plan(caller, plan_file, events)
             }

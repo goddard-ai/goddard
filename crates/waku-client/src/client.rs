@@ -98,6 +98,7 @@ struct ClientInner {
     /// `bossSpeechRequested` broadcasts — `(request_id, parts)` for the
     /// client's voice pipeline.
     speech_subscribers: Mutex<Vec<Sender<(Uuid, Vec<String>)>>>,
+    boss_browse_subscribers: Mutex<Vec<Sender<(Uuid, Uuid, String, Option<String>)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -357,6 +358,7 @@ impl DaemonClient {
             review_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
             speech_subscribers: Mutex::new(Vec::new()),
+            boss_browse_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -556,6 +558,13 @@ impl DaemonClient {
     pub fn subscribe_speech(&self) -> Receiver<(Uuid, Vec<String>)> {
         let (events, receiver) = unbounded();
         self.inner.speech_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Browse requests broadcast by the boss: `(request, session, url, title)`.
+    pub fn subscribe_boss_browse(&self) -> Receiver<(Uuid, Uuid, String, Option<String>)> {
+        let (events, receiver) = unbounded();
+        self.inner.boss_browse_subscribers.lock().push(events);
         receiver
     }
 
@@ -879,6 +888,11 @@ fn run_client(
                             subscriber.send((request_id, parts.clone())).is_ok()
                         });
                     }
+                    ServerMessage::BossBrowseRequested { request_id, session_id, url, title } => {
+                        inner.boss_browse_subscribers.lock().retain(|subscriber| {
+                            subscriber.send((request_id, session_id, url.clone(), title.clone())).is_ok()
+                        });
+                    }
                     ServerMessage::FriendSessionClosed {
                         session_id,
                         revoked,
@@ -938,6 +952,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.review_subscribers.lock().clear();
     inner.friend_session_closed_subscribers.lock().clear();
     inner.speech_subscribers.lock().clear();
+    inner.boss_browse_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(socket: &mut DaemonSocket, timeout: Option<Duration>) -> io::Result<()> {

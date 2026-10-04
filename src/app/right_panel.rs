@@ -2014,6 +2014,23 @@ mod tests {
 }
 
 impl Waku {
+    pub(super) fn drain_boss_browse_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok((key, _request_id, session_id, url, title)) =
+            self.boss_browse_events.try_recv()
+        {
+            if self.daemons.session_owner(session_id) != key
+                || !self.boss_ui.managed.contains(&session_id)
+            {
+                continue;
+            }
+            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
+            self.pending_boss_browse.push_back((session_id, url, title));
+            changed = true;
+        }
+        changed
+    }
+
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         let files_root = self.resolve_right_panel_files_root(cx);
         let route = transcript_link_route(target, files_root.as_deref());
@@ -3314,6 +3331,29 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let pending_count = self.pending_boss_browse.len();
+        for _ in 0..pending_count {
+            let Some((session_id, url, title)) = self.pending_boss_browse.pop_front() else {
+                break;
+            };
+            if self.state.selected_session == Some(session_id) && self.managed_panel_owner() {
+                let surface = RightPanelSurface::new_browser();
+                let Some(browser_id) = surface.browser_id() else {
+                    continue;
+                };
+                self.open_right_panel_surface(surface, cx);
+                let browser = self.ensure_right_panel_browser(browser_id, window, cx);
+                if let Some(title) = title.filter(|title| !title.trim().is_empty()) {
+                    self.right_panel_browser_titles.insert(browser_id, title);
+                }
+                cx.spawn(async move |_, cx| {
+                    let _ = browser.update(cx, |view, cx| view.navigate_to_url(url, cx));
+                })
+                .detach();
+            } else {
+                self.pending_boss_browse.push_back((session_id, url, title));
+            }
+        }
         let theme = Theme::current(cx);
         // The open-time fallback for surfaces with nothing focusable of
         // their own — held until a frame actually shows the panel so a
@@ -4470,6 +4510,8 @@ impl Waku {
             .collect::<HashSet<_>>();
         self.right_panel_browsers
             .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
+        self.right_panel_browser_titles
+            .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
     }
 
     /// Whether any GPUI overlay that could float above the right panel is
@@ -4875,9 +4917,14 @@ impl Waku {
                 // Browser tabs read like browser tabs: the page title once
                 // known, the address until then.
                 RightPanelSurface::Browser(browser_id) => self
-                    .right_panel_browsers
+                    .right_panel_browser_titles
                     .get(browser_id)
-                    .and_then(|browser| browser.read(cx).tab_label())
+                    .cloned()
+                    .or_else(|| {
+                        self.right_panel_browsers
+                            .get(browser_id)
+                            .and_then(|browser| browser.read(cx).tab_label())
+                    })
                     .unwrap_or_else(|| surface.label()),
                 // Work-item tabs name the open item: "#123".
                 RightPanelSurface::GitHub(project_id) => self.github_surface_label(*project_id),

@@ -272,6 +272,12 @@ pub enum BossOperation {
         #[serde(default)]
         model: Option<String>,
     },
+    /// Open a web page in the boss chat's right panel. Boss principals only.
+    Browse {
+        url: String,
+        #[serde(default)]
+        title: Option<String>,
+    },
     /// Freeze a plan document after user approval. A planning session
     /// finalizes its own plan (`plan_file` omitted); the boss chat or a
     /// human names the file. Approval lands on a daemon-owned request card;
@@ -532,6 +538,12 @@ pub enum BossResult {
         session: Box<AgentSession>,
         project: Box<Project>,
     },
+    /// The client should reveal the URL in the given managed boss session.
+    Browse {
+        session_id: Uuid,
+        url: String,
+        title: Option<String>,
+    },
     /// A plan document froze on user approval: its path beneath `memory/`
     /// in the Boss files root and the freeze stamp. The owning session
     /// archives once the grace period elapses.
@@ -718,6 +730,29 @@ mod tests {
             super::BossResult::PlanFinalized { plan_file, finalized_at, .. }
                 if plan_file == "plans/auth.md" && finalized_at == 1_700_000_000
         ));
+    }
+
+    #[test]
+    fn browse_operation_and_result_decode_camel_case_wire_payloads() {
+        let operation: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "browse",
+            "url": "https://example.com/docs",
+            "title": "Documentation"
+        }))
+        .unwrap();
+        assert!(matches!(
+            operation,
+            super::BossOperation::Browse { url, title: Some(title) }
+                if url == "https://example.com/docs" && title == "Documentation"
+        ));
+        let result: super::BossResult = serde_json::from_value(serde_json::json!({
+            "type": "browse",
+            "sessionId": "00000000-0000-0000-0000-000000000001",
+            "url": "https://example.com/docs",
+            "title": null
+        }))
+        .unwrap();
+        assert!(matches!(result, super::BossResult::Browse { url, title: None, .. } if url == "https://example.com/docs"));
     }
 
     #[test]

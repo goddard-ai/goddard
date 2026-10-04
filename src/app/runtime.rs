@@ -1449,6 +1449,7 @@ impl Waku {
         let automations_updates = self.automations_tx.clone();
         let boss_updates = self.boss_tx.clone();
         let speech_updates = self.speech_tx.clone();
+        let boss_browse_updates = self.boss_browse_tx.clone();
         let review_updates = self.review_tx.clone();
         let closed_updates = self.friend_session_closed_tx.clone();
         let event_wake = self.event_wake_tx.clone();
@@ -1504,6 +1505,7 @@ impl Waku {
                     let review = client.subscribe_review();
                     let session_closed = client.subscribe_friend_session_closed();
                     let speech = client.subscribe_speech();
+                    let boss_browse = client.subscribe_boss_browse();
                     // Seed the document before broadcasts arrive — a client
                     // connecting after the last change sees no event until
                     // something mutates friends state again.
@@ -1661,6 +1663,19 @@ impl Waku {
                                     break replacement;
                                 };
                                 if speech_updates.send((key, request_id, parts)).is_err() {
+                                    return;
+                                }
+                                signal_event_pump(&event_wake);
+                            }
+                            recv(boss_browse) -> request => {
+                                let Ok((request_id, session_id, url, title)) = request else {
+                                    let Ok(replacement) = clients.recv() else { return; };
+                                    break replacement;
+                                };
+                                if boss_browse_updates
+                                    .send((key, request_id, session_id, url, title))
+                                    .is_err()
+                                {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -7655,6 +7670,7 @@ impl Waku {
             | self.drain_discovery_events(cx)
             | self.drain_automations_events(cx)
             | self.drain_boss_events(cx)
+            | self.drain_boss_browse_events(cx)
             | self.drain_speech_events(cx)
             | self.drain_voice_gate_events(cx)
             | self.drain_review_events(cx)

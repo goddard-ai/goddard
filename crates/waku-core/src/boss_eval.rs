@@ -61,6 +61,7 @@ persist between eval calls for this boss session.
   publishBundle(path[, name])
   dismissBundle(id)
   speak(parts | \"whole utterance\")         client connections reached
+  browse(url[, title])                     open an http(s) page in the boss chat panel
   upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default
   setEmployeeIcon(sessionId, icon | ())
   rename(name)                              the boss's name
@@ -423,6 +424,20 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
                 .and_then(unwrap_result)
         }
     });
+    engine.register_fn("browse", {
+        let tx = tx.clone();
+        move |url: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(&tx, tagged("browse", serde_json::json!({ "url": url.as_str() })))
+                .and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("browse", {
+        let tx = tx.clone();
+        move |url: ImmutableString, title: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(&tx, tagged("browse", serde_json::json!({ "url": url.as_str(), "title": title.as_str() })))
+                .and_then(unwrap_result)
+        }
+    });
     engine.register_fn("upsertPersona", {
         let tx = tx.clone();
         move |persona: Map| -> Result<Dynamic, Box<EvalAltResult>> {
@@ -686,6 +701,25 @@ mod tests {
 
         let outcome = eval_with("answer + 1", scope, &dispatch_ok);
         assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(43)));
+    }
+
+    #[test]
+    fn browse_binding_dispatches_url_and_optional_title() {
+        let outcome = eval_with(
+            "browse(\"https://example.com\", \"Docs\")",
+            Scope::new(),
+            &|operation| match operation {
+                BossOperation::Browse { url, title } => Ok(BossResult::Browse {
+                    session_id: uuid::Uuid::nil(),
+                    url,
+                    title,
+                }),
+                other => bail!("unexpected operation {other:?}"),
+            },
+        );
+        let value = outcome.value.unwrap();
+        assert_eq!(value["url"], "https://example.com");
+        assert_eq!(value["title"], "Docs");
     }
 
     #[test]

@@ -3544,6 +3544,7 @@ pub struct Waku {
     agy_poll_events: Receiver<agy::AgyPollUpdate>,
     agy_poll_pending: bool,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
+    right_panel_browser_titles: HashMap<Uuid, String>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
@@ -3794,6 +3795,9 @@ pub struct Waku {
     /// `(daemon, request id, utterance fragments)` for the speech pipeline.
     speech_tx: Sender<(waku_client::DaemonKey, Uuid, Vec<String>)>,
     speech_events: Receiver<(waku_client::DaemonKey, Uuid, Vec<String>)>,
+    boss_browse_tx: Sender<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
+    boss_browse_events: Receiver<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
+    pending_boss_browse: VecDeque<(Uuid, String, Option<String>)>,
     automations_page: bool,
     /// Schedules vs Runs — which list the page body shows.
     automations_tab: automations::AutomationsTab,
@@ -5641,6 +5645,7 @@ impl Waku {
         let (automations_tx, automations_events) = unbounded();
         let (boss_tx, boss_events) = unbounded();
         let (speech_tx, speech_events) = unbounded();
+        let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
@@ -7140,6 +7145,7 @@ impl Waku {
                 agy_pending_spawns: HashSet::new(),
                 agy_poll_pending: false,
                 right_panel_browsers: HashMap::new(),
+                right_panel_browser_titles: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
@@ -7264,6 +7270,9 @@ impl Waku {
                 boss_events,
                 speech_tx,
                 speech_events,
+                boss_browse_tx,
+                boss_browse_events,
+                pending_boss_browse: VecDeque::new(),
                 automations_page: false,
                 automations_tab: automations::AutomationsTab::default(),
                 automations_detail: None,

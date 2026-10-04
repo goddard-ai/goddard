@@ -474,6 +474,17 @@ impl EventSink {
             .broadcast_speech(request_id, parts, Some(self.source_subscriber_id))
     }
 
+    /// Ask connected clients to open a URL in the boss chat's right panel.
+    pub fn boss_browse_requested(
+        &self,
+        request_id: Uuid,
+        session_id: Uuid,
+        url: String,
+        title: Option<String>,
+    ) {
+        self.hub.broadcast_boss_browse(request_id, session_id, url, title, None)
+    }
+
     /// Broadcast a live-only event without retaining it in the replay journal.
     /// High-volume PTY output is meaningful only to a terminal emulator that
     /// is currently attached; replaying raw chunks into a fresh emulator would
@@ -1098,6 +1109,24 @@ impl Hub {
             let _ = kicked.send(());
         }
         delivered
+    }
+
+    fn broadcast_boss_browse(
+        &self,
+        request_id: Uuid,
+        session_id: Uuid,
+        url: String,
+        title: Option<String>,
+        skip: Option<u64>,
+    ) {
+        let mut state = self.state.lock();
+        let message = ServerMessage::BossBrowseRequested {
+            request_id,
+            session_id,
+            url,
+            title,
+        };
+        Self::broadcast(&mut state, &message, skip);
     }
 
     /// The pairing document changed outside any request — a pair request
