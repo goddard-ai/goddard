@@ -35,6 +35,18 @@ impl Default for BossRotationConfig {
 }
 
 impl BossRotationConfig {
+    pub fn from_settings(settings: &crate::DaemonSettings) -> Self {
+        Self {
+            enabled: settings.boss_rotation_enabled,
+            context_threshold: settings.boss_rotation_context_threshold,
+            provider_cache_ttl_secs: settings
+                .boss_rotation_cache_ttl_secs
+                .iter()
+                .map(|(provider, ttl)| (*provider, *ttl))
+                .collect(),
+        }
+    }
+
     pub fn should_rotate(
         &self,
         provider: ProviderKind,
