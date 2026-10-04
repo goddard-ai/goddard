@@ -591,13 +591,6 @@ fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uui
     grouped_sessions
 }
 
-fn sidebar_phase_marker_visible(
-    phase_classification_enabled: bool,
-    hide_phase_labels: bool,
-) -> bool {
-    phase_classification_enabled && !hide_phase_labels
-}
-
 fn project_sidebar_groups(
     sessions: &[&AgentSession],
     projectless_project_ids: &HashSet<Uuid>,
@@ -6014,21 +6007,6 @@ impl Waku {
             ))
         .then(|| sidebar_draft_preview(&self.composer_drafts, session))
         .flatten();
-        // The status line is shared: an unsent draft outranks the phase
-        // marker — it is user-owned text — while the marker still shows on
-        // the selected row, which never carries a draft preview.
-        let phase_marker = draft_preview
-            .is_none()
-            .then(|| {
-                phases::sidebar_phase_marker(
-                    sidebar_phase_marker_visible(
-                        self.phase_classification_enabled(),
-                        self.state.sidebar_hide_phase_labels,
-                    ),
-                    session,
-                )
-            })
-            .flatten();
         let pull_request_badge = self
             .sidebar_pull_requests
             .borrow()
@@ -6263,21 +6241,6 @@ impl Waku {
                         .child(div().flex_1().min_w_0().truncate().child(preview)),
                 )
             })
-            .when_some(phase_marker, |element, (icon_path, label_key)| {
-                element.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(15.0))
-                        .text_color(theme.text_tertiary)
-                        .child(icon(icon_path, 12.0, theme.text_tertiary))
-                        .child(div().flex_1().min_w_0().truncate().child(tr!(label_key))),
-                )
-            })
             .child(
                 div()
                     .flex()
@@ -6490,13 +6453,6 @@ impl Waku {
                 })
             })
             .flatten();
-        let header_phase = session_surface
-            .then(|| {
-                session.and_then(|session| {
-                    phases::sidebar_phase_marker(self.phase_classification_enabled(), session)
-                })
-            })
-            .flatten();
         let environment = if session_surface && self.state.sandbox_experiment_enabled {
             session.map(AgentSession::environment)
         } else {
@@ -6644,21 +6600,6 @@ impl Waku {
                                 .child(div().min_w_0().truncate().child(job_title.clone()))
                         }),
                         )
-                        .children(header_phase.map(|(icon_path, label_key)| {
-                            div()
-                                .h(px(22.0))
-                                .px(px(6.0))
-                                .rounded(px(8.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .bg(theme.overlay)
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(icon(icon_path, 11.0, theme.text_secondary))
-                                .child(SharedString::from(tr!(label_key)))
-                        }))
                         .children(agent_preset_label.map(|label| {
                             div()
                                 .h(px(22.0))
@@ -7362,7 +7303,6 @@ mod tests {
             session_id: None,
             personas: Vec::new(),
             employees: Vec::new(),
-            planning: Vec::new(),
             bundles,
             goals_viewed_at: None,
             planning: Vec::new(),

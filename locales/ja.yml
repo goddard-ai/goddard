@@ -2744,8 +2744,6 @@ settings.memory_notes_one: 1 件の記録
 settings.memory_notes_many: "%{count} 件の記録"
 settings.memory_notes_matching: "%{count} 件中 %{shown} 件の記録"
 settings.memory_last_note: "最新 %{date}"
-settings.sidebar_hide_phase_labels: タスク行の計画中チップを隠す
-settings.sidebar_hide_phase_labels_description: 計画中はタイトルバーに残し、タスク行には繰り返し表示しません
 shortcuts.add_to_chat: 選択範囲をチャットに追加
 shortcuts.archive_task: タスクをアーカイブ
 shortcuts.big_picture: 全体表示を切り替える

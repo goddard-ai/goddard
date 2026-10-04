@@ -1,21 +1,10 @@
 //! Activity-based Planning/Executing labels. Model handoffs are evaluated
 //! before the next prompt in routing.rs; phase labels never select a model.
 
-use waku_protocol::model::{ActivityItem, AgentSession};
+use waku_protocol::model::ActivityItem;
 use waku_protocol::routing::{PhaseSignal, SessionPhase};
 
 use super::*;
-
-pub(super) fn sidebar_phase_marker(
-    enabled: bool,
-    session: &AgentSession,
-) -> Option<(&'static str, &'static str)> {
-    if !enabled {
-        return None;
-    }
-    (session.phase == Some(SessionPhase::Planning))
-        .then_some(("icons/compass.svg", "phase.planning"))
-}
 
 impl Waku {
     pub(super) fn phase_classification_enabled(&self) -> bool {
@@ -51,7 +40,7 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waku_protocol::model::ActivityFileChange;
+    use waku_protocol::model::{ActivityFileChange, AgentSession};
 
     fn activity(kind: ActivityKind, target: Option<&str>, failed: bool) -> ActivityItem {
         let mut item = ActivityItem::new(None, kind, "Edit", target.map(str::to_owned), true);
@@ -127,21 +116,6 @@ mod tests {
             file_change("src/main.rs").with_failed(true).phase_signal(),
             PhaseSignal::Ambiguous
         );
-    }
-
-    #[test]
-    fn marker_only_renders_while_planning() {
-        let mut session =
-            AgentSession::new(Uuid::new_v4(), waku_protocol::model::ProviderKind::Claude);
-        assert_eq!(sidebar_phase_marker(true, &session), None);
-        session.phase = Some(SessionPhase::Planning);
-        assert_eq!(
-            sidebar_phase_marker(true, &session),
-            Some(("icons/compass.svg", "phase.planning"))
-        );
-        session.phase = Some(SessionPhase::Executing);
-        assert_eq!(sidebar_phase_marker(true, &session), None);
-        assert_eq!(sidebar_phase_marker(false, &session), None);
     }
 
     #[test]

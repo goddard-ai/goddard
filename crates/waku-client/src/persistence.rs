@@ -1242,8 +1242,6 @@ pub struct AppSettings {
     /// Swap the composer's Enter chords: Enter steers into the running turn
     /// and ⌘⏎ submits the draft instead of the other way around.
     pub composer_enter_steers: bool,
-    #[serde(default)]
-    pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
     /// Days without a reply before a session groups as dormant; `None`
@@ -1450,7 +1448,6 @@ impl Default for AppSettings {
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
             composer_enter_steers: false,
-            sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -1928,8 +1925,6 @@ pub struct PersistedState {
     /// the running turn and ⌘⏎ submits the draft.
     #[serde(default)]
     pub composer_enter_steers: bool,
-    #[serde(default)]
-    pub sidebar_hide_phase_labels: bool,
     /// The color the sidebar's draft preview line wears.
     #[serde(default)]
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
@@ -2415,7 +2410,6 @@ impl PersistedState {
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
             composer_enter_steers: false,
-            sidebar_hide_phase_labels: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -2858,7 +2852,6 @@ impl PersistedState {
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
             composer_enter_steers: self.composer_enter_steers,
-            sidebar_hide_phase_labels: self.sidebar_hide_phase_labels,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
@@ -3009,7 +3002,6 @@ impl PersistedState {
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.composer_enter_steers = settings.composer_enter_steers;
-        self.sidebar_hide_phase_labels = settings.sidebar_hide_phase_labels;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
@@ -4657,20 +4649,16 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_phase_labels_default_off_and_persist_as_settings() {
+    fn phase_routing_defaults_off_and_persists_as_a_setting() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
-        assert!(!defaults.sidebar_hide_phase_labels);
         assert!(!defaults.phase_routing_enabled);
         let mut state = PersistedState::empty();
         assert!(!state.phase_routing_enabled);
-        state.sidebar_hide_phase_labels = true;
         state.phase_routing_enabled = true;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
-        assert_eq!(settings["sidebar_hide_phase_labels"], true);
         assert_eq!(settings["phase_routing_enabled"], true);
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
-        assert!(restored.sidebar_hide_phase_labels);
         assert!(restored.phase_routing_enabled);
     }
 

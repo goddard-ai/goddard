@@ -1993,29 +1993,6 @@ impl Waku {
                 theme,
                 search,
             ),
-            self.state
-                .phase_routing_enabled
-                .then(|| {
-                    setting_card(
-                        "icons/eye-off.svg",
-                        tr!("settings.sidebar_hide_phase_labels"),
-                        tr!("settings.sidebar_hide_phase_labels_description"),
-                        toggle_switch(
-                            "sidebar-hide-phase-labels-toggle",
-                            self.state.sidebar_hide_phase_labels,
-                            false,
-                            theme,
-                            cx,
-                            {
-                                let enabled = self.state.sidebar_hide_phase_labels;
-                                move |this, _, cx| this.set_sidebar_hide_phase_labels(!enabled, cx)
-                            },
-                        ),
-                        theme,
-                        search,
-                    )
-                })
-                .flatten(),
         ]
         .into_iter()
         .flatten()
@@ -11733,12 +11710,6 @@ impl Waku {
         }
         self.state.composer_enter_steers = enabled;
         crate::input::install_composer_enter_swap(enabled, cx);
-        self.save();
-        cx.notify();
-    }
-
-    fn set_sidebar_hide_phase_labels(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.sidebar_hide_phase_labels = enabled;
         self.save();
         cx.notify();
     }

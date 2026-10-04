@@ -1695,10 +1695,6 @@ settings.composer_enter_steers:
   en: Enter steers the running turn
 settings.composer_enter_steers_description:
   en: In the composer, Enter steers the draft into the running turn and %{modifier}Enter queues it. Shift+Enter still inserts a line break
-settings.sidebar_hide_phase_labels:
-  en: Hide Planning chips on task rows
-settings.sidebar_hide_phase_labels_description:
-  en: Keep Planning in the title bar without repeating it on task rows
 settings.sidebar_draft_preview_color:
   en: Draft preview color
 settings.sidebar_draft_preview_color_description:

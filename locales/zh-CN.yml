@@ -2696,8 +2696,6 @@ settings.memory_notes_one: 1 条记录
 settings.memory_notes_many: "%{count} 条记录"
 settings.memory_notes_matching: "%{count} 条记录中的 %{shown} 条"
 settings.memory_last_note: "最近 %{date}"
-settings.sidebar_hide_phase_labels: 隐藏任务行上的规划中标记
-settings.sidebar_hide_phase_labels_description: 规划中保留在标题栏，不在任务行重复显示
 shortcuts.add_to_chat: 将所选内容添加到对话
 shortcuts.archive_task: 归档任务
 shortcuts.big_picture: 显示或隐藏概览
