@@ -46,7 +46,16 @@ interface CharSlot {
 }
 
 const WHITESPACE = /\s/u;
-const ALPHANUMERIC = /[\p{L}\p{N}]/u;
+// NativeScript's V8 is built without ICU — \p{…} escapes are a parse error
+// there, so the literal form can't appear in the bundle. Build at runtime
+// and fall back to ASCII on engines without Unicode property support.
+const ALPHANUMERIC = (() => {
+	try {
+		return new RegExp('\\p{L}|\\p{N}', 'u');
+	} catch {
+		return /[A-Za-z0-9]/;
+	}
+})();
 
 /** Repair hanging inline markers. Returns `null` when nothing needs repair. */
 export function closeHanging(text: string): string | null {

@@ -101,8 +101,8 @@ export default function DaemonsScreen() {
   }
 
   return (
-    <Column style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView style={{ flex: 1 }}>
+    <Column style={{ flex: '1 1', backgroundColor: theme.background }}>
+      <ScrollView style={{ flex: '1 1' }}>
         <Column style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
           <ConnectionBanner />
           {discovered.length ? (
@@ -141,7 +141,7 @@ export default function DaemonsScreen() {
                       }}
                     >
                       <DaemonAvatar name={found.name} size={36} />
-                      <View style={{ flex: 1 }}>
+                      <View style={{ flex: '1 1' }}>
                         <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '500', color: theme.text }}>
                           {found.name}
                         </Text>
@@ -191,7 +191,7 @@ export default function DaemonsScreen() {
                   size={14}
                   tintColor={theme.textTertiary}
                 />
-                <Text style={{ flex: 1, fontSize: 13, lineHeight: '17px', color: theme.textTertiary }}>
+                <Text style={{ flex: '1 1', fontSize: 13, lineHeight: '17px', color: theme.textTertiary }}>
                   Only the selected daemon stays connected. Credentials are protected by the device
                   keychain and never pass through a Goddard service.
                 </Text>

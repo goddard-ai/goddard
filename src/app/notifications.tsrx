@@ -128,7 +128,7 @@ export default function NotificationsScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: '1 1', backgroundColor: theme.background }}>
       <View style={{ height: headerInset }} />
       <View style={[styles.controls, { borderBottomColor: theme.border }]}>
         <View style={[styles.scopeToggle, { backgroundColor: theme.overlay }]}>
@@ -358,7 +358,7 @@ const styles = {
   scopeLabel: { fontSize: 13.5, fontWeight: '500' },
   textButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },
   textButtonLabel: { fontSize: 14.5, fontWeight: '500' },
-  list: { flex: 1 },
+  list: { flex: '1 1' },
   repoHeader: {
     alignItems: 'center',
     borderBottomWidth: hairline,
@@ -367,7 +367,7 @@ const styles = {
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  repoTitle: { flex: 1, fontSize: 12.5, fontWeight: '600', marginRight: 10 },
+  repoTitle: { flex: '1 1', fontSize: 12.5, fontWeight: '600', marginRight: 10 },
   repoAction: { fontSize: 13, fontWeight: '500' },
   row: {
     alignItems: 'center',
@@ -379,7 +379,7 @@ const styles = {
     paddingVertical: 9,
   },
   unreadDot: { borderRadius: 4, height: 8, width: 8 },
-  rowCopy: { flex: 1, minWidth: 0 },
+  rowCopy: { flex: '1 1', minWidth: 0 },
   rowTitle: { fontSize: 14.5 },
   rowMeta: { fontSize: 12, marginTop: 2 },
   iconButton: {
@@ -390,7 +390,7 @@ const styles = {
   },
   message: {
     alignItems: 'center',
-    flex: 1,
+    flex: '1 1',
     gap: 8,
     justifyContent: 'center',
     paddingHorizontal: 32,

@@ -431,7 +431,7 @@ function ModelSearchField({
       />
       <TextInput
         placeholder="Search models"
-        style={{ flex: 1, fontSize: 16, paddingVertical: 7, color: theme.text }}
+        style={{ flex: '1 1', fontSize: 16, paddingVertical: 7, color: theme.text }}
         value={value}
         onChange={onChangeText}
       />

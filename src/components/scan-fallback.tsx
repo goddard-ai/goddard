@@ -18,7 +18,7 @@ export function ScanFallback(props: {
     <Column
       style={{
         alignItems: 'center',
-        flex: 1,
+        flex: '1 1',
         gap: 14,
         justifyContent: 'center',
         padding: 32,

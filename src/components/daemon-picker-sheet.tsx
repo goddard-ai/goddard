@@ -242,7 +242,7 @@ export function DaemonEditor({
             onSubmit={() => addressInput.current?.focus()}
             placeholder="Optional"
             returnKeyType="next"
-            style={{ flex: 1, fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
             value={name}
           />
         </Row>
@@ -260,7 +260,7 @@ export function DaemonEditor({
             onSubmit={() => tokenInput.current?.focus()}
             placeholder="wss://host.example"
             returnKeyType="next"
-            style={{ flex: 1, fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
             value={address}
           />
         </Row>
@@ -278,7 +278,7 @@ export function DaemonEditor({
             placeholder={profile ? 'Unchanged' : 'Required'}
             returnKeyType="done"
             secure={!revealed}
-            style={{ flex: 1, fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
             value={token}
           />
           <Pressable
@@ -309,7 +309,7 @@ export function DaemonEditor({
             size={14}
             tintColor={theme.danger}
           />
-          <Text style={{ flex: 1, fontSize: 13.5, lineHeight: '17px', color: theme.danger }}>{localError}</Text>
+          <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color: theme.danger }}>{localError}</Text>
         </Row>
       )}
 
@@ -323,7 +323,7 @@ export function DaemonEditor({
           style={{
             alignItems: 'center',
             borderRadius: Radius.medium,
-            flex: 1,
+            flex: '1 1',
             flexDirection: 'row',
             gap: 7,
             justifyContent: 'center',
@@ -402,7 +402,7 @@ function SheetPageHeader({
       ) : (
         <View style={{ width: 44 }} />
       )}
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 18, fontWeight: '600', textAlign: 'center', color: theme.text }}>
+      <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 18, fontWeight: '600', textAlign: 'center', color: theme.text }}>
         {title}
       </Text>
       <View style={{ width: 44 }} />
@@ -450,7 +450,7 @@ function ConnectionFootnote({
   return (
     <Row style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
       <AppSymbol name={icon} size={15} tintColor={color} />
-      <Text style={{ flex: 1, fontSize: 13.5, lineHeight: '17px', color }}>{message}</Text>
+      <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color }}>{message}</Text>
     </Row>
   );
 }

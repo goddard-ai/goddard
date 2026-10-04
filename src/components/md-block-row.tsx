@@ -102,7 +102,7 @@ export function useMarkdownStyles(): MarkdownStyles {
         minWidth: 18,
         textAlign: 'right',
       },
-      listContent: { flex: 1, gap: 4 },
+      listContent: { flex: '1 1', gap: 4 },
       // Frameless tables: hairline row rules only — no outer border, no
       // header fill, no cell borders (desktop parity).
       table: {},

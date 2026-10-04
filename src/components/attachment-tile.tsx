@@ -108,7 +108,7 @@ export const AttachmentTile = memo(function AttachmentTile({
           } else if (canRetry) {void image.refetch();}
         }}
         style={{
-          flex: 1,
+          flex: '1 1',
           borderRadius: 9,
           borderWidth: 1,
           overflow: 'hidden',
@@ -118,7 +118,7 @@ export const AttachmentTile = memo(function AttachmentTile({
         {source ? (
           <AttachmentImage source={source} onError={onImageError} />
         ) : (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 7 }}>
+          <View style={{ flex: '1 1', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 7 }}>
             {image.isFetching ? <ActivityIndicator busy /> : (
               <AppSymbol
                 name={attachment.is_dir
@@ -218,7 +218,7 @@ function AttachmentImagePreview({
   const theme = useTheme();
   return (
     <XSheet open onDismiss={onDismiss} detents={[1]}>
-      <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <View style={{ flex: '1 1', backgroundColor: theme.background }}>
         <View style={{
           flexDirection: 'row',
           alignItems: 'center',
@@ -226,7 +226,7 @@ function AttachmentImagePreview({
           paddingHorizontal: 16,
           paddingVertical: 8,
         }}>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 16, fontWeight: '600', color: theme.text }}>{name}</Text>
+          <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 16, fontWeight: '600', color: theme.text }}>{name}</Text>
           <Pressable
             accessibilityLabel="Close image preview"
             accessibilityRole="button"
@@ -242,7 +242,7 @@ function AttachmentImagePreview({
             <AppSymbol name={{ ios: 'xmark', android: 'close', web: 'close' }} size={17} tintColor={theme.text} />
           </Pressable>
         </View>
-        <View accessibilityLabel={name} accessibilityRole="image" style={{ flex: 1 }}>
+        <View accessibilityLabel={name} accessibilityRole="image" style={{ flex: '1 1' }}>
           <AttachmentImage contain source={source} onError={onError ?? (() => {})} />
         </View>
       </View>

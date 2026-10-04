@@ -449,9 +449,9 @@ function plainReasoning(value: string): string {
 const hairline = 0.5;
 
 const styles = {
-  fill: { flex: 1 },
-  pagerClip: { flex: 1, overflow: 'hidden' },
-  pagerTrack: { flex: 1, flexDirection: 'row', width: '200%' },
+  fill: { flex: '1 1' },
+  pagerClip: { flex: '1 1', overflow: 'hidden' },
+  pagerTrack: { flex: '1 1', flexDirection: 'row', width: '200%' },
   page: { width: '50%' },
   // ── Page one: the list ──────────────────────────────────────────────────
   listContent: { paddingHorizontal: Spacing.two, paddingTop: 6 },
@@ -471,7 +471,7 @@ const styles = {
     justifyContent: 'center',
     width: 26,
   },
-  rowLabel: { flex: 1, fontSize: 16, minWidth: 0 },
+  rowLabel: { flex: '1 1', fontSize: 16, minWidth: 0 },
   rowAction: { fontWeight: '600' },
   rowStats: { fontSize: 13, fontVariant: ['tabular-nums'], fontWeight: '600' },
   runningDot: { borderRadius: 3, height: 6, width: 6 },
@@ -494,7 +494,7 @@ const styles = {
     justifyContent: 'center',
     width: 34,
   },
-  headerCopy: { flex: 1, gap: 3, minWidth: 0 },
+  headerCopy: { flex: '1 1', gap: 3, minWidth: 0 },
   title: { fontSize: 18, fontWeight: '600', lineHeight: '22px' },
   status: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   statusText: { fontSize: 14 },
@@ -517,6 +517,6 @@ const styles = {
   fileChange: { gap: 8 },
   fileRow: { alignItems: 'center', flexDirection: 'row', gap: 8, minHeight: 24 },
   statusDot: { borderRadius: 3, height: 6, width: 6 },
-  filePath: { flex: 1, fontFamily: MonoFont, fontSize: 13 },
+  filePath: { flex: '1 1', fontFamily: MonoFont, fontSize: 13 },
   image: { borderRadius: Radius.small, height: 240, width: '100%' },
 };

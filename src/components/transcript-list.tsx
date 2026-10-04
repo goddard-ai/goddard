@@ -206,7 +206,7 @@ export function TranscriptList({
   const showEmpty = hydrated && !running && rows.length === 0;
 
   return (
-    <View style={{ flex: 1, overflow: 'hidden', paddingTop: headerInset }}>
+    <View style={{ flex: '1 1', overflow: 'hidden', paddingTop: headerInset }}>
       <TranscriptScrollView
         hasEarlier={hasEarlier}
         headerInset={headerInset}

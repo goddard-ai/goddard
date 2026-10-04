@@ -425,7 +425,7 @@ export function SessionView({
   const keyboardPadding = useKeyboardPadding();
 
   return (
-    <View style={[{ flex: 1, backgroundColor: theme.background }, keyboardPadding]}>
+    <View style={[{ flex: '1 1', backgroundColor: theme.background }, keyboardPadding]}>
       {/* Self-drawn header strip — the reference's native nav bar becomes
        * composed views (task-menu trigger, title+subtitle, new-task). */}
       <ScreenHeaderBackdrop />
@@ -450,7 +450,7 @@ export function SessionView({
             <View style={{ borderRadius: 3, height: 6, width: 6, backgroundColor: theme.info }} />
           ) : null}
         </Pressable>
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flex: '1 1', minWidth: 0 }}>
           <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
             {title}
           </Text>
@@ -491,7 +491,7 @@ export function SessionView({
           </>
         ) : null}
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: '1 1' }}>
         {session && transcriptMounted ? (
           <ActivitySheetHost session={session}>
             <TranscriptList
@@ -507,7 +507,7 @@ export function SessionView({
             />
           </ActivitySheetHost>
         ) : (
-          <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 }}>
+          <View style={{ alignItems: 'center', flex: '1 1', justifyContent: 'center', paddingHorizontal: 32 }}>
             <SessionEmpty
               error={query.error}
               loading={Boolean(session) || query.isPending}
@@ -543,7 +543,7 @@ export function SessionView({
                 onChange={setFindQuery}
                 placeholder="Find in transcript"
                 placeholderTextColor={theme.textGhost}
-                style={{ flex: 1, fontSize: 15, paddingVertical: 6, color: theme.text }}
+                style={{ flex: '1 1', fontSize: 15, paddingVertical: 6, color: theme.text }}
                 value={findQuery}
               />
               <Text style={{ fontSize: 12, fontVariant: ['tabular-nums'], color: theme.textTertiary }}>

@@ -34,7 +34,7 @@ export function ComposerContextPicker({
       }}>
         <TextInput
           placeholder={commands ? 'Search commands…' : 'Search project files…'}
-          style={{ flex: 1, fontSize: 16, minHeight: 44, paddingVertical: 10, color: theme.text }}
+          style={{ flex: '1 1', fontSize: 16, minHeight: 44, paddingVertical: 10, color: theme.text }}
           value={query}
           onChange={onQueryChange}
         />

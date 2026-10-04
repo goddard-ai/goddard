@@ -63,13 +63,13 @@ export function QrScanner(props: QrScannerProps) {
   }
 
   return (
-    <Grid rows="*" columns="*" style={{ flex: 1, backgroundColor: '#000000' }}>
-      <View row={0} col={0} style={{ flex: 1 }}>
+    <Grid rows="*" columns="*" style={{ flex: '1 1', backgroundColor: '#000000' }}>
+      <View row={0} col={0} style={{ flex: '1 1' }}>
         <mlkitview
           ref={scanner}
           detectionType={DetectionType.Barcode}
           barcodeFormats={[BarcodeFormats.QR_CODE]}
-          style={{ flex: 1 }}
+          style={{ flex: '1 1' }}
           onDetection={onDetection}
         />
       </View>

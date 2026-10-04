@@ -409,10 +409,10 @@ export default function NewTaskScreen() {
   const composerPadding = useComposerKeyboardPadding(insets.bottom);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: '1 1', backgroundColor: theme.background }}>
       {/* Title and back button sit in the header strip; keep clear of it. */}
       <View style={{ height: headerInset }} />
-      <View style={{ flex: 1 }} />
+      <View style={{ flex: '1 1' }} />
 
       <View style={{ gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three }}>
         <SelectorRow

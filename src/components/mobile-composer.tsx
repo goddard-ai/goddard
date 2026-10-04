@@ -113,7 +113,7 @@ export function ComposerCard({
       />
       <View style={{ alignItems: 'center', flexDirection: 'row', marginTop: 2 }}>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: 2 }}>{left}</View>
-        <View style={{ flex: 1 }} />
+        <View style={{ flex: '1 1' }} />
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: 2 }}>{right}</View>
       </View>
     </GlassSurface>
@@ -506,7 +506,7 @@ export function MobileComposer({
             paddingVertical: 7,
             backgroundColor: theme.dangerSoft,
           }}>
-          <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', lineHeight: '17px', color: theme.danger }}>
+          <Text style={{ flex: '1 1', fontSize: 13, fontWeight: '600', lineHeight: '17px', color: theme.danger }}>
             {visibleError}
           </Text>
           <Pressable
@@ -547,7 +547,7 @@ export function MobileComposer({
             size={12}
             tintColor={theme.textTertiary}
           />
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 13.5, color: theme.textSecondary }}>
+          <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 13.5, color: theme.textSecondary }}>
             {atomVisibleText(message.display_content ?? '').trim()
               || message.attachments?.map((attachment) => attachment.name).join(', ')
               || message.content}
@@ -712,7 +712,7 @@ export function PermissionPanel({
           size={16}
           tintColor={theme.warning}
         />
-        <Text style={{ flex: 1, fontSize: 15, fontWeight: '700', color: theme.text }}>{permission.title}</Text>
+        <Text style={{ flex: '1 1', fontSize: 15, fontWeight: '700', color: theme.text }}>{permission.title}</Text>
       </View>
       {permission.detail ? (
         <ScrollView
@@ -876,7 +876,7 @@ function UserInputPanel({
                 backgroundColor: checked ? theme.overlayStrong : theme.surfaceMuted,
                 borderColor: checked ? NativeTint : 'transparent',
               }}>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: '1 1' }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{option.label}</Text>
                 {option.description && option.description !== option.label && (
                   <Text style={{ fontSize: 12.5, lineHeight: '16px', marginTop: 2, color: theme.textSecondary }}>

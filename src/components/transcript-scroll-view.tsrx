@@ -414,7 +414,7 @@ export function TranscriptScrollView({
   }, [jump, jumpOpacity, reducedMotion]);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: '1 1' }}>
       <scrollview
         ref={scrollRef}
         flexGrow={1}
@@ -478,7 +478,7 @@ export function TranscriptScrollView({
                 accessibilityLabel="Scroll to latest"
                 accessibilityRole="button"
                 onPress={() => scrollToLatest(true)}
-                style={{ alignItems: 'center', flex: 1, justifyContent: 'center' }}>
+                style={{ alignItems: 'center', flex: '1 1', justifyContent: 'center' }}>
                 <AppSymbol
                   name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
                   size={15}

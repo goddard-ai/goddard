@@ -177,17 +177,6 @@ function FoldRow({
   );
 }
 
-const UserBubble = memo(
-  UserBubbleInner,
-  (previous, next) =>
-    previous.message.id === next.message.id &&
-    previous.message.content === next.message.content &&
-    previous.message.display_content === next.message.display_content &&
-    previous.message.attachments === next.message.attachments &&
-    previous.message.sent_by_task === next.message.sent_by_task &&
-    (previous.onRewind != null) === (next.onRewind != null),
-);
-
 function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: () => void }) {
   const theme = useTheme();
   const content = atomVisibleText(message.display_content ?? message.content);
@@ -243,6 +232,17 @@ function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: (
     </View>
   );
 }
+
+const UserBubble = memo(
+  UserBubbleInner,
+  (previous, next) =>
+    previous.message.id === next.message.id &&
+    previous.message.content === next.message.content &&
+    previous.message.display_content === next.message.display_content &&
+    previous.message.attachments === next.message.attachments &&
+    previous.message.sent_by_task === next.message.sent_by_task &&
+    (previous.onRewind != null) === (next.onRewind != null),
+);
 
 function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   const theme = useTheme();
@@ -425,7 +425,7 @@ const styles = {
     gap: 9,
     minHeight: 28,
   },
-  foldLine: { flex: 1, height: hairline },
+  foldLine: { flex: '1 1', height: hairline },
   foldLabel: { flexShrink: 1, fontSize: 13, fontWeight: '500' },
   changedCard: {
     borderRadius: Radius.medium,
@@ -439,7 +439,7 @@ const styles = {
     minHeight: 40,
     paddingHorizontal: 11,
   },
-  changedTitle: { flex: 1, fontSize: 13.5, fontWeight: '600' },
+  changedTitle: { flex: '1 1', fontSize: 13.5, fontWeight: '600' },
   changedStats: { fontSize: 12.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
   changedFiles: {
     borderTopWidth: hairline,
@@ -448,7 +448,7 @@ const styles = {
     paddingVertical: 9,
   },
   changedFileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  changedFilePath: { flex: 1, fontFamily: MonoFont, fontSize: 12 },
+  changedFilePath: { flex: '1 1', fontFamily: MonoFont, fontSize: 12 },
   workingStrip: {
     alignItems: 'center',
     flexDirection: 'row',

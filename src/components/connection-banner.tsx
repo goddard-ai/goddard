@@ -180,7 +180,7 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
           <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
         )}
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: '1 1' }}>
         <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{notice.title}</Text>
         {detail ? (
           <Text style={{ fontSize: 13, lineHeight: '17px', marginTop: 2, color: theme.textSecondary }}>{detail}</Text>

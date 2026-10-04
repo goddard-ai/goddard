@@ -13,8 +13,8 @@ export default function DaemonEditorScreen(props: { id?: string }) {
   const profile = daemon.profiles.find((item) => item.id === props.id);
 
   return (
-    <Column style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView style={{ flex: 1 }}>
+    <Column style={{ flex: '1 1', backgroundColor: theme.background }}>
+      <ScrollView style={{ flex: '1 1' }}>
         <Column style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
           <DaemonEditor
             key={profile?.id ?? 'new'}

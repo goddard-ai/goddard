@@ -202,7 +202,7 @@ const styles = {
     lineHeight: '17px',
   },
   reviewCode: {
-    flex: 1,
+    flex: '1 1',
     fontFamily: MonoFont,
     fontSize: 12,
     lineHeight: '17px',
@@ -210,7 +210,7 @@ const styles = {
     paddingVertical: 2,
   },
   reviewMeta: {
-    flex: 1,
+    flex: '1 1',
     fontFamily: MonoFont,
     fontSize: 11.5,
     lineHeight: '17px',

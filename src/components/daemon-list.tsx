@@ -45,7 +45,7 @@ export function DaemonList({
                 className="vx-pressable"
                 style={{
                   alignItems: 'center',
-                  flex: 1,
+                  flex: '1 1',
                   flexDirection: 'row',
                   gap: 12,
                   paddingLeft: 12,
@@ -54,7 +54,7 @@ export function DaemonList({
                 }}
               >
                 <DaemonAvatar name={profile.name} size={36} />
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: '1 1' }}>
                   <Row style={{ alignItems: 'center', gap: 8 }}>
                     <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '500', color: theme.text }}>
                       {profile.name}

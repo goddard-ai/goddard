@@ -109,7 +109,7 @@ export function SheetRow({
       }}
     >
       {leading}
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: '1 1' }}>
         <Text
           numberOfLines={1}
           style={{

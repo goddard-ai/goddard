@@ -10,7 +10,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
     <Column
       style={{
         alignItems: 'center',
-        flex: 1,
+        flex: '1 1',
         justifyContent: 'center',
         paddingBottom: 48,
         paddingHorizontal: 34,
@@ -75,7 +75,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
           size={15}
           tintColor={theme.textTertiary}
         />
-        <Text style={{ flex: 1, fontSize: 13, lineHeight: '17px', color: theme.textTertiary }}>
+        <Text style={{ flex: '1 1', fontSize: 13, lineHeight: '17px', color: theme.textTertiary }}>
           Tokens stay on this device and go directly to the host you choose.
         </Text>
       </Row>

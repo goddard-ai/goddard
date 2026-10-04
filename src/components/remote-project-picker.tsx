@@ -121,7 +121,7 @@ export function RemoteProjectPicker({
 
   return (
     <XSheet open onDismiss={onDismiss} detents={[1]}>
-      <SafeArea style={{ flex: 1, backgroundColor: theme.background }}>
+      <SafeArea style={{ flex: '1 1', backgroundColor: theme.background }}>
         <View style={{
           alignItems: 'center',
           borderBottomWidth: 0.5,
@@ -138,7 +138,7 @@ export function RemoteProjectPicker({
           >
             <Text style={{ fontSize: 17, fontWeight: '600', color: theme.accent }}>Cancel</Text>
           </Pressable>
-          <Text style={{ flex: 1, fontSize: 18, fontWeight: '700', textAlign: 'center', color: theme.text }}>
+          <Text style={{ flex: '1 1', fontSize: 18, fontWeight: '700', textAlign: 'center', color: theme.text }}>
             Choose Project
           </Text>
           <Pressable
@@ -178,7 +178,7 @@ export function RemoteProjectPicker({
               onChange={setPathDraft}
               onSubmit={() => visit(pathDraft.trim() || null)}
               placeholder="Path on daemon host"
-              style={{ flex: 1, fontSize: 15, minHeight: 44, paddingHorizontal: 9, paddingVertical: 8, color: theme.text }}
+              style={{ flex: '1 1', fontSize: 15, minHeight: 44, paddingHorizontal: 9, paddingVertical: 8, color: theme.text }}
               value={pathDraft}
             />
             <Pressable
@@ -232,7 +232,7 @@ export function RemoteProjectPicker({
         <VirtualList
           items={folders}
           keyExtractor={(item: WorkingTreeEntry) => item.absolutePath}
-          style={{ flex: 1, padding: Spacing.three }}
+          style={{ flex: '1 1', padding: Spacing.three }}
           renderItem={(item: WorkingTreeEntry) => (
             <FolderRow entry={item} onOpen={() => visit(item.absolutePath)} />
           )}
@@ -262,7 +262,7 @@ export function RemoteProjectPicker({
               New empty workspace
             </Text>
           </Pressable>
-          <Text numberOfLines={1} style={{ flex: 1, fontSize: 11.5, textAlign: 'right', color: theme.textTertiary }}>
+          <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 11.5, textAlign: 'right', color: theme.textTertiary }}>
             {directory.data?.path ?? 'Loading folder…'}
           </Text>
         </View>
@@ -336,7 +336,7 @@ function FolderRow({ entry, onOpen }: { entry: WorkingTreeEntry; onOpen: () => v
           tintColor={theme.textSecondary}
         />
       </View>
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 15.5, fontWeight: '600', color: theme.text }}>
+      <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 15.5, fontWeight: '600', color: theme.text }}>
         {entry.name}
       </Text>
       <AppSymbol
@@ -351,7 +351,7 @@ function FolderRow({ entry, onOpen }: { entry: WorkingTreeEntry; onOpen: () => v
 function DirectoryEmpty({ loading }: { loading: boolean }) {
   const theme = useTheme();
   return (
-    <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 220 }}>
+    <View style={{ alignItems: 'center', flex: '1 1', justifyContent: 'center', minHeight: 220 }}>
       {loading ? <ActivityIndicator busy /> : (
         <View style={{
           alignItems: 'center',

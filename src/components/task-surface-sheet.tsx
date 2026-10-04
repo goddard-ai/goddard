@@ -577,7 +577,7 @@ function FilesSurface({ root }: { root: string | null }) {
           title="Couldn’t load files"
         />
       ) : (
-        <ScrollView style={{ flex: 1 }}>
+        <ScrollView style={{ flex: '1 1' }}>
           {(tree.data ?? []).length === 0 ? (
             <PanelMessage
               detail="The workspace has no visible files."
@@ -1016,7 +1016,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
               ) : null}
             </View>
           ) : null}
-          <ScrollView style={{ flex: 1 }}>
+          <ScrollView style={{ flex: '1 1' }}>
             {sections.length === 0 ? (
               <PanelMessage detail="The working tree is clean." title="No changes" />
             ) : null}
@@ -1254,7 +1254,7 @@ function QueueSurface({ root }: { root: string | null }) {
               />
             </View>
           ) : null}
-          <ScrollView style={{ flex: 1 }}>
+          <ScrollView style={{ flex: '1 1' }}>
             {snapshot.entries.length === 0 ? (
               <PanelMessage
                 detail="Nothing is waiting for review."
@@ -1413,8 +1413,8 @@ function errorMessage(cause: unknown): string {
 const hairline = 0.5;
 
 const styles = {
-  sheet: { flex: 1, minHeight: 0 },
-  fill: { flex: 1, minHeight: 0 },
+  sheet: { flex: '1 1', minHeight: 0 },
+  fill: { flex: '1 1', minHeight: 0 },
   header: {
     alignItems: 'center',
     borderBottomWidth: hairline,
@@ -1431,7 +1431,7 @@ const styles = {
     justifyContent: 'center',
     width: 30,
   },
-  headerCopy: { flex: 1, minWidth: 0 },
+  headerCopy: { flex: '1 1', minWidth: 0 },
   headerTitle: { fontSize: 16, fontWeight: '600' },
   headerSubtitle: { fontSize: 12.5, marginTop: 1 },
   textButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },
@@ -1444,7 +1444,7 @@ const styles = {
     paddingHorizontal: 15,
   },
   backLabel: { fontSize: 15.5, fontWeight: '500' },
-  terminalBody: { flex: 1, minHeight: 0 },
+  terminalBody: { flex: '1 1', minHeight: 0 },
   terminalStatus: {
     borderTopWidth: hairline,
     fontSize: 12,
@@ -1452,7 +1452,7 @@ const styles = {
     paddingVertical: 8,
   },
   headerActions: { alignItems: 'center', flexDirection: 'row', gap: 14 },
-  fileContent: { flex: 1, paddingHorizontal: 14, paddingTop: 4 },
+  fileContent: { flex: '1 1', paddingHorizontal: 14, paddingTop: 4 },
   fileText: { fontFamily: MonoFont, fontSize: 12.5, lineHeight: '17px' },
   fileEditor: { minHeight: 200, textAlignVertical: 'top' },
   truncated: { fontSize: 12, marginTop: 14 },
@@ -1463,7 +1463,7 @@ const styles = {
     minHeight: 39,
     paddingRight: 14,
   },
-  fileRowLabel: { flex: 1, fontSize: 14.5 },
+  fileRowLabel: { flex: '1 1', fontSize: 14.5 },
   reviewControls: {
     alignItems: 'center',
     borderBottomWidth: hairline,
@@ -1482,7 +1482,7 @@ const styles = {
   },
   sourceLabel: { fontSize: 14, fontWeight: '500' },
   reviewStats: { fontSize: 12.5 },
-  reviewList: { flex: 1 },
+  reviewList: { flex: '1 1' },
   contextNote: {
     borderRadius: Radius.small,
     fontSize: 12.5,
@@ -1501,7 +1501,7 @@ const styles = {
     minHeight: 36,
     paddingHorizontal: 12,
   },
-  diffPath: { flex: 1, fontSize: 13.5, fontWeight: '500' },
+  diffPath: { flex: '1 1', fontSize: 13.5, fontWeight: '500' },
   gitSyncRow: {
     alignItems: 'center',
     borderBottomWidth: hairline,
@@ -1527,7 +1527,7 @@ const styles = {
     paddingVertical: 2,
   },
   gitStatusText: { fontFamily: MonoFont, fontSize: 11, fontWeight: '600' },
-  gitFileCopy: { flex: 1, minWidth: 0 },
+  gitFileCopy: { flex: '1 1', minWidth: 0 },
   gitFilePath: { fontFamily: MonoFont, fontSize: 13 },
   gitFileMeta: { fontSize: 11.5, marginTop: 1 },
   gitFileActions: { alignItems: 'center', flexDirection: 'row', gap: 12 },
@@ -1547,7 +1547,7 @@ const styles = {
   },
   commitInput: {
     borderRadius: Radius.small,
-    flex: 1,
+    flex: '1 1',
     fontSize: 14.5,
     minHeight: 38,
     paddingHorizontal: 11,
@@ -1562,11 +1562,11 @@ const styles = {
     paddingHorizontal: 14,
   },
   commitButtonLabel: { color: '#fff', fontSize: 14.5, fontWeight: '600' },
-  queueFrontier: { flex: 1, fontSize: 13.5 },
+  queueFrontier: { flex: '1 1', fontSize: 13.5 },
   queueActions: { alignItems: 'flex-end', gap: 2 },
   loading: {
     alignItems: 'center',
-    flex: 1,
+    flex: '1 1',
     gap: 10,
     justifyContent: 'center',
     padding: 24,
@@ -1574,7 +1574,7 @@ const styles = {
   loadingText: { fontSize: 13.5 },
   message: {
     alignItems: 'center',
-    flex: 1,
+    flex: '1 1',
     justifyContent: 'center',
     padding: 28,
   },

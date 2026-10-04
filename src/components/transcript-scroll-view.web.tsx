@@ -18,7 +18,7 @@ export function TranscriptScrollView({
 }: TranscriptScrollViewProps) {
   const theme = useTheme();
   return (
-    <ScrollView style={{ flex: 1 }}>
+    <ScrollView style={{ flex: '1 1' }}>
       <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
         {hasEarlier && (
           <Pressable

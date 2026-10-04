@@ -798,17 +798,17 @@ const SessionRow = memo(function SessionRow({
 });
 
 const styles = {
-  screen: { flex: 1 },
+  screen: { flex: '1 1' },
   drawerCardShadow: {
     // Continuous curve matches the display's squircle; borderRadius is set
     // per-device on the element above and shadowOpacity animates with drawer
     // progress.
-    flex: 1,
+    flex: '1 1',
   },
   drawerCard: {
     // Continuous curve matches the display's squircle; borderRadius is set
     // per-device on the element above.
-    flex: 1,
+    flex: '1 1',
     overflow: 'hidden',
   },
   daemonFloat: {
@@ -836,7 +836,7 @@ const styles = {
     top: 8,
     width: 8,
   },
-  roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  roundInner: { alignItems: 'center', flex: '1 1', justifyContent: 'center' },
   searchDockAvoider: {
     left: 0,
 
@@ -849,7 +849,7 @@ const styles = {
     gap: 10,
     paddingHorizontal: Spacing.three,
   },
-  searchCapsule: { borderRadius: Radius.pill, flex: 1 },
+  searchCapsule: { borderRadius: Radius.pill, flex: '1 1' },
   searchCapsuleInner: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -857,7 +857,7 @@ const styles = {
     minHeight: 50,
     paddingHorizontal: 16,
   },
-  searchInput: { flex: 1, fontSize: 17.5, paddingVertical: 10 },
+  searchInput: { flex: '1 1', fontSize: 17.5, paddingVertical: 10 },
   composeButton: { borderRadius: Radius.pill, height: 50, width: 50 },
   daemonButton: { borderRadius: Radius.pill, maxWidth: 176 },
   daemonButtonInner: {
@@ -870,7 +870,7 @@ const styles = {
   daemonButtonText: { flexShrink: 1, fontSize: 14, fontWeight: '600' },
   listContent: { paddingBottom: 96 },
   listContentEmpty: { flexGrow: 1 },
-  listHost: { flex: 1 },
+  listHost: { flex: '1 1' },
   emptyOverlay: {
     bottom: 0,
     left: 0,
@@ -888,7 +888,7 @@ const styles = {
   },
   emptyState: {
     alignItems: 'center',
-    flex: 1,
+    flex: '1 1',
     justifyContent: 'center',
     minHeight: 360,
     paddingHorizontal: 40,
@@ -921,12 +921,12 @@ const styles = {
   },
   sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   sessionMetadata: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  sessionProject: { flex: 1, fontSize: 13.5, lineHeight: '17px' },
+  sessionProject: { flex: '1 1', fontSize: 13.5, lineHeight: '17px' },
   sessionTime: { flexShrink: 0, fontSize: 13.5, lineHeight: '17px', marginLeft: 3 },
   sessionSpinner: { height: 14, transform: [{ scale: 0.72 }], width: 14 },
   unseenDot: { borderRadius: 4, height: 8, width: 8 },
   sessionTitle: {
-    flex: 1,
+    flex: '1 1',
     fontSize: 17.5,
     fontWeight: '400',
     letterSpacing: -0.2,

@@ -1,6 +1,4 @@
-import xtermCss from '@xterm/xterm/css/xterm.css?raw';
-import xtermJs from '@xterm/xterm/lib/xterm.js?raw';
-import fitAddonJs from '@xterm/addon-fit/lib/addon-fit.js?raw';
+import { xtermAssets } from './terminal-assets';
 
 /** Inline-document builder for the WebView terminal leaf. xterm.js runs
  * inside the embedded document (WKWebView / android.webkit / iframe), so the
@@ -156,6 +154,18 @@ export function buildTerminalHtml(options: {
     theme: options.theme,
   };
 
+  if (!xtermAssets) {
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body { background: ${options.theme.background}; color: ${options.theme.foreground}; font-family: ${options.fontFamily}; margin: 0; padding: 16px; }</style>
+</head>
+<body>Terminal is not available on this platform yet — the xterm.js bundle only ships on web.</body>
+</html>`;
+  }
+
   const script = safeScript(
     pageScript(options.channel, options.bridgeId, terminalOptions),
   );
@@ -170,13 +180,13 @@ html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: non
 body { background: ${options.theme.background}; }
 #terminal { height: 100%; width: 100%; }
 #terminal .xterm { height: 100%; padding: 6px; }
-${xtermCss}
+${xtermAssets.css}
 </style>
 </head>
 <body>
 <div id="terminal"></div>
-<script>${safeScript(xtermJs)}</script>
-<script>${safeScript(fitAddonJs)}</script>
+<script>${safeScript(xtermAssets.js)}</script>
+<script>${safeScript(xtermAssets.fit)}</script>
 <script>${script}</script>
 </body>
 </html>`;

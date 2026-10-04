@@ -61,7 +61,7 @@ export default function ConnectScreen(props: {
     <Column
       style={{
         alignItems: 'center',
-        flex: 1,
+        flex: '1 1',
         gap: 14,
         justifyContent: 'center',
         padding: 32,
@@ -80,7 +80,7 @@ export default function ConnectScreen(props: {
               size={16}
               tintColor={theme.danger}
             />
-            <Text style={{ flex: 1, fontSize: 15, lineHeight: '20px', color: theme.danger }}>
+            <Text style={{ flex: '1 1', fontSize: 15, lineHeight: '20px', color: theme.danger }}>
               {error}
             </Text>
           </Row>

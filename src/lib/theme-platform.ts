@@ -5,7 +5,7 @@ declare const UIColor: { systemBlueColor: unknown } | undefined;
 /** System tint for interactive affordances (back rows, checkmarks, active
  * toggles, text carets) so controls read native instead of branded. */
 export const NativeTint: Color | string =
-  typeof UIColor !== 'undefined' ? new Color(UIColor.systemBlueColor as never) : '#3b82f6';
+  typeof UIColor !== 'undefined' ? Color.fromIosColor(UIColor.systemBlueColor as never) : '#3b82f6';
 
 export const Fonts = {
   /** iOS `UIFontDescriptorSystemDesignDefault` */

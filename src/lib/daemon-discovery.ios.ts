@@ -44,6 +44,7 @@ function txtString(
 
 /** One delegate serves the browser and every in-flight service resolution —
  * both protocol surfaces land here, keyed by service instance name. */
+@NativeClass
 class DaemonBrowserDelegate
 	extends NSObject
 	implements NSNetServiceBrowserDelegate, NSNetServiceDelegate
@@ -54,26 +55,35 @@ class DaemonBrowserDelegate
 		onChange: (daemons: DiscoveredDaemon[]) => void,
 	): DaemonBrowserDelegate {
 		const delegate = DaemonBrowserDelegate.new() as DaemonBrowserDelegate;
+		// `new()` takes the ObjC alloc/init path — the JS constructor (and its
+		// field initializers) never runs, so every field is assigned here.
+		// Plain-object state: Map/Set stored on a NativeClass delegate get
+		// bridged into a proxy whose iteration breaks.
 		delegate.onChange = onChange;
+		delegate.stopped = false;
+		delegate.live = Object.create(null) as Record<string, true>;
+		delegate.resolved = Object.create(null) as Record<string, DiscoveredDaemon>;
+		delegate.pending = Object.create(null) as Record<string, NSNetService>;
 		return delegate;
 	}
 
 	onChange!: (daemons: DiscoveredDaemon[]) => void;
 	stopped = false;
-	private live = new Set<string>();
-	private resolved = new Map<string, DiscoveredDaemon>();
-	private pending = new Set<NSNetService>();
+	private live!: Record<string, true>;
+	private resolved!: Record<string, DiscoveredDaemon>;
+	private pending!: Record<string, NSNetService>;
 
 	private emit(): void {
-		if (!this.stopped) {this.onChange([...this.resolved.values()]);}
+		if (!this.stopped) {this.onChange(Object.values(this.resolved));}
 	}
 
 	netServiceBrowserDidFindServiceMoreComing(
 		_browser: NSNetServiceBrowser,
 		service: NSNetService,
 	): void {
-		this.live.add(service.name);
-		this.pending.add(service);
+		const key = String(service.name);
+		this.live[key] = true;
+		this.pending[key] = service;
 		service.delegate = this;
 		service.resolveWithTimeout(RESOLVE_TIMEOUT_SECONDS);
 	}
@@ -89,13 +99,18 @@ class DaemonBrowserDelegate
 		_browser: NSNetServiceBrowser,
 		service: NSNetService,
 	): void {
-		this.live.delete(service.name);
-		if (this.resolved.delete(service.name)) {this.emit();}
+		const key = String(service.name);
+		delete this.live[key];
+		if (key in this.resolved) {
+			delete this.resolved[key];
+			this.emit();
+		}
 	}
 
 	netServiceDidResolveAddress(service: NSNetService): void {
-		this.pending.delete(service);
-		if (this.stopped || !this.live.has(service.name)) {return;}
+		const key = String(service.name);
+		delete this.pending[key];
+		if (this.stopped || !(key in this.live)) {return;}
 		const host =
 			ipv4FromAddresses(service.addresses) ??
 			service.hostName?.replace(/\.$/, '');
@@ -107,28 +122,28 @@ class DaemonBrowserDelegate
 			? NSNetService.dictionaryFromTXTRecordData(record)
 			: null;
 
-		this.resolved.set(service.name, {
+		this.resolved[key] = {
 			id: txtString(txt, 'id') ?? service.name,
 			name: txtString(txt, 'name') || service.name,
 			address: `ws://${host}:${port}`,
-		});
+		};
 
 		this.emit();
 	}
 
 	netServiceDidNotResolve(service: NSNetService): void {
-		this.pending.delete(service);
+		delete this.pending[String(service.name)];
 	}
 
 	stop(): void {
 		this.stopped = true;
-		for (const service of this.pending) {
+		for (const service of Object.values(this.pending)) {
 			service.stop();
 		}
 
-		this.pending.clear();
-		this.live.clear();
-		this.resolved.clear();
+		this.pending = Object.create(null) as Record<string, NSNetService>;
+		this.live = Object.create(null) as Record<string, true>;
+		this.resolved = Object.create(null) as Record<string, DiscoveredDaemon>;
 	}
 }
 
