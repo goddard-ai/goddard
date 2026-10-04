@@ -5,7 +5,12 @@ import type { BossIdentity } from "./BossIdentity";
 import type { BossPersona } from "./BossPersona";
 import type { BossPlan } from "./BossPlan";
 
-export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>, bundles: Array<BossBundle>,
+export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
+/**
+ * Retired identities remain available for revival until their name is
+ * assigned to another employee. They are not part of the visible roster.
+ */
+retiredEmployees: Array<BossEmployee>, bundles: Array<BossBundle>,
 /**
  * Open planning sessions and their plan documents. Records stay after
  * finalization and archive — the freeze they carry is permanent.

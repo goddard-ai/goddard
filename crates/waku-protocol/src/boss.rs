@@ -214,6 +214,10 @@ pub struct BossState {
     pub session_id: Option<Uuid>,
     pub personas: Vec<BossPersona>,
     pub employees: Vec<BossEmployee>,
+    /// Retired identities remain available for revival until their name is
+    /// assigned to another employee. They are not part of the visible roster.
+    #[serde(default)]
+    pub retired_employees: Vec<BossEmployee>,
     #[serde(default)]
     pub bundles: Vec<BossBundle>,
     /// Open planning sessions and their plan documents. Records stay after

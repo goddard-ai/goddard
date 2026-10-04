@@ -168,6 +168,15 @@ impl BossService {
                 state.employees[index].identity.name = employee_human_name(id, existing_names);
             }
         }
+        const OLD_EXPIRY_GUIDANCE: &str = "Summon a fresh employee for a new job or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.";
+        for persona in &mut state.personas {
+            if persona.name == "Boss" && persona.markdown.contains(OLD_EXPIRY_GUIDANCE) {
+                persona.markdown = persona.markdown.replace(
+                    OLD_EXPIRY_GUIDANCE,
+                    "Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a distinct job.",
+                );
+            }
+        }
         // Older documents recorded only the expired flag, not when the
         // employee finished. Give those entries a full reuse window after
         // this version first sees them.
@@ -379,7 +388,7 @@ impl BossService {
             bail!("employee was interrupted by daemon restart; summon a new employee");
         }
         if self.employee(session).is_some_and(|entry| entry.expired) {
-            bail!("employee has expired; summon a new employee for another job");
+            bail!("employee has expired; prompt or steer can resume it, or summon a new employee");
         }
         Ok(())
     }
@@ -387,6 +396,14 @@ impl BossService {
     pub fn require_control(&self, caller: Option<Uuid>, target: Uuid) -> anyhow::Result<()> {
         let employee = self
             .employee(target)
+            .or_else(|| {
+                self.state
+                    .lock()
+                    .retired_employees
+                    .iter()
+                    .find(|entry| entry.session_id == target)
+                    .cloned()
+            })
             .ok_or_else(|| anyhow!("not a Boss employee"))?;
         if caller.is_some_and(|caller| !self.is_boss_principal(caller) && employee.supervisor_id != caller) {
             bail!("only the boss or this employee's supervisor can control it");
@@ -755,6 +772,29 @@ impl BossService {
     pub fn resurrect(&self, session: Uuid) -> anyhow::Result<bool> {
         let mut revived = false;
         self.update(|state| {
+            if !state.employees.iter().any(|entry| entry.session_id == session) {
+                if let Some(index) = state
+                    .retired_employees
+                    .iter()
+                    .position(|entry| entry.session_id == session)
+                {
+                    let mut entry = state.retired_employees[index].clone();
+                    if state
+                        .employees
+                        .iter()
+                        .any(|active| active.identity.name == entry.identity.name)
+                    {
+                        bail!("name has been reused; summon a new employee");
+                    }
+                    state.retired_employees.remove(index);
+                    entry.expired = false;
+                    entry.expired_at = None;
+                    entry.blocker = None;
+                    state.employees.push(entry);
+                    revived = true;
+                    return Ok(());
+                }
+            }
             if let Some(entry) = state
                 .employees
                 .iter_mut()
@@ -864,13 +904,16 @@ impl BossService {
         }
         let mut retired = Vec::new();
         self.update(|state| {
-            state.employees.retain(|employee| {
-                let should_retire = retires(employee);
-                if should_retire {
+            let mut keep = Vec::with_capacity(state.employees.len());
+            for employee in state.employees.drain(..) {
+                if retires(&employee) {
                     retired.push(employee.clone());
+                    state.retired_employees.push(employee);
+                } else {
+                    keep.push(employee);
                 }
-                !should_retire
-            });
+            }
+            state.employees = keep;
             Ok(())
         })?;
         Ok(retired)
@@ -1804,9 +1847,10 @@ fn fresh_state() -> BossState {
         session_id: None,
         personas: vec![
             BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Summon a fresh employee for a new job or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a distinct job.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
+        retired_employees: Vec::new(),
         bundles: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
@@ -1899,6 +1943,59 @@ mod tests {
 
         let restored = BossService::open(root.clone()).unwrap();
         assert!(!restored.is_employee(session_id));
+        assert!(restored.resurrect(session_id).unwrap());
+        assert!(restored.is_employee(session_id));
+        assert_eq!(restored.employee(session_id).unwrap().identity.name, name);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retired_employee_cannot_revive_after_its_name_is_reused() {
+        let root = std::env::temp_dir().join(format!("boss-revive-reused-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.update(|state| { state.session_id = Some(boss); Ok(()) }).unwrap();
+        let employee = service
+            .prepare_employee(
+                boss,
+                service.document().personas[0].id,
+                "Review".into(),
+                None,
+            )
+            .unwrap();
+        let old_id = employee.session_id;
+        let old_name = employee.identity.name.clone();
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        service.expire(old_id).unwrap();
+        service
+            .update(|state| {
+                state.employees[0].expired_at = Some(1);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(service.retire_expired(3_601).unwrap().len(), 1);
+        let mut replacement = service
+            .prepare_employee(
+                boss,
+                service.document().personas[0].id,
+                "New job".into(),
+                None,
+            )
+            .unwrap();
+        replacement.identity.name = old_name;
+        service
+            .update(|state| {
+                state.employees.push(replacement);
+                Ok(())
+            })
+            .unwrap();
+        let error = service.resurrect(old_id).unwrap_err().to_string();
+        assert!(error.contains("name has been reused; summon a new employee"), "{error}");
         fs::remove_dir_all(root).unwrap();
     }
 

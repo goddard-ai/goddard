@@ -6786,15 +6786,27 @@ impl WakuBackend {
                     self.boss.reset_context(session_id);
                     return Ok(BossResult::Saved);
                 }
-                // A prompt to a finished employee resurrects it: the boss
-                // sends the same worker another job instead of summoning a
-                // replacement. Steer and Stop stay gated on `require_active`
-                // — they only make sense against a live turn.
-                if let EmployeeControl::Prompt { prompt } = &action {
+                // A prompt or steer to a finished employee resumes the same
+                // transcript. A steer has no open turn to fold into, so it
+                // becomes the next queued prompt. Stop remains live-only.
+                let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
+                    || self
+                        .boss
+                        .document()
+                        .retired_employees
+                        .iter()
+                        .any(|e| e.session_id == session_id);
+                if let EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } =
+                    &action
+                {
                     if prompt.trim().is_empty() {
                         bail!("employee prompts cannot be empty");
                     }
                     self.boss.resurrect(session_id)?;
+                }
+                if was_expired && let EmployeeControl::Steer { prompt } = &action {
+                    self.queue_agent_prompt(session_id, prompt.clone(), caller, events)?;
+                    return Ok(BossResult::Saved);
                 }
                 self.boss.require_active(session_id)?;
                 match action {
@@ -7116,14 +7128,25 @@ impl WakuBackend {
             bail!("agent prompts require a prompt");
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        let mut delivery = delivery;
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
             self.boss.require_control(sender, target)?;
-            // Queue delivery resurrects a finished employee; steer still
-            // requires a live turn to fold into.
-            if matches!(delivery, AgentPromptDelivery::Queue) {
+            // Queue delivery resumes a finished employee. An expired steer
+            // is queued as a new turn because there is no live turn to fold into.
+            let was_expired = self.boss.employee(target).is_some_and(|employee| employee.expired)
+                || self
+                    .boss
+                    .document()
+                    .retired_employees
+                    .iter()
+                    .any(|employee| employee.session_id == target);
+            if matches!(delivery, AgentPromptDelivery::Queue) || was_expired {
                 self.boss.resurrect(target)?;
             }
             self.boss.require_active(target)?;
+            if was_expired {
+                delivery = AgentPromptDelivery::Queue;
+            }
         }
         if self.session_quarantined(target) {
             bail!("received files are quarantined until trusted");
@@ -13337,6 +13360,7 @@ mod tests {
             .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         let employee_id = employee.session_id;
+        let employee_name = employee.identity.name.clone();
         backend
             .boss
             .update(|state| {
@@ -13348,6 +13372,9 @@ mod tests {
             let mut state = backend.task_state.lock();
             let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
             child.id = employee_id;
+            child.begin_turn("Original assignment");
+            child.push_message(crate::model::MessageRole::Assistant, "Original findings");
+            child.finish_active_turn(TurnStatus::Completed);
             state.push_session(child);
             backend.task_store.save(&mut state).unwrap();
         }
@@ -13395,6 +13422,7 @@ mod tests {
             )
             .unwrap();
         assert!(!backend.boss.employee(employee_id).unwrap().expired);
+        assert_eq!(backend.boss.employee(employee_id).unwrap().identity.name, employee_name);
         assert!(
             backend
                 .boss
@@ -13404,6 +13432,17 @@ mod tests {
                 .is_none()
         );
         assert!(backend.boss.require_active(employee_id).is_ok());
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert!(session.messages.iter().any(|message| message.content == "Original findings"));
+            assert!(session.active_turn_id().is_some(), "the revived prompt starts a new turn");
+        }
         let prompts = capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains("One more check"));

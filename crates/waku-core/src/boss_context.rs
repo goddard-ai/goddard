@@ -491,6 +491,7 @@ mod tests {
             session_id: Some(Uuid::new_v4()),
             personas: Vec::new(),
             employees: Vec::new(),
+            retired_employees: Vec::new(),
             bundles: Vec::new(),
             planning: Vec::new(),
             goals_viewed_at: None,

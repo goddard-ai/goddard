@@ -7303,6 +7303,7 @@ mod tests {
             session_id: None,
             personas: Vec::new(),
             employees: Vec::new(),
+            retired_employees: Vec::new(),
             bundles,
             goals_viewed_at: None,
             planning: Vec::new(),
