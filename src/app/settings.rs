@@ -7274,6 +7274,12 @@ impl Waku {
             self.boss_ui.pending_deliverable = None;
         }
         self.save();
+        if enabled {
+            // Boss state is pull-only, so the first enable must fetch it —
+            // after the save lands the flag on the daemon — or the sidebar
+            // waits for a restart or task-state revision to show its rows.
+            self.refresh_boss_states(cx);
+        }
         cx.notify();
     }
 

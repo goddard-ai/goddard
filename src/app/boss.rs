@@ -325,6 +325,36 @@ impl Waku {
         changed
     }
 
+    /// Re-pull every connected host's Boss document. Boss state has no
+    /// broadcast — clients only load it on connect and after task-state
+    /// revisions — so flipping the experiment on would otherwise leave the
+    /// sidebar rows empty until one of those paths next ran.
+    pub(super) fn refresh_boss_states(&mut self, cx: &mut Context<Self>) {
+        for (key, _) in self.daemons.connected() {
+            self.refresh_boss_state_on(key, cx);
+        }
+    }
+
+    /// Fetch one host's Boss document off the UI thread. The daemon still
+    /// answers for its own copy of the experiment setting, and a returned
+    /// state lands through `drain_boss_events` like any other boss reply.
+    pub(super) fn refresh_boss_state_on(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        let Some(supervisor) = self.daemons.supervisor(key) else {
+            return;
+        };
+        let client = supervisor.client();
+        let boss_updates = self.boss_tx.clone();
+        let event_wake = self.event_wake_tx.clone();
+        cx.background_executor()
+            .spawn(async move {
+                if let Some(state) = super::runtime::load_remote_boss_state(&client) {
+                    let _ = boss_updates.send((key, state));
+                    signal_event_pump(&event_wake);
+                }
+            })
+            .detach();
+    }
+
     fn sync_boss_page_rows(&mut self) {
         let Some((key, tab)) = self.boss_ui.page else {
             return;

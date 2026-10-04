@@ -242,7 +242,7 @@ fn attach_driver(
     }))
 }
 
-fn load_remote_boss_state(
+pub(super) fn load_remote_boss_state(
     client: &waku_client::DaemonClient,
 ) -> Option<waku_client::boss::BossState> {
     let waku_client::ResponsePayload::Settings { settings } = client
@@ -2458,6 +2458,12 @@ impl Waku {
             if let Some(supervisor) = self.daemons.supervisor(key) {
                 supervisor.note_remote_settings(settings.clone());
             }
+            // A host that just enabled its own Boss experiment has a
+            // document this client may never have pulled — fetch it rather
+            // than waiting for the next task-state revision.
+            if settings.boss_experiment_enabled && !self.boss_ui.states.contains_key(&key) {
+                self.refresh_boss_state_on(key, cx);
+            }
             self.remote_daemon_settings.insert(host, settings);
             // The host's own provider_binary_overrides just became known (or
             // changed): re-detect so its probes reflect them.
@@ -2479,7 +2485,15 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
-        if !self.state.boss_experiment_enabled {
+        if self.state.boss_experiment_enabled {
+            // The settings write only queued with the daemon — this
+            // broadcast is the first moment its Boss document is fetchable.
+            // Clients that connected while the experiment was off hold no
+            // state for the host and must pull it now.
+            if !self.boss_ui.states.contains_key(&key) {
+                self.refresh_boss_state_on(key, cx);
+            }
+        } else {
             self.boss_ui.page = None;
             self.boss_ui.deliverable_page = None;
             self.boss_ui.command_deliverable = None;

@@ -3047,6 +3047,10 @@ impl Waku {
         }
 
         let mut fingerprint = 0xf1f9_9d5e_c7a3_b21d;
+        // Managed membership rides the boss document, not any session field
+        // mixed below — a revision bump folds a late-loading roster (or an
+        // experiment flip) into the scan.
+        fingerprint = mix(fingerprint, self.boss_ui.revision);
         // (session, checkout, worktree branch) grouped by owning daemon — gh
         // runs on whichever host holds the checkout.
         let mut targets: HashMap<waku_client::DaemonKey, Vec<(Uuid, PathBuf, Option<String>)>> =
@@ -3657,6 +3661,10 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.phase_routing_enabled));
+        // The Boss gate decides whether boss rows, managed-session
+        // filtering, and deliverables join the list at all — with an empty
+        // roster the session loop alone cannot see the flip.
+        fingerprint = mix(fingerprint, u64::from(self.state.boss_experiment_enabled));
         fingerprint = mix_uuid(
             fingerprint,
             self.focused_project_id().unwrap_or(Uuid::nil()),
