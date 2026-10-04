@@ -31,6 +31,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use waku_client::DaemonClient;
+use waku_protocol::computer_use::ComputerUseRunRequest;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 use waku_protocol::model::{ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion};
 use waku_protocol::{
@@ -53,6 +54,8 @@ USAGE
     goddard-agent ask '<json>'               Ask the user a structured question
     goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
     goddard-agent computer js --stdin        Read that JSON payload from stdin
+    goddard-agent computer run '<json>'      Run a bounded Jev-selected browser task
+    goddard-agent computer run --stdin       Read that JSON payload from stdin
     goddard-agent computer reset             Reset this task's CUA kernel
     goddard-agent resource acquire '<json>'   Acquire resources (waits, prints id)
     goddard-agent resource run '<json>' -- COMMAND [ARGS]   Run with supervised resources
@@ -124,11 +127,17 @@ USAGE CONTRACT
     you can just ask in your reply.
     `models` lists the provider/model combinations `create` accepts, in
     preference order — read it instead of guessing model ids.
-    `computer js` and `computer reset` operate only on this task's enabled
-    Computer Use runtime. JavaScript bindings persist; emitted images return
-    file paths to open with your image reader. App, browser, clipboard, and
-    desktop access keep their Goddard approval prompts. No actions are
-    automatically retried after a lost response.
+    `computer js`, `computer run`, and `computer reset` operate only on this
+    task's enabled Computer Use runtime. JavaScript bindings persist; emitted
+    images return file paths to open with your image reader. `computer run`
+    requires an explicit URL and goal, and can receive field values plus
+    machine-checkable completion conditions. Jev sees redacted page context
+    and candidate ids; executable browser refs and supplied values stay in the
+    daemon. Missing or ambiguous values return a handoff to the parent agent.
+    Browser runs use a new isolated profile and close their browser session
+    when finished. App, browser, clipboard, and desktop access keep their
+    Goddard approval prompts. Actions are never automatically replayed after
+    a lost response.
     `resource` reserves contended host resources — native builds, iOS/Android
     virtual devices, and shared desktop input — across every Goddard task on
     this machine. Wrap the workload in `resource run '<json>' -- COMMAND` so
@@ -622,8 +631,13 @@ fn legacy_schema() -> serde_json::Value {
     json!({
         "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "summon", "control", "reportBlocker", "transcript", "context", "rename", "renameEmployee", "regenerateAvatar", "upsertPersona", "setEmployeeIcon", "listFiles", "readFile", "writeFile", "createFolder", "publishDeliverable", "dismissDeliverable", "speak", "eval", "memory", "createPlan", "finalizePlan", "setProjectSubmissions", "setProjectQaBranch"], "createPlan": {"title": "the idea the design doc covers — becomes the planning session's title", "planFile": "design doc file name under plans/ in the boss's files root (e.g. \"auth.md\"; accepts plans/<name>.md or workspace/plans/<name>.md spellings)", "prompt": "the user request that prompted planning — seeds the new session's transcript", "provider": "optional provider — defaults to codex", "model": "optional model id — defaults to gpt-6.1-sol when the provider is codex", "reasoningEffort": "optional effort id — defaults to medium", "notes": "boss-only; opens a dedicated boss-attached planning session — a product-design session that drafts a design doc (user experience, flows, edge cases, decisions with rationale; implementation specifics stay out) for the user's approval — once approved, the boss implements the design via employees. Several plans may run at once — reuse an open plan's session instead of starting a second plan on the same idea"}, "finalizePlan": {"planFile": "optional; a planning session omits it to finalize its own plan, the boss chat names the file", "notes": "shows the user an approval card; approval freezes the plan document and reports the approved design to the boss chat — the boss then coordinates implementation via employees, and the planning session archives after a grace period"}, "summon": {"personaId": "UUID assigned by boss", "jobTitle": "purpose-specific job title; Goddard assigns the human name", "prompt": "bounded job", "project": "absolute project path", "workspace": "optional; \"worktree\" runs the employee in a fresh daemon-managed Git worktree, \"adopt\" hands it a finished employee's existing worktree instead of the primary checkout", "baseBranch": "required when workspace is \"worktree\"; ignored for \"adopt\"", "adoptWorktree": "required when workspace is \"adopt\" — absolute path of a daemon-managed worktree whose owning ticket is finished; the employee lands in it with uncommitted state intact", "provider": "optional inherited provider", "model": "optional inherited model", "reasoningEffort": "optional effort id supported by the resolved model — an unsupported id fails the summon", "permissions": "optional per-employee grant overrides — each supplied field (bucketIds, integrationIds, summonEmployees, computerUse) replaces the persona default for this employee, an empty list clears it, omitted fields inherit", "workGoal": "optional; \"errand\" (default) reports the finish to you — use it when the completion feeds your next step; \"goal\" expires silently and lists on the user's Goals page", "icon": format!("optional employee icon enum: {}; overrides the persona icon for this employee only — omit to inherit, and when neither names one the client derives the icon from the job title", employee_icons.join(", ")), "resources": "optional host-resource set reserved for the assignment's lifetime — snake_case keys like resource acquire: {\"exclusive\": [\"ios:<UDID>\"], \"resident_devices\": 1, \"native_builds\": 1, \"desktop_input\": 0}. The employee's own `resource run` calls borrow subsets of it; a contested set queues instead of erroring, and the broker never steals devices the user claimed. Example for a device build: {\"native_builds\": 1}", "allowBurst": "optional boolean; lets the ticket spend burst slots above the model rule's liveLimit — it still cannot pass hardCap. Without it the ticket waits at liveLimit", "groupId": "optional wave id — summons sharing one form a wave: a single notice lands when every member finishes, fails, or is cancelled", "priority": "optional scheduling hint stored on the admission — the FIFO scheduler does not reorder on it yet", "goalId": "optional UUID of a daemon-owned goal the assignment projects onto", "requestId": "optional UUID idempotency key — a retry that lost its response returns the original employee; reusing the id with different fields errors"}, "control": {"sessionId": "employee UUID", "action": {"type": "prompt | steer | stop | setModel | setPermissions | setWorkspace | setResources", "prompt": "required for prompt and steer", "delivery": "optional for prompt — \"interrupt\" (default) steers into the employee's open turn and queues when none is open, \"queue\" parks behind the current work, \"steer\" requires a live turn", "jobTitle": "optional for steer — retitles the job when the steer redirects the assignment; bookkeeping only, it queues no prompt and writes no transcript entry", "provider": "required for setModel", "model": "catalog model id required for setModel", "reasoningEffort": "optional effort id supported by the selected model", "permissions": "required for setPermissions — same per-field override shape as summon; each supplied field replaces the employee's current grant; MCP and Computer Use changes apply to its next launch", "workspace": "required for setWorkspace — \"local\" returns the employee to the project's primary checkout, \"worktree\" forks a fresh daemon-managed worktree", "baseBranch": "required for setWorkspace when workspace is \"worktree\" — the ref the new worktree detaches at; ignored for \"local\"", "resources": "required for setResources — a host-resource set like summon's; a queued ticket re-enters admission on it, a running employee swaps to it once capacity grants without interrupting its turn", "notes": "setWorkspace is one atomic move: it interrupts the employee's current turn, rebinds the session, and resumes the same transcript in the new workspace — a failure leaves it running in its old workspace"}}, "reportBlocker": {"message": "what needs supervisor attention (<=1000 chars)", "notes": "employee-only; interrupts the supervisor's running turn when it can and makes the finish deliver a full report — flag blockers, needed decisions, and failures, never routine completions"}, "transcript": {"sessionId": "employee UUID", "turn": "optional turn number; omit for index", "notes": "pull-only; a flagged, errand, or always-report employee's index arrives at finish — never poll it"}, "context": {"type": "context", "result": "snapshot of the human's projects, tasks, and automations"}, "files": "document paths are relative to the boss's persistent files root; writeFile/createFolder are boss-only while employees may read pinned documents — memory is managed through named bucket operations, not files or folders", "speak": {"parts": ["ordered utterance fragments, 1-8; each becomes or reuses a canned voice clip", "several parts chain into a sentence — isolate proper nouns and reusable phrases as their own parts so generated audio is reused", "boss-only; returns {\"type\":\"speak\",\"delivered\":<client connections reached>} — 0 means nobody could hear it"], "example": {"type": "speak", "parts": ["Your build on ", "Goddard", " finished"]}},  "publishDeliverable": {"path": "absolute path of an employee-produced file or folder; shows it in the user's sidebar — employees may publish only paths inside their own assigned workspace; the daemon copies the target into its deliverable store so the entry survives the workspace", "name": "optional display name; defaults to the file name", "reference": "optional boolean; true keeps a live filesystem reference instead of copying — for artifacts too large for the store or meant to stay current — and the entry dies with the path"}, "dismissDeliverable": {"id": "deliverable UUID from view"},  "memory": {"operation": {"type": "listBuckets | createBucket | overview | record | submitSummary | scan | zoomBucket", "notes": "content operations pick a bucket three ways: an explicit `bucket` id, a `project` reference — a registered project name/id or an absolute project root — resolving to that project's shared bucket, or no selector at all for the caller's own project bucket (employees); bucket metadata can be listed without loading contents; Boss-created bucket IDs are explicit grants"}}, "setEmployeeIcon": {"sessionId": "employee UUID", "icon": format!("optional custom icon enum: {} (null clears override)", employee_icons.join(", "))},  "eval": {"script": "Rhai source run inside the daemon with the boss operations bound as functions — one call batches operations and chains their results; variables persist between evals for this boss session. Bindings: view() → state map, context() → digest string, summon(#{personaId,jobTitle,prompt,project,...}) → sessionId, control(sessionId, action-map | \"stop\"), transcript(sessionId[, turn]), readFile(path) → #{path,content}, writeFile(path, content), listFiles([path]), createFolder(path), publishDeliverable(path[, name]), dismissDeliverable(id), speak(parts|string) → delivered, upsertPersona(#{name,markdown,...}) — id/pinnedFiles/permissions optional, setEmployeeIcon(sessionId, icon|null), rename(name), renameEmployee(sessionId, name), regenerateAvatar([sessionId]), memory(#{type,...}) → memory store fields, op(#{type,...}) → whole result for any other operation, help() → binding list. Returns {\"type\":\"eval\",\"value\":<script's last expression as JSON>,\"output\":<captured print/debug text>}. Boss-only, bounded by a wall-clock and operations budget.", "example": "let s = view(); s.employees.len()"},  "examples": [{"type": "view"}, {"type": "readFile", "path": "plans/auth.md"}, {"type": "publishDeliverable", "path": "/abs/path/to/output", "name": "Q3 report"}], "setProjectSubmissions": {"project": "registered project name/id or absolute project root", "enabled": "boolean", "notes": "boss/human only; merge submit is off per project until enabled — a worktree employee's `merge submit` fails with 'submissions not enabled for this project' while it is off"}, "setProjectQaBranch": {"project": "registered project name/id or absolute project root", "branch": "branch name the project's merge submit landings and review train use; omit or pass null to clear the override and inherit the daemon-global qa_branch setting", "notes": "boss/human only; the named branch must be checked out somewhere in the project's repository for submissions to land"}, "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "pinnedFiles": "document paths beneath the Boss files root pinned into the agent's context; memory bucket access is controlled by bucketIds", "permissions": {"bucketIds": "Boss-created memory bucket IDs", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean", "alwaysReport": "boolean; finishes report to the supervisor instead of expiring silently"}}},
         "merge": {"submit": "no payload; submits this employee's daemon-managed worktree to the configured QA branch after serialized rebase and verification"},
-        "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "computer": {
+            "js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"},
+            "run": {"url": "http(s) URL (required)", "goal": "string (required)", "values": "optional object mapping accessible field labels to supplied text", "verify": {"urlContains": "optional string", "textContains": "optional string[]", "fields": "optional object mapping accessible field labels to exact expected values; at least one check required"}, "maxActions": "integer 1..32 (default 12)", "timeoutMs": "integer 1..120000 (default 60000)"},
+            "reset": "no payload; resets only this task",
+            "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"
+        },
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. Computer run uses Jev to select semantic browser actions and returns needs_input or needs_parent when it cannot safely finish. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "resource": {
             "syntax": "resource acquire '<json>' | resource run '<json>' -- COMMAND [ARGS] | resource release/cancel '{\"id\":\"UUID\"}' | resource status",
             "acquire": {"resources": {"exclusive": ["ios:SIMULATOR-UDID"], "resident_devices": 1, "native_builds": 1, "desktop_input": 0}, "purpose": "iOS smoke test", "wait_seconds": 600},
@@ -2311,19 +2325,7 @@ fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
     let command = match arguments {
         [action] if action == "reset" => Command::AgentComputerUseReset,
         [action, payload] if action == "js" => {
-            let payload = if payload == "--stdin" {
-                let mut input = String::new();
-                std::io::Read::read_to_string(
-                    &mut std::io::Read::take(std::io::stdin().lock(), 1024 * 1024 + 1),
-                    &mut input,
-                )?;
-                if input.len() > 1024 * 1024 {
-                    bail!("computer payload exceeds 1 MB");
-                }
-                input
-            } else {
-                payload.clone()
-            };
+            let payload = computer_payload(payload, 1024 * 1024)?;
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
@@ -2341,9 +2343,33 @@ fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
                 title: input.title,
             }
         }
-        _ => bail!("use `computer js '<json>'`, `computer js --stdin`, or `computer reset`"),
+        [action, payload] if action == "run" => {
+            let payload = computer_payload(payload, 64 * 1024)?;
+            let request: ComputerUseRunRequest =
+                serde_json::from_str(&payload).context("invalid computer run payload")?;
+            Command::AgentComputerUseRun { request }
+        }
+        _ => bail!("use `computer js '<json>'`, `computer run '<json>'`, or `computer reset`"),
     };
     Ok(command)
+}
+
+fn computer_payload(payload: &str, max_bytes: usize) -> anyhow::Result<String> {
+    if payload != "--stdin" {
+        if payload.len() > max_bytes {
+            bail!("computer payload exceeds {} bytes", max_bytes);
+        }
+        return Ok(payload.to_owned());
+    }
+    let mut input = String::new();
+    std::io::Read::read_to_string(
+        &mut std::io::Read::take(std::io::stdin().lock(), max_bytes as u64 + 1),
+        &mut input,
+    )?;
+    if input.len() > max_bytes {
+        bail!("computer payload exceeds {} bytes", max_bytes);
+    }
+    Ok(input)
 }
 
 fn computer(arguments: Vec<String>) -> anyhow::Result<()> {
@@ -2663,7 +2689,7 @@ fn request_session_id() -> Uuid {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn computer_commands_accept_execution_and_reset_but_no_task_selector() {
+    fn computer_commands_accept_js_and_bounded_run_payloads_without_task_selectors() {
         let command = super::computer_command(&[
             "js".into(),
             r#"{"code":"var value = 42","timeout_ms":1000,"title":"Initialize"}"#.into(),
@@ -2684,6 +2710,24 @@ mod tests {
         assert!(
             super::computer_command(&["js".into(), r#"{"code":"1","task_id":"foreign"}"#.into()])
                 .is_err()
+        );
+        let run = super::computer_command(&[
+            "run".into(),
+            r#"{"url":"https://example.test/form","goal":"Fill the form","values":{"Email":"user@example.test"},"verify":{"textContains":["Saved"]}}"#.into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            run,
+            Command::AgentComputerUseRun { request }
+                if request.url == "https://example.test/form"
+                    && request.values.get("Email").is_some_and(|value| value == "user@example.test")
+        ));
+        assert!(
+            super::computer_command(&[
+                "run".into(),
+                r#"{"url":"https://example.test","goal":"x","task_id":"foreign"}"#.into()
+            ])
+            .is_err()
         );
     }
 

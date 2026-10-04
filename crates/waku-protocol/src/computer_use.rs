@@ -1,7 +1,40 @@
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use ts_rs::TS;
+
+/// One bounded browser task delegated to Jev through the task's existing
+/// Computer Use runtime. Supplied values stay in the daemon and are omitted
+/// from evaluation state and candidate descriptions.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ComputerUseRunRequest {
+    /// Explicit page target. Only HTTP(S) URLs are accepted.
+    pub url: String,
+    pub goal: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify: Option<ComputerUseVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_actions: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// Conditions the daemon checks against a fresh semantic browser snapshot
+/// before it reports the task as verified.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ComputerUseVerification {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_contains: Option<String>,
+    #[serde(default)]
+    pub text_contains: Vec<String>,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+}
 
 /// Clamp a requested Computer Use enablement to what the daemon's settings
 /// allow. The feature is experimental, so the daemon ANDs the user's enable

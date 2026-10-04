@@ -5,10 +5,29 @@ description: Control local macOS, Windows, and Linux apps through Goddard Comput
 
 # Goddard Computer Use
 
-Use `goddard-agent computer js` for computer interactions. If Goddard's
+Use `goddard-agent computer run` for a bounded browser task when the caller
+provides an explicit URL and goal. It asks Jev to choose fresh semantic page
+actions, including bounded scrolling, clicks, and supplied text entry, in a
+new isolated browser profile; it does not attach to an existing browser
+profile. Use `goddard-agent computer js` for direct CUA work,
+including native apps and workflows that need custom JavaScript. If Goddard's
 session instructions supply an absolute launcher path, use that launcher
-instead of `goddard-agent`. It runs a persistent QuickJS kernel scoped to this
-task; calls and turns share bindings, and other tasks have separate kernels.
+instead of `goddard-agent`. The JavaScript kernel is scoped to this task; calls
+and turns share bindings, and other tasks have separate kernels.
+
+Pass `url` and `goal`, plus an optional `values` object whose keys are
+accessible field labels and whose values are the text to enter. `verify` can
+declare `urlContains`, `textContains`, or exact `fields` checks. Without
+verification conditions, a Jev `done` decision returns `needs_parent` for the
+parent agent to judge. Other handoffs include `needs_input`, `not_verified`,
+and `stopped`. The run attempts to close its browser session and reports
+`cleanup: "incomplete"` if that cannot be completed.
+
+```sh
+goddard-agent computer run '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
+```
+
+For longer payloads, pass the same JSON object to `computer run --stdin`.
 
 Pass one JSON object, or use `--stdin` for longer scripts:
 

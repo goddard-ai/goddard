@@ -11544,6 +11544,7 @@ dependencies = [
  "smol",
  "subtle",
  "tokio",
+ "url",
  "uuid",
  "waku-base",
  "waku-boss",

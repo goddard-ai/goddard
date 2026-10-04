@@ -1737,6 +1737,9 @@ impl Backend for WakuBackend {
                 timeout_ms,
                 title.as_deref(),
             ),
+            Command::AgentComputerUseRun { request } => {
+                self.agent_computer_use_run(session_id, agent, request)
+            }
             Command::AgentComputerUseReset => {
                 self.agent_computer_use(session_id, agent, None, None, None)
             }

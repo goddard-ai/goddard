@@ -141,6 +141,7 @@ pub(super) fn handle_driver_command(
         | Command::AgentResources { .. }
         | Command::AgentListModels
         | Command::AgentComputerUse { .. }
+        | Command::AgentComputerUseRun { .. }
         | Command::AgentComputerUseReset
         | Command::CancelQueuedPrompt { .. }
         | Command::UpsertCustomCommand { .. }

@@ -1269,6 +1269,10 @@ routing.feature_boss_context_router:
   en: Boss context router
 routing.feature_boss_context_router_description:
   en: Decides whether a boss message should carry the projects-and-tasks snapshot and tracks the conversation's focus
+routing.feature_computer_use:
+  en: Jev computer use
+routing.feature_computer_use_description:
+  en: Selects bounded actions in a task's isolated browser from semantic page state
 jev.tab_suggestions:
   en: Suggestions
 jev.tab_automation:

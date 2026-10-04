@@ -1739,6 +1739,21 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
             .unwrap(),
         ResponsePayload::AgentComputerUseResult { .. }
     ));
+    let run_request = waku_protocol::computer_use::ComputerUseRunRequest {
+        url: "https://example.test".into(),
+        goal: "Check the page".into(),
+        values: Default::default(),
+        verify: None,
+        max_actions: None,
+        timeout_ms: None,
+    };
+    assert!(
+        backend
+            .agent_computer_use_run(other, Some(task), run_request.clone())
+            .unwrap_err()
+            .to_string()
+            .contains("cannot target another task")
+    );
     assert!(
         backend
             .agent_computer_use(other, Some(task), Some("text"), None, None)
@@ -1763,6 +1778,14 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
             .to_string()
             .contains("disabled")
     );
+    let ResponsePayload::AgentComputerUseResult { result } = backend
+        .agent_computer_use_run(task, Some(task), run_request)
+        .unwrap()
+    else {
+        panic!("computer run must return its structured availability status");
+    };
+    assert_eq!(result["status"], "unavailable");
+    assert_eq!(result["reason"], "computer_use_disabled");
     service.shutdown();
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();

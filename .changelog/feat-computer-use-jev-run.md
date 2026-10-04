@@ -1,0 +1,1 @@
+- Agents can run bounded browser tasks from a URL, goal, and supplied field values using Jev-selected scrolling, clicks, and text entry. Runs use a new isolated browser profile and report verified completion only when declared checks pass; missing inputs are handed back.

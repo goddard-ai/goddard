@@ -620,6 +620,61 @@ impl WakuBackend {
         })
     }
 
+    pub(super) fn agent_computer_use_run(
+        &self,
+        session_id: Uuid,
+        agent: Option<Uuid>,
+        request: waku_protocol::computer_use::ComputerUseRunRequest,
+    ) -> anyhow::Result<ResponsePayload> {
+        let task = agent.unwrap_or(session_id);
+        if agent.is_some() && task != session_id {
+            anyhow::bail!("computer use cannot target another task");
+        }
+        let unavailable = |reason: &str| ResponsePayload::AgentComputerUseResult {
+            result: serde_json::json!({
+                "status": "unavailable",
+                "reason": reason,
+                "actions": [],
+            }),
+        };
+        {
+            let settings = self.settings.get();
+            if !settings.computer_use_enabled || !settings.computer_use_experiment_enabled {
+                return Ok(unavailable("computer_use_disabled"));
+            }
+            if crate::inference::resolve_eval(&settings, &self.inference_secrets).is_none() {
+                return Ok(unavailable("jev_not_configured"));
+            }
+        }
+        if !self
+            .sessions
+            .lock()
+            .get(&task)
+            .is_some_and(|runtime| runtime.computer_use_available)
+        {
+            return Ok(unavailable("computer_use_unavailable_for_task"));
+        }
+        let service = match driver::computer_use_service(task) {
+            Ok(service) => service,
+            Err(_) => return Ok(unavailable("computer_use_unavailable_for_task")),
+        };
+        let result = crate::jev_computer_use::run(
+            &service,
+            request,
+            &mut |state, questions, timeout_secs| {
+                evaluate_with_feature(
+                    &self.settings,
+                    &self.inference_secrets,
+                    state,
+                    questions,
+                    "computer-use",
+                    Some(timeout_secs),
+                )
+            },
+        );
+        Ok(ResponsePayload::AgentComputerUseResult { result })
+    }
+
     /// `agent ask`: surface the session's ordinary question card and park
     /// this request until the user answers, clarifies, or dismisses — or the
     /// turn underneath it ends. The provider never sees the exchange; to it

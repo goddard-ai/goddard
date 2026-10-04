@@ -31,6 +31,28 @@ For multiline scripts, `computer js --stdin` reads the JSON object from stdin.
 Shared-service providers receive a session-specific launcher path in their
 Goddard instructions; use that path in place of `goddard-agent`.
 
+Use `computer run` for a bounded browser workflow when the caller supplies an
+explicit URL and goal:
+
+```sh
+goddard-agent computer run '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
+```
+
+The optional `values` object maps accessible field labels to supplied text;
+`verify` accepts `urlContains`, `textContains`, and exact `fields` checks. The
+daemon starts a new isolated browser profile, asks Jev to select among bounded
+scrolls, clicks, and supplied text entry built from each fresh semantic
+snapshot. It attempts to close that browser
+session when the run ends and reports incomplete cleanup if it cannot. It does
+not attach to an existing browser profile. Jev receives
+redacted page context and candidate ids, never executable refs or supplied
+values. The command returns `verified` only when all declared checks pass;
+without checks, `done` returns `needs_parent` for parent-agent judgment.
+Missing or ambiguous values return `needs_input`. Other outcomes include
+`not_verified`, `needs_parent`, `unavailable`, and `stopped`. The action budget
+defaults to 12 decisions (maximum 32), and the total time budget defaults to
+60 seconds (maximum 120 seconds).
+
 Each task runtime owns a persistent QuickJS kernel. Bindings survive CLI calls
 and turns until reset or teardown. Requests to one kernel execute in order on
 a dedicated queue; approval waits leave daemon control requests available.

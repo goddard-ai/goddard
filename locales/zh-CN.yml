@@ -2601,6 +2601,8 @@ routing.feature_boss_speech: Boss 预录语音
 routing.feature_boss_speech_description: 判断已保存的语音片段是否已经说出了 Boss 想表达的片段
 routing.feature_boss_context_router: 老板上下文路由器
 routing.feature_boss_context_router_description: 判断发给老板的消息是否应附带项目和任务快照，并跟踪对话焦点
+routing.feature_computer_use: Jev 电脑操作
+routing.feature_computer_use_description: 根据语义页面状态，为任务隔离浏览器选择有界操作
 routing.feature_auto_prompt_suggest_description: 为自动提示编辑器建议问题权重和阈值
 routing.feature_evaluate: 评估调用
 routing.feature_evaluate_description: 未标记功能标签的调用

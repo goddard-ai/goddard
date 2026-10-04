@@ -37,7 +37,7 @@ pub(super) struct ComputerUseConfig {
 
 pub fn hint(skill_path: &Path) -> String {
     format!(
-        "When the user asks you to interact with a local app, use `goddard-agent computer js` (or the session-specific launcher supplied in the Goddard instructions) and read the Goddard Computer Use skill at {} before the first call. JavaScript bindings persist per task. Returned image paths must be opened with your image-reading tool.",
+        "For a bounded browser task with an explicit URL and goal, use `goddard-agent computer run`; it uses a new isolated browser profile and returns structured completion status. For direct CUA work, use `goddard-agent computer js` (or the session-specific launcher supplied in the Goddard instructions) and read the Goddard Computer Use skill at {} before the first call. JavaScript bindings persist per task. Returned image paths must be opened with your image-reading tool.",
         skill_path.display()
     )
 }
@@ -103,6 +103,9 @@ impl ComputerUseRuntime {
     }
 
     pub(super) fn stop(&self) {
+        if let Some(service) = &self.cli_service {
+            service.cancel();
+        }
         stop_registered_processes(&self.config.process_directory, &self.config.server_path);
     }
 

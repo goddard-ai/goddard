@@ -29,7 +29,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -836,6 +836,11 @@ pub enum Command {
         timeout_ms: Option<u64>,
         #[serde(default)]
         title: Option<String>,
+    },
+    /// Scoped agent credential only: run a bounded Jev-selected browser
+    /// workflow through this task's existing Computer Use runtime.
+    AgentComputerUseRun {
+        request: crate::computer_use::ComputerUseRunRequest,
     },
     AgentComputerUseReset,
     /// Host-wide cooperative broker, authenticated task ownership only.
@@ -1794,7 +1799,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 18);
+        assert_eq!(PROTOCOL_VERSION, 19);
     }
 
     #[test]
@@ -1832,7 +1837,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 18);
+        assert_eq!(PROTOCOL_VERSION, 19);
     }
 
     #[test]
@@ -1957,5 +1962,35 @@ mod tests {
             project_id.to_string()
         );
         assert_eq!(json["changes"][0]["draft"]["text"], "unfinished");
+    }
+
+    #[test]
+    fn agent_computer_use_run_keeps_its_typed_camel_case_payload() {
+        let request = crate::computer_use::ComputerUseRunRequest {
+            url: "https://example.test/form".into(),
+            goal: "Fill and verify the form".into(),
+            values: std::collections::BTreeMap::from([("Email".into(), "a@example.test".into())]),
+            verify: Some(crate::computer_use::ComputerUseVerification {
+                text_contains: vec!["Saved".into()],
+                ..Default::default()
+            }),
+            max_actions: Some(8),
+            timeout_ms: Some(30_000),
+        };
+        let command = Command::AgentComputerUseRun {
+            request: request.clone(),
+        };
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["type"], "agentComputerUseRun");
+        assert_eq!(json["request"]["maxActions"], 8);
+        assert_eq!(json["request"]["timeoutMs"], 30_000);
+        assert_eq!(json["request"]["verify"]["textContains"][0], "Saved");
+        let Command::AgentComputerUseRun {
+            request: round_trip,
+        } = serde_json::from_value(json).unwrap()
+        else {
+            panic!("unexpected command variant");
+        };
+        assert_eq!(round_trip, request);
     }
 }

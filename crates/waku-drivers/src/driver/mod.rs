@@ -19,6 +19,7 @@ mod support;
 mod title_refresh;
 
 pub use computer_use::ComputerUseRuntime;
+pub use computer_use::cli::Service as ComputerUseService;
 #[cfg(any(test, feature = "test-support"))]
 pub use computer_use::cli::bind_for_test as bind_computer_use_for_test;
 pub use computer_use::cli::for_task as computer_use_service;

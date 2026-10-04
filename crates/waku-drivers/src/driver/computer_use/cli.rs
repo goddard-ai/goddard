@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
@@ -43,6 +43,7 @@ pub struct Service {
     connection: Mutex<Option<Connection>>,
     child: Mutex<Option<Child>>,
     closed: AtomicBool,
+    cancellation_generation: AtomicU64,
     events: Mutex<Option<DriverEventSender>>,
 }
 
@@ -61,6 +62,7 @@ impl Service {
             connection: Mutex::new(None),
             child: Mutex::new(None),
             closed: AtomicBool::new(false),
+            cancellation_generation: AtomicU64::new(0),
             events: Mutex::new(Some(events)),
         });
         let mut registry = services().lock();
@@ -140,6 +142,34 @@ impl Service {
         timeout_ms: Option<u64>,
         title: Option<&str>,
     ) -> anyhow::Result<Value> {
+        self.call_inner(code, timeout_ms, title, None)
+    }
+
+    pub fn cancellation_generation(&self) -> u64 {
+        self.cancellation_generation.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.cancellation_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn call_for_generation(
+        &self,
+        generation: u64,
+        code: &str,
+        timeout_ms: u64,
+        title: &str,
+    ) -> anyhow::Result<Value> {
+        self.call_inner(Some(code), Some(timeout_ms), Some(title), Some(generation))
+    }
+
+    fn call_inner(
+        &self,
+        code: Option<&str>,
+        timeout_ms: Option<u64>,
+        title: Option<&str>,
+        expected_generation: Option<u64>,
+    ) -> anyhow::Result<Value> {
         let timeout_ms = timeout_ms.unwrap_or(300_000);
         if !(1..=300_000).contains(&timeout_ms) {
             bail!("timeout_ms must be between 1 and 300000");
@@ -148,6 +178,11 @@ impl Service {
             bail!("JavaScript exceeds 1 MB");
         }
         let mut connection = self.connection.lock();
+        if expected_generation
+            .is_some_and(|generation| self.cancellation_generation() != generation)
+        {
+            bail!("computer-use run was cancelled");
+        }
         if self.closed.load(Ordering::Acquire) {
             bail!("computer-use runtime has closed");
         }
@@ -161,6 +196,11 @@ impl Service {
         }
         if connection.is_none() {
             *connection = Some(self.connect()?);
+        }
+        if expected_generation
+            .is_some_and(|generation| self.cancellation_generation() != generation)
+        {
+            bail!("computer-use run was cancelled");
         }
         let id = Uuid::new_v4().to_string();
         let mut arguments = match code {
@@ -361,6 +401,20 @@ mod tests {
             self.service.shutdown();
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn cancellation_generation_rejects_jevs_next_action_before_kernel_start() {
+        let fixture = Fixture::new(None);
+        let generation = fixture.service.cancellation_generation();
+        fixture.service.cancel();
+        let error = fixture
+            .service
+            .call_for_generation(generation, "1", 1000, "Cancelled Jev action")
+            .unwrap_err();
+        assert!(error.to_string().contains("run was cancelled"));
+        assert!(!fixture.root.join("started").exists());
+        assert!(fixture.service.connection.lock().is_none());
     }
 
     #[test]

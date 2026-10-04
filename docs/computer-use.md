@@ -36,6 +36,23 @@ Use the task's **Stop** control to interrupt work. Turning off the
 **Computer Use** experiment also disables computer use; turn it back on and
 re-enable **Let Goddard use apps** when you want to use it again.
 
+## Goal-driven browser tasks
+
+When a task includes a page URL and a clear browser goal, an agent can use
+Jev to choose bounded scrolling, clicks, and text entry from the page's
+semantic state.
+This uses the Computer Use access described above and requires an evaluation
+backend configured for Jev. For example, ask an agent to “Open
+`https://example.com`, confirm the visible Example Domain heading, and report
+whether it is present.”
+
+These runs start a new isolated browser profile, so they do not use a browser
+window that is already signed in. Include any required field values in the
+task request. The agent can return to you for missing or ambiguous values and
+reports if it cannot close the browser session.
+When it has no machine-checkable completion condition, it reports the result
+for the parent agent to judge; it does not claim verified completion.
+
 ## Platform limits
 
 | Platform | Requirements and limits |

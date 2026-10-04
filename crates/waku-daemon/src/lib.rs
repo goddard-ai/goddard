@@ -44,6 +44,7 @@ pub use waku_sessions::eval;
 pub use waku_sessions::grok_session;
 pub use waku_vcs::github;
 pub mod inference;
+pub(crate) mod jev_computer_use;
 pub use waku_drivers::integrations;
 pub use waku_drivers::model;
 pub use waku_drivers::model_catalog;

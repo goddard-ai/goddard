@@ -1401,7 +1401,9 @@ impl RequestDispatcher {
     ) {
         if matches!(
             request.command,
-            Command::AgentComputerUse { .. } | Command::AgentComputerUseReset
+            Command::AgentComputerUse { .. }
+                | Command::AgentComputerUseRun { .. }
+                | Command::AgentComputerUseReset
         ) {
             self.dispatch_computer_use(request, outgoing, source_subscriber_id, agent);
         } else if command_targets_runtime(&request.command) {
@@ -2373,6 +2375,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentResources { .. }
             | Command::AgentListModels
             | Command::AgentComputerUse { .. }
+            | Command::AgentComputerUseRun { .. }
             | Command::AgentComputerUseReset
             | Command::UpsertCustomCommand { .. }
             | Command::RemoveCustomCommand { .. }
@@ -2788,6 +2791,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentResources { .. } => "agentResources",
         Command::AgentListModels => "agentListModels",
         Command::AgentComputerUse { .. } => "agentComputerUse",
+        Command::AgentComputerUseRun { .. } => "agentComputerUseRun",
         Command::AgentComputerUseReset => "agentComputerUseReset",
         Command::ShareProjectWithFriend { .. } => "shareProjectWithFriend",
         Command::UnshareProjectWithFriend { .. } => "unshareProjectWithFriend",
@@ -4492,6 +4496,7 @@ mod tests {
         ) -> anyhow::Result<ResponsePayload> {
             let action = match request.command {
                 Command::AgentComputerUse { code, .. } => code,
+                Command::AgentComputerUseRun { .. } => "run".into(),
                 Command::CancelComputerUse => "cancel".into(),
                 _ => "other".into(),
             };
@@ -4543,14 +4548,37 @@ mod tests {
                 Some(task),
             )
         };
+        let run = |task, outgoing: Sender<ServerMessage>| {
+            dispatcher.dispatch(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: task,
+                    runtime_id: Uuid::nil(),
+                    command: Command::AgentComputerUseRun {
+                        request: waku_protocol::computer_use::ComputerUseRunRequest {
+                            url: "https://example.test".into(),
+                            goal: "Check the page".into(),
+                            values: Default::default(),
+                            verify: None,
+                            max_actions: None,
+                            timeout_ms: None,
+                        },
+                    },
+                },
+                outgoing,
+                0,
+                Some(task),
+            )
+        };
         call(task, "wait", outgoing.clone());
         assert_eq!(
             received.recv_timeout(Duration::from_secs(2)).unwrap(),
             (task, "wait".into())
         );
-        for index in 0..8 {
+        for index in 0..7 {
             call(task, &format!("queued-{index}"), outgoing.clone());
         }
+        run(task, outgoing.clone());
         let (overflow, response) = unbounded();
         call(task, "must-not-run", overflow);
         let ServerMessage::Response {
@@ -4583,12 +4611,16 @@ mod tests {
             (task, "cancel".into())
         );
         release.0.send(()).unwrap();
-        for index in 0..8 {
+        for index in 0..7 {
             assert_eq!(
                 received.recv_timeout(Duration::from_secs(2)).unwrap(),
                 (task, format!("queued-{index}"))
             );
         }
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (task, "run".into())
+        );
     }
 
     struct RuntimeOrderingBackend {
