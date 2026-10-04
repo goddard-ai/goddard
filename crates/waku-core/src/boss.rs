@@ -1869,6 +1869,7 @@ fn disabled_state() -> BossState {
         session_id: None,
         personas: Vec::new(),
         employees: Vec::new(),
+        retired_employees: Vec::new(),
         bundles: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
