@@ -13959,6 +13959,11 @@ mod tests {
             .expect("the employee task persisted before the failed launch")
             .clone();
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// `control`'s `setWorkspace` action is the boss-side move a client
     /// drives with separate stop/switch/resume steps: the session rebinds
     /// to a fresh daemon worktree, the employee record stays live, and the
