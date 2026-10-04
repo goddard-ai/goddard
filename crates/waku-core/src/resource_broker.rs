@@ -8,11 +8,24 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
+use waku_protocol::boss::AdmissionBlocker;
 use waku_protocol::resources::*;
 
 #[derive(Default, Deserialize, Serialize)]
 struct Ledger {
     reservations: Vec<Reservation>,
+}
+
+/// The answer to one daemon-owned admission try-grant: the model claim and
+/// host set landed under one authority lock, or nothing did.
+#[derive(Debug)]
+pub struct AdmissionAttempt {
+    /// The ticket is granted — fresh or an idempotent retry of a grant
+    /// already held. A denied attempt holds nothing.
+    pub granted: bool,
+    /// Why the ticket could not take capacity this pass.
+    pub blockers: Vec<AdmissionBlocker>,
+    pub status: ResourceStatus,
 }
 
 pub struct Broker {
@@ -31,6 +44,12 @@ impl Broker {
             .context("Goddard home unavailable")?
             .join("resource-broker");
         Ok(Self { root })
+    }
+
+    /// A broker rooted anywhere — tests keep their own ledger rather than
+    /// the host's.
+    pub fn at(root: PathBuf) -> Self {
+        Self { root }
     }
 
     pub fn operate(&self, task: Uuid, operation: ResourceOperation) -> Result<ResourceStatus> {
@@ -105,6 +124,7 @@ impl Broker {
         });
         let request_id;
         let mut borrowed = false;
+        let mut denied_blockers = Vec::new();
         match operation {
             ResourceOperation::Acquire {
                 mut resources,
@@ -170,7 +190,61 @@ impl Broker {
                         granted_at: None,
                         cancelled: false,
                         released: false,
+                        admission: None,
                     });
+                }
+            }
+            ResourceOperation::Admission {
+                id,
+                mut resources,
+                purpose,
+                claim,
+            } => {
+                if let Some(existing) = ledger
+                    .reservations
+                    .iter()
+                    .find(|r| r.id == id && r.task == task)
+                {
+                    // A retry after a lost response or a daemon restart:
+                    // the ticket's claims are already held — re-issue is a
+                    // no-op. A settled id belongs to a stale generation and
+                    // must never revive.
+                    if existing.cancelled || existing.released {
+                        bail!("admission ticket {id} was already released");
+                    }
+                    request_id = Some(id);
+                } else {
+                    validate_admission(&mut resources, &policy, &claim)?;
+                    if purpose.trim().is_empty() || purpose.len() > 512 {
+                        bail!("purpose must contain 1–512 bytes");
+                    }
+                    denied_blockers =
+                        admission_blockers(&resources, &claim, &ledger, &policy, &observation);
+                    if denied_blockers.is_empty() {
+                        ledger.reservations.push(Reservation {
+                            id,
+                            task,
+                            purpose,
+                            resources,
+                            holder_pid: std::process::id(),
+                            daemon_pid: std::process::id(),
+                            workload_pid: None,
+                            requested_at: now,
+                            duration_seconds: 0,
+                            // Granted rows ignore the deadline; it exists
+                            // only for parked Acquire requests.
+                            deadline: now,
+                            granted_at: Some(now),
+                            cancelled: false,
+                            released: false,
+                            admission: Some(claim),
+                        });
+                        request_id = Some(id);
+                    } else {
+                        // Denied admissions hold nothing — the daemon's
+                        // queue owns ordering, not the ledger.
+                        request_id = Some(id);
+                    }
                 }
             }
             ResourceOperation::Attach { id, workload_pid } => {
@@ -233,7 +307,102 @@ impl Broker {
             observation_errors: observation.errors,
             request_id,
             borrowed,
+            admission_blockers: denied_blockers,
         })
+    }
+
+    /// Validate a declared set against the current policy without holding
+    /// or granting anything — submission-time checks use it; a later
+    /// policy change never turns a granted reservation invalid.
+    pub fn validate_set(&self, resources: &ResourceSet) -> Result<()> {
+        validate_set(&mut resources.clone(), &self.policy()?)
+    }
+
+    /// The host capacity policy the ledger currently transacts under.
+    pub fn policy(&self) -> Result<ResourcePolicy> {
+        crate::fs_ext::create_private_dir_all(&self.root)?;
+        Ok(read_json(&self.root.join("policy.json"))?.unwrap_or_default())
+    }
+
+    /// Replace the host capacity policy under the authority lock — the
+    /// same serialized writer the ledger uses, so a policy write can never
+    /// interleave with a grant decision.
+    pub fn set_policy(&self, policy: &ResourcePolicy) -> Result<()> {
+        crate::fs_ext::create_private_dir_all(&self.root)?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.root.join("authority.lock"))?;
+        crate::fs_ext::restrict_to_owner(&self.root.join("authority.lock"))?;
+        lock.lock().context("lock host resource authority")?;
+        let path = self.root.join("policy.json");
+        let temporary = self.root.join("policy.next");
+        let bytes = serde_json::to_vec(policy)?;
+        fs::write(&temporary, bytes)?;
+        crate::fs_ext::restrict_to_owner(&temporary)?;
+        File::open(&temporary)?.sync_all()?;
+        fs::rename(&temporary, &path)?;
+        File::open(&self.root)?.sync_all()?;
+        drop(lock);
+        Ok(())
+    }
+
+    /// Daemon-owned admission try-grant: claim a model slot and the
+    /// declared host set atomically under the authority lock. A denied
+    /// attempt writes no ledger entry — ordering stays in the daemon's
+    /// queue — while retrying an already-granted `id` answers granted, so
+    /// restart reconciliation re-issues tickets idempotently.
+    pub fn try_admission(
+        &self,
+        task: Uuid,
+        id: Uuid,
+        resources: ResourceSet,
+        purpose: String,
+        claim: AdmissionClaim,
+    ) -> Result<AdmissionAttempt> {
+        // Device claims need the real inventory — an empty observation
+        // would hide user-owned devices and over-grant. Model-only and
+        // counted-pool tickets never consult it.
+        let observe = if resources.exclusive.is_empty() && resources.resident_devices == 0 {
+            Observation::default
+        } else {
+            observe
+        };
+        let status = self.with_observation(
+            task,
+            ResourceOperation::Admission {
+                id,
+                resources,
+                purpose,
+                claim,
+            },
+            observe,
+        )?;
+        let granted = status
+            .reservations
+            .iter()
+            .any(|r| r.id == id && r.granted_at.is_some());
+        Ok(AdmissionAttempt {
+            granted,
+            blockers: status.admission_blockers.clone(),
+            status,
+        })
+    }
+
+    /// Release an admission ticket's claims — `Release` semantics under
+    /// the ticket's owning task id. Missing or already-settled
+    /// reservations are a no-op so recovery can call it unconditionally.
+    pub fn release_admission(&self, task: Uuid, id: Uuid) {
+        let _ = self.transaction(
+            task,
+            ResourceOperation::Release { id },
+            Observation {
+                devices: vec![],
+                errors: vec!["admission release".into()],
+            },
+        );
     }
 
     /// Cancel exact request IDs captured at runtime exit. A new runtime of the
@@ -287,6 +456,32 @@ fn subset(a: &ResourceSet, b: &ResourceSet) -> bool {
         && a.desktop_input <= b.desktop_input
 }
 fn validate(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
+    validate_set(r, policy)?;
+    if r.exclusive.is_empty() && r.native_builds == 0 && r.desktop_input == 0 {
+        bail!("request must name at least one resource");
+    }
+    Ok(())
+}
+
+/// An admission's host set is allowed to be empty — the model claim alone
+/// is a valid ticket — but anything declared still has to be a legal,
+/// in-policy set.
+fn validate_admission(
+    r: &mut ResourceSet,
+    policy: &ResourcePolicy,
+    claim: &AdmissionClaim,
+) -> Result<()> {
+    validate_set(r, policy)?;
+    if claim.provider.trim().is_empty() || claim.model.trim().is_empty() {
+        bail!("admission claims need a resolved provider and model");
+    }
+    if claim.live_limit > claim.hard_cap {
+        bail!("admission claim live limit cannot exceed its hard cap");
+    }
+    Ok(())
+}
+
+fn validate_set(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
     for key in &mut r.exclusive {
         if let Some(id) = key.strip_prefix("ios:") {
             *key = format!(
@@ -325,10 +520,75 @@ fn validate(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
     {
         bail!("request exceeds host capacity policy");
     }
-    if r.exclusive.is_empty() && r.native_builds == 0 && r.desktop_input == 0 {
-        bail!("request must name at least one resource");
-    }
     Ok(())
+}
+
+/// Why one admission try-grant cannot take capacity under the authority
+/// lock — the model claim against other granted claims, and the host set
+/// against the ledger, policy, and live device inventory. Granting an
+/// admission that would leave an earlier parked `Acquire` still blocked
+/// on the same resources also denies: admissions never starve the
+/// broker's FIFO clients.
+fn admission_blockers(
+    request: &ResourceSet,
+    claim: &AdmissionClaim,
+    ledger: &Ledger,
+    policy: &ResourcePolicy,
+    observation: &Observation,
+) -> Vec<AdmissionBlocker> {
+    let mut blockers = Vec::new();
+    let used = ledger
+        .reservations
+        .iter()
+        .filter(|r| {
+            r.granted_at.is_some()
+                && !r.released
+                && !r.cancelled
+                && r.admission.as_ref().is_some_and(|held| {
+                    held.daemon == claim.daemon
+                        && held.provider == claim.provider
+                        && held.model == claim.model
+                })
+        })
+        .count() as u32;
+    let cap = if claim.allow_burst {
+        claim.hard_cap
+    } else {
+        claim.live_limit
+    };
+    if used >= cap {
+        blockers.push(AdmissionBlocker::ModelLimit { used, limit: cap });
+    }
+    if blocked(request, ledger, policy, observation) {
+        blockers.push(AdmissionBlocker::HostResources {
+            detail: "host capacity is occupied".into(),
+        });
+    } else if starves_earlier_waiter(request, ledger) {
+        blockers.push(AdmissionBlocker::HostResources {
+            detail: "an earlier resource request is waiting for the same capacity".into(),
+        });
+    }
+    blockers
+}
+
+/// Whether granting `request` now would leapfrog a parked `Acquire` that
+/// needs the same capacity. A pending request counts as sharing when it
+/// names an identical exclusive key or draws on the same counted pool.
+fn starves_earlier_waiter(request: &ResourceSet, ledger: &Ledger) -> bool {
+    ledger
+        .reservations
+        .iter()
+        .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
+        .any(|waiting| {
+            let waiting = &waiting.resources;
+            waiting
+                .exclusive
+                .iter()
+                .any(|key| request.exclusive.contains(key))
+                || (waiting.resident_devices > 0 && request.resident_devices > 0)
+                || (waiting.native_builds > 0 && request.native_builds > 0)
+                || (waiting.desktop_input > 0 && request.desktop_input > 0)
+        })
 }
 fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observation, now: u64) {
     for index in 0..ledger.reservations.len() {

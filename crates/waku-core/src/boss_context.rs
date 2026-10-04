@@ -477,7 +477,10 @@ pub fn apply_verdict(evaluation: &Evaluation) -> RouterVerdict {
 mod tests {
     use super::*;
     use uuid::Uuid;
-    use waku_protocol::boss::{BossEmployee, BossIdentity, EmployeeGoal, PersonaPermissions};
+    use waku_protocol::boss::{
+        BossEmployee, BossIdentity, BossResourcePolicy, EmployeeGoal, EmployeeLifecycle,
+        PersonaPermissions,
+    };
     use waku_protocol::model::{AgentSession, Project, ProviderKind};
 
     fn boss_state() -> BossState {
@@ -495,6 +498,10 @@ mod tests {
             deliverables: Vec::new(),
             planning: Vec::new(),
             goals_viewed_at: None,
+            resource_policy: BossResourcePolicy::default(),
+            next_sequence: 0,
+            next_event_id: 0,
+            outbox: Vec::new(),
             revision: 0,
         }
     }
@@ -545,6 +552,11 @@ mod tests {
             expired,
             expired_at: expired.then(unix_time),
             blocker: None,
+            state: EmployeeLifecycle::Working,
+            ticket: None,
+            queued_at: None,
+            request_id: None,
+            request_fingerprint: None,
         };
         boss.employees = vec![employee(done.id, "Zed", true), employee(active.id, "Ada", false)];
 

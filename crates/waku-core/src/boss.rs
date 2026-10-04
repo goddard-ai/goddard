@@ -8,8 +8,10 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
-    BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPlan,
-    BossResult, BossState, EmployeeGoal, PermissionOverrides, PersonaPermissions,
+    AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
+    BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, DispatchNotification,
+    EmployeeGoal, EmployeeLifecycle, ModelLimit, PermissionOverrides, PersonaPermissions,
+    SummonTicket,
 };
 
 pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
@@ -125,6 +127,7 @@ impl BossService {
             if employee.expired && employee.expired_at.is_none() {
                 employee.expired_at = Some(now);
             }
+            normalize_lifecycle(employee);
         }
         *self.state.lock() = state;
         *self.interrupted.lock() = self
@@ -132,7 +135,7 @@ impl BossService {
             .lock()
             .employees
             .iter()
-            .filter(|entry| !entry.expired)
+            .filter(|entry| restart_interrupted(entry))
             .map(|entry| entry.session_id)
             .collect();
         self.migrate_legacy_pins();
@@ -193,6 +196,7 @@ impl BossService {
             if employee.expired && employee.expired_at.is_none() {
                 employee.expired_at = Some(now);
             }
+            normalize_lifecycle(employee);
         }
         let service = Self {
             root,
@@ -201,7 +205,7 @@ impl BossService {
                 state
                     .employees
                     .iter()
-                    .filter(|entry| !entry.expired)
+                    .filter(|entry| restart_interrupted(entry))
                     .map(|entry| entry.session_id)
                     .collect(),
             ),
@@ -395,10 +399,17 @@ impl BossService {
         if self.interrupted.lock().contains(&session) {
             bail!("employee was interrupted by daemon restart; summon a new employee");
         }
-        if self.employee(session).is_some_and(|entry| entry.expired) {
-            bail!("employee has expired; prompt or steer can resume it, or summon a new employee");
+        match self.employee(session).map(|entry| entry.lifecycle()) {
+            Some(EmployeeLifecycle::Finishing) => {
+                bail!("employee is finishing; try again or summon a fresh employee")
+            }
+            Some(EmployeeLifecycle::Expired) => {
+                bail!(
+                    "employee has expired; prompt or steer can resume it, or summon a new employee"
+                );
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     pub fn require_control(&self, caller: Option<Uuid>, target: Uuid) -> anyhow::Result<()> {
@@ -525,6 +536,11 @@ impl BossService {
             expired: false,
             expired_at: None,
             blocker: None,
+            state: EmployeeLifecycle::Queued,
+            ticket: None,
+            queued_at: None,
+            request_id: None,
+            request_fingerprint: None,
         })
     }
 
@@ -724,19 +740,37 @@ impl BossService {
         *self.backend.lock() = std::sync::Arc::downgrade(backend);
     }
 
+    /// The bound daemon, when its `Arc` still exists — long-lived workers
+    /// like the summon scheduler downgrade it and let the daemon die.
+    pub fn backend(&self) -> Option<std::sync::Arc<crate::daemon::WakuBackend>> {
+        self.backend.lock().upgrade()
+    }
+
     pub fn recover_interrupted(&self) {
-        let ids = self.interrupted.lock().clone();
-        if ids.is_empty() {
+        let entries: Vec<BossEmployee> = {
+            let ids = self.interrupted.lock().clone();
+            let state = self.state.lock();
+            state
+                .employees
+                .iter()
+                .filter(|entry| ids.contains(&entry.session_id))
+                .cloned()
+                .collect()
+        };
+        if entries.is_empty() {
             return;
         }
         // An employee the restart cut off mid-job could not flag its own
         // failure; flag it so the finish still reaches the supervisor.
+        // `dispatching` records are the exception: the daemon reverts
+        // unstarted launches back to the queue instead of reporting an
+        // interruption for a job that never ran — it flags started ones
+        // itself once the persisted turn identity is known.
         let _ = self.update(|state| {
-            for entry in state
-                .employees
-                .iter_mut()
-                .filter(|entry| ids.contains(&entry.session_id))
-            {
+            for entry in state.employees.iter_mut().filter(|entry| {
+                entries.iter().any(|id| id.session_id == entry.session_id)
+                    && entry.lifecycle() != EmployeeLifecycle::Dispatching
+            }) {
                 if entry.blocker.is_none() {
                     entry.blocker = Some("interrupted by a daemon restart".into());
                 }
@@ -747,9 +781,12 @@ impl BossService {
             let _ = std::thread::Builder::new()
                 .name("boss-recover-employees".into())
                 .spawn(move || {
-                    for id in ids {
-                        if let Err(error) = backend.finish_boss_employee(id) {
-                            eprintln!("could not recover interrupted employee {id}: {error:#}");
+                    for entry in entries {
+                        if let Err(error) = backend.recover_boss_employee(&entry) {
+                            eprintln!(
+                                "could not recover interrupted employee {}: {error:#}",
+                                entry.session_id
+                            );
                         }
                     }
                 });
@@ -795,7 +832,7 @@ impl BossService {
                         bail!("name has been reused; summon a new employee");
                     }
                     state.retired_employees.remove(index);
-                    entry.expired = false;
+                    entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                     entry.expired_at = None;
                     entry.blocker = None;
                     state.employees.push(entry);
@@ -808,7 +845,7 @@ impl BossService {
                 .iter_mut()
                 .find(|entry| entry.session_id == session && entry.expired)
             {
-                entry.expired = false;
+                entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                 entry.expired_at = None;
                 entry.blocker = None;
                 revived = true;
@@ -861,11 +898,15 @@ impl BossService {
                 .upgrade()
                 .map(|backend| backend.session_active(employee.supervisor_id))
                 .unwrap_or(true);
-        if self
-            .employee(employee.supervisor_id)
-            .is_some_and(|entry| !entry.expired)
-            || supervisor_is_planning
-        {
+        let supervisor_admitted = self.employee(employee.supervisor_id).is_some_and(|entry| {
+            matches!(
+                entry.lifecycle(),
+                EmployeeLifecycle::Queued
+                    | EmployeeLifecycle::Dispatching
+                    | EmployeeLifecycle::Working
+            )
+        });
+        if supervisor_admitted || supervisor_is_planning {
             Some(employee.supervisor_id)
         } else {
             self.document().session_id
@@ -873,23 +914,563 @@ impl BossService {
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
+        let employee = self.begin_finishing(session)?;
+        if employee.is_some() {
+            self.complete_expiry(session)?;
+        }
+        Ok(employee)
+    }
+
+    /// Start an employee's teardown: persist `finishing` so the model
+    /// slot stays held through shutdown and the release can happen
+    /// exactly once. Returns the employee only on the winning
+    /// transition — a second finish, a queued cancel, or a settled
+    /// generation all see `None`. Queued tickets skip `finishing` and
+    /// expire directly: they hold no capacity to release.
+    pub fn begin_finishing(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
+        let now = waku_protocol::model::unix_time();
         let mut employee = None;
         self.update(|state| {
-            if let Some(entry) = state
-                .employees
-                .iter_mut()
-                .find(|entry| entry.session_id == session && !entry.expired)
-            {
-                entry.expired = true;
-                entry.expired_at = Some(waku_protocol::model::unix_time());
+            if let Some(entry) = state.employees.iter_mut().find(|entry| {
+                entry.session_id == session
+                    && matches!(
+                        entry.lifecycle(),
+                        EmployeeLifecycle::Queued
+                            | EmployeeLifecycle::Dispatching
+                            | EmployeeLifecycle::Working
+                    )
+            }) {
+                let lifecycle = entry.lifecycle();
+                entry.set_lifecycle(
+                    if lifecycle == EmployeeLifecycle::Queued {
+                        EmployeeLifecycle::Expired
+                    } else {
+                        EmployeeLifecycle::Finishing
+                    },
+                    now,
+                );
                 employee = Some(entry.clone());
             }
             Ok(())
         })?;
-        self.reset_context(session);
-        self.projects.lock().remove(&session);
-        self.interrupted.lock().retain(|id| *id != session);
+        if employee.is_some() {
+            self.reset_context(session);
+            self.projects.lock().remove(&session);
+            self.interrupted.lock().retain(|id| *id != session);
+        }
         Ok(employee)
+    }
+
+    /// Close out a finishing (or cancelled queued) employee: mark the
+    /// record expired and hand back the admission reservation id still
+    /// owed a broker release — `None` when the slot is already free, so
+    /// the caller releases exactly once.
+    pub fn complete_expiry(&self, session: Uuid) -> anyhow::Result<Option<Uuid>> {
+        let now = waku_protocol::model::unix_time();
+        let mut reservation = None;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            entry.set_lifecycle(EmployeeLifecycle::Expired, now);
+            if let Some(ticket) = &mut entry.ticket {
+                reservation = ticket.reservation.take();
+            }
+            Ok(())
+        })?;
+        Ok(reservation)
+    }
+
+    /// Whether the daemon loaded durable Boss state — a disabled service
+    /// runs no scheduler and reconciles nothing.
+    pub fn is_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// The employee's admission lifecycle — `lifecycle()` folds legacy
+    /// expired-only records into the projection. A `queued` record that
+    /// holds no ticket never entered admission (a pre-queue summon or a
+    /// malformed document), so it reports `working` like the plain record
+    /// it is.
+    pub fn employee_lifecycle(&self, session: Uuid) -> Option<EmployeeLifecycle> {
+        self.employee(session).map(|entry| {
+            if entry.lifecycle() == EmployeeLifecycle::Queued && entry.ticket.is_none() {
+                EmployeeLifecycle::Working
+            } else {
+                entry.lifecycle()
+            }
+        })
+    }
+
+    /// The queue root an employee's supervisor chain ends at: the boss
+    /// session or a planning session. Strict FIFO is per root — only the
+    /// group's oldest queued sequence may dispatch.
+    fn queue_root(state: &BossState, employee: &BossEmployee) -> Uuid {
+        let mut current = employee.supervisor_id;
+        for _ in 0..state.employees.len() {
+            let Some(parent) = state
+                .employees
+                .iter()
+                .find(|entry| entry.session_id == current)
+            else {
+                return current;
+            };
+            current = parent.supervisor_id;
+        }
+        current
+    }
+
+    /// Every queued ticket in sequence order — position and blocked
+    /// display read this, the scheduler reads `queued_heads`.
+    pub fn queued(&self) -> Vec<BossEmployee> {
+        let state = self.state.lock();
+        let mut queued: Vec<BossEmployee> = state
+            .employees
+            .iter()
+            .filter(|entry| entry.lifecycle() == EmployeeLifecycle::Queued)
+            .cloned()
+            .collect();
+        queued.sort_by_key(|entry| entry.ticket.as_ref().map(|ticket| ticket.sequence));
+        queued
+    }
+
+    /// Each queue group's head — its oldest queued ticket — in global
+    /// sequence order. These are the only tickets the scheduler may
+    /// attempt this pass; a blocked head delays its group but no other.
+    pub fn queued_heads(&self) -> Vec<BossEmployee> {
+        let state = self.state.lock();
+        let mut heads: Vec<BossEmployee> = Vec::new();
+        let mut employees: Vec<&BossEmployee> = state
+            .employees
+            .iter()
+            .filter(|entry| entry.lifecycle() == EmployeeLifecycle::Queued)
+            .collect();
+        employees.sort_by_key(|entry| {
+            entry
+                .ticket
+                .as_ref()
+                .map(|ticket| ticket.sequence)
+                .unwrap_or(0)
+        });
+        let mut seen = std::collections::HashSet::new();
+        for entry in employees {
+            if seen.insert(Self::queue_root(&state, entry)) {
+                heads.push(entry.clone());
+            }
+        }
+        heads
+    }
+
+    /// The employee's position inside its own queue group, 1-based —
+    /// `None` when it is not waiting.
+    pub fn queue_position(&self, session: Uuid) -> Option<u64> {
+        let state = self.state.lock();
+        let employee = state
+            .employees
+            .iter()
+            .find(|entry| entry.session_id == session)?;
+        if employee.lifecycle() != EmployeeLifecycle::Queued {
+            return None;
+        }
+        let root = Self::queue_root(&state, employee);
+        let sequence = employee.ticket.as_ref()?.sequence;
+        Some(
+            state
+                .employees
+                .iter()
+                .filter(|entry| {
+                    entry.lifecycle() == EmployeeLifecycle::Queued
+                        && Self::queue_root(&state, entry) == root
+                        && entry
+                            .ticket
+                            .as_ref()
+                            .is_some_and(|ticket| ticket.sequence <= sequence)
+                })
+                .count() as u64,
+        )
+    }
+
+    /// Persist an accepted admission: the employee joins the roster as
+    /// `queued` with its assigned sequence stamped — one durable ticket
+    /// covering the employee, its envelope, and its queue position.
+    pub fn enqueue_ticket(
+        &self,
+        mut employee: BossEmployee,
+        mut ticket: SummonTicket,
+    ) -> anyhow::Result<BossEmployee> {
+        let now = waku_protocol::model::unix_time();
+        self.update(|state| {
+            state.next_sequence = state.next_sequence.saturating_add(1);
+            ticket.sequence = state.next_sequence;
+            employee.set_lifecycle(EmployeeLifecycle::Queued, now);
+            employee.queued_at = Some(now);
+            employee.ticket = Some(ticket);
+            state.employees.push(employee.clone());
+            Ok(())
+        })?;
+        Ok(employee)
+    }
+
+    /// Park a follow-up on a queued ticket — it joins the dispatch
+    /// envelope in submission order and survives restart. Working or
+    /// finished employees reject with `false`.
+    pub fn append_queued_prompt(&self, session: Uuid, prompt: String) -> anyhow::Result<bool> {
+        let mut appended = false;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            if entry.lifecycle() != EmployeeLifecycle::Queued {
+                return Ok(());
+            }
+            if let Some(ticket) = &mut entry.ticket {
+                ticket.pending_prompts.push(prompt);
+                appended = true;
+            }
+            Ok(())
+        })?;
+        Ok(appended)
+    }
+
+    /// Rewrite a queued ticket's resolved selection — `setModel` keeps
+    /// the ticket's sequence, so a model change never buys queue position.
+    /// Working generations reject; the caller re-queues those itself.
+    pub fn reticket(
+        &self,
+        session: Uuid,
+        change: impl FnOnce(&mut SummonTicket),
+    ) -> anyhow::Result<bool> {
+        let mut done = false;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            if entry.lifecycle() != EmployeeLifecycle::Queued {
+                return Ok(());
+            }
+            if let Some(ticket) = &mut entry.ticket {
+                change(ticket);
+                done = true;
+            }
+            Ok(())
+        })?;
+        Ok(done)
+    }
+
+    /// Grant a queued ticket its claims and move it to `dispatching`.
+    /// `false` means the generation went stale — the ticket was stopped
+    /// or re-admitted while the broker grant was in flight, and the
+    /// caller must release what it just took.
+    pub fn mark_dispatching(
+        &self,
+        session: Uuid,
+        generation: u64,
+        reservation: Option<Uuid>,
+    ) -> anyhow::Result<bool> {
+        let mut marked = false;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            let stale = entry.lifecycle() != EmployeeLifecycle::Queued
+                || entry
+                    .ticket
+                    .as_ref()
+                    .is_none_or(|ticket| ticket.generation != generation);
+            if stale {
+                return Ok(());
+            }
+            entry.set_lifecycle(EmployeeLifecycle::Dispatching, 0);
+            entry.queued_at = None;
+            if let Some(ticket) = &mut entry.ticket {
+                ticket.reservation = reservation.or(ticket.reservation);
+                ticket.blocked_by.clear();
+            }
+            marked = true;
+            Ok(())
+        })?;
+        Ok(marked)
+    }
+
+    /// The launch intent landed: the initial prompt reached the provider,
+    /// or the re-admitted employee's slot is confirmed held. `false`
+    /// settles a stale generation — the launch result is discarded.
+    pub fn mark_working(&self, session: Uuid, generation: u64) -> anyhow::Result<bool> {
+        let mut marked = false;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            let stale = entry.lifecycle() != EmployeeLifecycle::Dispatching
+                || entry
+                    .ticket
+                    .as_ref()
+                    .is_none_or(|ticket| ticket.generation != generation);
+            if stale {
+                return Ok(());
+            }
+            entry.set_lifecycle(EmployeeLifecycle::Working, 0);
+            marked = true;
+            Ok(())
+        })?;
+        Ok(marked)
+    }
+
+    /// Record why a queued head cannot dispatch — cleared by the next
+    /// grant. Skips the write (and the revision bump that would redraw
+    /// clients) when the reasons are unchanged.
+    pub fn record_blocked(
+        &self,
+        session: Uuid,
+        blockers: Vec<AdmissionBlocker>,
+    ) -> anyhow::Result<()> {
+        if self
+            .employee(session)
+            .and_then(|entry| entry.ticket)
+            .is_some_and(|ticket| ticket.blocked_by == blockers)
+        {
+            return Ok(());
+        }
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            if entry.lifecycle() == EmployeeLifecycle::Queued
+                && let Some(ticket) = &mut entry.ticket
+            {
+                ticket.blocked_by = blockers;
+            }
+            Ok(())
+        })
+    }
+
+    /// Re-enter an employee into admission: a fresh generation and a new
+    /// sequence at the tail — resurrection never inherits queue position.
+    /// The employee record revives (from the roster or retirement) as
+    /// `queued`. The previous ticket is kept and adjusted; `base` supplies
+    /// one for employees summoned before tickets existed. Returns the
+    /// employee plus the previous generation's reservation id, still owed
+    /// a broker release by the caller.
+    pub fn requeue_employee(
+        &self,
+        session: Uuid,
+        base: SummonTicket,
+        adjust: impl FnOnce(&mut SummonTicket),
+    ) -> anyhow::Result<(BossEmployee, Option<Uuid>)> {
+        let now = waku_protocol::model::unix_time();
+        let mut outcome = None;
+        self.update(|state| {
+            let previous = state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|entry| entry.session_id == session)
+                .and_then(|entry| entry.ticket.clone());
+            let generation = previous.as_ref().map(|t| t.generation).unwrap_or(0) + 1;
+            let mut ticket = previous.unwrap_or(base);
+            let stale_reservation = ticket.reservation.take();
+            ticket.blocked_by.clear();
+            ticket.dispatch_event = None;
+            adjust(&mut ticket);
+            state.next_sequence = state.next_sequence.saturating_add(1);
+            ticket.sequence = state.next_sequence;
+            ticket.generation = generation;
+            let employee = if let Some(index) = state
+                .employees
+                .iter()
+                .position(|entry| entry.session_id == session)
+            {
+                &mut state.employees[index]
+            } else if let Some(index) = state
+                .retired_employees
+                .iter()
+                .position(|entry| entry.session_id == session)
+            {
+                let entry = state.retired_employees.remove(index);
+                if state
+                    .employees
+                    .iter()
+                    .any(|active| active.identity.name == entry.identity.name)
+                {
+                    bail!("name has been reused; summon a new employee");
+                }
+                state.employees.push(entry);
+                state.employees.last_mut().unwrap()
+            } else {
+                return Ok(());
+            };
+            employee.set_lifecycle(EmployeeLifecycle::Queued, now);
+            employee.expired_at = None;
+            employee.blocker = None;
+            employee.queued_at = Some(now);
+            employee.ticket = Some(ticket);
+            outcome = Some((employee.clone(), stale_reservation));
+            Ok(())
+        })?;
+        outcome.context("not a Boss employee")
+    }
+
+    /// Atomically replace the admission policy. `expected_revision`
+    /// guards lost-update races between boss and human callers; the
+    /// returned document is what was persisted.
+    pub fn set_resource_policy(
+        &self,
+        caller: Option<Uuid>,
+        expected_revision: u64,
+        model_limits: Vec<ModelLimit>,
+        host: Option<waku_protocol::resources::ResourcePolicy>,
+    ) -> anyhow::Result<BossResourcePolicy> {
+        if caller.is_some_and(|id| !self.is_boss_principal(id)) {
+            bail!("only the boss or a human can set the resource policy");
+        }
+        for rule in &model_limits {
+            if rule.model.trim().is_empty() {
+                bail!("model limit rules need a model id");
+            }
+            if rule.live_limit > rule.hard_cap {
+                bail!(
+                    "{} / {} liveLimit cannot exceed hardCap",
+                    rule.provider.display_name(),
+                    rule.model
+                );
+            }
+        }
+        let mut applied = None;
+        self.update(|state| {
+            if state.resource_policy.revision != expected_revision {
+                bail!(
+                    "resource policy revision mismatch: expected {expected_revision}, have {}",
+                    state.resource_policy.revision
+                );
+            }
+            state.resource_policy = BossResourcePolicy {
+                revision: expected_revision + 1,
+                model_limits,
+                host,
+            };
+            applied = Some(state.resource_policy.clone());
+            Ok(())
+        })?;
+        Ok(applied.unwrap())
+    }
+
+    /// The policy rule a resolved provider+model counts against — `None`
+    /// imposes no model cap.
+    pub fn model_limit(
+        &self,
+        provider: crate::model::ProviderKind,
+        model: &str,
+    ) -> Option<ModelLimit> {
+        self.state
+            .lock()
+            .resource_policy
+            .model_limits
+            .iter()
+            .find(|rule| rule.provider == provider && rule.model == model)
+            .cloned()
+    }
+
+    /// Record a dispatch notification in the durable outbox and return
+    /// its event id — delivery dedupes on it, so a restart can re-drive
+    /// the same entry instead of guessing whether it went out.
+    pub fn outbox_push(
+        &self,
+        session: Uuid,
+        generation: u64,
+        provider: crate::model::ProviderKind,
+        model: String,
+        goal_id: Option<Uuid>,
+    ) -> anyhow::Result<u64> {
+        let now = waku_protocol::model::unix_time();
+        let mut id = 0;
+        self.update(|state| {
+            state.next_event_id = state.next_event_id.saturating_add(1);
+            id = state.next_event_id;
+            state.outbox.push(DispatchNotification {
+                id,
+                session_id: session,
+                generation,
+                provider,
+                model,
+                goal_id,
+                created_at: now,
+                delivered_at: None,
+            });
+            Ok(())
+        })?;
+        Ok(id)
+    }
+
+    /// Notifications still owed a supervisor.
+    pub fn outbox_pending(&self) -> Vec<DispatchNotification> {
+        self.state
+            .lock()
+            .outbox
+            .iter()
+            .filter(|entry| entry.delivered_at.is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// A notification reached its supervisor's durable prompt queue —
+    /// parked or delivered, it can no longer be lost.
+    pub fn outbox_mark_delivered(&self, id: u64) -> anyhow::Result<()> {
+        let now = waku_protocol::model::unix_time();
+        self.update(|state| {
+            if let Some(entry) = state.outbox.iter_mut().find(|entry| entry.id == id) {
+                entry.delivered_at = Some(now);
+            }
+            Ok(())
+        })
+    }
+
+    /// Revert a `dispatching` ticket whose launch never reached the
+    /// provider — a crash between grant and prompt leaves it here, and
+    /// recovery puts it back in line rather than reporting an
+    /// interruption for a job that never started.
+    pub fn revert_dispatch(&self, session: Uuid) -> anyhow::Result<()> {
+        let now = waku_protocol::model::unix_time();
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            if entry.lifecycle() == EmployeeLifecycle::Dispatching {
+                entry.set_lifecycle(EmployeeLifecycle::Queued, now);
+                entry.queued_at = Some(now);
+                if let Some(ticket) = &mut entry.ticket {
+                    ticket.reservation = None;
+                }
+            }
+            Ok(())
+        })
     }
 
     /// Remove finished employees once their one-hour reuse window has elapsed.
@@ -1020,6 +1601,7 @@ impl BossService {
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::Speak { .. }
+            | BossOperation::SetResourcePolicy { .. }
             | BossOperation::Eval { .. } => {
                 bail!("runtime operation requires daemon dispatch")
             }
@@ -1826,6 +2408,33 @@ fn validate_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Keep the lifecycle field and the `expired` projection consistent for
+/// documents written before `state` existed: the flag was the only
+/// record, so it wins wherever they disagree.
+fn normalize_lifecycle(employee: &mut BossEmployee) {
+    if employee.expired {
+        employee.state = EmployeeLifecycle::Expired;
+    } else if employee.state == EmployeeLifecycle::Expired {
+        employee.expired = true;
+        if employee.expired_at.is_none() {
+            employee.expired_at = Some(waku_protocol::model::unix_time());
+        }
+    }
+}
+
+/// Which employees a restart cut off mid-flight. Queued tickets hold no
+/// runtime or claims, so they re-dispatch instead of finishing as
+/// interrupted; `dispatching`/`finishing` records reconcile through
+/// `recover_interrupted` like working ones. A `queued` record without a
+/// ticket is malformed or predates admission — it interrupts like a
+/// working record.
+fn restart_interrupted(employee: &BossEmployee) -> bool {
+    if employee.expired {
+        return false;
+    }
+    employee.lifecycle() != EmployeeLifecycle::Queued || employee.ticket.is_none()
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let temporary = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
     let mut options = fs::OpenOptions::new();
@@ -1864,6 +2473,10 @@ fn fresh_state() -> BossState {
         deliverables: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
+        resource_policy: BossResourcePolicy::default(),
+        next_sequence: 0,
+        next_event_id: 0,
+        outbox: Vec::new(),
         revision: 0,
     }
 }
@@ -1883,6 +2496,10 @@ fn disabled_state() -> BossState {
         deliverables: Vec::new(),
         planning: Vec::new(),
         goals_viewed_at: None,
+        resource_policy: BossResourcePolicy::default(),
+        next_sequence: 0,
+        next_event_id: 0,
+        outbox: Vec::new(),
         revision: 0,
     }
 }
@@ -2176,6 +2793,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 state
                     .employees
@@ -2227,6 +2849,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 Ok(())
             })
@@ -2353,6 +2980,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 Ok(())
             })
@@ -2795,6 +3427,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 Ok(())
             })
@@ -3072,6 +3709,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 Ok(())
             })
@@ -3153,6 +3795,11 @@ mod tests {
                     expired: false,
                     expired_at: None,
                     blocker: None,
+                    state: EmployeeLifecycle::Working,
+                    ticket: None,
+                    queued_at: None,
+                    request_id: None,
+                    request_fingerprint: None,
                 });
                 Ok(())
             })

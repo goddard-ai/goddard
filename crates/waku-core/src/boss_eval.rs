@@ -335,6 +335,19 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
             .and_then(unwrap_result)
         }
     });
+    engine.register_fn("setResourcePolicy", {
+        let tx = tx.clone();
+        move |args: Map| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                tagged(
+                    "setResourcePolicy",
+                    dynamic_to_json(&Dynamic::from_map(args)),
+                ),
+            )
+            .and_then(unwrap_result)
+        }
+    });
     engine.register_fn("control", {
         let tx = tx.clone();
         move |session_id: ImmutableString, action: Dynamic| -> Result<Dynamic, Box<EvalAltResult>> {
