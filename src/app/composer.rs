@@ -7746,11 +7746,14 @@ impl Waku {
                 }
             })
         };
-        // A boss-managed session (the boss chat or one of its employees)
-        // has no project, workspace, or branch to pick — its daemon owns
-        // the workspace. The pickers' slot shows who the session is instead.
+        // A boss-managed session with no catalog project — the boss
+        // chat's daemon-owned workspace or a projectless employee — has
+        // no project, workspace, or branch to pick, so the pickers' slot
+        // shows who the session is instead. An employee working in a
+        // project keeps the same chips as any task.
         let managed = subject_session_id
             .and_then(|id| self.boss_session_identity(id))
+            .filter(|_| subject_project_path.is_none())
             .map(|identity| {
                 div()
                     .flex()
@@ -8095,11 +8098,7 @@ impl Waku {
             worktree_trigger.into_any_element()
         };
 
-        let branch_selector = if managed.is_some() {
-            None
-        } else {
-            self.render_branch_selector(cx)
-        };
+        let branch_selector = self.render_branch_selector(cx);
 
         let usage_meter = self.render_usage_meter(cx);
         div()

@@ -1,0 +1,1 @@
+- An employee working in a project shows the same project, workspace, and branch chips below its composer as a regular task; the worker's avatar and name now stand in only when there are no chips to show, as on the boss chat.
