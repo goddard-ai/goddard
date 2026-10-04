@@ -5,6 +5,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::AgentWorkspace;
+use crate::automations::AutomationInput;
 use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode, SessionPlanning};
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -275,6 +276,10 @@ pub enum BossOperation {
         #[serde(default)]
         plan_file: Option<String>,
     },
+    /// Manage the user's daemon-owned scheduled automations. Boss-only.
+    Automation {
+        action: AutomationOperation,
+    },
     Summon {
         persona_id: Uuid,
         #[serde(alias = "name")]
@@ -417,6 +422,21 @@ pub enum BossOperation {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+pub enum AutomationOperation {
+    List,
+    Create { input: AutomationInput },
+    Update { input: AutomationInput },
+    Delete { automation_id: Uuid },
+    Pause { automation_id: Uuid },
+    Resume { automation_id: Uuid },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum MemoryOperation {
     Insert {
         collection: String,
@@ -492,6 +512,9 @@ pub enum BossResult {
     },
     Context {
         context: String,
+    },
+    Automations {
+        state: crate::automations::AutomationsState,
     },
     Files {
         files: Vec<BossFile>,

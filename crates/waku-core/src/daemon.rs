@@ -6445,13 +6445,59 @@ impl WakuBackend {
         operation: waku_protocol::boss::BossOperation,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
-        use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
+        use waku_protocol::boss::{AutomationOperation, BossOperation, BossResult, EmployeeControl};
         anyhow::ensure!(
             self.settings.get().boss_experiment_enabled,
             "Boss is disabled by the experiment setting"
         );
         self.boss.activate()?;
         match operation {
+            BossOperation::Automation { action } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can manage automations");
+                }
+                use waku_protocol::automations::AutomationInput;
+                let state = match action {
+                    AutomationOperation::List => self.automations.document(),
+                    AutomationOperation::Create { mut input } => {
+                        input.id = None;
+                        self.automations.upsert(input)?;
+                        self.automations.document()
+                    }
+                    AutomationOperation::Update { input } => {
+                        let id = input.id.ok_or_else(|| anyhow!("automation update requires an id"))?;
+                        anyhow::ensure!(
+                            self.automations.document().automations.iter().any(|automation| automation.id == id),
+                            "unknown automation {id}"
+                        );
+                        self.automations.upsert(input)?;
+                        self.automations.document()
+                    }
+                    AutomationOperation::Delete { automation_id } => {
+                        self.automations.remove(automation_id)?;
+                        self.automations.document()
+                    }
+                    action @ (AutomationOperation::Pause { automation_id }
+                    | AutomationOperation::Resume { automation_id }) => {
+                        let existing = self.automations.document().automations.into_iter()
+                            .find(|automation| automation.id == automation_id)
+                            .ok_or_else(|| anyhow!("unknown automation {automation_id}"))?;
+                        let resume = matches!(action, AutomationOperation::Resume { .. });
+                        self.automations.upsert(AutomationInput {
+                            id: Some(existing.id), name: existing.name, prompt: existing.prompt,
+                            provider: existing.provider, model: existing.model,
+                            project_path: existing.project_path, workspace: existing.workspace,
+                            base_branch: existing.base_branch, session_id: existing.session_id,
+                            schedule: existing.schedule, webhook: existing.webhook_secret.is_some(),
+                            timezone: existing.timezone, enabled: resume, precheck: existing.precheck,
+                            missed_run_grace_minutes: existing.missed_run_grace_minutes,
+                            reuse_session: existing.reuse_session,
+                        })?;
+                        self.automations.document()
+                    }
+                };
+                Ok(BossResult::Automations { state })
+            }
             BossOperation::Open {
                 provider,
                 model,

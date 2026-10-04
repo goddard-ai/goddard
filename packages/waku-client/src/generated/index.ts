@@ -23,6 +23,7 @@ export type { AutoPromptQuestion } from "./AutoPromptQuestion";
 export type { AutoPromptRule } from "./AutoPromptRule";
 export type { Automation } from "./Automation";
 export type { AutomationInput } from "./AutomationInput";
+export type { AutomationOperation } from "./AutomationOperation";
 export type { AutomationPrecheck } from "./AutomationPrecheck";
 export type { AutomationPrecheckResult } from "./AutomationPrecheckResult";
 export type { AutomationRun } from "./AutomationRun";

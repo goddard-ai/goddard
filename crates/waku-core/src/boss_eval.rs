@@ -47,6 +47,8 @@ persist between eval calls for this boss session.
   view()                                    boss state map
   roster()                                  compact employee status digest
   context()                                 work digest string
+  automation(#{type:list|create|update|delete|pause|resume,...})
+                                            automation document with schedules and run history
   summon(#{personaId,jobTitle,prompt,project,provider?,model?,workspace?,baseBranch?,workGoal?})
                                             employee session id
   control(sessionId, \"stop\")               shorthand for a bare action
@@ -255,6 +257,19 @@ fn append_output(output: &Mutex<String>, text: &str) {
 /// operation's wire JSON — the same shapes `goddard-agent boss` accepts —
 /// so the eval surface tracks the protocol enum.
 fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
+    engine.register_fn("automation", {
+        let tx = tx.clone();
+        move |action: Map| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                serde_json::json!({
+                    "type": "automation",
+                    "action": dynamic_to_json(&Dynamic::from_map(action)),
+                }),
+            )
+            .and_then(unwrap_result)
+        }
+    });
     engine.register_fn("view", {
         let tx = tx.clone();
         move || -> Result<Dynamic, Box<EvalAltResult>> {
