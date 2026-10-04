@@ -7262,6 +7262,7 @@ mod tests {
             pinned_at: None,
             dormant_at: None,
             archived_at: None,
+            viewed_at: None,
         };
         let hour = 3600;
         let fresh = bundle(hour);
@@ -7304,6 +7305,7 @@ mod tests {
             pinned_at: Some(now),
             dormant_at: None,
             archived_at: None,
+            viewed_at: None,
         };
         let mut swept = pinned.clone();
         swept.id = Uuid::new_v4();
@@ -7324,6 +7326,7 @@ mod tests {
             pinned_at: None,
             dormant_at: None,
             archived_at: None,
+            viewed_at: None,
             ..pinned.clone()
         };
         let fresh = BossBundle {

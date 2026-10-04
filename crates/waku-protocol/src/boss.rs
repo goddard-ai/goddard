@@ -148,6 +148,10 @@ pub struct BossBundle {
     /// An archived bundle leaves the sidebar entirely.
     #[serde(default)]
     pub archived_at: Option<u64>,
+    /// When the user last opened the bundle. `None` — or older than
+    /// `updated_at` after a re-publish — reads as unread in the sidebar.
+    #[serde(default)]
+    pub viewed_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -302,6 +306,11 @@ pub enum BossOperation {
     /// between calls. Boss-only.
     Eval {
         script: String,
+    },
+    /// Stamp the bundle viewed at the daemon's clock — opening its page or
+    /// preview retires the sidebar's unread marker.
+    MarkBundleViewed {
+        id: Uuid,
     },
 }
 

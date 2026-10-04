@@ -25,4 +25,9 @@ dormantAt: number | null,
 /**
  * An archived bundle leaves the sidebar entirely.
  */
-archivedAt: number | null, };
+archivedAt: number | null,
+/**
+ * When the user last opened the bundle. `None` — or older than
+ * `updated_at` after a re-publish — reads as unread in the sidebar.
+ */
+viewedAt: number | null, };

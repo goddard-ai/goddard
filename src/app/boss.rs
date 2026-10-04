@@ -1591,6 +1591,11 @@ impl Waku {
             DaemonKey::Local => file_name,
         };
         let age = sidebar::format_time_ago(unix_time().saturating_sub(bundle.updated_at));
+        // Unread reads like a task's unseen completion: never opened, or
+        // refreshed by a re-publish since the last open.
+        let unread = bundle
+            .viewed_at
+            .is_none_or(|viewed| viewed < bundle.updated_at);
         let pinned = bundle.pinned_at.is_some();
         let dormant = bundle.dormant_at.is_some() && !pinned;
         let menu = self.menu_handle(format!("bundle-{key:?}-{bundle_id}"), cx);
@@ -1770,7 +1775,27 @@ impl Waku {
                             )
                             .children(finder_button)
                             .child(pin_button)
-                            .child(archive_button),
+                            .child(archive_button)
+                            // The unread dot holds the row's right edge so
+                            // the hover controls reveal to its left without
+                            // moving it — the same glyph a task row's
+                            // unseen-completion indicator draws.
+                            .when(unread, |line| {
+                                line.child(
+                                    div()
+                                        .flex_none()
+                                        .size(px(12.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            div()
+                                                .size(px(7.0))
+                                                .rounded_full()
+                                                .bg(theme.info),
+                                        ),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -1952,11 +1977,38 @@ impl Waku {
         bundle_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        self.mark_bundle_viewed(key, bundle_id, cx);
         self.boss_ui.command_bundle = Some((key, bundle_id));
         self.boss_ui.pending_bundle = Some((key, bundle_id));
         self.sync_composer_placeholder(cx);
         self.chat_with_boss(key, cx);
         cx.notify();
+    }
+
+    /// Opening a bundle stamps it viewed on the owning daemon; the stamped
+    /// state returns through the usual revision broadcast. The stamp is
+    /// fire-and-forget outside `boss_request`'s pending gate — an in-flight
+    /// list or save must never drop the view, and the view must never
+    /// queue a click behind them.
+    fn mark_bundle_viewed(&self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
+        else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                let _ = client.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::Boss {
+                        operation: BossOperation::MarkBundleViewed { id },
+                    },
+                );
+            })
+            .detach();
     }
 
     /// The deferred half of a bundle row click, fired when the activation

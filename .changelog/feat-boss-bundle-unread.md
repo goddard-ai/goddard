@@ -1,0 +1,1 @@
+- Bundle rows in the sidebar's Recent bundles group show an unread dot — the same marker a task gets for an unseen completion — when a bundle is new or an employee re-published it since you last opened it. Clicking the bundle clears the dot.

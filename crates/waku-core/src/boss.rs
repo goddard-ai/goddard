@@ -965,6 +965,7 @@ impl BossService {
                             pinned_at: None,
                             dormant_at: None,
                             archived_at: None,
+                            viewed_at: None,
                         });
                     }
                     Ok(())
@@ -1026,6 +1027,20 @@ impl BossService {
                         .find(|bundle| bundle.id == id)
                         .ok_or_else(|| anyhow!("unknown bundle"))?;
                     bundle.archived_at = archived.then_some(now);
+                    Ok(())
+                })?;
+                Ok(BossResult::Saved)
+            }
+            BossOperation::MarkBundleViewed { id } => {
+                self.require_owner(caller)?;
+                let now = waku_protocol::model::unix_time();
+                self.update(|state| {
+                    let bundle = state
+                        .bundles
+                        .iter_mut()
+                        .find(|bundle| bundle.id == id)
+                        .ok_or_else(|| anyhow!("unknown bundle"))?;
+                    bundle.viewed_at = Some(now);
                     Ok(())
                 })?;
                 Ok(BossResult::Saved)
@@ -2193,6 +2208,7 @@ mod tests {
                 id: Uuid::nil(),
                 archived: true,
             },
+            BossOperation::MarkBundleViewed { id: Uuid::nil() },
         ] {
             assert!(service.handle(Some(employee_id), op).is_err());
         }
@@ -2295,6 +2311,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 archived: true,
             },
+            BossOperation::MarkBundleViewed { id: Uuid::new_v4() },
         ] {
             assert!(service.handle(None, op).is_err());
         }
@@ -2354,6 +2371,29 @@ mod tests {
         assert_eq!(bundle.archived_at, None);
         assert_eq!(bundle.dormant_at, None);
         assert!(bundle.pinned_at.is_some());
+
+        // A fresh bundle is unread until the owner opens it; re-publishing
+        // refreshed content makes it unread again by leaving `viewed_at`
+        // behind `updated_at`.
+        assert_eq!(bundle.viewed_at, None);
+        service
+            .handle(None, BossOperation::MarkBundleViewed { id: file_id })
+            .unwrap();
+        let bundle = service.document().bundles[0].clone();
+        let viewed = bundle.viewed_at.expect("opening stamps viewed_at");
+        assert!(viewed >= bundle.updated_at);
+        service
+            .handle(
+                None,
+                BossOperation::PublishBundle {
+                    path: file_path.clone(),
+                    name: None,
+                },
+            )
+            .unwrap();
+        let bundle = service.document().bundles[0].clone();
+        assert_eq!(bundle.viewed_at, Some(viewed));
+        assert!(bundle.updated_at >= viewed);
 
         drop(service);
         let restored = BossService::open(root.clone()).unwrap();
