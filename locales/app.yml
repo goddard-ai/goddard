@@ -255,6 +255,8 @@ command_palette.opens_on_web:
   en: Opens on GitHub
 command_palette.no_issue_projects_hint:
   en: Open a project to file an issue
+command_palette.no_sync_projects_hint:
+  en: Open a project to sync a branch
 command_palette.no_issue_templates:
   en: No issue templates
 command_palette.no_issue_templates_hint:
@@ -293,6 +295,8 @@ command_palette.view_drafts:
   en: View drafts
 command_palette.sync_branch:
   en: Sync branch…
+command_palette.sync_branch_project_placeholder:
+  en: Select a project to sync…
 command_palette.new_custom_command:
   en: New custom command…
 command_palette.prompts:

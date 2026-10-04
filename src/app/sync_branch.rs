@@ -1,6 +1,8 @@
 //! The `⌘S` "Sync branch…" modal: pick a tracked branch's checkout and sync
 //! it with its upstream — pull what the branch lacks, then push what the
-//! upstream lacks.
+//! upstream lacks. When neither the selected task nor the selected project
+//! supplies a repository folder, the command palette's project step asks
+//! which project to sync and a pick re-enters this picker rooted there.
 //!
 //! The chord still belongs to SaveFile — the save handler falls through to
 //! `open_sync_branch` whenever no file-editor surface is active, so saving an
@@ -177,9 +179,12 @@ impl Waku {
     }
 
     /// Open the picker over the session's repository — or the selected
-    /// project's when no task is selected. The search field takes real focus;
-    /// closing restores whatever held it before, on the next frame if the
-    /// close came from a background completion.
+    /// project's when no task is selected. When neither resolves to a
+    /// folder, the palette's project step asks which project to sync and a
+    /// pick re-enters here through `open_sync_branch_in`; Esc there quietly
+    /// backs out. The search field takes real focus; closing restores
+    /// whatever held it before, on the next frame if the close came from a
+    /// background completion.
     pub(super) fn open_sync_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_page.is_some() || self.sync_branch.open {
             return;
@@ -191,8 +196,26 @@ impl Waku {
             .clone()
             .or_else(|| self.selected_project().map(|project| project.path.clone()))
         else {
+            self.prompt_sync_branch_project(window, cx);
             return;
         };
+        self.open_sync_branch_in(cwd, session_workspace, window, cx);
+    }
+
+    /// The open once a repository folder is known — the resolved session
+    /// workspace or project, or the fallback project step's pick. The
+    /// session's checkout leads as "Current branch"; a picked project
+    /// passes `None` so no row claims it.
+    pub(super) fn open_sync_branch_in(
+        &mut self,
+        cwd: PathBuf,
+        session_workspace: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() || self.sync_branch.open {
+            return;
+        }
         // One picker at a time; closing first restores the palette's recorded
         // focus so this picker captures the element that was really focused.
         if self.command_palette.is_open() {

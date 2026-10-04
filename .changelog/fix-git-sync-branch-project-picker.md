@@ -1,0 +1,1 @@
+- "Sync branch…" no longer does nothing when it has no repository to work with — run it with no task or project selected and it asks which project to sync, then opens that project's branch picker.

@@ -238,6 +238,9 @@ enum PaletteAction {
         onto: Option<String>,
     },
     SyncBranch,
+    /// The "Sync branch…" fallback picker's pick: open the branch picker
+    /// rooted at this project's path.
+    ChooseSyncBranchProject(Uuid),
     CompactContext,
     GenerateVoiceBriefing,
     CancelVoiceBriefing,
@@ -313,6 +316,9 @@ enum CommandPaletteView {
     /// The "New task in…" directory picker.
     NewTaskIn,
     IssueProjects,
+    /// The "Sync branch…" fallback's project picker — shown when neither a
+    /// session workspace nor a selected project supplied a repository.
+    SyncBranchProjects,
     IssueTemplates,
     /// The "Change base branch" branch picker.
     RebaseBase,
@@ -1804,6 +1810,33 @@ impl Waku {
         cx.notify();
     }
 
+    /// "Sync branch…" found no repository in context: the palette offers a
+    /// project to run it in — a pick re-enters the branch picker rooted at
+    /// that project, Esc lands back on the regular palette.
+    fn open_command_palette_sync_branch_projects_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::SyncBranchProjects;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.sync_branch_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// The branch picker's entry to that fallback, reached from ⌘S or the
+    /// palette command where the palette may be closed — open it first,
+    /// then swap straight to the project step.
+    pub(super) fn prompt_sync_branch_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.open_command_palette_sync_branch_projects_view(cx);
+    }
+
     /// The picker picked — or skipped — a template; the dialog is a
     /// separate surface, so the palette hands it the resolved target and
     /// repo after closing.
@@ -1869,6 +1902,7 @@ impl Waku {
             }
             CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
             CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::SyncBranchProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the templates step backs up to the project step —
             // also the way to override an inferred repository.
             CommandPaletteView::IssueTemplates => self.open_command_palette_issue_projects_view(cx),
@@ -1900,6 +1934,9 @@ impl Waku {
             CommandPaletteView::NewTaskIn => tr!("command_palette.new_task_in_placeholder"),
             CommandPaletteView::IssueProjects => {
                 tr!("command_palette.issue_project_placeholder")
+            }
+            CommandPaletteView::SyncBranchProjects => {
+                tr!("command_palette.sync_branch_project_placeholder")
             }
             CommandPaletteView::IssueTemplates => {
                 tr!("command_palette.issue_template_placeholder")
@@ -1950,6 +1987,7 @@ impl Waku {
                 | CommandPaletteView::ShareProjectFriends(_)
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
+                | CommandPaletteView::SyncBranchProjects
                 | CommandPaletteView::IssueTemplates
                 | CommandPaletteView::RebaseBase
                 | CommandPaletteView::SavePrompt
@@ -2435,10 +2473,18 @@ impl Waku {
         }
 
         // Same reachability as ⌘S outside the file editor: a session's
-        // workspace or a selected project supplies the repository. The chord
-        // itself belongs to SaveFile — its handler falls through to the
-        // branch picker — so the hint advertises that action's binding.
-        if self.selected_workspace_path().is_some() || self.selected_project().is_some() {
+        // workspace or a selected project supplies the repository, and any
+        // registered project lets the fallback picker ask for one. The
+        // chord itself belongs to SaveFile — its handler falls through to
+        // the branch picker — so the hint advertises that action's binding.
+        if self.selected_workspace_path().is_some()
+            || self.selected_project().is_some()
+            || self
+                .state
+                .projects
+                .iter()
+                .any(|project| !project.is_projectless())
+        {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.sync_branch"),
@@ -3950,6 +3996,80 @@ impl Waku {
         );
     }
 
+    /// The "Sync branch…" fallback picker's projects — every real project a
+    /// repository could live in. Repo-ness is deliberately not pre-filtered:
+    /// the pick re-runs the branch fetch, whose "not a repository" state is
+    /// the error a repo-less pick should surface.
+    fn command_palette_sync_branch_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .collect::<Vec<_>>();
+        let current = self
+            .selected_session()
+            .map(|session| session.project_id)
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        run_script::run_script_project_order(current, &recent, &projects)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if let waku_client::DaemonKey::Remote(host) = self.project_host(project_id)
+                    && let Some(host) = self.remote_host_name(host)
+                {
+                    detail = format!("{detail} · {host}");
+                }
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!(
+                        "{label} {} project sync branch",
+                        project.path.to_string_lossy()
+                    ),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/git-branch.svg"),
+                    shortcut: None,
+                    action: PaletteAction::ChooseSyncBranchProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
+    fn refresh_command_palette_sync_branch_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_sync_branch_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(
+            selected_action.flatten(),
+            Some(PaletteAction::ChooseSyncBranchProject),
+        );
+    }
+
     fn refresh_command_palette_issue_template_results(
         &mut self,
         query: &str,
@@ -4233,6 +4353,10 @@ impl Waku {
             }
             CommandPaletteView::IssueProjects => {
                 self.refresh_command_palette_issue_project_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::SyncBranchProjects => {
+                self.refresh_command_palette_sync_branch_project_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::IssueTemplates => {
@@ -4983,6 +5107,18 @@ impl Waku {
                 self.settings_page = None;
                 self.open_sync_branch(window, cx);
             }
+            PaletteAction::ChooseSyncBranchProject(project_id) => {
+                self.settings_page = None;
+                if let Some(path) = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+                    .map(|project| project.path.clone())
+                {
+                    self.open_sync_branch_in(path, None, window, cx);
+                }
+            }
             PaletteAction::CompactContext => {
                 self.settings_page = None;
                 if let Some(session_id) = self.composer_session_id() {
@@ -5202,6 +5338,7 @@ impl Waku {
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_)
             | CommandPaletteView::IssueProjects
+            | CommandPaletteView::SyncBranchProjects
             | CommandPaletteView::SavePrompt => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
@@ -5324,6 +5461,13 @@ impl Waku {
                     "icons/folder.svg",
                     tr!("command_palette.no_projects"),
                     Some(tr!("command_palette.no_issue_projects_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::SyncBranchProjects {
+                (
+                    "icons/folder.svg",
+                    tr!("command_palette.no_projects"),
+                    Some(tr!("command_palette.no_sync_projects_hint")),
                     false,
                 )
             } else if issue_templates_view {
