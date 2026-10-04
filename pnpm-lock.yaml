@@ -47,6 +47,9 @@ importers:
       '@nativescript-community/octane':
         specifier: 0.2.4
         version: 0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+      '@nativescript-community/ui-document-picker':
+        specifier: 1.1.29
+        version: 1.1.29
       '@nativescript-community/ui-drawer':
         specifier: 0.1.32
         version: 0.1.32
@@ -62,6 +65,12 @@ importers:
       '@nativescript/imagepicker':
         specifier: 5.0.0
         version: 5.0.0
+      '@nativescript/mlkit-barcode-scanning':
+        specifier: 3.0.4
+        version: 3.0.4
+      '@nativescript/mlkit-core':
+        specifier: 3.0.4
+        version: 3.0.4
       '@nativescript/secure-storage':
         specifier: ^4.0.2
         version: 4.0.2
@@ -800,6 +809,9 @@ packages:
   '@nativescript-community/perms@2.3.6':
     resolution: {integrity: sha512-KtAyY2fCjKL19HQ3AslQKH4h+Sao0u4G4AgoF+SkRcAMGxqQd8covjpJ2hN3AFm8TDkqbSm3o0NDMR1dYVr/3A==}
 
+  '@nativescript-community/ui-document-picker@1.1.29':
+    resolution: {integrity: sha512-msmjSnDB76AG6xae6NCFIhVMDScbaj+U5guIaSBTYahwlFPKA/kC6aM42LE5Ucs6nLRllWPa66+tSwCFdNFhfA==}
+
   '@nativescript-community/ui-drawer@0.1.32':
     resolution: {integrity: sha512-SxvprjOAdyuDSqynIiy2s4cWvamolaSZrh4rXqMihA8IeOQ5FHZ1T/92BhJG1sTj1pl5aZ380RNzD98n7TykWA==}
 
@@ -833,6 +845,12 @@ packages:
 
   '@nativescript/ios@9.1.0':
     resolution: {integrity: sha512-rdSmL+oOL+iyLYoSBM/cS0bOMAKzzOax6SpR4WmIHpmpa7TrFrrmzekuPSkwTZGeA7NTXnXD6K45rFvCHm6kOA==}
+
+  '@nativescript/mlkit-barcode-scanning@3.0.4':
+    resolution: {integrity: sha512-Oq4x69wU9EHMBSjRfkNluICJEZ1WlxRmE2Vz3mD+l86Y+XTwFBCNESLXGCk/1hPRCLG7Qttg1+ieM4LGTlfmDA==}
+
+  '@nativescript/mlkit-core@3.0.4':
+    resolution: {integrity: sha512-TNPxgRIKUFxR6ZGYHnBCIQ5wSWN9dxhV8QZOiP6yibHObCkRLpEiRJ1Nk8iATLfxlYf2JbIAyCWIHhPg0KCYag==}
 
   '@nativescript/secure-storage@4.0.2':
     resolution: {integrity: sha512-4sWU4tmvGjh9ZfuApt0enwcT3tGN88dR5IeOuQsYqUSeUQbxK7Xo2JTF1dy7KIxnh0Fnxrs5O61x7hp9JBn/kw==}
@@ -4447,6 +4465,10 @@ snapshots:
 
   '@nativescript-community/perms@2.3.6': {}
 
+  '@nativescript-community/ui-document-picker@1.1.29':
+    dependencies:
+      '@nativescript-community/perms': 2.3.6
+
   '@nativescript-community/ui-drawer@0.1.32':
     dependencies:
       '@nativescript-community/gesturehandler': 2.0.45
@@ -4500,6 +4522,10 @@ snapshots:
       '@nativescript-community/perms': 2.3.6
 
   '@nativescript/ios@9.1.0': {}
+
+  '@nativescript/mlkit-barcode-scanning@3.0.4': {}
+
+  '@nativescript/mlkit-core@3.0.4': {}
 
   '@nativescript/secure-storage@4.0.2': {}
 

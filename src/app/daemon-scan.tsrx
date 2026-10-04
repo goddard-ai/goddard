@@ -1,53 +1,37 @@
-import { Pressable, pushRoute, Text, Column } from '@octane-xplat/ui';
+import { useRef } from 'octane';
+import { popRoute, pushRoute } from '@octane-xplat/ui';
 
-import { AppSymbol } from '../components/app-symbol';
-import { NativeTint } from '../lib/theme-platform';
-import { Radius } from '../lib/theme-colors';
-import { useTheme } from '../lib/use-theme';
+import { QrScanner } from '../components/qr-scanner';
+import { showAlert } from '../lib/alert';
+import { parseDaemonConnectLink } from '../lib/daemon-profile';
 
-/** QR scanner for `goddard://connect` codes.
- *
- * TODO(xplat-blocker): live camera scanning. There is no shared camera or
- * barcode-detection widget in @octane-xplat/ui — CameraView exists only for
- * macOS. Needs @nativescript/mlkit-barcode-scanning (or equivalent) wrapped
- * as an app component; until then this screen routes to manual entry. */
+/** QR scanner for `goddard://connect` codes. The platform leaf owns the
+ * camera (native) or the manual-entry fallback (web); a parsed code routes
+ * through the shared connect screen, which saves and activates the profile. */
 export default function DaemonScanScreen() {
-  const theme = useTheme();
+  const handled = useRef(false);
+
+  const onCode = (raw: string) => {
+    if (handled.current) {return;}
+    try {
+      const link = parseDaemonConnectLink(raw);
+      handled.current = true;
+      // Pop the scanner first so connect's own pop lands back on the
+      // caller instead of a live camera.
+      popRoute('root');
+      pushRoute({ stack: 'root', name: 'connect', params: { ...link } });
+    } catch {
+      void showAlert(
+        'Not a pairing code',
+        'That QR code isn’t a Goddard connect code. Scan the code shown in Settings → Daemon on your host.',
+      );
+    }
+  };
+
   return (
-    <Column
-      style={{
-        alignItems: 'center',
-        flex: 1,
-        gap: 14,
-        justifyContent: 'center',
-        padding: 32,
-        backgroundColor: theme.background,
-      }}
-    >
-      <AppSymbol
-        name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
-        size={48}
-        tintColor={theme.textTertiary}
-      />
-      <Text style={{ fontSize: 16, textAlign: 'center', color: theme.textSecondary }}>
-        Camera scanning isn’t available in this build yet. Enter the daemon
-        address and token by hand instead.
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => pushRoute({ stack: 'root', name: 'daemon-editor', params: {} })}
-        className="vx-pressable"
-        style={{
-          alignItems: 'center',
-          borderRadius: Radius.medium,
-          justifyContent: 'center',
-          minHeight: 44,
-          paddingHorizontal: 18,
-          backgroundColor: String(NativeTint),
-        }}
-      >
-        <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Enter manually</Text>
-      </Pressable>
-    </Column>
+    <QrScanner
+      onCode={onCode}
+      onManual={() => pushRoute({ stack: 'root', name: 'daemon-editor', params: {} })}
+    />
   );
 }

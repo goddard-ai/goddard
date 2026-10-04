@@ -1,21 +1,30 @@
 import { create as createImagePicker, ImagePickerMediaType } from '@nativescript/imagepicker';
+import { openFilePicker } from '@nativescript-community/ui-document-picker';
 import {
   requestPermissions,
   takePicture,
 } from '@nativescript/camera';
 
-import { File, knownFolders, path as nsPath } from '@nativescript/core';
+import { File, Utils, knownFolders, path as nsPath } from '@nativescript/core';
 
 
-import type { LocalAttachmentFile } from './attachments';
+import { localFileName, type LocalAttachmentFile } from './attachments';
+
+declare const android:
+  | {
+      net: { Uri: { parse(uri: string): unknown } };
+      provider: { OpenableColumns: { DISPLAY_NAME: string; SIZE: string } };
+    }
+  | undefined;
 
 export type AttachmentSource = 'files' | 'camera' | 'photo';
 
-/** Generic document picking has no maintained NativeScript plugin —
- * flagged blocker. Photo/library attachments work. */
 export async function pickAttachments(source: AttachmentSource): Promise<LocalAttachmentFile[] | null> {
   if (source === 'files') {
-    throw new Error('File picking is not available on this platform yet — use Photo');
+    const result = await openFilePicker({ multipleSelection: true });
+    const uris = result.files ?? [];
+    if (!uris.length) {return null;}
+    return uris.map(describeDocument);
   }
 
   if (source === 'camera') {
@@ -35,6 +44,61 @@ export async function pickAttachments(source: AttachmentSource): Promise<LocalAt
     mimeType: item.type === 'image' ? 'image/jpeg' : 'video/mp4',
     size: item.filesize,
   }));
+}
+
+interface AndroidCursor {
+  moveToFirst(): boolean;
+  getColumnIndex(name: string): number;
+  getString(index: number): string | null;
+  getLong(index: number): number;
+  close(): void;
+}
+
+/** The picker returns plain paths on iOS (import mode copies into the app
+ * inbox) and below-30 Android; on newer Android it is a `content://` URI
+ * whose display name and size live in the provider's OpenableColumns. */
+function describeDocument(uri: string): LocalAttachmentFile {
+  const fallback = {
+    uri,
+    name: localFileName(uri, 'Attachment'),
+    size: File.exists(uri) ? File.fromPath(uri).size : null,
+  };
+
+  if (!uri.startsWith('content://')) {return fallback;}
+  const ns = android;
+  if (!ns) {return fallback;}
+  try {
+    const parsed = ns.net.Uri.parse(uri);
+    const resolver = Utils.android.getApplicationContext().getContentResolver() as unknown as {
+      query(
+        uri: unknown,
+        projection: string[] | null,
+        selection: string | null,
+        selectionArgs: string[] | null,
+        sortOrder: string | null,
+      ): AndroidCursor | null;
+    };
+
+    const cursor = resolver.query(parsed, null, null, null, null);
+    if (!cursor?.moveToFirst()) {
+      cursor?.close();
+      return fallback;
+    }
+
+    try {
+      const nameIndex = cursor.getColumnIndex(ns.provider.OpenableColumns.DISPLAY_NAME);
+      const sizeIndex = cursor.getColumnIndex(ns.provider.OpenableColumns.SIZE);
+      return {
+        uri,
+        name: (nameIndex >= 0 && cursor.getString(nameIndex)) || fallback.name,
+        size: sizeIndex >= 0 ? cursor.getLong(sizeIndex) : null,
+      };
+    } finally {
+      cursor.close();
+    }
+  } catch {
+    return fallback;
+  }
 }
 
 async function saveToTmp(asset: unknown, name: string): Promise<LocalAttachmentFile> {
