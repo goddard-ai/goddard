@@ -1,0 +1,1 @@
+- Polished the bundle preview page: markdown documents center like the maximized file preview, the boss's avatar and name show once below the composer instead of repeating next to the model picker, and content scrolling under the composer dissolves into the surface like the transcript does.

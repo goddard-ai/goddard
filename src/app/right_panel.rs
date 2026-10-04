@@ -3321,7 +3321,7 @@ impl Waku {
                     .into_any_element()
                 }),
             Some(RightPanelSurface::File(path)) => self
-                .render_right_panel_file(path, width, true, window, cx)
+                .render_right_panel_file(path, width, true, false, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::FileAtRef { path, git_ref }) => self
                 .render_right_panel_ref_file(&path, &git_ref, width, window, cx)
@@ -5242,7 +5242,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         if let Some(relative_path) = self.right_panel_files_selected_path.clone() {
-            self.render_right_panel_file(relative_path, panel_width, true, window, cx)
+            self.render_right_panel_file(relative_path, panel_width, true, false, window, cx)
         } else {
             self.render_right_panel_working_tree(None, cx)
         }
@@ -5671,6 +5671,7 @@ impl Waku {
                 relative_path,
                 self.chat_viewport_width(window),
                 false,
+                true,
                 window,
                 cx,
             )
@@ -5681,11 +5682,15 @@ impl Waku {
     /// `show_tree` mounts the working-tree column beside the editor — the
     /// strip's own browsing surface. A bundle's preview page leaves it
     /// out: the page previews one published file, not its directory.
+    /// `bundle_page` lays the surface out as a page — the markdown preview
+    /// centers its column like the maximized panel and a bottom fade marks
+    /// content scrolling under the composer, as the transcript's does.
     fn render_right_panel_file(
         &mut self,
         relative_path: String,
         panel_width: f32,
         show_tree: bool,
+        bundle_page: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -5720,6 +5725,7 @@ impl Waku {
                 &relative_path,
                 &editor_state,
                 panel_width - file_tree_width,
+                bundle_page,
                 window,
                 cx,
             )
@@ -5908,7 +5914,29 @@ impl Waku {
                     .children(tree_toggle)
                     .children(preview_toggle),
             )
-            .child(body);
+            .child(body)
+            // A bundle's page rides above the composer like the transcript:
+            // its rows dissolve into the surface where more waits below.
+            .when_some(
+                bundle_page
+                    .then(|| {
+                        if image_mode {
+                            None
+                        } else if preview {
+                            Some(self.file_preview_scroll_handle.clone())
+                        } else {
+                            Some(self.right_panel_editor_scroll_handle.clone())
+                        }
+                    })
+                    .flatten(),
+                |editor, handle| {
+                    editor.child(scrollbar::edge_fade(
+                        handle,
+                        scrollbar::FadeEdge::Bottom,
+                        theme.surface,
+                    ))
+                },
+            );
 
         div()
             .flex_1()
@@ -6926,6 +6954,7 @@ impl Waku {
         relative_path: &str,
         editor_state: &Entity<TextInput>,
         pane_width: f32,
+        bundle_page: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -6939,7 +6968,9 @@ impl Waku {
 
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let fullscreen = self.panel_fullscreen_active();
+        // The maximized panel and a bundle's page both own a full-width
+        // column — the document centers at the content measure either way.
+        let centered = self.panel_fullscreen_active() || bundle_page;
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::document()));
@@ -7054,12 +7085,12 @@ impl Waku {
                             .child(md::render::frame_reset(preview_selection.clone()))
                             .child(
                                 div()
-                                    .when(fullscreen, |element| {
+                                    .when(centered, |element| {
                                         element.w_full().flex().justify_center()
                                     })
                                     .child(
                                         div()
-                                            .when(fullscreen, |element| {
+                                            .when(centered, |element| {
                                                 element
                                                     .w_full()
                                                     .max_w(px(CONTENT_MAX_WIDTH))

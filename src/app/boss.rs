@@ -746,6 +746,11 @@ impl Waku {
     /// while the pickers still describe the viewed session.
     pub(super) fn render_boss_command_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let command = self.composer_boss_command()?;
+        // The workspace footer already names the boss when the command's
+        // own chat is the viewed session — one avatar and name, not two.
+        if self.workspace_subject().0 == Some(command.session_id) {
+            return None;
+        }
         Some(
             div()
                 .id("boss-command-chip")
