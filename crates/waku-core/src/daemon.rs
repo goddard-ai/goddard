@@ -13850,7 +13850,7 @@ mod tests {
         let persona = backend.boss.document().personas[0].id;
         let employee = backend
             .boss
-            .prepare_employee(plan.session_id, persona, "Follow-up".into(), None)
+            .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         assert_eq!(backend.boss.report_target(&employee), Some(plan.session_id));
         // Elapse the window and the sweep archives the session; afterwards
@@ -13882,7 +13882,7 @@ mod tests {
         assert!(
             backend
                 .boss
-                .prepare_employee(plan.session_id, persona, "Follow-up".into(), None)
+                .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
                 .is_err()
         );
         assert_eq!(backend.boss.report_target(&employee), Some(boss));

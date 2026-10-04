@@ -3435,7 +3435,7 @@ mod memory_op_tests {
             })
             .unwrap();
         let mut employee = service
-            .prepare_employee(planning, service.document().personas[0].id, "Job".into(), None)
+            .prepare_employee(planning, service.document().personas[0].id, "Job".into(), None, EmployeeGoal::Errand)
             .unwrap();
         employee.supervisor_id = planning;
         assert_eq!(service.report_target(&employee), Some(planning));
