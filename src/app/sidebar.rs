@@ -7670,7 +7670,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn date_groups_follow_last_updated_under_last_created_ordering() {
         use chrono::TimeZone;
 
