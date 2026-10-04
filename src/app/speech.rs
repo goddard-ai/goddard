@@ -849,7 +849,7 @@ impl Waku {
                 crate::platform::play_briefing_audio(&bytes, self.state.completion_sound_volume)
             {
                 self.speech_playback_key = Some(key);
-                self.track_voice_briefing_playback(duration, cx);
+                self.track_voice_briefing_playback(duration, None, cx);
                 return;
             }
         }

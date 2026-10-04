@@ -205,11 +205,17 @@ impl Waku {
 /// The response footer's voice-briefing affordance. `Generate` is the
 /// on-demand headphones button that sits beside copy while automatic
 /// playback is off; `Generating` is the spinner + label at the front of
-/// the footer — visible without hover — that cancels on click.
+/// the footer — visible without hover — that cancels on click; `Playback`
+/// is the flat pause/resume button — also visible without hover — for the
+/// reply whose clip is currently voicing.
 #[derive(Clone, Copy)]
 pub(super) enum VoiceBriefingFooter {
     Generate,
     Generating,
+    Playback {
+        playing: bool,
+        remaining: Duration,
+    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -281,9 +287,12 @@ pub(super) fn render_message_footer(
     // footer otherwise only reveals on hover.
     let force_visible =
         force_visible || matches!(voice_briefing, Some(VoiceBriefingFooter::Generating));
-    let mut footer = div()
-        .w_full()
+    // The hover gate wraps only this strip — a voicing clip's pause/resume
+    // button sits beside it and stays on without hover.
+    let mut strip = div()
         .h(px(27.0))
+        .min_w_0()
+        .flex_1()
         .flex()
         .items_center()
         .gap(px(1.0))
@@ -292,12 +301,11 @@ pub(super) fn render_message_footer(
                 .invisible()
                 .group_hover(group_name, |element| element.visible())
         })
-        .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
 
     if let Some(VoiceBriefingFooter::Generating) = voice_briefing {
         let cancel_waku = waku.clone();
-        footer = footer.child(
+        strip = strip.child(
             div()
                 .id(SharedString::from(format!(
                     "voice-briefing-pending-{message_id}"
@@ -339,7 +347,7 @@ pub(super) fn render_message_footer(
             .as_ref()
             .and_then(|mark| mark.focus.clone())
         {
-            footer = footer.child(
+            strip = strip.child(
                 div()
                     .h(px(27.0))
                     .max_w(px(280.0))
@@ -360,12 +368,12 @@ pub(super) fn render_message_footer(
                     ),
             );
         }
-        footer = footer.child(timestamp).child(copy_button);
+        strip = strip.child(timestamp).child(copy_button);
     } else {
-        footer = footer.child(copy_button);
+        strip = strip.child(copy_button);
         if let Some(VoiceBriefingFooter::Generate) = voice_briefing {
             let brief_waku = waku.clone();
-            footer = footer.child(
+            strip = strip.child(
                 div()
                     .id(SharedString::from(format!(
                         "voice-briefing-generate-{message_id}"
@@ -412,7 +420,7 @@ pub(super) fn render_message_footer(
                 } else {
                     tr_cow!("session.forking_task")
                 }));
-            footer = footer.child(if action.enabled {
+            strip = strip.child(if action.enabled {
                 fork_button
                     .hover(|element| element.bg(theme.overlay_strong))
                     .on_click(move |_, _, cx| {
@@ -428,12 +436,12 @@ pub(super) fn render_message_footer(
                 fork_button
             });
         }
-        footer = footer.child(timestamp);
+        strip = strip.child(timestamp);
     }
 
     if let Some(action) = user_message_action {
-        let edit_waku = waku;
-        footer = footer.child(
+        let edit_waku = waku.clone();
+        strip = strip.child(
             div()
                 .id(SharedString::from(format!(
                     "user-message-action-{message_id}"
@@ -456,6 +464,75 @@ pub(super) fn render_message_footer(
         );
     }
 
+    // The voicing clip's pause/resume rides outside the hover-gated strip —
+    // flat like the neighboring controls, but on while it speaks.
+    let playback_button = if let Some(VoiceBriefingFooter::Playback {
+        playing,
+        remaining,
+    }) = voice_briefing
+    {
+        let seconds = remaining.as_secs();
+        let time_remaining = format!("{:02}:{:02}", seconds / 60, seconds % 60);
+        let toggle_waku = waku.clone();
+        Some(
+            div()
+                .id(SharedString::from(format!(
+                    "voice-briefing-playback-{message_id}"
+                )))
+                .h(px(27.0))
+                .px(px(6.0))
+                .rounded(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay_strong))
+                .child(icon(
+                    if playing {
+                        "icons/pause.svg"
+                    } else {
+                        "icons/play.svg"
+                    },
+                    14.0,
+                    footer_color,
+                ))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(footer_color)
+                        .child(tr!(
+                            "experiments.voice_briefing_time_remaining",
+                            time = time_remaining
+                        )),
+                )
+                .tooltip(Tooltip::text(if playing {
+                    tr_cow!("automations.pause")
+                } else {
+                    tr_cow!("automations.resume")
+                }))
+                .on_click(move |_, _, cx| {
+                    let _ = toggle_waku.update(cx, |this, cx| {
+                        this.toggle_voice_briefing_playback(cx);
+                    });
+                }),
+        )
+    } else {
+        None
+    };
+
+    let mut footer = div()
+        .w_full()
+        .h(px(27.0))
+        .flex()
+        .items_center()
+        .gap(px(1.0))
+        .when(!align_right, |element| element.ml(-px(7.0)))
+        .when(align_right, |element| element.justify_end());
+    if align_right {
+        footer = footer.child(strip).children(playback_button);
+    } else {
+        footer = footer.children(playback_button).child(strip);
+    }
     footer.into_any_element()
 }
 

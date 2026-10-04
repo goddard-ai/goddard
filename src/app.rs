@@ -2271,6 +2271,9 @@ impl Default for ActivityScrollViewport {
 pub(super) struct VoiceBriefingPlayback {
     pub(super) playing: bool,
     pub(super) remaining: std::time::Duration,
+    /// The transcript reply the clip speaks for — queued boss speech clips
+    /// carry `None`, so their pause control never lands on a message footer.
+    pub(super) message_id: Option<Uuid>,
 }
 
 pub struct Waku {

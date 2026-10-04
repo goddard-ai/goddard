@@ -1136,7 +1136,10 @@ impl Waku {
                                             }
                                         },
                                     ))
-                            })),
+                            }))
+                            // A voicing briefing's pause/resume trails the
+                            // row — same slot, same chip shell.
+                            .children(self.voice_briefing_playback_chip(&theme, cx)),
                     ),
             ),
         )

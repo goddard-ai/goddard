@@ -26,6 +26,7 @@ use waku_protocol::inference::InferenceProvider;
 
 use super::status_markers::tail_chars;
 use super::*;
+use crate::ui::ActivationExt;
 
 /// Replies shorter than this read faster than their briefing would.
 const MIN_RESPONSE_CHARS: usize = 300;
@@ -382,6 +383,7 @@ impl Waku {
     }
 
     /// What the response footer shows for one reply: the always-visible
+    /// pause/resume control while its clip voices, the always-visible
     /// cancellable indicator while its clip is being decided or generated,
     /// the on-demand headphones button while manual mode is armed —
     /// experiment on, autoplay off, provider credential configured.
@@ -389,6 +391,14 @@ impl Waku {
         &self,
         message_id: Uuid,
     ) -> Option<VoiceBriefingFooter> {
+        if let Some(playback) = self.voice_briefing_playback
+            && playback.message_id == Some(message_id)
+        {
+            return Some(VoiceBriefingFooter::Playback {
+                playing: playback.playing,
+                remaining: playback.remaining,
+            });
+        }
         if self.voice_briefing_in_flight(message_id) {
             return Some(VoiceBriefingFooter::Generating);
         }
@@ -448,11 +458,88 @@ impl Waku {
         }
 
         let playing = !playback.playing;
-        self.voice_briefing_playback = Some(super::VoiceBriefingPlayback { playing, remaining });
+        self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
+            playing,
+            remaining,
+            message_id: playback.message_id,
+        });
         if playing {
             self.schedule_voice_briefing_playback_tick(cx);
         }
         cx.notify();
+    }
+
+    /// The pause/resume control, styled as a suggestion chip. It rides the
+    /// composer suggestion row when that slot is claimed; otherwise
+    /// `render_voice_briefing_float` hangs it off the composer card's top
+    /// edge in the same slot.
+    pub(super) fn voice_briefing_playback_chip(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        let playback = self.voice_briefing_playback_status()?;
+        let (icon_path, label) = if playback.playing {
+            ("icons/pause.svg", tr!("automations.pause"))
+        } else {
+            ("icons/play.svg", tr!("automations.resume"))
+        };
+        let seconds = playback.remaining.as_secs();
+        let time_remaining = format!("{:02}:{:02}", seconds / 60, seconds % 60);
+        Some(
+            div()
+                .id("voice-briefing-playback-toggle")
+                .tab_index(0)
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .h(px(24.0))
+                .px(px(9.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_subtle)
+                .bg(theme.raised)
+                .cursor_default()
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|element| element.bg(theme.overlay_strong))
+                .child(icon(icon_path, 11.0, theme.text_secondary))
+                .child(label)
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!(
+                            "experiments.voice_briefing_time_remaining",
+                            time = time_remaining
+                        )),
+                )
+                .on_activation(cx, |this, _, cx| {
+                    this.toggle_voice_briefing_playback(cx);
+                }),
+        )
+    }
+
+    /// The chip's standalone mount — an absolute float off the composer
+    /// card's top edge at the suggestion chips' left inset. While the
+    /// suggestion row claims the slot the chip rides that row instead, so
+    /// the two never overlap; Big Picture mounts no suggestion row, so the
+    /// float always stands alone there.
+    pub(super) fn render_voice_briefing_float(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if self.action_suggestion_row_visible() && !self.big_picture.is_open() {
+            return None;
+        }
+        Some(
+            div()
+                .absolute()
+                .top(px(-32.0))
+                .left(px(COMPOSER_CHIP_INSET))
+                .child(self.voice_briefing_playback_chip(theme, cx)?),
+        )
     }
 
     fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {
@@ -463,13 +550,14 @@ impl Waku {
         };
         self.speech_playback_key = None;
         self.mark_briefed(message_id);
-        self.track_voice_briefing_playback(duration, cx);
+        self.track_voice_briefing_playback(duration, Some(message_id), cx);
         true
     }
 
     pub(super) fn track_voice_briefing_playback(
         &mut self,
         remaining: Duration,
+        message_id: Option<Uuid>,
         cx: &mut Context<Self>,
     ) {
         self.voice_briefing_playback_generation =
@@ -477,6 +565,7 @@ impl Waku {
         self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
             playing: true,
             remaining,
+            message_id,
         });
         self.schedule_voice_briefing_playback_tick(cx);
         cx.notify();
@@ -513,8 +602,14 @@ impl Waku {
                         cx.notify();
                         return false;
                     }
-                    this.voice_briefing_playback =
-                        Some(super::VoiceBriefingPlayback { playing, remaining });
+                    let message_id = this
+                        .voice_briefing_playback
+                        .and_then(|playback| playback.message_id);
+                    this.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
+                        playing,
+                        remaining,
+                        message_id,
+                    });
                     cx.notify();
                     playing
                 });
