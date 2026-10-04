@@ -86,7 +86,7 @@ pub mod issues;
 pub mod kimi_session;
 pub mod lan;
 pub mod memory;
-pub mod memory_engine;
+pub use waku_memory_engine as memory_engine;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;

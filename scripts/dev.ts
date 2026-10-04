@@ -1525,7 +1525,8 @@ function targetForChange(
   if (
     relativePath.startsWith("waku-daemon/") ||
     relativePath.startsWith("waku-agent/") ||
-    relativePath.startsWith("waku-core/")
+    relativePath.startsWith("waku-core/") ||
+    relativePath.startsWith("waku-memory-engine/")
   ) {
     return "daemon";
   }

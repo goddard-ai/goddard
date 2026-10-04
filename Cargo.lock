@@ -11278,6 +11278,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-client",
+ "waku-memory-engine",
  "waku-protocol",
  "waku-share",
  "windows-sys 0.61.2",
@@ -11291,6 +11292,18 @@ dependencies = [
  "anyhow",
  "serde_json",
  "waku-core",
+ "waku-protocol",
+]
+
+[[package]]
+name = "waku-memory-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
  "waku-protocol",
 ]
 
