@@ -2,4 +2,4 @@
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
 
-export type EmployeeControl = { "type": "prompt", prompt: string, } | { "type": "steer", prompt: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "stop" };
+export type EmployeeControl = { "type": "prompt", prompt: string, } | { "type": "steer", prompt: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, interrupt?: boolean, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "stop" };

@@ -554,6 +554,9 @@ pub enum EmployeeControl {
         model: String,
         #[serde(default)]
         reasoning_effort: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        interrupt: Option<bool>,
     },
     /// Replace individual grants on the employee's record — memory and
     /// delegation changes take effect immediately, while MCP server and
@@ -575,16 +578,29 @@ mod tests {
             "type": "setModel",
             "provider": "codex",
             "model": "gpt-5.5",
-            "reasoningEffort": "high"
+            "reasoningEffort": "high",
+            "interrupt": true
         }))
         .unwrap();
         assert!(matches!(
             action,
-            EmployeeControl::SetModel { provider, model, reasoning_effort }
+            EmployeeControl::SetModel { provider, model, reasoning_effort, interrupt }
                 if provider == crate::model::ProviderKind::Codex
                     && model == "gpt-5.5"
                     && reasoning_effort.as_deref() == Some("high")
+                    && interrupt == Some(true)
         ));
+    }
+
+    #[test]
+    fn set_model_control_defaults_interrupt_to_false() {
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setModel",
+            "provider": "codex",
+            "model": "gpt-5.5"
+        }))
+        .unwrap();
+        assert!(matches!(action, EmployeeControl::SetModel { interrupt: None, .. }));
     }
 
     #[test]

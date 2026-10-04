@@ -6526,39 +6526,84 @@ impl WakuBackend {
                     provider,
                     model,
                     reasoning_effort,
+                    interrupt,
                 } = &action
                 {
-                    if self.agent.is_working(session_id) {
+                    let working = self.agent.is_working(session_id);
+                    let interrupt = interrupt.unwrap_or(false);
+                    if working && !interrupt {
                         bail!(
                             "wait for the employee's current turn to finish before changing its model"
                         );
                     }
                     let catalog = crate::model_catalog::cached_models(*provider)
                         .unwrap_or_else(|| crate::model_catalog::fallback_models(*provider));
-                    let selected =
-                        waku_protocol::model_catalog::packed_catalog_model(&catalog, model, *provider)
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "model {model:?} is not listed for {}",
-                                    provider.display_name()
-                                )
-                            })?;
-                    let effort = reasoning_effort.clone().map(|effort| {
-                        if effort == "default" {
-                            Ok(None)
-                        } else if selected
-                            .model
-                            .reasoning_efforts
-                            .iter()
-                            .any(|option| option.id == effort)
-                        {
-                            Ok(Some(effort))
-                        } else {
-                            Err(anyhow!(
-                                "reasoning effort is not supported by model {model:?}"
-                            ))
+                    let selected = waku_protocol::model_catalog::packed_catalog_model(
+                        &catalog, model, *provider,
+                    )
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "model {model:?} is not listed for {}",
+                            provider.display_name()
+                        )
+                    })?;
+                    let effort = reasoning_effort
+                        .clone()
+                        .map(|effort| {
+                            if effort == "default" {
+                                Ok(None)
+                            } else if selected
+                                .model
+                                .reasoning_efforts
+                                .iter()
+                                .any(|option| option.id == effort)
+                            {
+                                Ok(Some(effort))
+                            } else {
+                                Err(anyhow!(
+                                    "reasoning effort is not supported by model {model:?}"
+                                ))
+                            }
+                        })
+                        .transpose()?
+                        .flatten();
+                    let current_provider = self
+                        .task_state
+                        .lock()
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .map(|session| session.provider)
+                        .ok_or_else(|| anyhow!("employee session is missing"))?;
+                    let provider_changed = current_provider != *provider;
+                    let runtime = self
+                        .sessions
+                        .lock()
+                        .get(&session_id)
+                        .map(|entry| entry.driver.clone());
+                    if working && interrupt {
+                        if let Some(driver) = &runtime {
+                            driver.cancel();
                         }
-                    }).transpose()?.flatten();
+                    }
+                    let applied_in_place = !provider_changed
+                        && runtime.as_ref().is_some_and(|driver| {
+                            let mode = self
+                                .task_state
+                                .lock()
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == session_id)
+                                .map(|session| session.runtime_mode)
+                                .unwrap_or_default();
+                            driver.apply_options(crate::driver::SessionOptions {
+                                mode,
+                                model: Some(selected.model.id.clone()),
+                                reasoning_effort: effort.clone(),
+                                service_tier: None,
+                                context_window: None,
+                            })
+                        });
                     {
                         let mut state = self.task_state.lock();
                         let session = state
@@ -6571,25 +6616,31 @@ impl WakuBackend {
                         session.reasoning_effort = effort;
                         session.service_tier = None;
                         session.context_window = None;
-                        session.provider_cursor = None;
-                        session.provider_session_id = None;
                         session.auto_route = false;
                         session.route_decision = None;
-                        session.pending_provider_context = Some(format!(
-                            "This employee was switched to {} / {}. Continue with the existing task context. Read the prior transcript with `goddard-agent read '{{}}'` and relevant turns with `goddard-agent read '{{\"turn\": N}}'` before relying on earlier details.",
-                            provider.display_name(),
-                            selected.model.name
-                        ));
+                        if provider_changed {
+                            session.provider_cursor = None;
+                            session.provider_session_id = None;
+                            session.pending_provider_context = Some(format!(
+                                "This employee was switched to {} / {}. Continue with the existing task context. Read the prior transcript with `goddard-agent read '{{}}'` and relevant turns with `goddard-agent read '{{\"turn\": N}}'` before relying on earlier details.",
+                                provider.display_name(),
+                                selected.model.name
+                            ));
+                        }
                         session.updated_at = crate::model::unix_time();
                         state.mark_session_dirty(session_id);
                         self.task_store.save(&mut state)?;
                     }
-                    let removed = self.sessions.lock().remove(&session_id);
-                    if let Some(entry) = &removed {
-                        entry.driver.begin_shutdown();
+                    if !applied_in_place {
+                        let removed = self.sessions.lock().remove(&session_id);
+                        if let Some(entry) = &removed {
+                            entry.driver.begin_shutdown();
+                        }
+                        drop_detached(removed);
                     }
-                    drop_detached(removed);
-                    self.agent.revoke_session(session_id);
+                    if provider_changed || !applied_in_place {
+                        self.agent.revoke_session(session_id);
+                    }
                     return Ok(BossResult::Saved);
                 }
                 if let EmployeeControl::SetPermissions { permissions } = &action {
