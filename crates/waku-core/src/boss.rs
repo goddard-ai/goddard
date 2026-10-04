@@ -1962,6 +1962,7 @@ mod tests {
                 service.document().personas[0].id,
                 "Review".into(),
                 None,
+                EmployeeGoal::Errand,
             )
             .unwrap();
         let old_id = employee.session_id;
@@ -1986,6 +1987,7 @@ mod tests {
                 service.document().personas[0].id,
                 "New job".into(),
                 None,
+                EmployeeGoal::Errand,
             )
             .unwrap();
         replacement.identity.name = old_name;
