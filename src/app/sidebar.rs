@@ -7319,6 +7319,8 @@ mod tests {
             next_sequence: 0,
             next_event_id: 0,
             outbox: Vec::new(),
+            waves: Vec::new(),
+            wave_outbox: Vec::new(),
             revision: 0,
         }
     }
