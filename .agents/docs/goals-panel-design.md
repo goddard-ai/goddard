@@ -1,14 +1,17 @@
 # Goals panel design
 
-Proposal only. Source reviewed on 2026-10-04 at `462b23cc`; no runtime or UI
-changes accompany this document. The follow-up implementation should make the
-Boss chat's Goals tab an overview of **what was assigned, what is happening,
-and which task to open**.
+Proposal only. Source reviewed on 2026-10-04 at `462b23cc`; revised after Alec's
+review of `0fda8947`. No runtime or UI changes accompany this document. The
+Boss chat's Goals tab should lead with **what finished**, then show ongoing and
+pending goals and the task to open for each.
 
-Recommend objective-led rows under **In progress**, **Pending**, and
-**Finished**, followed by a compact **Errands** disclosure. Keep projects as
-row metadata. Add named wave groups only when their product contract exists.
-This keeps ongoing goals readable at the panel's 280px minimum width without
+Use **Finished**, **In progress**, then **Pending**. Show about five recent
+finished goals with a **Show more** expander for older history. Use compact
+two-line rows: status icon and task title, then employee avatar/name, project
+folder icon/name, worktree indicator, and relative last-updated time. Only
+`EmployeeGoal::Goal` records belong here; exclude errands from the surface.
+Keep projects as row metadata. Add named wave groups only when their product
+contract exists. This keeps goals readable at the panel's 280px minimum width without
 turning the panel into another employee roster (`RIGHT_PANEL_MIN_WIDTH` in
 [src/app.rs](../../src/app.rs), `142`).
 
@@ -32,7 +35,9 @@ turning the panel into another employee roster (`RIGHT_PANEL_MIN_WIDTH` in
   summon-time work kind: errands deliver their finish to the supervisor; goals
   normally finish silently and keep their roster record beyond the errand
   retirement window. It is independent of a provider's `ThreadGoal`.
-  A Goal row can exist without a thread goal; an Errand can have one.
+  A Goal row can exist without a thread goal. Filter by this work kind before
+  preparing visible rows or counts; a provider thread goal does not make an
+  Errand eligible for this tab. Work-kind terminology stays out of the UI.
 - Queue plumbing already exists in this revision:
   [`EmployeeLifecycle`, `SummonTicket`, `BossEmployee`](../../crates/waku-protocol/src/boss.rs)
   (`120–239`, `292–372`) carry queued/dispatching/working/finishing/expired,
@@ -46,89 +51,101 @@ turning the panel into another employee roster (`RIGHT_PANEL_MIN_WIDTH` in
 
 ## Layout and hierarchy
 
-At roughly 340px, two active goals and one queued goal should read as follows.
-The boxes show hit regions and alignment, not borders around every row.
+At roughly 340px, recent finishes lead the panel. The sketch shows three of the
+five default recent rows to keep it short. `[A]` denotes an employee avatar,
+`[F]` the folder icon, and `[W]` the existing worktree fork icon; these labels
+are diagram notation, not text rendered in the UI.
 
 ```text
 ┌────────────────────────────────────┐
 │ Goals                         +    │  Existing tab strip
 ├────────────────────────────────────┤
-│ 2 in progress · 1 pending           │  Fixed 28px summary; goals only
-│                                    │
-│ In progress                      2 │  Section header
-│ ┌────────────────────────────────┐ │
-│ │ Validate the new release flow  │ │  Objective, at most two lines
-│ │ Rowan · Goddard                │ │  Employee · project
-│ │ ! Needs input                  │ │  Icon + explicit state
-│ │ Confirm the signing identity   │ │  Reason when action is needed
-│ └────────────────────────────────┘ │
-│ ┌────────────────────────────────┐ │
-│ │ Fix queued employee dispatch   │ │
-│ │ Nina · Goddard                 │ │
-│ │ ◌ Working                      │ │
-│ └────────────────────────────────┘ │
-│                                    │
+│ Finished                         8 │  First; recent finishes expanded
+│ ✓ Fix queued employee dispatch     │  Status icon + task title
+│ [A] Nina [F] Goddard [W]     4m ago │  Identity, project, workspace, update
+│ ✓ Check upgrade path               │
+│ [A] Rowan [F] Goddard        8m ago │
+│ × Validate release signing         │
+│ [A] Leo [F] Goddard [W]     12m ago │
+│   Signing identity unavailable     │  Optional small reason
+│ … two more recent rows …           │  Annotation: up to five by default
+│ Show more (3 older)                │  Bounded history expansion
+├────────────────────────────────────┤
+│ In progress                      2 │
+│ ! Validate the new release flow    │
+│ [A] Rowan [F] Goddard [W]    1m ago │
+│   Needs input · Confirm identity   │  Attention reason remains explicit
+│ ◌ Audit task navigation            │
+│ [A] Nina [F] Goddard         2m ago │
 │ Pending                          1 │
-│ ┌────────────────────────────────┐ │
-│ │ Audit keyboard navigation      │ │
-│ │ Leo · Goddard                  │ │
-│ │ ◷ Queued · #1                  │ │  Authoritative queue position
-│ │ Waiting for swe-2 · 6/6 slots   │ │  Admission explanation
-│ └────────────────────────────────┘ │
-│                                    │
-│ > Finished                       8 │  Collapsed initially
-│ > Errands              2 ongoing   │  Separate, compact disclosure
+│ ◷ Audit keyboard navigation        │
+│ [A] Leo [F] Goddard          3m ago │
 └────────────────────────────────────┘
 ```
 
-Goals use one shared list surface: normal rows have no persistent card
-background. A hover/focus background reveals the rounded hit region, as in
+Normal rows have no persistent card background. A hover/focus background
+reveals the rounded hit region, as in
 employee sidebar rows and Automations. This makes spacing and type carry the
 hierarchy rather than a stack of equally prominent cards.
 
-The summary counts goals in In progress and Pending, even when those sections
-are folded. It stays visible while scrolling. Omit zero phrases; if only
-finished goals remain, say `8 finished`. If there are no Goal records, omit the
-summary and use the empty treatment below. Do not duplicate the tab's title or
-Boss identity in a second large heading.
+Section headers carry counts; omit a second summary bar or large duplicate
+Goals heading. Finished always comes first and starts expanded with the five
+most recent results. `Show more (N older)` reveals the remaining finished rows;
+`Show less` returns to the recent five. Echo the app's
+[sidebar Show more row](../../src/app/sidebar.rs) (`4895–4942`) rather than
+introducing a large button or paging controls.
 
-In progress and Pending start expanded; Finished starts collapsed. With only
-finished goals, Finished starts expanded. Honor the user's disclosure choices
-after that initial mount; updates do not force sections open. Suppress empty
-sections. Each disclosure has an always-visible chevron and numeric count.
-Within a folded section, show `1 needs attention` when relevant, so a failure or
-reportBlocker cannot disappear behind a quiet count.
+When unfinished goals exist, cap the finished list viewport at the smaller of
+five normal rows (about 240px) and 45% of available panel-body height. On short
+panels, fewer recent rows are visible at once and scroll within that viewport.
+Show more expands the available history **inside this same height cap**, so
+older history never pushes In progress/Pending farther down. Reserve the rest
+for the ongoing viewport; its sections scroll together. With finished goals
+only, history may use the full body height. This is an intentional pair of
+scroll regions, with the expansion control outside the finished viewport and
+scrollbars only where needed.
+
+In progress and Pending start expanded. Honor subsequent user folds and history
+expansion choices per Boss daemon; updates do not force sections open. Suppress
+empty sections. Every disclosure has an always-visible chevron and count.
+Folded sections and the Finished header show `1 needs attention` when relevant,
+including attention items older than the recent five, so they remain discoverable.
 
 ### Row anatomy and density
 
 | Element | Proposed treatment | Existing surface to echo |
 | --- | --- | --- |
-| Panel body | 12px horizontal inset; one scroll viewport; no extra frame | Current [Goals panel](../../src/app/right_panel.rs), `8253–8306` |
+| Panel body | 12px horizontal inset; bounded finished viewport above the ongoing viewport; no extra card frame | Current [Goals panel](../../src/app/right_panel.rs), `8253–8306`, supplies virtualized lists and overlay scrollbars |
 | Section header | 28px target; 12px medium text; count tertiary; 12px gap before the next section | [Sidebar group header](../../src/app/sidebar.rs), `4620–4730`: quiet label, disclosure, hover and focus |
-| Goal objective | 12.5px medium, `theme.text`, 16px line height, two-line clamp | [Right-panel chooser card](../../src/app/right_panel.rs), `5308–5363`: restrained title, wrapped supporting text |
-| Owner/project line | 11.5px, `theme.text_secondary`; single line, truncate project first | [Employee row / boss_sidebar_label](../../src/app/boss.rs), `1588–1652`, `2964–3013`: identity with subordinate detail |
-| Status line | 11.5px; 12px icon plus text; reserve the label's space | [Session status indicator](../../src/app/sidebar.rs), `5769–5833`, and [goal_status_color](../../src/app/goal_dialog.rs), `958–967` |
-| Reason | Additional 11.5px line, at most two lines; warning tint only for execution problems | [Automation run row](../../src/app/automations.rs), `1280–1387`: concrete failure/precheck detail and task destination |
+| Line 1: status + title | 12px status icon; 12.5px medium task title, `theme.text`, 16px line height, one line with ellipsis; assignment objective is the fallback | [Session status indicator](../../src/app/sidebar.rs), `5769–5833`, and [employee/sidebar labels](../../src/app/boss.rs), `1588–1652`, `2964–3013` |
+| Line 2: employee | Cached 16px avatar, then 11.5px employee name in secondary text | [boss_avatar](../../src/app/boss.rs), `1301–1342`, and employee rows: reuse the identity and initial-letter loading fallback |
+| Line 2: project/worktree | 11px `icons/folder.svg` then project name; add `icons/fork.svg` for an actual employee worktree | [Sidebar project chip](../../src/app/sidebar.rs), `24–41`, and worktree marker, `6325–6327` |
+| Line 2: updated time | Trailing 11px tertiary relative last-updated label, kept visible | [format_time_ago](../../src/app/sidebar.rs), `1036–1043`; reuse its localized format with the update timestamp |
+| Attention reason | Optional third line, 11.5px, single-line ellipsis; explicit state plus a short reason; full text in task/tooltip | [Automation run row](../../src/app/automations.rs), `1280–1387`: concrete failure/precheck detail and task destination |
 | Hit region | Full row, 8px radius, 8px horizontal/vertical padding; `overlay` on hover, `focus_highlight()` on focus | [Automation row](../../src/app/automations.rs), `1147–1277` |
 
-A short normal goal is about 64px tall; a wrapped objective adds 16px, and a
-reason adds 16–32px. These are sizing targets, not uniform fixed heights.
-Use the list's measured heights and invalidate them when width or row content
-changes. At 280px, objective, ownership, and state remain stacked; there is no
-right-hand badge column stealing title width. At larger widths retain this
-anatomy rather than introducing another layout mode.
+A normal row is about 48px; an attention reason adds 16px. Titles do not wrap
+into another headline row. At 280px, line 2 remains a single line: preserve the
+avatar, folder/worktree glyphs, and timestamp; truncate project and employee
+names within flexible slots, project first. The full project path, workspace,
+employee identity, title, status, and exact update time remain in the tooltip
+and task surface. Do not replace the folder icon with the worktree marker:
+project and workspace are separate facts. A queued worktree request has no
+materialized worktree yet, so it gets no fork icon until that exists.
 
-Do not show the job title alongside every objective: it repeats role information
-and crowds out the assignment. Keep it in the full-text tooltip with the
-employee name. Avatars remain on the employee's existing sidebar/task identity;
-the Goals list uses the status icon as its only small visual anchor. This
-distinguishes assigned work from the roster without adding a new icon system.
+Keep the same two-line anatomy at wider widths. Do not show job title or a
+separate status/budget line in every row. Status text must also be available
+through keyboard focus and the task surface; attention states carry a small
+reason line such as `Paused`, `Needs input · Confirm identity`, or `Budget
+reached`. Pending admission details and queue position belong in focus-accessible
+details, preserving the compact base row. Keep all text and icons theme-aware.
 
 ### Projects and waves
 
-**Status first, project on each row.** This panel answers “what is happening?”
-across the current Boss daemon. Project-first nesting would scatter pending and
-attention items and consume vertical space with repeated headers. Always show
+**Completion first, project on each row.** This panel answers “what finished?”
+across the current Boss daemon, then shows unfinished work. Project-first nesting
+would scatter finished, pending, and attention items and consume vertical space
+with repeated headers. Always show
 the human project name, including when only one project is present, to keep
 orientation stable as assignments arrive. Resolve from the cached session's
 project; for a queued task use the ticket's project reference against cached
@@ -149,6 +166,11 @@ wave's members together. Single-member/single-wave sections keep wave context
 as a metadata line. Unassigned rows remain plain rows.
 
 ```text
+Finished                            8
+  ✓ Verify signing …
+  ✓ Check upgrade path …
+  … up to five recent results …
+  Show more (3 older)
 In progress                         3
   Release validation                2   Named wave, no raised container
     Verify signing …
@@ -217,29 +239,32 @@ daemon admission sequence, never project or model. Finished is newest finish
 first; missing timestamps sort last. Within the current assignment generation,
 Pending → Starting → Working updates the same row, not duplicate rows.
 
-Pending reasons stay neutral: `Waiting for swe-2 · 6/6 slots`, or a sanitized
-host-resource explanation. If several resources block admission, show the
-first concise reason plus `+1 reason`, with all reasons in the full-text
-tooltip. A later FIFO ticket with no recorded blocker says `Waiting for earlier
+Pending details stay neutral: `Queued · #1 · Waiting for swe-2 · 6/6 slots`, or
+a sanitized host-resource explanation. These details appear on keyboard focus,
+in the full-text tooltip, and in the queued task preview, not as another routine
+row line. A later FIFO ticket with no recorded blocker says `Waiting for earlier
 work`; #1 without a known reason says `Waiting for admission`. Never infer an
 ETA, progress percentage, time spent executing, or stalled state from queue age.
-Use `Queued` without a number when authoritative position is unavailable.
+Use `Queued` without a number when authoritative position is unavailable. An
+execution attention/blocker state may keep its small explicit reason line.
 
 For glyphs reuse loader-circle, hourglass, alert, x-bold, pause, and an existing
 check glyph. Complete may use `theme.success`; budget/input/blockage use
 `theme.warning`; queue/paused/neutral finish use secondary text. Pair every icon
-with the label. Animate only actual Starting/Working indicators through the
-existing motion helper; waiting for capacity needs no spinner. Follow
+with status text in focus-accessible details and the task surface; attention
+states also show their reason inline. Animate only actual Starting/Working
+indicators through the existing motion helper; waiting for capacity needs no spinner. Follow
 [accessibility](accessibility.md) and reduce-motion settings.
 
-## Navigation and errands
+## Navigation
 
 The **whole goal row opens its employee task** using
 `request_session_activation(session_id, SessionActivationTransition::Visit, cx)`,
 as [employee sidebar rows](../../src/app/boss.rs) do (`1588–1652`). Employee text
 names that destination; it is not a second link to the same place. Give the row
-an `Open task: <objective>, <employee>, <status>` label and tooltip containing
-the full objective, job title, project, and reason. Hover is supplementary:
+an `Open task: <title>, <employee>, <status>` label and tooltip containing
+the full title/objective, job title, project, workspace, update time, and reason.
+Expose those same details on keyboard focus. Hover is supplementary:
 the task transcript/goal dialog must expose full text after keyboard activation.
 Leave back/forward navigation and the Boss's panel ownership intact.
 
@@ -258,21 +283,6 @@ detail view or inline Pause/Resume/Stop controls in its first version: existing
 task/goal controls own those operations. Pending cancellation must use employee
 admission control, not thread-goal pause.
 
-Errands remain visible for coordination, but get their own disclosure after
-goals. In it, use plain **two-line 42–56px rows**, with a one-line task title and
-`Employee · State` beneath. Show project as an extra metadata line only when
-needed to disambiguate. Reuse the same row activation, keyboard behavior, and
-explicit queue status. No persistent raised background and no “Errand” badge
-per row; the section already says what these entries are.
-
-The Errands header shows separate `ongoing` and `finished` counts; its contents
-order in-progress, queued in FIFO order, then finished. It starts collapsed
-when goals exist, expanded when only errands exist. Show an attention count
-when folded. Do not include errands in goal totals, merge them with finished
-goals, or keep their records forever for this panel: existing retirement/history
-semantics remain unchanged. Goals differ through objective wrapping, explicit
-state sections, and durable finished history, not brighter color or ornament.
-
 ## Empty and unavailable states
 
 Use the [right-panel empty message](../../src/app/right_panel.rs) (`8667–8699`)
@@ -285,14 +295,13 @@ control with no existing Boss summon workflow behind it.
 No goals yet
 Ask your Boss to assign a goal.
 Goals stay here after they finish.
-
-> Errands                 2 ongoing     Optional; expands when it is all there is
 ```
 
 This message applies only to an authoritative snapshot containing no Goal
-records. It still permits active Errands below. When only finished goals remain,
-show their expanded section rather than an empty message. When the Boss snapshot
-has not arrived, show `Loading goals…`; when unavailable, show `Goals unavailable`
+records, including when the Boss has only Errand employees. No work-kind labels
+or excluded-work counts appear. When only finished goals remain, show their
+recent finished section and Show more rather than an empty message. When the
+Boss snapshot has not arrived, show `Loading goals…`; when unavailable, show `Goals unavailable`
 with the existing host connection explanation. Retain a previous snapshot when
 available and label it `Offline · last known state`; disconnection must not turn
 running rows into finished rows or an empty list. Do not add per-row reconnect
@@ -301,8 +310,10 @@ buttons; use the app's existing host connection affordance.
 ## Implementation outline
 
 1. **Prepare display data at snapshot boundaries.** Extend `BossGoalRow` and
-   preparation in `drain_boss_events` (`src/app/boss.rs`); refresh when relevant
-   session/project/goal snapshots change as well as BossState. Build a session-id
+   preparation in `drain_boss_events` (`src/app/boss.rs`). Filter employees to
+   `work_goal == EmployeeGoal::Goal` before building panel rows and counts;
+   leave the full roster intact for other surfaces and queue accounting. Refresh
+   when relevant session/project/goal snapshots change as well as BossState. Build a session-id
    lookup once per refresh. Preserve `DaemonKey` ownership and stale-revision
    protection. Render only cached, immutable data; see [performance](performance.md).
 
@@ -311,15 +322,17 @@ buttons; use the app's existing host connection affordance.
    ```text
    GoalDisplayRow {
      key: (daemon, session_id), assignment_generation: Option<u64>,
-     kind: Goal | Errand,
-     objective, employee_name, job_title, project_label,
+     task_title?, assignment_objective?, display_title,
+     employee_name, employee_avatar_seed, cached_avatar?, job_title,
+     project_label, workspace: Local | Worktree | Unknown,
      execution: Pending | Running | Finished,
      status_label, status_icon, status_tone, reason?,
-     created_at?, finished_at?, queue_position?,
+     created_at?, finished_at?, updated_at?, relative_updated_label?, queue_position?,
      task_destination: Known | Resolving | Unavailable,
      wave: Option<{ id, display_name }>
    }
-   GoalsListItem = SectionHeader | GoalRow | ErrandHeader | ErrandRow
+   GoalsListItem = SectionHeader | GoalRow
+   FinishedHistory = { recent_limit: 5, show_older: bool, older_count: usize }
    ```
 
    These are proposed display types, not existing protocol symbols. The row key
@@ -327,20 +340,25 @@ buttons; use the app's existing host connection affordance.
    Keep one current assignment per employee as today; do not create a new
    historical assignment store in this change.
 
-2. **Close the objective/admission data gaps explicitly.** Prefer a current,
-   generation-linked `ThreadGoal.objective`; otherwise use a persisted short
-   assignment objective. Current employee sessions are explicitly titled with
+2. **Resolve task title, then assignment fallback.** Line 1 prefers the task's
+   meaningful explicit/automatic title. When none exists, use the current,
+   generation-linked `ThreadGoal.objective`, then a persisted assignment
+   objective. Current employee sessions are explicitly titled with
    the employee name in `summon_employee` (`daemon.rs:7946–8045`), so
-   `session.display_title()` is not a reliable assignment headline. Ticket.prompt
+   `session.display_title()` may return an identity label rather than a task
+   title. Track title provenance or expose a distinct task title; the seeded
+   employee identity must not suppress the assignment-objective fallback. Do
+   not replace a meaningful task title with its objective. Ticket.prompt
    is cleared after dispatch (`7595–7726`); reading it only while queued makes
    the headline disappear at launch.
 
    Add an optional persisted display objective at summon/requeue, derived
    deterministically from the original assignment's first nonempty paragraph,
    never from the persona wrapper. Keep the full assignment in the task; clamp
-   only its list presentation. Legacy fallback is job title, then employee name,
-   with no guessed objective. The preparation path must never hydrate every
-   transcript or call a model to fill titles. Expose a generation-linked terminal
+   only its list presentation. Legacy fallback is job title, then `Untitled goal`,
+   with no guessed objective; the employee name already appears on line 2.
+   The preparation path must never hydrate every transcript or call a model to
+   fill titles. Expose a generation-linked terminal
    outcome when available; until then use neutral Finished. Carry these fields
    through existing protocol/client generation and caller filtering.
 
@@ -355,28 +373,56 @@ buttons; use the app's existing host connection affordance.
    occupy places. Keep blockers from the persisted ticket. Future wave names
    and an explicit `executionState` projection can enrich this same boundary.
 
-3. **Flatten section and row items outside render.** Compute goal/errand counts,
-   attention counts, stable ordering, and disclosure items on relevant updates.
-   Cache disclosure choices, scroll state, and focused row key per Boss daemon.
+3. **Prepare identity, workspace, and update metadata.** Reuse the existing
+   Boss avatar cache/pump for 16px rasters; prepare a cached image or initial-letter
+   fallback without reacquiring Waku from the list row builder. Use the actual
+   cached session workspace for the fork marker, not the requested worktree
+   mode on a still-queued ticket. Preserve folder and worktree as separate icons.
+   Derive the relative timestamp from the current task's `updated_at`, including
+   a newer known admission/finish timestamp if the session snapshot lags.
+   It means last updated, not last reply or time spent executing. If no update
+   timestamp is known, omit it. Reuse `format_time_ago` with saturating elapsed
+   subtraction; refresh labels at minute boundaries through the existing clock
+   cadence, without changing row sort order or starting a per-row timer.
+
+4. **Flatten section and row items outside render.** Order Finished, In progress,
+   Pending. Compute goal-only counts, attention counts, and stable ordering on
+   relevant updates. Initially prepare five recent finished rows; Show more
+   admits older rows to the same bounded history viewport and Show less restores
+   the five-row limit. Keep its height cap when ongoing work exists, including
+   when attention reasons make rows taller. Do not let an expanded history
+   enlarge the whole panel's scroll content above the ongoing sections.
+   Cache disclosure/history expansion choices, both list/scrollbar states, and
+   focused row keys per Boss daemon.
    Replace the count-only list reset with an item/order revision, including
    changes that preserve item count. Invalidate height measurement on width or
    content changes. Preserve the visible row anchor on state transitions and
    restore focus by key; if removed, focus the next row or its section header.
 
-4. **Render the new surface in `src/app/right_panel.rs`.** Keep the current tab
-   and `Goals` surface reuse. Use `div`, `list`, `ListState`, `scrollbar::vertical`,
-   `px`/`sp`, `icon`, and the existing Theme tokens. Render rows from their
-   snapshot with `&mut App` and `ActivationExt::on_activation_app`, deferring
+5. **Render the new surface in `src/app/right_panel.rs`.** Keep the current tab
+   and `Goals` surface reuse. Use two `list`/`ListState` viewports with
+   `scrollbar::vertical`, `div`, `px`/`sp`, `icon`, cached avatar images, and the
+   existing Theme tokens. Put the Finished header and Show more/less control
+   outside its scrolling rows. Render line 1 as status icon + one-line title;
+   line 2 as avatar + employee + folder icon + project + optional fork + trailing
+   relative update. Add a small reason line only for attention/blocker states.
+   Render rows from their snapshot with `&mut App` and
+   `ActivationExt::on_activation_app`, deferring
    Waku updates to activation callbacks. Do not copy the current list builder's
    render-time `entity.update` lease; [performance](performance.md) prohibits
    reacquiring Waku when its caller already holds it.
 
-5. **Wire keyboard and text handling.** Give headers/rows stable ids,
+6. **Wire keyboard and text handling.** Give headers/rows and Show more/less
+   stable ids,
    `track_focus`, `tab_index`, `tab_group`/`tab_stop`, `focus_visible`, and
    `on_activation`/`on_activation_app` from [src/ui/mod.rs](../../src/ui/mod.rs)
-   (`280–327`). Use one roving tab stop in the virtualized list: Up/Down and
+   (`280–327`). Use one roving tab stop per virtualized viewport: Up/Down and
    Home/End move among visible items, Enter/Space open tasks or toggle sections;
-   Left folds a section and Right opens it. Focused items scroll into view.
+   Left folds a section and Right opens it. Tab traverses the history expander
+   and ongoing viewport in section order. Focused items scroll into their own
+   viewport; opening older history must not steal focus or scroll the ongoing
+   viewport. If Show less hides the focused row, return focus to that control.
+   Provide full row/status details on keyboard focus as well as pointer hover.
    Capture callbacks without acquiring the entity until activation. Keep
    selection/focus distinct from completion tint. Localize new copy with `tr!`.
    Apply [UI conventions](ui-conventions.md): `#[track_caller]` for element
@@ -397,18 +443,29 @@ interaction; visual analysis remains subject to the user's task authorization:
   reason/position, survives restart, and becomes Starting/Working once under
   capacity. An errand ahead of it still counts in its queue position.
 - Revival with an old Complete thread goal shows the new pending assignment;
-  dispatch keeps its headline and produces one row.
+  dispatch keeps its fallback headline and produces one row. A meaningful task
+  title takes precedence over its assignment objective; an identity-only title
+  does not.
 - Paused, Needs input, Usage limit, Budget reached, Failed, and neutral Finished
-  stay distinct; a finished blocker remains discoverable when folded.
+  stay distinct; an older finished blocker remains discoverable through the
+  header attention count and Show more.
 - Keyboard-only list/disclosure/task navigation has visible focus; returning
   from a task restores the Boss panel's scroll and disclosure choices. Check a
   remote queued task and a task whose transcript has not been loaded locally.
-- At 280px and a wider panel, long objectives/names/reasons wrap or truncate
-  according to the anatomy; full text remains available through the task.
-  Resize, reorder with equal item count, and scroll a long finished history.
+- At 280px and a wider panel, rows remain two lines with ellipsized titles and
+  metadata; only attention reasons add a small line. Avatars, folder/worktree
+  icons, and relative updates stay visible. Full text remains available through
+  focus details and the task. Resize, reorder with equal item count, and scroll
+  a long finished history.
   Confirm row building remains proportional to visible items with no render I/O.
-- No goals, errands only, finished goals only, loading, and offline snapshots
+- Finished appears first, newest first, with five recent rows by default.
+  Show more/less and a short panel keep history bounded and the ongoing viewport
+  in place. With finished goals only, history may fill the body. Neither title
+  changes nor timestamp ticks reorder rows.
+- No goals, excluded-work-only, finished goals only, loading, and offline snapshots
   each show the specified surface; both themes and reduce-motion remain legible.
+  Errand employees never create rows, headers, terminology, or counts here,
+  including when they have a provider thread goal.
 
 The implementation needs executable `Test-Plan:` commit trailers. Follow
 [changelog rules](changelog.md): update the existing unreleased
