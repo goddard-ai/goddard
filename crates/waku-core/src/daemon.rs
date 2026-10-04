@@ -6419,8 +6419,9 @@ impl WakuBackend {
     }
 
     /// The boss-facing wrap for an outbound prompt: the persona injection
-    /// first, then a deferred work digest when the context router asked for
-    /// one a steer-less or already-settled turn could not take.
+    /// first, then the always-on work header — replaced by the deferred
+    /// full digest when the context router asked for one a steer-less or
+    /// already-settled turn could not take.
     fn boss_outbound_prompt(&self, session_id: Uuid, prompt: String) -> String {
         wrap_boss_outbound_prompt(
             &self.task_state,
@@ -6434,9 +6435,11 @@ impl WakuBackend {
     /// Route one user prompt to the boss through Jev: remember it for focus
     /// continuity, evaluate it against the current focus inference and the
     /// work snapshot, then apply the verdict off-thread. Jev decides, code
-    /// applies — an unconfigured or failed evaluation attaches nothing and
-    /// changes nothing. An attaching verdict also marks the prompt's message
-    /// (`PromptContextMarked`) so transcripts can note the routing.
+    /// applies — an unconfigured or failed evaluation withholds the full
+    /// digest and changes nothing, while the compact header the outbound
+    /// wrap already attached keeps the boss oriented. An attaching verdict
+    /// also marks the prompt's message (`PromptContextMarked`) so
+    /// transcripts can note the routing.
     fn route_boss_prompt(
         &self,
         session_id: Uuid,
@@ -10685,9 +10688,11 @@ fn deliver_agent_prompt(
     Ok(())
 }
 
-/// The deferred-digest half of an outbound boss prompt: the persona wrap
-/// always applies, and a work snapshot the router asked for but could not
-/// steer rides the next prompt — whichever path sends it.
+/// The boss-context half of an outbound boss prompt: the persona wrap
+/// always applies, then every prompt to the boss carries the compact work
+/// header — orientation is never gated. A full digest the router asked for
+/// but could not steer replaces the header on the next prompt — whichever
+/// path sends it.
 fn wrap_boss_outbound_prompt(
     task_state: &Mutex<PersistedState>,
     automations: &waku_protocol::automations::AutomationsState,
@@ -10696,15 +10701,22 @@ fn wrap_boss_outbound_prompt(
     prompt: String,
 ) -> String {
     let prompt = boss.prompt_with_context(session_id, prompt);
-    if !boss.is_boss(session_id) || !boss.router_take_pending(session_id) {
+    if !boss.is_boss(session_id) {
         return prompt;
     }
-    let digest =
-        crate::boss_context::work_context(&task_state.lock(), &boss.document(), automations).digest;
-    if digest.is_empty() {
+    let pending = boss.router_take_pending(session_id);
+    let work =
+        crate::boss_context::work_context(&task_state.lock(), &boss.document(), automations);
+    // The deferred verdict's full digest supersedes the header it contains.
+    let block = if pending && !work.digest.is_empty() {
+        work.digest
+    } else {
+        work.header
+    };
+    if block.is_empty() {
         return prompt;
     }
-    format!("<goddard-boss-context>\n{digest}\n</goddard-boss-context>\n\n{prompt}")
+    format!("<goddard-boss-context>\n{block}\n</goddard-boss-context>\n\n{prompt}")
 }
 
 /// Mirror an accepted agent prompt into the daemon's stored copy of the
@@ -12519,6 +12531,65 @@ mod tests {
         assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() {
+        let root = std::env::temp_dir().join(format!("waku-boss-header-{}", Uuid::new_v4()));
+        let boss = crate::boss::BossService::open(root.join("boss")).unwrap();
+        let boss_id = Uuid::new_v4();
+        boss.update(|state| {
+            state.session_id = Some(boss_id);
+            Ok(())
+        })
+        .unwrap();
+
+        let mut state = PersistedState::empty();
+        let project = Project::from_path(root.join("app"));
+        let mut task = AgentSession::new(project.id, ProviderKind::Claude);
+        task.set_title("Fix login");
+        task.status = SessionStatus::Working;
+        // A stored row the daemon never hydrated: started, by definition.
+        task.detail_loaded = false;
+        state.projects.push(project);
+        state.sessions.push(task);
+        let task_state = Mutex::new(state);
+        let automations = waku_protocol::automations::AutomationsState::default();
+
+        // The first wrap spends the one-shot persona injection.
+        let _ = wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "prime".into());
+
+        // Orientation rides every boss prompt — no router verdict required.
+        let wrapped =
+            wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
+        assert!(wrapped.contains("<goddard-boss-context>\nWork overview"));
+        assert!(wrapped.contains("app: 1 task (1 active)"));
+        assert!(!wrapped.contains("Fix login"));
+        assert!(wrapped.ends_with("hello"));
+
+        // A deferred attach upgrades the same block to the full digest —
+        // once, then the header resumes.
+        boss.router_defer_context(boss_id);
+        let wrapped =
+            wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
+        assert!(wrapped.contains("## app — "));
+        assert!(wrapped.contains("\"Fix login\""));
+        assert!(!wrapped.contains("Work overview"));
+        let wrapped =
+            wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
+        assert!(wrapped.contains("Work overview"));
+
+        // Prompts to other sessions are never wrapped.
+        let untouched = wrap_boss_outbound_prompt(
+            &task_state,
+            &automations,
+            &boss,
+            Uuid::new_v4(),
+            "hi".into(),
+        );
+        assert_eq!(untouched, "hi");
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     /// A session plus its side chat in the test store; returns

@@ -1,6 +1,9 @@
-//! The boss context router: a bounded digest of the user's projects, tasks,
-//! and automations the boss can read on demand, plus the Jev evaluation that
-//! decides per user prompt whether that digest should ride along.
+//! The boss context router: a two-tier digest of the user's projects, tasks,
+//! and automations. Every outbound boss prompt carries the compact header —
+//! project names plus live counts — so orientation is never gated. Jev still
+//! decides per user prompt whether the full digest rides along; a gate miss
+//! only withholds bulk detail, and the boss can pull it on demand through
+//! the `context` operation.
 //!
 //! Jev judges two things on one shared `state`: whether the digest is worth
 //! attaching, and which project the user's attention currently centers on —
@@ -8,7 +11,7 @@
 //! previous answer back into the next request's `state`. Everything else is
 //! deterministic: thresholds below decide what an answer may apply, and any
 //! missing, malformed, or failed evaluation leaves the defaults standing —
-//! no attachment, no focus change.
+//! no digest attachment, no focus change.
 
 use std::collections::BTreeMap;
 
@@ -42,6 +45,9 @@ const SESSIONS_PER_PROJECT: usize = 10;
 /// Total digest budget — large enough to cover a busy project catalog,
 /// small enough to attach to a prompt without crowding it.
 const DIGEST_CAP: usize = 12_000;
+/// Header budget — the always-on block stays near 200 tokens. Over-cap
+/// projects fold into a count rather than dropping silently.
+const HEADER_CAP: usize = 1_000;
 /// Focus choices cap: the option list doubles as the digest's project set,
 /// and a Choice distributes probability mass — past this it stops
 /// discriminating.
@@ -53,9 +59,13 @@ const AUTOMATION_PROMPT_CAP: usize = 100;
 /// The user prompt's budget inside eval `state`.
 const PROMPT_CAP: usize = 4_000;
 
-/// The work snapshot: the rendered digest plus the project names that double
-/// as the router's focus options.
+/// The work snapshot: the always-on header, the rendered digest, and the
+/// project names that double as the router's focus options.
 pub struct WorkContext {
+    /// Compact per-project live counts — attaches to every boss prompt,
+    /// never gated.
+    pub header: String,
+    /// The full digest Jev gates per prompt.
     pub digest: String,
     /// User-project names in digest order — the `focus` Choice's option set.
     pub projects: Vec<String>,
@@ -225,8 +235,21 @@ pub fn work_context(
         };
         activity(b).cmp(&activity(a))
     });
+    // Live employees attribute to the project their task session lives in,
+    // looked up over every stored session — an employee's task may be idle
+    // or archived while the employee still counts as live.
+    let employee_project = |employee: &waku_protocol::boss::BossEmployee| {
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee.session_id)
+            .map(|session| session.project_id)
+    };
+    let live_employees = || boss.employees.iter().filter(|entry| !entry.expired);
     let mut digest = String::new();
     let mut names = Vec::new();
+    let mut header_lines = Vec::new();
+    let mut mapped_employees = 0usize;
     let mut omitted_projects = 0usize;
     for project in &projects {
         let mut sessions: Vec<&AgentSession> = state
@@ -236,6 +259,20 @@ pub fn work_context(
             .filter(live)
             .collect();
         sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
+        // The header lists every user project — only the digest folds.
+        let employees_here: Vec<_> = live_employees()
+            .filter(|employee| employee_project(employee) == Some(project.id))
+            .collect();
+        mapped_employees += employees_here.len();
+        header_lines.push(header_line(
+            project,
+            &sessions,
+            employees_here.len(),
+            employees_here
+                .iter()
+                .filter(|employee| employee.blocker.is_some())
+                .count(),
+        ));
         let mut section = String::new();
         let mut header = format!("## {} — {}", project.name, project.path.display());
         if project.starred {
@@ -262,6 +299,38 @@ pub fn work_context(
     }
     if omitted_projects > 0 {
         digest.push_str(&format!("## …{omitted_projects} more projects omitted\n"));
+    }
+    // The always-on header: one counts line per user project, then the
+    // fleet tallies no project line can carry. It points at the `context`
+    // operation so a gate miss still leaves the boss a path to the detail.
+    let unmapped_employees = live_employees().count() - mapped_employees;
+    let has_fleet = unmapped_employees > 0 || !automations.automations.is_empty();
+    let mut header = String::new();
+    if !header_lines.is_empty() || has_fleet {
+        header.push_str(
+            "Work overview — the `context` operation returns the full digest.\n",
+        );
+    }
+    let mut folded = 0usize;
+    for line in header_lines {
+        if header.len() + line.len() > HEADER_CAP {
+            folded += 1;
+            continue;
+        }
+        header.push_str(&line);
+        header.push('\n');
+    }
+    if folded > 0 {
+        header.push_str(&format!("…{folded} more projects\n"));
+    }
+    if unmapped_employees > 0 {
+        header.push_str(&format!("employees: {unmapped_employees} live\n"));
+    }
+    if !automations.automations.is_empty() {
+        header.push_str(&format!(
+            "automations: {} scheduled\n",
+            automations.automations.len()
+        ));
     }
     if !boss.employees.is_empty() {
         digest.push_str("## Employees\n");
@@ -310,8 +379,67 @@ pub fn work_context(
         }
     }
     WorkContext {
+        header,
         digest,
         projects: names,
+    }
+}
+
+/// One header line — `name: N tasks (M active, …), K employees` — names
+/// and live counts only; titles and paths stay in the digest. The state
+/// breakdown lists only non-empty buckets, and idle needs no label.
+fn header_line(
+    project: &waku_protocol::model::Project,
+    sessions: &[&AgentSession],
+    employees: usize,
+    blocked: usize,
+) -> String {
+    let active = sessions
+        .iter()
+        .filter(|session| {
+            matches!(
+                session.status,
+                SessionStatus::Connecting | SessionStatus::Working | SessionStatus::Background
+            )
+        })
+        .count();
+    let waiting = sessions
+        .iter()
+        .filter(|session| session.status == SessionStatus::Waiting)
+        .count();
+    let failed = sessions
+        .iter()
+        .filter(|session| session.status == SessionStatus::Failed)
+        .count();
+    let mut line = format!("{}: {}", project.name, plural(sessions.len(), "task"));
+    let breakdown = [(active, "active"), (waiting, "waiting"), (failed, "failed")]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, label)| format!("{count} {label}"))
+        .collect::<Vec<_>>();
+    if !breakdown.is_empty() {
+        line.push_str(&format!(" ({})", breakdown.join(", ")));
+    }
+    if employees > 0 {
+        line.push_str(&format!(", {}", plural(employees, "employee")));
+        if blocked > 0 {
+            line.push_str(&format!(" ({blocked} blocked)"));
+        }
+    }
+    if project.starred {
+        line.push_str(" · starred");
+    }
+    if project.is_friends() {
+        line.push_str(" · friend chats");
+    }
+    line
+}
+
+fn plural(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("{count} {noun}")
+    } else {
+        format!("{count} {noun}s")
     }
 }
 
@@ -546,15 +674,13 @@ mod tests {
         session
     }
 
-    #[test]
-    fn employee_roster_sorts_working_before_expired_and_includes_project_and_model() {
-        let mut boss = boss_state();
-        let project = project("workspace");
-        let active = session(&project, "active", SessionStatus::Working);
-        let mut done = session(&project, "done", SessionStatus::Idle);
-        done.id = Uuid::new_v4();
-        let supervisor_id = boss.session_id.unwrap();
-        let employee = |session_id, name: &str, expired| BossEmployee {
+    fn employee(
+        session_id: Uuid,
+        name: &str,
+        expired: bool,
+        supervisor_id: Uuid,
+    ) -> BossEmployee {
+        BossEmployee {
             session_id,
             supervisor_id,
             identity: BossIdentity { id: Uuid::new_v4(), name: name.into(), avatar_seed: String::new() },
@@ -574,8 +700,50 @@ mod tests {
             queued_at: None,
             request_id: None,
             request_fingerprint: None,
-        };
-        boss.employees = vec![employee(done.id, "Zed", true), employee(active.id, "Ada", false)];
+        }
+    }
+
+    fn automation(name: &str) -> waku_protocol::automations::Automation {
+        use waku_protocol::automations::{Automation, AutomationWorkspace};
+        Automation {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            prompt: "do the thing".into(),
+            provider: ProviderKind::Claude,
+            model: None,
+            project_path: "/work/app".into(),
+            workspace: AutomationWorkspace::Local,
+            base_branch: None,
+            session_id: None,
+            schedule: Some(AutomationSchedule::Daily { hour: 9, minute: 0 }),
+            webhook_secret: None,
+            timezone: None,
+            enabled: true,
+            precheck: None,
+            missed_run_grace_minutes: None,
+            reuse_session: false,
+            last_session_id: None,
+            next_run_at: None,
+            last_run_at: None,
+            last_run_status: None,
+            last_refusal_key: None,
+            created_at: unix_time(),
+            updated_at: unix_time(),
+        }
+    }
+
+    #[test]
+    fn employee_roster_sorts_working_before_expired_and_includes_project_and_model() {
+        let mut boss = boss_state();
+        let project = project("workspace");
+        let active = session(&project, "active", SessionStatus::Working);
+        let mut done = session(&project, "done", SessionStatus::Idle);
+        done.id = Uuid::new_v4();
+        let supervisor_id = boss.session_id.unwrap();
+        boss.employees = vec![
+            employee(done.id, "Zed", true, supervisor_id),
+            employee(active.id, "Ada", false, supervisor_id),
+        ];
 
         let digest = employee_roster(&boss, &[active], &[project]);
         assert!(digest.starts_with("1 live: 1 working, 0 idle"));
@@ -617,15 +785,129 @@ mod tests {
     }
 
     #[test]
-    fn empty_catalog_means_no_digest_and_no_focus_options() {
+    fn empty_catalog_means_no_header_digest_or_focus_options() {
         let boss = boss_state();
         let work = work_context(
             &PersistedState::empty(),
             &boss,
             &AutomationsState::default(),
         );
+        assert!(work.header.is_empty());
         assert!(work.digest.is_empty());
         assert!(work.projects.is_empty());
+    }
+
+    #[test]
+    fn header_counts_live_states_and_keeps_digest_detail_out() {
+        let boss = boss_state();
+        let app = project("app");
+        let lib = project("lib");
+        let mut state = PersistedState::empty();
+        state.projects.push(app.clone());
+        state.projects.push(lib.clone());
+        state
+            .sessions
+            .push(session(&app, "Fix login", SessionStatus::Working));
+        state
+            .sessions
+            .push(session(&app, "Awaiting review", SessionStatus::Waiting));
+        state
+            .sessions
+            .push(session(&app, "Nap", SessionStatus::Idle));
+        state
+            .sessions
+            .push(session(&lib, "Ship it", SessionStatus::Failed));
+        // The boss's own chat and archived tasks never count.
+        let mut own = session(&app, "Boss", SessionStatus::Working);
+        own.id = boss.session_id.unwrap();
+        state.sessions.push(own);
+        let mut archived = session(&lib, "Old", SessionStatus::Working);
+        archived.archived_at = Some(unix_time());
+        state.sessions.push(archived);
+
+        let work = work_context(&state, &boss, &AutomationsState::default());
+        assert!(work.header.starts_with("Work overview"));
+        assert!(work.header.contains("app: 3 tasks (1 active, 1 waiting)"));
+        assert!(work.header.contains("lib: 1 task (1 failed)"));
+        // Names and counts only — titles and paths stay in the digest.
+        assert!(!work.header.contains("Fix login"));
+        assert!(!work.header.contains("/work/app"));
+    }
+
+    #[test]
+    fn header_counts_employees_per_project_and_fleet_automations() {
+        let mut boss = boss_state();
+        let app = project("app");
+        let mut state = PersistedState::empty();
+        state.projects.push(app.clone());
+        let working = session(&app, "Job", SessionStatus::Working);
+        let idle_task = session(&app, "Other job", SessionStatus::Idle);
+        state.sessions.push(working.clone());
+        state.sessions.push(idle_task.clone());
+        let supervisor = boss.session_id.unwrap();
+        let mut blocked = employee(idle_task.id, "Bea", false, supervisor);
+        blocked.blocker = Some("needs a decision".into());
+        boss.employees = vec![
+            employee(working.id, "Ada", false, supervisor),
+            blocked,
+            // Expired employees and their counts drop out of the header.
+            employee(Uuid::new_v4(), "Cas", true, supervisor),
+            // A live employee whose task session is gone lands in the
+            // fleet tally, not on a project line.
+            employee(Uuid::new_v4(), "Dee", false, supervisor),
+        ];
+        let mut automations = AutomationsState::default();
+        automations.automations.push(automation("nightly"));
+        automations.automations.push(automation("standup"));
+
+        let work = work_context(&state, &boss, &automations);
+        assert!(
+            work.header
+                .contains("app: 2 tasks (1 active), 2 employees (1 blocked)")
+        );
+        assert!(work.header.contains("employees: 1 live"));
+        assert!(work.header.contains("automations: 2 scheduled"));
+        assert!(!work.header.contains("Bea"));
+    }
+
+    #[test]
+    fn header_lists_every_project_when_the_digest_folds() {
+        let boss = boss_state();
+        let mut state = PersistedState::empty();
+        // Sixteen busy projects overflow the digest cap but not the
+        // header's — the tail folds only from the digest.
+        for index in 0..16 {
+            let busy = project(&format!("busy-{index:02}"));
+            state.projects.push(busy.clone());
+            for _ in 0..SESSIONS_PER_PROJECT {
+                state.sessions.push(session(
+                    &busy,
+                    &"x".repeat(TITLE_CAP),
+                    SessionStatus::Working,
+                ));
+            }
+        }
+
+        let work = work_context(&state, &boss, &AutomationsState::default());
+        assert!(work.digest.contains("more projects omitted"));
+        assert!(!work.digest.contains("## busy-15"));
+        assert!(work.header.contains("busy-15"));
+        assert!(work.header.len() <= HEADER_CAP + 32);
+    }
+
+    #[test]
+    fn header_folds_past_its_own_budget() {
+        let boss = boss_state();
+        let mut state = PersistedState::empty();
+        for index in 0..60 {
+            state.projects.push(project(&format!("project-{index:02}")));
+        }
+
+        let work = work_context(&state, &boss, &AutomationsState::default());
+        assert!(work.header.len() <= HEADER_CAP + 32);
+        assert!(work.header.contains("project-00"));
+        assert!(work.header.contains("more projects"));
+        assert!(!work.header.contains("project-59:"));
     }
 
     #[test]

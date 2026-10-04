@@ -71,7 +71,7 @@ carry the information the judgment actually needs.
 | `provider-switch` | `src/app/provider_switch.rs` | One Noul per transcript item/span: keep verbatim for the new provider? |
 | `permission-review` | `crates/waku-core/src/permission_review.rs` | Auto-mode permission requests → clear/caution Choice |
 | `memory-triage`, `memory-rank` | `crates/waku-core/src/memory.rs` | Transcript segments worth feeding the distiller |
-| `boss-context-router` | `crates/waku-core/src/boss_context.rs`, `WakuBackend::route_boss_prompt` | Each user prompt to the boss → attach Noul + project-focus Choice; an attach steers the projects/tasks digest into the open turn |
+| `boss-context-router` | `crates/waku-core/src/boss_context.rs`, `WakuBackend::route_boss_prompt` | Each user prompt to the boss → attach Noul + project-focus Choice; an attach steers the projects/tasks digest into the open turn. The Noul gates only bulk detail — a compact per-project counts header rides every boss prompt unjudged |
 
 ## Design conventions
 
