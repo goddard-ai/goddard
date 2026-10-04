@@ -154,10 +154,15 @@ pub fn work_context(
                 .map(|session| status_label(session.status))
                 .unwrap_or("idle");
             digest.push_str(&format!(
-                "  - {} ({}) — {status}{}\n",
+                "  - {} ({}) — {status}{}{}\n",
                 entry.identity.name,
                 truncate_chars(&entry.job_title, TITLE_CAP),
                 if entry.expired { " — finished" } else { "" },
+                if entry.blocker.is_some() {
+                    " · blocker flagged"
+                } else {
+                    ""
+                },
             ));
         }
         if extra > 0 {

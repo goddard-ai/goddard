@@ -2469,9 +2469,10 @@ impl Waku {
                     ),
                 )
                 .child(tr!("boss.permissions_hint"));
-            for (computer, label, enabled) in [
-                (false, "boss.delegate", editor.permissions.summon_employees),
-                (true, "boss.computer", editor.permissions.computer_use),
+            for (label, enabled) in [
+                ("boss.delegate", editor.permissions.summon_employees),
+                ("boss.computer", editor.permissions.computer_use),
+                ("boss.always_report", editor.permissions.always_report),
             ] {
                 form = form.child(
                     boss_button(label, tr!(label), &theme)
@@ -2487,12 +2488,19 @@ impl Waku {
                         .child(tr!(label))
                         .on_activation(cx, move |this, _, cx| {
                             if let Some(editor) = &mut this.boss_ui.editor {
-                                if computer {
-                                    editor.permissions.computer_use =
-                                        !editor.permissions.computer_use;
-                                } else {
-                                    editor.permissions.summon_employees =
-                                        !editor.permissions.summon_employees;
+                                match label {
+                                    "boss.delegate" => {
+                                        editor.permissions.summon_employees =
+                                            !editor.permissions.summon_employees;
+                                    }
+                                    "boss.computer" => {
+                                        editor.permissions.computer_use =
+                                            !editor.permissions.computer_use;
+                                    }
+                                    _ => {
+                                        editor.permissions.always_report =
+                                            !editor.permissions.always_report;
+                                    }
                                 }
                             }
                             cx.notify();

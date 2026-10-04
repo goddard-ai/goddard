@@ -22,6 +22,9 @@ pub struct PersonaPermissions {
     pub integration_ids: Vec<String>,
     pub summon_employees: bool,
     pub computer_use: bool,
+    /// The boss's per-persona opt-in to prompted reports: employees of this
+    /// persona deliver their finish report instead of expiring silently.
+    pub always_report: bool,
 }
 
 impl PersonaPermissions {
@@ -38,6 +41,7 @@ impl PersonaPermissions {
             .retain(|id| ceiling.integration_ids.contains(id));
         self.summon_employees &= ceiling.summon_employees;
         self.computer_use &= ceiling.computer_use;
+        self.always_report &= ceiling.always_report;
     }
 }
 
@@ -108,6 +112,12 @@ pub struct BossEmployee {
     /// unless the boss assigns the employee another prompt first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<u64>,
+    /// The attention item the employee raised through `reportBlocker`, or
+    /// one the daemon recorded on its behalf (a restart interrupted the
+    /// job). Its presence turns a finish back into a delivered report;
+    /// resurrection clears it with the job that raised it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocker: Option<String>,
 }
 
 /// A file or folder of employee output the boss published to the user's
@@ -197,6 +207,14 @@ pub enum BossOperation {
     Control {
         session_id: Uuid,
         action: EmployeeControl,
+    },
+    /// An employee flags that its job needs supervisor attention — a
+    /// blocker, a decision, or a failure. The report interrupts the
+    /// supervisor's running turn when the runtime can take it and stays on
+    /// the record so the finish delivers a full report instead of expiring
+    /// silently. Employee-only.
+    ReportBlocker {
+        message: String,
     },
     Transcript {
         session_id: Uuid,

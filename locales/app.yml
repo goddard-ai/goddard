@@ -5976,6 +5976,8 @@ boss.delegate:
   en: May summon employees
 boss.computer:
   en: Computer use
+boss.always_report:
+  en: Always report when finished
 boss.select_document:
   en: Select a file or persona to view and edit it.
 boss.save:

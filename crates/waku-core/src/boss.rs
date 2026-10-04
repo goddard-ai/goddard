@@ -42,6 +42,9 @@ const MAX_SPEECH_PARTS: usize = 8;
 const MAX_SPEECH_PART_CHARS: usize = 160;
 const MAX_SPEECH_TOTAL_CHARS: usize = 480;
 const EMPLOYEE_RETIREMENT_SECONDS: u64 = 60 * 60;
+/// A blocker report is one bounded attention item, not an essay — long
+/// context belongs in the transcript the finish report indexes.
+const MAX_BLOCKER_CHARS: usize = 1_000;
 
 pub struct BossService {
     root: PathBuf,
@@ -251,6 +254,7 @@ impl BossService {
             knowledge_files,
             expired: false,
             expired_at: None,
+            blocker: None,
         })
     }
 
@@ -392,7 +396,7 @@ impl BossService {
         };
         let role = if let Some(employee) = employee {
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Knowledge files: {}. Finish this bounded job, return your results, and expire. Finishing is silent — your supervisor reads your outcome from its `view` or `context`, not from a delivered prompt, so do not expect a reply. When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -401,7 +405,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees' indexed results arrive as prompts when they finish. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishBundle, dismissBundle, speak. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with bundles so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Employees finish silently — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish reaches you only when the employee flagged a blocker through its `reportBlocker` operation or its persona grants `alwaysReport`. A blocker report also interrupts your running turn when it can. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -430,6 +434,20 @@ impl BossService {
         if ids.is_empty() {
             return;
         }
+        // An employee the restart cut off mid-job could not flag its own
+        // failure; flag it so the finish still reaches the supervisor.
+        let _ = self.update(|state| {
+            for entry in state
+                .employees
+                .iter_mut()
+                .filter(|entry| ids.contains(&entry.session_id))
+            {
+                if entry.blocker.is_none() {
+                    entry.blocker = Some("interrupted by a daemon restart".into());
+                }
+            }
+            Ok(())
+        });
         if let Some(backend) = self.backend.lock().upgrade() {
             let _ = std::thread::Builder::new()
                 .name("boss-recover-employees".into())
@@ -474,11 +492,57 @@ impl BossService {
             {
                 entry.expired = false;
                 entry.expired_at = None;
+                entry.blocker = None;
                 revived = true;
             }
             Ok(())
         })?;
         Ok(revived)
+    }
+
+    /// Record an employee's attention item. Raising the flag is what makes
+    /// the finish report reach the supervisor — the daemon reads `blocker`
+    /// back when the employee expires — and it also interrupts a live
+    /// supervisor immediately. Only a live employee may flag its own job.
+    pub fn report_blocker(
+        &self,
+        caller: Uuid,
+        message: String,
+    ) -> anyhow::Result<BossEmployee> {
+        self.require_active(caller)?;
+        let message = message.trim().to_owned();
+        if message.is_empty() {
+            bail!("a blocker report needs a message");
+        }
+        if message.chars().count() > MAX_BLOCKER_CHARS {
+            bail!("a blocker report exceeds {MAX_BLOCKER_CHARS} characters");
+        }
+        let mut flagged = None;
+        self.update(|state| {
+            let employee = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == caller)
+                .ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;
+            employee.blocker = Some(message);
+            flagged = Some(employee.clone());
+            Ok(())
+        })?;
+        Ok(flagged.unwrap())
+    }
+
+    /// Where an employee's report lands: its live supervisor, escalating to
+    /// the boss session when the supervisor cannot take prompts — expired,
+    /// retired from the roster, or never an employee.
+    pub fn report_target(&self, employee: &BossEmployee) -> Option<Uuid> {
+        if self
+            .employee(employee.supervisor_id)
+            .is_some_and(|entry| !entry.expired)
+        {
+            Some(employee.supervisor_id)
+        } else {
+            self.document().session_id
+        }
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
@@ -580,6 +644,7 @@ impl BossService {
             | BossOperation::Open { .. }
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
+            | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::Speak { .. } => {
                 bail!("runtime operation requires daemon dispatch")
@@ -1221,7 +1286,7 @@ fn fresh_state() -> BossState {
         session_id: None,
         personas: vec![
             BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory and knowledge granted to your persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; finished employees report back unprompted. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone. Queued prompts may be lost as an employee finishes, so summon a fresh employee for follow-up work rather than piling prompts onto one about to expire. Track employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, conflict resolution) to employees promptly, keeping yourself available for the human. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; finished employees expire silently, so read their outcomes through `view` or `context` — a finish reaches you only when the employee flagged a blocker or its persona requires always-report. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone. Queued prompts may be lost as an employee finishes, so summon a fresh employee for follow-up work rather than piling prompts onto one about to expire. Track employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as bundles; speak when a timely interruption will help the human. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas. Grant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared knowledge, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona.".into(), knowledge_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
         bundles: Vec::new(),
@@ -1327,6 +1392,86 @@ mod tests {
     }
 
     #[test]
+    fn report_blocker_flags_the_employee_and_clears_on_resurrect() {
+        let root = std::env::temp_dir().join(format!("boss-blocker-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let employee = service
+            .prepare_employee(boss, service.document().personas[0].id, "Review".into(), None)
+            .unwrap();
+        let session_id = employee.session_id;
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        // Only a live employee flags its own job, with a bounded message.
+        assert!(service.report_blocker(boss, "self".into()).is_err());
+        assert!(service.report_blocker(session_id, "   ".into()).is_err());
+        assert!(
+            service
+                .report_blocker(session_id, "x".repeat(MAX_BLOCKER_CHARS + 1))
+                .is_err()
+        );
+        let flagged = service
+            .report_blocker(session_id, " needs an approval ".into())
+            .unwrap();
+        assert_eq!(flagged.blocker.as_deref(), Some("needs an approval"));
+        // Reports land with a live supervisor employee and escalate to the
+        // boss session once that supervisor expires.
+        let supervisor_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.employees.push(BossEmployee {
+                    session_id: supervisor_id,
+                    supervisor_id: boss,
+                    identity: BossIdentity {
+                        id: supervisor_id,
+                        name: "Super".into(),
+                        avatar_seed: supervisor_id.to_string(),
+                    },
+                    job_title: "Super".into(),
+                    persona_id: state.personas[1].id,
+                    icon: None,
+                    permissions: PersonaPermissions::default(),
+                    knowledge_files: Vec::new(),
+                    expired: false,
+                    expired_at: None,
+                    blocker: None,
+                });
+                state
+                    .employees
+                    .iter_mut()
+                    .find(|entry| entry.session_id == session_id)
+                    .unwrap()
+                    .supervisor_id = supervisor_id;
+                Ok(())
+            })
+            .unwrap();
+        let flagged = service.employee(session_id).unwrap();
+        assert_eq!(service.report_target(&flagged), Some(supervisor_id));
+        service.expire(supervisor_id).unwrap();
+        assert_eq!(service.report_target(&flagged), Some(boss));
+        // Resurrection hands the employee a fresh job — the old flag goes
+        // with the job that raised it.
+        service.expire(session_id).unwrap();
+        assert!(service.report_blocker(session_id, "too late".into()).is_err());
+        assert!(service.resurrect(session_id).unwrap());
+        assert_eq!(
+            service.employee(session_id).unwrap().blocker,
+            None
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn boss_can_set_and_clear_employee_icon_override() {
         let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
@@ -1348,6 +1493,7 @@ mod tests {
                     knowledge_files: Vec::new(),
                     expired: false,
                     expired_at: None,
+                    blocker: None,
                 });
                 Ok(())
             })
@@ -1471,6 +1617,7 @@ mod tests {
                     knowledge_files: Vec::new(),
                     expired: false,
                     expired_at: None,
+                    blocker: None,
                 });
                 Ok(())
             })
@@ -1907,6 +2054,7 @@ mod tests {
                     knowledge_files: Vec::new(),
                     expired: false,
                     expired_at: None,
+                    blocker: None,
                 });
                 Ok(())
             })
@@ -2156,6 +2304,7 @@ mod tests {
                     knowledge_files: Vec::new(),
                     expired: false,
                     expired_at: None,
+                    blocker: None,
                 });
                 Ok(())
             })

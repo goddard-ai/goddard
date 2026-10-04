@@ -2323,6 +2323,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::Boss {
                 operation: waku_protocol::boss::BossOperation::Summon { .. }
                     | waku_protocol::boss::BossOperation::Control { .. }
+                    | waku_protocol::boss::BossOperation::ReportBlocker { .. }
             }
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
@@ -2815,6 +2816,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         Command::Boss { operation: waku_protocol::boss::BossOperation::Open { .. }
             | waku_protocol::boss::BossOperation::Summon { .. }
             | waku_protocol::boss::BossOperation::Control { .. }
+            | waku_protocol::boss::BossOperation::ReportBlocker { .. }
             | waku_protocol::boss::BossOperation::Rename { .. } }
         | Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }

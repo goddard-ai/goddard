@@ -16,4 +16,11 @@ permissions: PersonaPermissions, knowledgeFiles: Array<string>, expired: boolean
  * Unix timestamp when the employee finished. Retired after one hour
  * unless the boss assigns the employee another prompt first.
  */
-expiredAt?: number | null, };
+expiredAt?: number | null,
+/**
+ * The attention item the employee raised through `reportBlocker`, or
+ * one the daemon recorded on its behalf (a restart interrupted the
+ * job). Its presence turns a finish back into a delivered report;
+ * resurrection clears it with the job that raised it.
+ */
+blocker?: string | null, };

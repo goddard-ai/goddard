@@ -1,0 +1,1 @@
+- Boss employees now finish silently: a clean completion updates the employee's status in `view` and `context` instead of delivering a prompt that spends a boss turn. Employees can flag a blocker with `reportBlocker` to interrupt their supervisor mid-work and make their finish report — and a new "Always report when finished" persona grant restores prompted finishes per persona.

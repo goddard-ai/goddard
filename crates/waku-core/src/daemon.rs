@@ -6302,6 +6302,21 @@ impl WakuBackend {
                 }
                 Ok(BossResult::Saved)
             }
+            BossOperation::ReportBlocker { message } => {
+                let caller =
+                    caller.ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;
+                let employee = self.boss.report_blocker(caller, message)?;
+                if let Some(supervisor) = self.boss.report_target(&employee) {
+                    let prompt = format!(
+                        "Employee {} ({}) reports a blocker that needs your attention: {}",
+                        employee.identity.name,
+                        employee.session_id,
+                        employee.blocker.as_deref().unwrap_or_default()
+                    );
+                    self.deliver_employee_report(supervisor, prompt, employee.session_id, events)?;
+                }
+                Ok(BossResult::Saved)
+            }
             BossOperation::Transcript { session_id, turn } => {
                 self.boss.authorize_transcript(caller, session_id)?;
                 let result = self.agent_read_session(caller, Some(session_id), None, None, turn)?;
@@ -6395,7 +6410,7 @@ impl WakuBackend {
             sink.end_session_runtime();
         }
         drop_detached(removed);
-        let index = {
+        let (index, failed) = {
             let mut state = self.task_state.lock();
             let session = state
                 .sessions
@@ -6406,14 +6421,15 @@ impl WakuBackend {
             if session.active_turn_id().is_some() {
                 session.finish_active_turn(TurnStatus::Interrupted);
             }
-            if session.status != SessionStatus::Failed {
+            let failed = session.status == SessionStatus::Failed;
+            if !failed {
                 session.status = SessionStatus::Idle;
             }
             session.queued_messages.clear();
             let index = session.transcript_index();
             state.mark_session_dirty(session_id);
             self.task_store.save(&mut state)?;
-            index
+            (index, failed)
         };
         let mut body = String::new();
         for (turn, cues) in index {
@@ -6424,26 +6440,67 @@ impl WakuBackend {
                 body.push_str(&format!("  {cue}\n"));
             }
         }
-        // Reports escalate to the boss whenever the supervisor cannot take
-        // them — expired, retired from the roster, or never an employee.
-        let supervisor = if self
-            .boss
-            .employee(employee.supervisor_id)
-            .is_some_and(|entry| !entry.expired)
+        // A clean finish is silent — the boss reads outcomes lazily through
+        // `view` and `context`. A report goes out only when the employee
+        // flagged a blocker, its session failed, or its persona requires
+        // always-report; it lands with the supervisor and escalates to the
+        // boss when the supervisor cannot take prompts.
+        let reports =
+            employee.blocker.is_some() || employee.permissions.always_report || failed;
+        if reports
+            && let Some(supervisor) = self.boss.report_target(&employee)
         {
-            Some(employee.supervisor_id)
-        } else {
-            self.boss.document().session_id
-        };
-        if let Some(supervisor) = supervisor {
+            let blocker = employee
+                .blocker
+                .as_deref()
+                .map(|note| format!(" It flagged a blocker: {note}"))
+                .unwrap_or_default();
             let prompt = format!(
-                "Employee {} ({session_id}) has finished and expired. Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
+                "Employee {} ({session_id}) has finished and expired.{blocker} Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
                 employee.identity.name
             );
             let events = self.event_source.lock().clone();
             self.queue_agent_prompt_hidden(supervisor, prompt, Some(session_id), &events)?;
         }
         Ok(())
+    }
+
+    /// Interrupt delivery for an employee's report: steer into the
+    /// supervisor's open turn when its runtime can take one, else park a
+    /// hidden prompt that drains when the turn settles.
+    fn deliver_employee_report(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Uuid,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        let driver = self
+            .sessions
+            .lock()
+            .get(&target)
+            .map(|entry| entry.driver.clone());
+        if let Some(driver) = driver
+            && self.agent.has_open_turn(target)
+            && driver.supports_steer()
+        {
+            let transport = agent_prompt_envelope(&self.task_state, target, Some(sender), &prompt);
+            self.agent.record_pending_steer(
+                target,
+                crate::agent::AgentPrompt {
+                    prompt: prompt.clone(),
+                    transport: transport.clone(),
+                    sender: Some(sender),
+                    // A direct steer never parks — no chip to mirror.
+                    queued_id: None,
+                    context: None,
+                    hidden: true,
+                },
+            );
+            driver.steer(transport.unwrap_or(prompt));
+            return Ok(());
+        }
+        self.queue_agent_prompt_hidden(target, prompt, Some(sender), events)
     }
 
     /// `agent prompt`: deliver a message to an existing task, by Waku task
@@ -12222,7 +12279,7 @@ mod tests {
     }
 
     #[test]
-    fn boss_completion_retires_runtime_revokes_token_and_delivers_one_index() {
+    fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
         let root = std::env::temp_dir().join(format!("boss-finish-{}", Uuid::new_v4()));
         let (backend, supervisor) = surface_test_backend(&root);
         backend
@@ -12285,12 +12342,223 @@ mod tests {
         assert!(backend.agent.resolve(&token).is_none());
         assert!(!backend.sessions.lock().contains_key(&employee_id));
         assert_eq!(*child_capture.shutdowns.lock(), 1);
+        // A clean finish is silent: the employee's status and index stay in
+        // `view` and `context`, but no prompt burns a supervisor turn.
+        assert!(parent_capture.prompts.lock().is_empty());
+        assert!(parent_capture.steers.lock().is_empty());
+        assert!(backend.boss.require_active(employee_id).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Boss fixture shared by the report-gating tests: the boss session is
+    /// live, one prepared employee sits on the roster with a finished
+    /// transcript, and capture drivers stand in for both runtimes.
+    fn employee_finish_fixture(
+        root: &Path,
+    ) -> (
+        WakuBackend,
+        Uuid,
+        Uuid,
+        Arc<CaptureDriver>,
+        Arc<CaptureDriver>,
+    ) {
+        let (backend, supervisor) = surface_test_backend(root);
+        backend
+            .boss
+            .update(|state| {
+                state.session_id = Some(supervisor);
+                Ok(())
+            })
+            .unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let employee = backend
+            .boss
+            .prepare_employee(supervisor, persona, "Release checks".into(), None)
+            .unwrap();
+        let employee_id = employee.session_id;
+        backend
+            .boss
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let mut child = AgentSession::new(
+            backend.task_state.lock().sessions[0].project_id,
+            ProviderKind::Codex,
+        );
+        child.id = employee_id;
+        child.begin_turn("Run tests");
+        child.push_message(crate::model::MessageRole::Assistant, "Tests passed");
+        child.finish_active_turn(TurnStatus::Completed);
+        {
+            let mut state = backend.task_state.lock();
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let parent_capture = Arc::new(CaptureDriver::default());
+        let child_capture = Arc::new(CaptureDriver::default());
+        for (id, capture) in [
+            (supervisor, parent_capture.clone()),
+            (employee_id, child_capture.clone()),
+        ] {
+            backend.sessions.lock().insert(
+                id,
+                RuntimeEntry {
+                    runtime_id: Uuid::new_v4(),
+                    driver: DriverHandle::from_control(capture),
+                    last_active: std::time::Instant::now(),
+                    resumable: false,
+                    computer_use_available: false,
+                    provider: ProviderKind::Codex,
+                    cwd: root.to_path_buf(),
+                },
+            );
+        }
+        (
+            backend,
+            supervisor,
+            employee_id,
+            parent_capture,
+            child_capture,
+        )
+    }
+
+    #[test]
+    fn a_flagged_employee_finish_delivers_the_index() {
+        let root = std::env::temp_dir().join(format!("boss-flagged-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.employees[0].blocker = Some("needs a release call".into());
+                Ok(())
+            })
+            .unwrap();
+        backend.finish_boss_employee(employee_id).unwrap();
+        backend.finish_boss_employee(employee_id).unwrap();
         let prompts = parent_capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains(&employee_id.to_string()));
+        assert!(prompts[0].contains("flagged a blocker: needs a release call"));
         assert!(prompts[0].contains("Turn 1"));
         assert!(prompts[0].contains("Tests passed"));
-        assert!(backend.boss.require_active(employee_id).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_failed_employee_finish_delivers_the_index() {
+        let root = std::env::temp_dir().join(format!("boss-failed-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            session.status = SessionStatus::Failed;
+            backend.task_store.save(&mut state).unwrap();
+        }
+        backend.finish_boss_employee(employee_id).unwrap();
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains(&employee_id.to_string()));
+        // A failed finish keeps its status instead of washing to idle.
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == employee_id)
+                .unwrap()
+                .status,
+            SessionStatus::Failed
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_always_report_employee_finish_delivers_the_index() {
+        let root = std::env::temp_dir().join(format!("boss-always-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .boss
+            .update(|state| {
+                state.employees[0].permissions.always_report = true;
+                Ok(())
+            })
+            .unwrap();
+        backend.finish_boss_employee(employee_id).unwrap();
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains(&employee_id.to_string()));
+        assert!(!prompts[0].contains("It flagged a blocker:"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `reportBlocker` is the employee's mid-job attention channel: it
+    /// steers into the supervisor's open turn when the runtime can take
+    /// one, flags the record so the finish still reports, and refuses
+    /// callers that are not live employees.
+    #[test]
+    fn report_blocker_interrupts_the_supervisor_and_marks_the_finish() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-blocker-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        let stranger = Uuid::new_v4();
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(stranger),
+                    BossOperation::ReportBlocker {
+                        message: "intruder".into(),
+                    },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(employee_id),
+                BossOperation::ReportBlocker {
+                    message: "build is red".into(),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert_eq!(
+            backend.boss.employee(employee_id).unwrap().blocker.as_deref(),
+            Some("build is red")
+        );
+        let steers = parent_capture.steers.lock().clone();
+        assert_eq!(steers.len(), 1);
+        assert!(steers[0].contains("build is red"));
+        // The flag survives to the finish, which reports instead of expiring
+        // silently — here it parks behind the open turn as a queued prompt.
+        backend.finish_boss_employee(employee_id).unwrap();
+        assert!(parent_capture.prompts.lock().is_empty());
+        assert!(backend.agent.has_queued(supervisor));
+        // And only an employee may flag: the boss itself cannot.
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(supervisor),
+                    BossOperation::ReportBlocker {
+                        message: "self".into(),
+                    },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
