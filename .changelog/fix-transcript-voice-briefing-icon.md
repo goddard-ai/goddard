@@ -1,0 +1,1 @@
+- The response footer's "Generate voice briefing" button and a handful of other controls now draw their icons — the SVGs shipped on disk but were never registered in the app's embedded icon set, so they rendered as blank space.

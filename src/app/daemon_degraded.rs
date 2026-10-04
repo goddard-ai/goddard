@@ -158,7 +158,7 @@ impl Waku {
         let restart_row = render_daemon_restart_row(
             "daemon-restart-dialog-confirm",
             &dialog.restart_focus,
-            "icons/refresh-cw.svg",
+            "icons/rotate-cw.svg",
             tr!("daemon.restart_confirm_action"),
             weak.clone(),
             &theme,

@@ -376,3 +376,50 @@ impl AssetSource for Assets {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_sources(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every `"icons/…svg"` literal in the crate's source must resolve through
+    /// the embedded `AssetSource` — an SVG left out of `icons!` renders blank
+    /// with no error anywhere.
+    #[test]
+    fn every_referenced_icon_is_embedded() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_sources(&root, &mut files);
+        let mut missing = Vec::new();
+        for file in files {
+            let source = std::fs::read_to_string(&file).unwrap();
+            for (start, _) in source.match_indices("\"icons/") {
+                let rest = &source[start + 1..];
+                let Some(end) = rest.find('"') else { continue };
+                let path = &rest[..end];
+                if !path.ends_with(".svg") || path.contains(char::is_whitespace) {
+                    continue;
+                }
+                if Assets.load(path).unwrap().is_none() {
+                    missing.push(format!("{path} (referenced by {})", file.display()));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "icon paths referenced but not embedded:\n{}",
+            missing.join("\n")
+        );
+    }
+}
