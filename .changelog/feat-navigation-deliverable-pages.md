@@ -1,0 +1,1 @@
+- A deliverable's preview page now joins back/forward history like chats and pages — Back or Escape returns to the boss chat underneath — and the boss top bar no longer renders over it.

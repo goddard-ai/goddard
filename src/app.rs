@@ -1633,6 +1633,9 @@ enum NavigationLocation {
     DraftsPage,
     AutomationsPage,
     BossPage(waku_client::DaemonKey, boss::BossTab),
+    /// A deliverable's preview page mounted over its boss chat — the chat's
+    /// `Task` entry sits underneath it on the stack.
+    Deliverable(waku_client::DaemonKey, Uuid),
     Inbox,
     /// The settings overlay. It never enters `back` — the surface it
     /// opened over holds that slot — but leaving settings through back
@@ -1805,6 +1808,9 @@ impl SettingsNavigation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionActivationTransition {
     Visit,
+    /// The activation serves another location's hop — a deliverable page's
+    /// restore re-lands its boss chat underneath — so it records nothing.
+    Silent,
     Back { from: NavigationLocation },
     Forward { from: NavigationLocation },
 }
@@ -1847,7 +1853,8 @@ fn persisted_location(location: NavigationLocation) -> Option<PersistedNavigatio
         NavigationLocation::Inbox => Some(PersistedNavigationLocation::Inbox),
         NavigationLocation::Terminal(_)
         | NavigationLocation::Settings
-        | NavigationLocation::BossPage(..) => None,
+        | NavigationLocation::BossPage(..)
+        | NavigationLocation::Deliverable(..) => None,
     }
 }
 

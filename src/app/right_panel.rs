@@ -5762,17 +5762,10 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (key, deliverable_id) = self.boss_ui.deliverable_page?;
-        let valid = self.boss_ui.command_deliverable == Some((key, deliverable_id))
-            && self
-                .boss_ui
-                .states
-                .get(&key)
-                .is_some_and(|state| state.session_id == self.state.selected_session);
-        if !valid {
+        let Some((key, deliverable_id)) = self.live_deliverable_page() else {
             self.boss_ui.deliverable_page = None;
             return None;
-        }
+        };
         let relative_path = self
             .boss_ui
             .states

@@ -65,8 +65,10 @@ pub(super) struct BossUi {
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
-    /// the arm once the boss chat is on screen.
-    pub pending_deliverable: Option<(DaemonKey, Uuid)>,
+    /// the arm once the boss chat is on screen. The flag is whether the
+    /// landing should write a history entry: a fresh row click pushes the
+    /// page; a back/forward hop restoring it must not re-push.
+    pub pending_deliverable: Option<(DaemonKey, Uuid, bool)>,
     /// The deliverable whose preview page covers the boss chat's transcript: a
     /// previewable file's own page rather than a panel off the chat. Lives
     /// and dies with `command_deliverable` — the same arm brands the composer's
@@ -2139,9 +2141,57 @@ impl Waku {
     ) {
         self.mark_deliverable_viewed(key, deliverable_id, cx);
         self.boss_ui.command_deliverable = Some((key, deliverable_id));
-        self.boss_ui.pending_deliverable = Some((key, deliverable_id));
+        self.boss_ui.pending_deliverable = Some((key, deliverable_id, true));
         self.sync_composer_placeholder(cx);
         self.chat_with_boss(key, cx);
+        cx.notify();
+    }
+
+    /// The parked preview page when it is the surface on screen — its armed
+    /// deliverable's boss chat still selected. The render gate prunes stale
+    /// state lazily; history reads this eagerly so a dead page never claims
+    /// a back slot.
+    pub(super) fn live_deliverable_page(&self) -> Option<(DaemonKey, Uuid)> {
+        let page = self.boss_ui.deliverable_page?;
+        (self.boss_ui.command_deliverable == Some(page)
+            && self
+                .boss_ui
+                .states
+                .get(&page.0)
+                .is_some_and(|state| state.session_id == self.state.selected_session))
+        .then_some(page)
+    }
+
+    /// A history hop landing on a deliverable: the same landing
+    /// `open_deliverable_task` produces — boss chat underneath, file armed,
+    /// preview page mounted — but the stacks already moved, so the parked
+    /// arm carries no visit flag and the chat's activation is `Silent`:
+    /// recording either would re-enter the hop it restores.
+    pub(super) fn show_deliverable_page(
+        &mut self,
+        key: DaemonKey,
+        deliverable_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_id) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| state.session_id)
+            .filter(|session_id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == *session_id)
+            })
+        else {
+            return;
+        };
+        self.mark_deliverable_viewed(key, deliverable_id, cx);
+        self.boss_ui.command_deliverable = Some((key, deliverable_id));
+        self.boss_ui.pending_deliverable = Some((key, deliverable_id, false));
+        self.sync_composer_placeholder(cx);
+        self.request_session_activation(session_id, SessionActivationTransition::Silent, cx);
         cx.notify();
     }
 
@@ -2181,7 +2231,9 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, deliverable_id)) = self.boss_ui.pending_deliverable.take() else {
+        let Some((key, deliverable_id, record_visit)) =
+            self.boss_ui.pending_deliverable.take()
+        else {
             return;
         };
         let Some((directory, path)) = self
@@ -2219,6 +2271,14 @@ impl Waku {
         // keeps the armed deliverable's boss chip, so the page still reads as a
         // command to the boss with the file attached.
         self.boss_ui.deliverable_page = Some((key, deliverable_id));
+        if record_visit {
+            // The page mounts over the chat it parked on, so the chat is
+            // what back returns to.
+            self.session_navigation.visit(
+                Some(NavigationLocation::Task(session_id)),
+                NavigationLocation::Deliverable(key, deliverable_id),
+            );
+        }
     }
 
     /// Task affordances on a deliverable row are daemon mutations — the deliverable

@@ -510,6 +510,7 @@ impl Waku {
                 self.navigation_location(),
                 NavigationLocation::Task(session_id),
             ),
+            SessionActivationTransition::Silent => {}
             SessionActivationTransition::Back { from } => {
                 if self.navigation_location() != Some(from)
                     || self.session_navigation.back_target()
@@ -778,12 +779,14 @@ impl Waku {
         // page may have been mounted over this same session, in which case
         // the page's strip is what needs parking.
         self.sync_right_panel_owner(cx);
+        // The preview page belongs to the activation that carried it in —
+        // a landing that is not re-arming one drops it even on the same
+        // session: a history hop back to the chat re-shows the transcript.
+        self.boss_ui.deliverable_page = None;
         if session_changed {
             // A new session is a new context: a deliverable click's armed boss
-            // command belongs to whatever was on screen before — and the
-            // preview page it may have opened with it.
+            // command belongs to whatever was on screen before.
             self.boss_ui.command_deliverable = None;
-            self.boss_ui.deliverable_page = None;
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);
@@ -3503,6 +3506,11 @@ impl Waku {
             Some(NavigationLocation::ProjectsPage(project_id))
         } else if self.notifications.open {
             Some(NavigationLocation::Inbox)
+        // The preview page ranks below the pages and above the transcript,
+        // matching the render order — a page opened over a live deliverable
+        // view is the surface history reports.
+        } else if let Some((key, deliverable_id)) = self.live_deliverable_page() {
+            Some(NavigationLocation::Deliverable(key, deliverable_id))
         } else if let Some(session_id) = self.state.selected_session {
             Some(NavigationLocation::Task(session_id))
         } else {
@@ -3626,6 +3634,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_boss_page(key, tab, window, cx);
             }
+            Some(NavigationLocation::Deliverable(key, deliverable_id)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_deliverable_page(key, deliverable_id, cx);
+            }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_inbox(window, cx);
@@ -3687,6 +3699,10 @@ impl Waku {
             Some(NavigationLocation::BossPage(key, tab)) => {
                 let _ = self.session_navigation.go_forward(current);
                 self.show_boss_page(key, tab, window, cx);
+            }
+            Some(NavigationLocation::Deliverable(key, deliverable_id)) => {
+                let _ = self.session_navigation.go_forward(current);
+                self.show_deliverable_page(key, deliverable_id, cx);
             }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_forward(current);
@@ -4341,7 +4357,7 @@ impl Waku {
             self.close_file_finder(window, cx);
             return;
         }
-        if self.boss_ui.page.is_some() {
+        if self.boss_ui.page.is_some() || self.boss_ui.deliverable_page.is_some() {
             self.navigate_back_action(&NavigateBack, window, cx);
             return;
         }

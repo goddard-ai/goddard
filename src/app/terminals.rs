@@ -1169,6 +1169,10 @@ impl Waku {
                 let _ = self.session_navigation.go_back(current);
                 self.show_boss_page(key, tab, window, cx);
             }
+            Some(NavigationLocation::Deliverable(key, deliverable_id)) => {
+                let _ = self.session_navigation.go_back(current);
+                self.show_deliverable_page(key, deliverable_id, cx);
+            }
             Some(NavigationLocation::Inbox) => {
                 let _ = self.session_navigation.go_back(current);
                 self.show_inbox(window, cx);
@@ -1446,6 +1450,9 @@ impl Waku {
                         }
                         NavigationLocation::BossPage(key, tab) => {
                             this.show_boss_page(key, tab, window, cx)
+                        }
+                        NavigationLocation::Deliverable(key, deliverable_id) => {
+                            this.show_deliverable_page(key, deliverable_id, cx)
                         }
                         NavigationLocation::Inbox => this.show_inbox(window, cx),
                         NavigationLocation::Settings => {}
