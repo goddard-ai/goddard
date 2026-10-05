@@ -1,1 +1,1 @@
-- Approving a plan now starts execution: the planning session summons employees to do the work and reports progress to the boss chat, instead of ending once the document freezes.
+- Approving a plan now starts implementation: the planning session summons employees to do the work and reports progress to the boss chat, instead of ending once the document freezes.

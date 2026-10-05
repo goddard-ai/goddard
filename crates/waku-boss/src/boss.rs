@@ -896,9 +896,9 @@ impl BossService {
             .find(|plan| plan.session_id == session)
             .map(|plan| {
                 if plan.finalized_at.is_some() {
-                    format!("\nThis planning session's plan memory/{} is finalized and frozen — the document can no longer be edited. Now execute the plan: summon employees for the work, coordinate them, and report progress to the boss chat.", plan.plan_file)
+                    format!("\nThis planning session's design doc memory/{} is finalized and frozen — the document can no longer be edited. Now implement the approved design: summon employees for the work, coordinate them, and report progress to the boss chat.", plan.plan_file)
                 } else {
-                    format!("\nThis is a planning session for \"{}\". Draft and revise the plan document at memory/{} with `writeFile`; when the plan is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval starts execution: implement the plan by summoning employees for the work, coordinating them, and reporting progress to the boss chat.", plan.idea, plan.plan_file)
+                    format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at memory/{} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. When the design is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval starts implementation: build the approved design by summoning employees for the work, coordinating them, and reporting progress to the boss chat.", plan.idea, plan.plan_file)
                 }
             })
             .unwrap_or_default();
