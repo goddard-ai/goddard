@@ -5922,6 +5922,17 @@ impl Waku {
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
                     .child(div().flex_1())
+                    // The VS button lives on the main card only — one
+                    // dictation session at a time, bound to that chat.
+                    .children(if interactive {
+                        self.render_voice_scratchpad_button(
+                            &controls,
+                            self.composer_session_id(),
+                            cx,
+                        )
+                    } else {
+                        None
+                    })
                     .child(match submit_action {
                         ComposerSubmitAction::Preparing => div()
                             .id(controls.chip_id("send-or-stop"))

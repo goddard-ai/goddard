@@ -55,6 +55,12 @@ serde-saphyr = { version = "0.0.29", default-features = false, features = ["dese
 unicode-segmentation = "1.12"
 unicode-linebreak = "0.1.5"
 unicode-script = "0.5"
+# The voice scratchpad's streaming transcription socket — same feature set
+# waku-client uses for its own WebSocket traffic.
+tungstenite = { version = "0.30", default-features = false, features = [
+    "handshake",
+    "rustls-tls-native-roots",
+] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-client = { path = "crates/waku-client" }

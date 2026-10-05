@@ -11173,6 +11173,7 @@ dependencies = [
  "smol",
  "tar",
  "tokio",
+ "tungstenite 0.30.0",
  "unicode-linebreak",
  "unicode-script",
  "unicode-segmentation",

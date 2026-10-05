@@ -175,6 +175,15 @@ mod voice_gate {
     type ConsentHook = Box<dyn Fn(ConsentSignal) + Send + Sync>;
     static CONSENT_HOOK: Mutex<Option<ConsentHook>> = Mutex::new(None);
 
+    /// The dictation scratchpad's consumer for captured audio. Unlike the
+    /// consent feed these samples leave the process — they stream to the
+    /// transcription gateway — so the sink is registered only while a
+    /// scratchpad session is live and the muted flag drops blocks in the
+    /// tap itself, before any copy leaves the audio engine.
+    type AudioSink = Box<dyn Fn(&[f32], f64) + Send + Sync>;
+    static AUDIO_SINK: Mutex<Option<AudioSink>> = Mutex::new(None);
+    static AUDIO_SINK_MUTED: AtomicBool = AtomicBool::new(false);
+
     /// The recognizer objects — created and retired on the main thread only.
     /// The recognizer is only held, never called: the task may not retain it.
     struct ConsentSession {
@@ -221,6 +230,34 @@ mod voice_gate {
         }
     }
 
+    /// Downmix one tap block to mono f32 plus its sample rate — `None` when
+    /// the buffer carries no float samples.
+    fn mono_samples(buffer: &AVAudioPCMBuffer) -> Option<(Vec<f32>, f64)> {
+        let frames = unsafe { buffer.frameLength() } as usize;
+        let channels = unsafe { buffer.floatChannelData() };
+        if frames == 0 || channels.is_null() {
+            return None;
+        }
+        let format = unsafe { buffer.format() };
+        let channel_count = unsafe { format.channelCount() } as usize;
+        let rate = unsafe { format.sampleRate() };
+        if channel_count == 0 {
+            return None;
+        }
+        // Planar layout: one contiguous channel of `frames` floats per
+        // channel pointer. A mono tap mixes by averaging.
+        let mut mono = Vec::with_capacity(frames);
+        for frame in 0..frames {
+            let mut sum = 0.0f32;
+            for channel in 0..channel_count {
+                let data = unsafe { *channels.add(channel) }.as_ptr();
+                sum += unsafe { *data.add(frame) };
+            }
+            mono.push(sum / channel_count as f32);
+        }
+        Some((mono, rate))
+    }
+
     /// The recognizer's answer to one callback: consent heard, task ended,
     /// or an unremarkable partial result.
     fn consent_signal(
@@ -263,6 +300,13 @@ mod voice_gate {
                         unsafe { request.appendAudioPCMBuffer(buffer) };
                     }
                     observe_ambient_level(buffer);
+                    if !AUDIO_SINK_MUTED.load(Ordering::Relaxed)
+                        && let Ok(sink) = AUDIO_SINK.try_lock()
+                        && let Some(sink) = sink.as_ref()
+                        && let Some((mono, rate)) = mono_samples(buffer)
+                    {
+                        sink(&mono, rate);
+                    }
                 },
             );
             let tap_pointer = &*tap as *const _ as *mut _;
@@ -382,6 +426,29 @@ mod voice_gate {
         })
     }
 
+    /// Hand captured mic audio to the dictation scratchpad: `sink` gets mono
+    /// f32 samples plus the buffer's rate on the audio thread, so it must be
+    /// cheap and never block — the app copies into a bounded channel and
+    /// drops blocks when it's full. `None` detaches the sink; detaching also
+    /// clears the mute flag so a new session can't inherit one.
+    pub fn set_audio_sink(sink: Option<AudioSink>) {
+        AUDIO_SINK_MUTED.store(false, Ordering::Relaxed);
+        *AUDIO_SINK.lock().unwrap() = sink;
+    }
+
+    /// Mute drops tap blocks before they copy — capture pauses but the
+    /// session stays live. Not retroactive: blocks already handed to the
+    /// sink still stream.
+    pub fn set_audio_sink_muted(muted: bool) {
+        AUDIO_SINK_MUTED.store(muted, Ordering::Relaxed);
+    }
+
+    /// Whether a dictation sink is registered — the engine should stay up
+    /// for it even while nothing else needs the mic.
+    pub fn audio_sink_active() -> bool {
+        AUDIO_SINK.lock().unwrap().is_some()
+    }
+
     /// End the consent session but leave the engine running — playback still
     /// wants the ambient check. Feed and hook clear before `endAudio`/`cancel`
     /// so the handler they synchronously fire sees nothing to report.
@@ -443,6 +510,38 @@ pub fn begin_consent_recognition(
 #[cfg(target_os = "macos")]
 pub fn end_consent_recognition() {
     voice_gate::end_consent()
+}
+
+/// Register the dictation scratchpad's consumer for live mic audio. Unlike
+/// the on-device consent feed, samples handed to this sink leave the
+/// process — they stream to the transcription gateway — so it only exists
+/// while a scratchpad session is live. `None` detaches it.
+#[cfg(target_os = "macos")]
+pub fn set_voice_audio_sink(sink: Option<Box<dyn Fn(&[f32], f64) + Send + Sync + 'static>>) {
+    voice_gate::set_audio_sink(sink)
+}
+
+/// Suspend audio delivery to the dictation sink without ending the session.
+#[cfg(target_os = "macos")]
+pub fn set_voice_audio_sink_muted(muted: bool) {
+    voice_gate::set_audio_sink_muted(muted)
+}
+
+/// Whether the dictation sink is attached — keeps the mic engine alive.
+#[cfg(target_os = "macos")]
+pub fn voice_audio_sink_active() -> bool {
+    voice_gate::audio_sink_active()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_voice_audio_sink(_: Option<Box<dyn Fn(&[f32], f64) + Send + Sync + 'static>>) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_voice_audio_sink_muted(_: bool) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn voice_audio_sink_active() -> bool {
+    false
 }
 
 #[cfg(not(target_os = "macos"))]

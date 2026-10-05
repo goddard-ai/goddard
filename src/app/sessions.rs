@@ -4351,6 +4351,12 @@ impl Waku {
         }) {
             return;
         }
+        // The visible scratchpad sends its transcript on Enter — the typed
+        // draft stays in the composer underneath it.
+        if self.voice_scratchpad_visible() {
+            self.submit_voice_scratchpad(cx);
+            return;
+        }
         // A lane that would take the keystroke by the typing rule takes
         // Enter too: its draft submits (⌘⏎ steers), an empty field fires
         // the stopped-turn Continue affordance — never the session
@@ -4537,6 +4543,14 @@ impl Waku {
         }
         if self.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
+            return;
+        }
+        // The scratchpad owns bare Escape while it's the chat column's
+        // content: an annotation box exits first, otherwise Esc cancels the
+        // session — with its own confirm rule — rather than arming the
+        // turn-stop path below.
+        if !action.immediate && self.voice_scratchpad_visible() {
+            self.voice_scratchpad_escape(window, cx);
             return;
         }
         // A pinned daemon request eats the first bare Escape — answering it

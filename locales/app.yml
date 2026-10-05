@@ -6176,3 +6176,45 @@ boss.plans:
   en: Plans
 boss.plans_hint:
   en: Finalized design docs stay readable here after their planning session archives.
+voice_scratchpad.title:
+  en: Voice Scratchpad
+voice_scratchpad.start:
+  en: Start voice dictation
+voice_scratchpad.recording:
+  en: Dictating — click to show the scratchpad
+voice_scratchpad.muted:
+  en: Dictation muted — click to show the scratchpad
+voice_scratchpad.active_elsewhere:
+  en: Dictating in another chat
+voice_scratchpad.mute:
+  en: Mute
+voice_scratchpad.unmute:
+  en: Unmute
+voice_scratchpad.hide:
+  en: Hide
+voice_scratchpad.cancel:
+  en: Cancel
+voice_scratchpad.hint_prefix:
+  en: "Say “"
+voice_scratchpad.hint_command:
+  en: Ok, next
+voice_scratchpad.hint_suffix:
+  en: "” to go to next paragraph"
+voice_scratchpad.annotation_hint:
+  en: Dictating an annotation…
+voice_scratchpad.discard_title:
+  en: Discard transcript?
+voice_scratchpad.discard_keep:
+  en: Keep
+voice_scratchpad.discard:
+  en: Discard
+voice_scratchpad.mic_denied:
+  en: Microphone access is needed for Voice Scratchpad
+voice_scratchpad.retry:
+  en: Retry
+voice_scratchpad.open_settings:
+  en: Open Settings
+voice_scratchpad.connecting:
+  en: Connecting…
+voice_scratchpad.connection_lost:
+  en: Transcription paused — connection lost

@@ -673,6 +673,7 @@ impl Render for Waku {
         let incognito_dialog = self.render_incognito_dialog(window, cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
         let close_dialog = self.render_close_dialog(cx);
+        let scratchpad_discard = self.render_scratchpad_discard(cx);
         let daemon_restart_dialog = self.render_daemon_restart_dialog(cx);
         let provider_switch_dialog = self.render_provider_switch_dialog(cx);
         let push_base_dialog = self.render_push_base_dialog(window, cx);
@@ -897,6 +898,11 @@ impl Render for Waku {
                             self.render_inbox_page(window, cx)
                         } else if agy_surface {
                             self.render_agy_surface(self.chat_viewport_width(window), cx)
+                        } else if self.voice_scratchpad_visible() {
+                            // The scratchpad takes the transcript slot —
+                            // empty or not — while the composer lane stays
+                            // mounted below it.
+                            self.render_voice_scratchpad(window, cx)
                         } else if empty && self.boss_chat_key().is_some() {
                             self.render_boss_chat_empty_state(cx).into_any_element()
                         } else if empty {
@@ -1098,6 +1104,7 @@ impl Render for Waku {
             .children(incognito_dialog)
             .children(terminal_close_dialog)
             .children(close_dialog)
+            .children(scratchpad_discard)
             .children(daemon_restart_dialog)
             .children(provider_switch_dialog)
             .children(push_base_dialog)

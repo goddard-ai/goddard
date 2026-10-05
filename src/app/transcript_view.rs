@@ -786,6 +786,17 @@ impl Waku {
                     })
                     .and_then(|view| view.selection.selection.borrow().selected_text())
             })
+            .or_else(|| {
+                // The scratchpad owns the column while it's up — its
+                // registry holds this frame's scratchpad text.
+                self.voice_scratchpad_visible()
+                    .then(|| {
+                        self.voice_scratchpad.as_ref().and_then(|scratchpad| {
+                            scratchpad.selection.selection.borrow().clipboard_text()
+                        })
+                    })
+                    .flatten()
+            })
             .or_else(|| self.toast_selection.selection.borrow().selected_text())
             .or_else(|| self.skills_selection.selection.borrow().selected_text())
             .or_else(|| {

@@ -2543,6 +2543,12 @@ pub struct Waku {
     /// `bossSpeechRequested` ids already handled this run — reconnects and
     /// repeat broadcasts must not replay an utterance.
     speech_requests_seen: VecDeque<Uuid>,
+    /// The one live voice-scratchpad dictation session, bound to its chat.
+    voice_scratchpad: Option<voice_scratchpad::VoiceScratchpad>,
+    /// Transcript and permission events landing from the scratchpad's
+    /// worker thread — drained with the rest of the pump's traffic.
+    voice_scratchpad_tx: Sender<(u64, voice_scratchpad::ScratchpadEvent)>,
+    voice_scratchpad_events: Receiver<(u64, voice_scratchpad::ScratchpadEvent)>,
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
     briefing_pending: HashMap<Uuid, bool>,
@@ -4243,6 +4249,7 @@ mod transcript_view;
 mod usage_meter;
 mod usage_page;
 mod voice_briefing;
+mod voice_scratchpad;
 mod window_chrome;
 mod worktrees;
 
@@ -5745,6 +5752,7 @@ impl Waku {
         let (speech_tx, speech_events) = unbounded();
         let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
+        let (voice_scratchpad_tx, voice_scratchpad_events) = unbounded();
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();
@@ -5987,7 +5995,11 @@ impl Waku {
                     ComposerEvent::Submit(prompt) => {
                         let typed_only =
                             prompt.trim().is_empty() && this.composer_inline_atoms.is_empty();
-                        if this.big_picture.is_open() {
+                        if this.voice_scratchpad_visible() {
+                            // The scratchpad owns Enter while it's up — the
+                            // typed draft stays in the composer underneath.
+                            this.submit_voice_scratchpad(cx);
+                        } else if this.big_picture.is_open() {
                             // Big Picture routes by its own target — a card's
                             // session or a new task — not the selection.
                             if !typed_only
@@ -6818,6 +6830,9 @@ impl Waku {
                 speech_waiting_for_ambient: false,
                 boss_voice_gate_tx,
                 boss_voice_gate_events,
+                voice_scratchpad: None,
+                voice_scratchpad_tx,
+                voice_scratchpad_events,
                 voice_mic_requested: false,
                 speech_auth_requested: false,
                 voice_consent_restarts: 0,
