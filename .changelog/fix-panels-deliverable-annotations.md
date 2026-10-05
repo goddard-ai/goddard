@@ -1,0 +1,1 @@
+- Option-click a block in a Markdown deliverable to open its annotation editor and attach the comment to your next chat message.

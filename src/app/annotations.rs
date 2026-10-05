@@ -143,6 +143,23 @@ fn annotation_prompt_passage(annotation: &TranscriptAnnotation) -> String {
     )
 }
 
+/// File annotations normally follow the active right-panel file. A deliverable
+/// page renders in the chat column, so it supplies the file path through the
+/// same annotation route without changing the general right-panel resolver.
+fn annotation_file_path(
+    panel_path: Option<String>,
+    deliverable_path: Option<&str>,
+) -> Option<String> {
+    deliverable_path
+        .and_then(|path| {
+            std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .or(panel_path)
+}
+
 /// The prompt block prepended to a submission carrying annotations.
 ///
 /// Each passage is quoted and labelled so the agent can cite the comment's
@@ -540,7 +557,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(path) = self.visible_right_panel_file_path() {
+        let deliverable_path = self.live_deliverable_page().and_then(|(key, id)| {
+            self.boss_ui
+                .states
+                .get(&key)?
+                .deliverables
+                .iter()
+                .find(|deliverable| deliverable.id == id && !deliverable.directory)
+                .map(|deliverable| deliverable.path.as_str())
+        });
+        if let Some(path) =
+            annotation_file_path(self.visible_right_panel_file_path(), deliverable_path)
+        {
             if self.file_markdown_preview_active(&path) {
                 // As in the source view, a lingering selection only counts
                 // while the pane it was made in holds focus — otherwise ⌘L
@@ -2912,6 +2940,22 @@ fn annotation_quote_preview(annotation: &TranscriptAnnotation) -> String {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+
+    #[test]
+    fn annotation_path_uses_the_visible_deliverable_page() {
+        assert_eq!(
+            super::annotation_file_path(Some("panel.md".to_owned()), Some("outputs/report.md")),
+            Some("report.md".to_owned()),
+        );
+        assert_eq!(
+            super::annotation_file_path(None, Some("outputs/report.md")),
+            Some("report.md".to_owned()),
+        );
+        assert_eq!(
+            super::annotation_file_path(Some("panel.md".to_owned()), None),
+            Some("panel.md".to_owned()),
+        );
+    }
 
     use super::*;
     use crate::md::selection::TextKey;
