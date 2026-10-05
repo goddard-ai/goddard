@@ -3042,9 +3042,14 @@ impl Waku {
         }
         self.replace_active_right_panel_state(state);
         // A planning session's plan tab is strip furniture, not a user tab —
-        // restore inserts it before whatever the parked strip holds. A strip
-        // meeting its session for the first time opens on the plan; a parked
-        // one gains the tab without moving the user's selection.
+        // restore inserts it before whatever the parked strip holds, but only
+        // once the fetched document has real contents: until the session's
+        // first write lands, the strip stays without the tab rather than
+        // opening the panel on a loading screen. The fetch below re-arms on
+        // each Boss state revision, so the write mounts the tab one sync
+        // later. A strip meeting its session for the first time opens on the
+        // plan; a parked one gains the tab without moving the user's
+        // selection.
         if let RightPanelOwner::Session(session_id) = self.right_panel_live_owner
             && let Some(plan_file) = self
                 .state
@@ -3054,21 +3059,11 @@ impl Waku {
                 .and_then(|session| session.planning.as_ref())
                 .map(|planning| planning.plan_file.clone())
         {
-            let surface = RightPanelSurface::Plan {
-                session_id,
-                plan_file,
-            };
-            if !self.right_panel_surfaces.contains(&surface) {
-                let first_visit = self.right_panel_surfaces.is_empty();
-                self.right_panel_surfaces.insert(0, surface);
-                self.right_panel_active_surface = if first_visit {
-                    Some(0)
-                } else {
-                    self.right_panel_active_surface.map(|index| index + 1)
-                };
-                if first_visit {
-                    self.right_panel_visible = true;
-                }
+            if self.plan_docs.get(&session_id).is_some_and(PlanDoc::has_content) {
+                self.mount_plan_tab(session_id, plan_file);
+            } else {
+                let key = self.daemons.session_owner(session_id);
+                self.ensure_plan_doc(key, session_id, &plan_file, cx);
             }
         }
         // A Git panel that parked with the strip comes back whole — refresh
@@ -3188,6 +3183,35 @@ impl Waku {
         if self.right_panel_visible {
             self.request_active_terminal_focus();
             self.request_active_browser_focus();
+        }
+    }
+
+    /// Inserts a planning session's plan tab ahead of the strip's user tabs —
+    /// furniture, not a user tab. A strip meeting its session for the first
+    /// time opens on the plan; one already holding tabs gains the tab without
+    /// moving the selection. A no-op unless the session owns the live strip
+    /// and the tab is not already mounted — callers gate the mount on the
+    /// fetched document holding real contents.
+    fn mount_plan_tab(&mut self, session_id: Uuid, plan_file: String) {
+        if self.right_panel_live_owner != RightPanelOwner::Session(session_id) {
+            return;
+        }
+        let surface = RightPanelSurface::Plan {
+            session_id,
+            plan_file,
+        };
+        if self.right_panel_surfaces.contains(&surface) {
+            return;
+        }
+        let first_visit = self.right_panel_surfaces.is_empty();
+        self.right_panel_surfaces.insert(0, surface);
+        self.right_panel_active_surface = if first_visit {
+            Some(0)
+        } else {
+            self.right_panel_active_surface.map(|index| index + 1)
+        };
+        if first_visit {
+            self.right_panel_visible = true;
         }
     }
 
@@ -7686,8 +7710,9 @@ impl Waku {
     /// workspace, so neither the file-tree reads a `File` editor uses nor
     /// the workspace client can reach it — only `BossOperation::ReadFile`
     /// resolves the `memory/` prefix. The read re-arms whenever the boss
-    /// document's revision moves, so agent writes stream into the preview
-    /// one sync later.
+    /// document's revision moves — `drain_boss_events` calls in on each
+    /// received state — so agent writes stream into the preview one sync
+    /// later.
     pub(super) fn ensure_plan_doc(
         &mut self,
         key: waku_client::DaemonKey,
@@ -7761,6 +7786,19 @@ impl Waku {
                     Ok(_) => Err(tr!("boss.unexpected_response")),
                     Err(error) => Err(error.to_string()),
                 });
+                // The document's first real contents mount the plan tab —
+                // until this read the strip stayed without it.
+                if doc.has_content()
+                    && let Some(plan_file) = waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .and_then(|session| session.planning.as_ref())
+                        .map(|planning| planning.plan_file.clone())
+                {
+                    waku.mount_plan_tab(session_id, plan_file);
+                }
                 cx.notify();
             });
         })

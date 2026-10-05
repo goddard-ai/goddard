@@ -400,7 +400,14 @@ impl Waku {
                     .collect(),
             );
             self.boss_ui.goal_rows.insert(key, rows);
+            // A plan document write bumps the Boss revision — re-arm every
+            // planning session's read so a waiting strip mounts its plan tab
+            // once the file holds real contents.
+            let planning = state.planning.clone();
             self.boss_ui.states.insert(key, state);
+            for plan in planning {
+                self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, cx);
+            }
             changed = true;
         }
         if changed {

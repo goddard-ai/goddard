@@ -5488,6 +5488,24 @@ fn merged_planning_ignores_new_employee_and_task_sessions() {
 }
 
 #[test]
+fn plan_doc_content_gate_waits_for_real_text() {
+    // The plan tab mounts only once a read returns real contents — a
+    // missing fetch, an error, and a created-but-blank file all leave the
+    // strip without it.
+    let doc = |content: Option<Result<String, String>>| super::PlanDoc {
+        key: waku_client::DaemonKey::Local,
+        revision: 0,
+        requested: false,
+        content,
+    };
+    assert!(!doc(None).has_content());
+    assert!(!doc(Some(Err("no such file".into()))).has_content());
+    assert!(!doc(Some(Ok(String::new()))).has_content());
+    assert!(!doc(Some(Ok("  \n\t ".into()))).has_content());
+    assert!(doc(Some(Ok("# Auth plan".into()))).has_content());
+}
+
+#[test]
 fn archive_gate_admits_planning_sessions() {
     // A planning session is an ordinary started task to the archive path:
     // the row menu and ⌘⇧A share this gate, and they set the same

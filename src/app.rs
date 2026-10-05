@@ -885,6 +885,14 @@ struct PlanDoc {
     content: Option<Result<String, String>>,
 }
 
+impl PlanDoc {
+    /// Whether the fetched read returned real document contents — an absent
+    /// or still-blank plan file does not mount the session's plan tab.
+    fn has_content(&self) -> bool {
+        matches!(&self.content, Some(Ok(text)) if !text.trim().is_empty())
+    }
+}
+
 /// One side-chat tab's render state — a bottom-pinned row list, its scrollbar,
 /// fingerprinted row-kind cache, and transcript disclosure state. `selection`
 /// is the lane's own text-selection registry: sharing the transcript's would
