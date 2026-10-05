@@ -1,0 +1,1 @@
+- Hovering the window's left edge to peek the hidden sidebar no longer shifts the top-row icons — the sidebar toggle, bell, and back/forward buttons now hold the same position they occupy in the header.
