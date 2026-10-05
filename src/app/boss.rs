@@ -3664,6 +3664,8 @@ mod tests {
             priority: None,
             goal_id: None,
             reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
             blocked_by,
             dispatch_event: None,
         }
