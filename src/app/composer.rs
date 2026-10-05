@@ -5017,7 +5017,12 @@ impl Waku {
             return None;
         }
         let theme = Theme::current(cx);
-        let steerable = self.session_can_steer(session);
+        let steerable = self.session_can_steer(session)
+            || (session.is_busy()
+                && self
+                    .runtimes
+                    .get(&session.id)
+                    .is_some_and(|runtime| runtime.driver.supports_steer()));
         let mut list = div().flex().flex_col().py(px(4.0));
         for (index, message) in session.queued_messages.iter().enumerate() {
             let message_id = message.id;

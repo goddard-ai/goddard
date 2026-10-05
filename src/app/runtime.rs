@@ -23,6 +23,28 @@ fn interrupted_planning_turn_has_no_file_changes(session: &AgentSession, turn_id
         })
 }
 
+pub(super) fn append_queued_steer_preview(
+    session: &mut AgentSession,
+    queued: &QueuedMessage,
+) -> bool {
+    if queued.hidden
+        || session
+            .messages
+            .iter()
+            .any(|message| message.id == queued.id)
+    {
+        return false;
+    }
+    let mut preview = Message::new(MessageRole::User, queued.content.clone()).with_presentation(
+        queued.display_content.clone(),
+        queued.attachments.clone(),
+        queued.atoms.clone(),
+    );
+    preview.id = queued.id;
+    session.messages.push(preview);
+    true
+}
+
 /// Whether a daemon-restart loss can auto-resume this session: a live
 /// provider turn was in flight and the provider session can be reloaded
 /// from its persisted cursor. A `Connecting` turn the provider never
@@ -6554,7 +6576,7 @@ impl Waku {
         // A live driver reports the outcome asynchronously via SteerAccepted
         // or SteerRejected once a steer is handed off.
         if !self.session_can_steer(&session) {
-            self.enqueue_follow_up_submission(session.id, submission, cx);
+            self.enqueue_steer_follow_up_submission(session.id, submission, cx);
             return;
         }
         let workspace_path = self
@@ -6572,7 +6594,7 @@ impl Waku {
             runtime.driver.steer(provider_prompt, false);
             runtime.pending_steers.push_back(submission);
         } else {
-            self.enqueue_follow_up_submission(session.id, submission, cx);
+            self.enqueue_steer_follow_up_submission(session.id, submission, cx);
         }
         cx.notify();
     }
@@ -6678,6 +6700,34 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn enqueue_steer_follow_up_submission(
+        &mut self,
+        session_id: Uuid,
+        mut submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let queued_id = submission.queued_id.unwrap_or_else(Uuid::new_v4);
+        submission.queued_id = Some(queued_id);
+        self.enqueue_follow_up_submission(session_id, submission, cx);
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        let Some(queued) = session
+            .queued_messages
+            .iter()
+            .find(|queued| queued.id == queued_id)
+            .cloned()
+        else {
+            return;
+        };
+        if !append_queued_steer_preview(session, &queued) {
+            return;
+        }
+        session.updated_at = unix_time();
+        self.save();
+        cx.notify();
+    }
+
     pub(super) fn remove_queued_message(
         &mut self,
         session_id: Uuid,
@@ -6708,6 +6758,7 @@ impl Waku {
             session
                 .queued_messages
                 .retain(|message| message.id != message_id);
+            session.messages.retain(|message| message.id != message_id);
         }
         self.queued_annotations.remove(&message_id);
         self.save();
@@ -6765,7 +6816,9 @@ impl Waku {
             if session.queued_messages[index].is_agent_owned() {
                 return None;
             }
-            Some(session.queued_messages.remove(index))
+            let message = session.queued_messages.remove(index);
+            session.messages.retain(|stored| stored.id != message_id);
+            Some(message)
         }) else {
             return;
         };
@@ -6809,6 +6862,9 @@ impl Waku {
         }) else {
             return;
         };
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.messages.retain(|stored| stored.id != message_id);
+        }
         let mut submission = ComposerSubmission::from_queued_message(message);
         submission.annotations = self
             .queued_annotations
@@ -6882,6 +6938,9 @@ impl Waku {
             return;
         };
         let queued_id = message.id;
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.messages.retain(|message| message.id != queued_id);
+        }
         let mut submission = ComposerSubmission::from_queued_message(message);
         submission.annotations = self
             .queued_annotations

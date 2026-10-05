@@ -680,25 +680,44 @@ impl Waku {
                 let sent_message_id = if let Some(session) = self.state.session_mut(session_id) {
                     settle_stream_segment(session);
                     let queued_id = submission.queued_id;
-                    let message_id = session.push_user_message_with_presentation(
-                        message,
-                        submission.display_content,
-                        submission.attachments,
-                        submission.message_atoms,
-                        sent_by_task,
-                    );
-                    // A steered queued follow-up converts under its chip's
-                    // id, the same convention a queue drain follows.
-                    if let Some(queued_id) = queued_id
-                        && let Some(stored) = session
+                    let active_turn_id = session.active_turn_id();
+                    let existing_preview = queued_id.and_then(|queued_id| {
+                        session
                             .messages
                             .iter_mut()
-                            .find(|stored| stored.id == message_id)
-                    {
-                        stored.id = queued_id;
-                    }
+                            .find(|stored| stored.id == queued_id)
+                    });
+                    let message_id = if let Some(preview) = existing_preview {
+                        // The queued transcript row already owns this id.
+                        // Upgrade its presentation in place so stream commits
+                        // cannot duplicate or reorder the user's steer.
+                        preview.content = message;
+                        preview.display_content = submission.display_content;
+                        preview.attachments = submission.attachments;
+                        preview.atoms = submission.message_atoms;
+                        preview.turn_id = active_turn_id;
+                        preview.sent_by_task = sent_by_task;
+                        preview.id
+                    } else {
+                        let message_id = session.push_user_message_with_presentation(
+                            message,
+                            submission.display_content,
+                            submission.attachments,
+                            submission.message_atoms,
+                            sent_by_task,
+                        );
+                        if let Some(queued_id) = queued_id
+                            && let Some(stored) = session
+                                .messages
+                                .iter_mut()
+                                .find(|stored| stored.id == message_id)
+                        {
+                            stored.id = queued_id;
+                        }
+                        queued_id.unwrap_or(message_id)
+                    };
                     session.updated_at = unix_time();
-                    Some(queued_id.unwrap_or(message_id))
+                    Some(message_id)
                 } else {
                     None
                 };
@@ -740,7 +759,7 @@ impl Waku {
                     })
                     .unwrap_or((false, false));
                 if busy {
-                    self.enqueue_follow_up_submission(session_id, submission, cx);
+                    self.enqueue_steer_follow_up_submission(session_id, submission, cx);
                     if self.state.selected_session == Some(session_id) {
                         self.show_toast(tr!(
                             "session.steer_rejected",

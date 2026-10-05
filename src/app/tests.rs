@@ -12,7 +12,7 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    merge_remote_session_catalog, merged_planning_activation_target,
+    append_queued_steer_preview, merge_remote_session_catalog, merged_planning_activation_target,
     session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
@@ -401,6 +401,24 @@ fn steer_waits_during_assistant_text_but_not_reasoning_or_tools() {
     // A backgrounded status without a live provider turn is not steerable.
     session.turns.last_mut().unwrap().status = TurnStatus::Completed;
     assert!(!session_accepts_immediate_steer(&session));
+}
+
+#[test]
+fn queued_steer_preview_follows_streaming_text_and_is_idempotent() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("inspect the project");
+    session.push_message(MessageRole::Assistant, "still streaming");
+    session.messages.last_mut().unwrap().streaming = true;
+    let queued = QueuedMessage::new("follow up now");
+
+    assert!(append_queued_steer_preview(&mut session, &queued));
+    assert_eq!(session.messages.len(), 3);
+    assert!(session.messages[1].streaming);
+    assert_eq!(session.messages[2].id, queued.id);
+    assert_eq!(session.messages[2].role, MessageRole::User);
+    assert_eq!(session.messages[2].content, "follow up now");
+    assert!(!append_queued_steer_preview(&mut session, &queued));
+    assert_eq!(session.messages.len(), 3);
 }
 
 #[test]
