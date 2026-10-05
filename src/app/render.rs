@@ -982,6 +982,11 @@ impl Render for Waku {
                         .h_full()
                         .w(px(panels.panel_fullscreen_width))
                         .on_action(cx.listener(Self::exit_panel_fullscreen_action))
+                        // The occlusion above drops the workspace root's
+                        // hitbox from the hit test, so its Navigate capture
+                        // listener no longer counts as hovered here — the
+                        // layer has to answer the swipe itself.
+                        .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
                         .child(
                             self.right_panel_pane
                                 .clone()
@@ -1094,6 +1099,79 @@ impl Render for Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mirrors the workspace's navigation wiring: a root `Navigate` capture
+    /// listener plus the maximized panel's occluding layer carrying the same
+    /// listener. Occlusion drops the root's hitbox from the hit test, so only
+    /// the layer's own handler can answer a swipe over it.
+    struct SwipeHarness {
+        hits: Rc<RefCell<Vec<(&'static str, NavigationDirection)>>>,
+    }
+
+    impl SwipeHarness {
+        fn record(
+            tag: &'static str,
+            hits: &Rc<RefCell<Vec<(&'static str, NavigationDirection)>>>,
+        ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+            let hits = hits.clone();
+            move |event: &MouseDownEvent, _, cx| {
+                if let MouseButton::Navigate(direction) = event.button {
+                    cx.stop_propagation();
+                    hits.borrow_mut().push((tag, direction));
+                }
+            }
+        }
+    }
+
+    impl Render for SwipeHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .capture_any_mouse_down(Self::record("root", &self.hits))
+                .child(
+                    div()
+                        .occlude()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .h_full()
+                        .w(px(400.0))
+                        .capture_any_mouse_down(Self::record("layer", &self.hits)),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn navigation_swipe_over_an_occluding_layer_navigates(cx: &mut gpui::TestAppContext) {
+        let hits = Rc::new(RefCell::new(Vec::new()));
+        let (_view, cx) = cx.add_window_view({
+            let hits = hits.clone();
+            move |_, _| SwipeHarness { hits }
+        });
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let mid_y = px(f32::from(viewport.height) / 2.0);
+
+        cx.simulate_mouse_down(
+            point(viewport.width - px(50.0), mid_y),
+            MouseButton::Navigate(NavigationDirection::Back),
+            Modifiers::none(),
+        );
+        assert_eq!(
+            hits.borrow().as_slice(),
+            &[("layer", NavigationDirection::Back)]
+        );
+
+        hits.borrow_mut().clear();
+        cx.simulate_mouse_down(
+            point(px(50.0), mid_y),
+            MouseButton::Navigate(NavigationDirection::Forward),
+            Modifiers::none(),
+        );
+        assert_eq!(
+            hits.borrow().as_slice(),
+            &[("root", NavigationDirection::Forward)]
+        );
+    }
 
     #[test]
     fn unloaded_history_never_renders_the_new_task_prompt() {

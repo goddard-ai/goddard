@@ -1,0 +1,1 @@
+- The three-finger trackpad swipe for back/forward navigation now works when the pointer is over a maximized right panel — the gesture previously did nothing there.
