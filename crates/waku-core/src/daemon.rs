@@ -7687,10 +7687,14 @@ impl WakuBackend {
                 if resumed {
                     // The envelope parked in the daemon queue while the
                     // ticket was dispatching — drain it in order now that
-                    // the record reads working.
+                    // the record reads working. Delivery events belong to
+                    // the session's runtime sink: emitted on the root source
+                    // they target `(nil, nil)`, fail the hub's active-runtime
+                    // check, and never reach the journal or attached clients.
                     let events = self.event_source.lock().clone();
-                    let (_runtime, driver) = self.ensure_agent_runtime(session_id, &events)?;
-                    self.drain_agent_queue(session_id, &driver, &events)?;
+                    let (runtime_id, driver) = self.ensure_agent_runtime(session_id, &events)?;
+                    let sink = events.for_session(session_id, runtime_id);
+                    self.drain_agent_queue(session_id, &driver, &sink)?;
                 }
                 // The envelope has been adopted — the transcript owns it
                 // now, and a later requeue must not replay it.
@@ -17230,6 +17234,77 @@ mod tests {
         assert_eq!(prompts.len(), 2);
         assert!(prompts[0].contains("queued while working"));
         assert!(prompts[1].contains("revive prompt"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The revive drain publishes on the session's runtime stream: a client
+    /// watching the employee's page adopts `promptSubmitted` into the resumed
+    /// turn and drops the parked chip on `queuedMessagesChanged`. Emitted on
+    /// the root event source instead, both target `(nil, nil)` and the hub
+    /// drops them — the stored turn exists but no attached or replaying
+    /// client ever learns it opened.
+    #[test]
+    fn a_revived_employee_prompt_reaches_session_subscribers() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-revive-events-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+        backend.finish_boss_employee(employee_id).unwrap();
+        // The expiry pass dropped the runtime; a revived prompt would
+        // cold-start one in production — a control driver stands in here.
+        let employee_runtime = Uuid::new_v4();
+        backend.sessions.lock().insert(
+            employee_id,
+            RuntimeEntry {
+                runtime_id: employee_runtime,
+                driver: DriverHandle::from_control(child.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+        // `serve` installs the hub's root sink as the event source — scoped
+        // to no session — so the stand-in runtime is registered on the hub
+        // separately and the tap plays an attached client.
+        let source = EventSink::detached();
+        let _registered = source.begin_session_runtime(employee_id, employee_runtime);
+        *backend.event_source.lock() = source.clone();
+        let tapped = source.tapped_events();
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "revive prompt".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let kinds = std::iter::from_fn(|| tapped.try_recv().ok())
+            .filter_map(|message| match message {
+                crate::ServerMessage::Event(event) => Some(event),
+                _ => None,
+            })
+            .filter(|event| event.session_id == employee_id)
+            .map(|event| (event.runtime_id, event.event.kind))
+            .collect::<Vec<_>>();
+        assert!(
+            kinds
+                .iter()
+                .any(|(runtime_id, kind)| *runtime_id == employee_runtime
+                    && kind == "promptSubmitted"),
+            "expected promptSubmitted on the employee's stream, got {kinds:?}"
+        );
+        assert!(
+            kinds
+                .iter()
+                .any(|(runtime_id, kind)| *runtime_id == employee_runtime
+                    && kind == "queuedMessagesChanged"),
+            "expected queuedMessagesChanged on the employee's stream, got {kinds:?}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
