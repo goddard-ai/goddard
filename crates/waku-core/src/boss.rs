@@ -718,9 +718,9 @@ impl BossService {
             .find(|plan| plan.session_id == session)
             .map(|plan| {
                 if plan.finalized_at.is_some() {
-                    format!("\nThis planning session's plan memory/{} is finalized and frozen — the document can no longer be edited.", plan.plan_file)
+                    format!("\nThis planning session's plan memory/{} is finalized and frozen — the document can no longer be edited. Now execute the plan: summon employees for the work, coordinate them, and report progress to the boss chat.", plan.plan_file)
                 } else {
-                    format!("\nThis is a planning session for \"{}\". Draft and revise the plan document at memory/{} with `writeFile`; when the plan is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes.", plan.idea, plan.plan_file)
+                    format!("\nThis is a planning session for \"{}\". Draft and revise the plan document at memory/{} with `writeFile`; when the plan is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval starts execution: implement the plan by summoning employees for the work, coordinating them, and reporting progress to the boss chat.", plan.idea, plan.plan_file)
                 }
             })
             .unwrap_or_default();
