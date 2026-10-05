@@ -3309,6 +3309,7 @@ mod tests {
             name: "investigate".into(),
             branch: Some("waku/investigate".into()),
             base_branch: None,
+            adopted_by: None,
         };
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
@@ -3333,6 +3334,7 @@ mod tests {
                 name: "investigate".into(),
                 branch: Some("waku/investigate".into()),
                 base_branch: None,
+                adopted_by: None,
             }
         );
         // ...and none of what it does not.
@@ -3357,6 +3359,7 @@ mod tests {
                 name: "investigate".into(),
                 branch: Some("waku/investigate".into()),
                 base_branch: None,
+                adopted_by: None,
             }
         );
         assert!(
@@ -4540,6 +4543,7 @@ mod tests {
                 name: "task".into(),
                 branch: Some("wt/task".into()),
                 base_branch: None,
+                adopted_by: None,
             }
         );
         let local: Option<String> = connection

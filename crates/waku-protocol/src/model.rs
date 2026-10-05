@@ -1149,6 +1149,11 @@ pub enum SessionWorkspace {
         /// for worktrees that adopted a checkout's state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_branch: Option<String>,
+        /// The session that adopted this worktree away — set when a later
+        /// summon takes ownership. This session no longer claims the
+        /// checkout and cannot resume into it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        adopted_by: Option<Uuid>,
     },
 }
 
@@ -6846,6 +6851,7 @@ mod tests {
             name: "task".into(),
             branch: None,
             base_branch: None,
+            adopted_by: None,
         };
         session.workspace_moved_from = Some(PathBuf::from("/tmp/waku"));
 
@@ -8123,6 +8129,7 @@ mod tests {
             name: "task".into(),
             branch: Some("waku/task".into()),
             base_branch: None,
+            adopted_by: None,
         };
         session.begin_turn("A large prompt");
         session.messages.push(Message::new(

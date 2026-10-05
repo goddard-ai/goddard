@@ -132,6 +132,30 @@ pub fn is_linked_worktree(path: &Path) -> bool {
     resolve(&git_dir) != resolve(&common_dir)
 }
 
+/// Whether `path` is a linked worktree registered to the same repository
+/// `project` belongs to. A linked worktree is registered by definition,
+/// so a common-dir match is the whole check — no name-list comparison.
+/// Non-Git paths report false.
+pub fn is_worktree_of(project: &Path, path: &Path) -> bool {
+    if !is_linked_worktree(path) {
+        return false;
+    }
+    let common_dir = |dir: &Path| {
+        let common = git_optional_stdout(dir, &["rev-parse", "--git-common-dir"]).ok()??;
+        let common = Path::new(&common);
+        let common = if common.is_absolute() {
+            common.to_path_buf()
+        } else {
+            dir.join(common)
+        };
+        Some(dunce::canonicalize(&common).unwrap_or(common))
+    };
+    matches!(
+        (common_dir(project), common_dir(path)),
+        (Some(project_common), Some(path_common)) if project_common == path_common
+    )
+}
+
 /// Create a detached linked worktree named `name` — or given a generated
 /// name when `name` is `None` — based on `base_ref` or the repository's
 /// default branch. When `sync_default_branch` is set and the base resolves

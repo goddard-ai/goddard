@@ -4220,6 +4220,7 @@ mod tests {
             name: "task".into(),
             branch: Some("waku/task".into()),
             base_branch: None,
+            adopted_by: None,
         };
         {
             let session = &mut state.sessions[0];
@@ -4292,6 +4293,7 @@ mod tests {
             name: "task".into(),
             branch: None,
             base_branch: None,
+            adopted_by: None,
         };
         {
             let session = &mut state.sessions[0];

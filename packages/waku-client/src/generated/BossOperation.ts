@@ -22,14 +22,24 @@ export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type"
 reasoningEffort: string | null,
 /**
  * Where the employee's checkout runs; `None` uses the project
- * itself, `worktree` forks a daemon-managed Git worktree.
+ * itself, `worktree` forks a daemon-managed Git worktree, and
+ * `adopt` hands it a finished employee's worktree (see
+ * `adopt_worktree`).
  */
 workspace: AgentWorkspace | null,
 /**
  * The ref a worktree summon starts from; required when
- * `workspace` is `worktree`, ignored otherwise.
+ * `workspace` is `worktree`, ignored otherwise — an `adopt`
+ * summon keeps whatever the worktree already contains.
  */
 baseBranch: string | null,
+/**
+ * The daemon-managed worktree a `workspace: "adopt"` summon
+ * takes over: a registered worktree of the project repo whose
+ * owning ticket is finished. Required for `adopt`, ignored
+ * otherwise.
+ */
+adoptWorktree?: string,
 /**
  * Per-field grant overrides persisted on the employee record;
  * `None` inherits the persona's permissions unchanged.

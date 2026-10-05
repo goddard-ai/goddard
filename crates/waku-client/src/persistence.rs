@@ -5072,6 +5072,7 @@ mod tests {
                 name: "worktree".to_owned(),
                 branch: Some("feature".to_owned()),
                 base_branch: None,
+                adopted_by: None,
             },
         );
         let session = state.new_session(project_id, ProviderKind::Codex);

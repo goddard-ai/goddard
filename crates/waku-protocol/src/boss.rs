@@ -1,5 +1,7 @@
 //! Daemon-owned Boss identities, personas, files, and employee relationships.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -226,6 +228,12 @@ pub struct SummonTicket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub base_branch: Option<String>,
+    /// The daemon-managed worktree a `workspace: "adopt"` ticket takes
+    /// over. `None` on every other workspace kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "string")]
+    pub adopt_worktree: Option<PathBuf>,
     /// Host resources the summon declared for the assignment's lifetime —
     /// claimed atomically with the model slot at dispatch.
     #[serde(default)]
@@ -726,13 +734,24 @@ pub enum BossOperation {
         #[serde(default)]
         reasoning_effort: Option<String>,
         /// Where the employee's checkout runs; `None` uses the project
-        /// itself, `worktree` forks a daemon-managed Git worktree.
+        /// itself, `worktree` forks a daemon-managed Git worktree, and
+        /// `adopt` hands it a finished employee's worktree (see
+        /// `adopt_worktree`).
         #[serde(default)]
         workspace: Option<AgentWorkspace>,
         /// The ref a worktree summon starts from; required when
-        /// `workspace` is `worktree`, ignored otherwise.
+        /// `workspace` is `worktree`, ignored otherwise — an `adopt`
+        /// summon keeps whatever the worktree already contains.
         #[serde(default)]
         base_branch: Option<String>,
+        /// The daemon-managed worktree a `workspace: "adopt"` summon
+        /// takes over: a registered worktree of the project repo whose
+        /// owning ticket is finished. Required for `adopt`, ignored
+        /// otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        #[ts(type = "string")]
+        adopt_worktree: Option<PathBuf>,
         /// Per-field grant overrides persisted on the employee record;
         /// `None` inherits the persona's permissions unchanged.
         #[serde(default)]
@@ -1112,7 +1131,8 @@ pub enum EmployeeControl {
     /// a fresh daemon-managed worktree off `base_branch`, `local` returns
     /// it to the project's primary checkout — and the same transcript
     /// resumes there. A failure anywhere leaves the employee running in
-    /// its old workspace.
+    /// its old workspace. `adopt` is not a move target — adopting another
+    /// employee's worktree happens at summon.
     SetWorkspace {
         workspace: AgentWorkspace,
         /// The ref the new worktree detaches at; required when `workspace`

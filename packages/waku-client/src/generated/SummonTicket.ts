@@ -33,6 +33,11 @@ provider: ProviderKind, model: string, reasoningEffort?: string,
  */
 prompt: string, project: string, workspace?: AgentWorkspace, baseBranch?: string,
 /**
+ * The daemon-managed worktree a `workspace: "adopt"` ticket takes
+ * over. `None` on every other workspace kind.
+ */
+adoptWorktree?: string,
+/**
  * Host resources the summon declared for the assignment's lifetime —
  * claimed atomically with the model slot at dispatch.
  */

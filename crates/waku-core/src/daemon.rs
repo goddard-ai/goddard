@@ -395,6 +395,14 @@ pub(crate) struct ResolvedAgentSelection {
     pub sender_environment: crate::model::SessionEnvironment,
 }
 
+/// A `workspace: "adopt"` target that passed validation: the finished
+/// employee whose worktree it was and the workspace binding the adopter
+/// takes over.
+pub(crate) struct WorktreeAdoption {
+    pub owner_name: String,
+    pub workspace: SessionWorkspace,
+}
+
 /// A created task's first prompt. `Fixed` ships as sent. `Assignment` is
 /// the Boss employee wrapper: the job text follows an "Assigned project"
 /// line resolved against the task's run directory — the worktree path for
@@ -5892,6 +5900,9 @@ impl WakuBackend {
         if !project.is_absolute() {
             bail!("the project path must be absolute");
         }
+        if matches!(workspace, AgentWorkspace::Adopt) {
+            bail!("adopt workspaces are summon-only — an agent-created task always starts fresh");
+        }
         if matches!(workspace, AgentWorkspace::Worktree)
             && base_branch
                 .as_deref()
@@ -5941,8 +5952,10 @@ impl WakuBackend {
                     name: created.name,
                     branch: None,
                     base_branch,
+                    adopted_by: None,
                 }
             }
+            AgentWorkspace::Adopt => unreachable!("adopt is rejected above"),
         };
         let prompt = prompt.resolve(&session.workspace, &project_path);
         if let Some(employee) = &employee {
@@ -6785,6 +6798,7 @@ impl WakuBackend {
                 reasoning_effort,
                 workspace,
                 base_branch,
+                adopt_worktree,
                 permissions,
                 work_goal,
                 icon,
@@ -6805,6 +6819,7 @@ impl WakuBackend {
                     reasoning_effort,
                     workspace,
                     base_branch,
+                    adopt_worktree,
                     permissions,
                     work_goal,
                     icon,
@@ -7421,6 +7436,9 @@ impl WakuBackend {
                 .to_path_buf();
             (project_path, old_path)
         };
+        if matches!(workspace, AgentWorkspace::Adopt) {
+            bail!("adopting a worktree is summon-only — setWorkspace accepts \"local\" or \"worktree\"");
+        }
         let base_branch = base_branch
             .map(|branch| branch.trim().to_owned())
             .filter(|branch| !branch.is_empty());
@@ -7438,6 +7456,7 @@ impl WakuBackend {
                 false,
                 &[],
             )?),
+            AgentWorkspace::Adopt => unreachable!("adopt is rejected above"),
         };
         // A cancelled turn settles like a finished one — for a live
         // employee that means expiry, a supervisor report, and a cleared
@@ -7485,6 +7504,7 @@ impl WakuBackend {
                     name: worktree.name.clone(),
                     branch: None,
                     base_branch: base_branch.clone(),
+                    adopted_by: None,
                 },
                 None => SessionWorkspace::Local,
             };
@@ -7904,29 +7924,46 @@ impl WakuBackend {
         let project = dunce::canonicalize(Path::new(&ticket.project))
             .with_context(|| format!("project path {} does not exist", ticket.project))?;
         let (project_id, project_path) = self.register_agent_project(&project)?;
-        let created = match ticket.workspace.unwrap_or_default() {
-            AgentWorkspace::Local => None,
-            AgentWorkspace::Worktree => Some(crate::worktree::create(
-                &project_path,
-                None,
-                ticket.base_branch.as_deref(),
-                false,
-                &[],
-            )?),
+        let (workspace, adopted_from) = match ticket.workspace.unwrap_or_default() {
+            AgentWorkspace::Local => (SessionWorkspace::Local, None),
+            AgentWorkspace::Worktree => {
+                let created = crate::worktree::create(
+                    &project_path,
+                    None,
+                    ticket.base_branch.as_deref(),
+                    false,
+                    &[],
+                )?;
+                (
+                    SessionWorkspace::Worktree {
+                        path: created.path,
+                        name: created.name,
+                        branch: None,
+                        base_branch: ticket.base_branch.clone(),
+                        adopted_by: None,
+                    },
+                    None,
+                )
+            }
+            AgentWorkspace::Adopt => {
+                let adopt = ticket.adopt_worktree.as_deref().ok_or_else(|| {
+                    anyhow!("adopt workspaces require an adoptWorktree path")
+                })?;
+                let adoption = self.resolve_worktree_adoption(&project_path, adopt, Some(session_id))?;
+                (adoption.workspace, Some(adoption.owner_name))
+            }
         };
-        let workspace = match &created {
-            Some(worktree) => SessionWorkspace::Worktree {
-                path: worktree.path.clone(),
-                name: worktree.name.clone(),
-                branch: None,
-                base_branch: ticket.base_branch.clone(),
-            },
-            None => SessionWorkspace::Local,
-        };
-        let envelope = std::iter::once(ticket.prompt.clone())
+        let mut envelope = std::iter::once(ticket.prompt.clone())
             .chain(ticket.pending_prompts.iter().cloned())
             .collect::<Vec<_>>()
             .join("\n\n");
+        if let Some(owner) = &adopted_from {
+            envelope = format!(
+                "{envelope}\n\nThis workspace was adopted from {owner}, a finished employee — its \
+                 uncommitted work is still in the checkout. Continue it; do not reset or clean \
+                 anything you did not make."
+            );
+        }
         let prompt = AgentTaskPrompt::Assignment(envelope).resolve(&workspace, &project_path);
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
@@ -7963,6 +8000,103 @@ impl WakuBackend {
             &events,
         )?;
         Ok(false)
+    }
+
+    /// Resolve a `workspace: "adopt"` target. The path must be a
+    /// registered worktree of `project`'s repository and owned by a daemon
+    /// session whose employee ticket is finished — finished, failed,
+    /// cancelled, and retired records all read `expired` here. A live
+    /// owner rejects naming the employee holding it. `adopter`, when set,
+    /// completes the hand-off: the old session stops claiming the path so
+    /// a second adoption cannot share the checkout, and its own revival
+    /// is refused rather than resumed into somebody else's worktree.
+    fn resolve_worktree_adoption(
+        &self,
+        project: &Path,
+        adopt: &Path,
+        adopter: Option<Uuid>,
+    ) -> anyhow::Result<WorktreeAdoption> {
+        use waku_protocol::boss::EmployeeLifecycle;
+        let project = dunce::canonicalize(project).with_context(|| {
+            format!("project path {} does not exist", project.display())
+        })?;
+        let adopt = dunce::canonicalize(adopt).with_context(|| {
+            format!("worktree path {} does not exist", adopt.display())
+        })?;
+        if !crate::worktree::is_worktree_of(&project, &adopt) {
+            bail!(
+                "{} is not a registered worktree of {}",
+                adopt.display(),
+                project.display()
+            );
+        }
+        let claims = |session: &AgentSession| {
+            matches!(
+                &session.workspace,
+                SessionWorkspace::Worktree { path, adopted_by, .. }
+                    if adopted_by.is_none()
+                        && dunce::canonicalize(path).is_ok_and(|path| path == adopt)
+            )
+        };
+        let mut state = self.task_state.lock();
+        // The hand-off's first write is the `adopted_by` mark, its second
+        // the adopter's own binding — a dispatch retried between them finds
+        // the mark already crediting this adopter and finishes the move.
+        let index = state.sessions.iter().position(&claims).or_else(|| {
+            adopter.and_then(|adopter| {
+                state.sessions.iter().position(|session| {
+                    matches!(
+                        &session.workspace,
+                        SessionWorkspace::Worktree { path, adopted_by, .. }
+                            if *adopted_by == Some(adopter)
+                                && dunce::canonicalize(path).is_ok_and(|path| path == adopt)
+                    )
+                })
+            })
+        });
+        let Some(index) = index else {
+            if state.sessions.iter().any(|session| {
+                matches!(
+                    &session.workspace,
+                    SessionWorkspace::Worktree { path, .. }
+                        if dunce::canonicalize(path).is_ok_and(|path| path == adopt)
+                )
+            }) {
+                bail!("{} was already adopted by another employee", adopt.display());
+            }
+            bail!("{} is not a daemon-managed employee worktree", adopt.display());
+        };
+        let owner_id = state.sessions[index].id;
+        let mut workspace = state.sessions[index].workspace.clone();
+        if let SessionWorkspace::Worktree { adopted_by, .. } = &mut workspace {
+            *adopted_by = None;
+        }
+        let employee = self
+            .boss
+            .employee_including_retired(owner_id)
+            .ok_or_else(|| anyhow!("{} is not owned by a summon ticket", adopt.display()))?;
+        if employee.lifecycle() != EmployeeLifecycle::Expired {
+            bail!(
+                "{} is still owned by employee {} — its ticket is {}",
+                adopt.display(),
+                employee.identity.name,
+                format!("{:?}", employee.lifecycle()).to_lowercase()
+            );
+        }
+        if let Some(adopter) = adopter
+            && let SessionWorkspace::Worktree { adopted_by, .. } =
+                &mut state.sessions[index].workspace
+            && adopted_by.is_none()
+        {
+            *adopted_by = Some(adopter);
+            state.sessions[index].updated_at = crate::model::unix_time();
+            state.mark_session_dirty(owner_id);
+            self.task_store.save(&mut state)?;
+        }
+        Ok(WorktreeAdoption {
+            owner_name: employee.identity.name,
+            workspace,
+        })
     }
 
     /// Deliver durable dispatch notifications to their supervisors.
@@ -8155,6 +8289,7 @@ impl WakuBackend {
         reasoning_effort: Option<String>,
         workspace: Option<AgentWorkspace>,
         base_branch: Option<String>,
+        adopt_worktree: Option<PathBuf>,
         permissions: Option<waku_protocol::boss::PermissionOverrides>,
         work_goal: waku_protocol::boss::EmployeeGoal,
         icon: Option<waku_protocol::custom_commands::CustomCommandIcon>,
@@ -8172,11 +8307,23 @@ impl WakuBackend {
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }
+        // Adoption validates at admission — the summoner hears a bad path
+        // or a live owner immediately — and again at dispatch, since a
+        // queued ticket's target can be claimed or revived meanwhile.
+        let adopt_worktree = match (workspace, adopt_worktree) {
+            (Some(AgentWorkspace::Adopt), Some(path)) => Some(path),
+            (Some(AgentWorkspace::Adopt), None) => {
+                bail!("adopt workspaces require an adoptWorktree path")
+            }
+            (_, Some(_)) => bail!("adoptWorktree only applies to workspace \"adopt\""),
+            _ => None,
+        };
         let fingerprint = serde_json::to_string(&serde_json::json!({
             "personaId": persona_id, "jobTitle": job_title, "prompt": prompt,
             "project": project, "provider": provider, "model": model,
             "reasoningEffort": reasoning_effort, "workspace": workspace,
-            "baseBranch": base_branch, "permissions": permissions,
+            "baseBranch": base_branch, "adoptWorktree": adopt_worktree,
+            "permissions": permissions,
             "workGoal": work_goal, "icon": icon, "resources": resources,
             "allowBurst": allow_burst, "groupId": group_id,
             "priority": priority, "goalId": goal_id,
@@ -8195,6 +8342,9 @@ impl WakuBackend {
                 return self.summoned_result(existing.session_id);
             }
             bail!("requestId was already used for a different summon");
+        }
+        if let Some(adopt) = &adopt_worktree {
+            self.resolve_worktree_adoption(Path::new(&project), adopt, None)?;
         }
         let mut employee = self.boss.prepare_employee(
             supervisor,
@@ -8243,6 +8393,7 @@ impl WakuBackend {
             project: project.clone(),
             workspace,
             base_branch,
+            adopt_worktree,
             resources,
             allow_burst,
             pending_prompts: Vec::new(),
@@ -8477,6 +8628,9 @@ impl WakuBackend {
                 workspace,
                 base_branch,
             } => {
+                if matches!(workspace, AgentWorkspace::Adopt) {
+                    bail!("adopting a worktree is summon-only — setWorkspace accepts \"local\" or \"worktree\"");
+                }
                 if matches!(workspace, AgentWorkspace::Worktree)
                     && base_branch
                         .as_deref()
@@ -8487,6 +8641,7 @@ impl WakuBackend {
                 if !self.boss.reticket(session_id, |ticket| {
                     ticket.workspace = Some(workspace);
                     ticket.base_branch = base_branch.clone();
+                    ticket.adopt_worktree = None;
                 })? {
                     bail!("employee is no longer queued");
                 }
@@ -8618,6 +8773,26 @@ impl WakuBackend {
                 .find(|project| project.id == session.project_id)
                 .map(|project| project.path.display().to_string())
                 .unwrap_or_default();
+            // A worktree a later summon adopted is no longer this
+            // employee's to resume — revival would land it in somebody
+            // else's checkout, so the requeue refuses and the transcript
+            // stays read-only history.
+            if let SessionWorkspace::Worktree {
+                adopted_by: Some(adopter),
+                ..
+            } = &session.workspace
+            {
+                let adopter = state
+                    .sessions
+                    .iter()
+                    .find(|session| &session.id == adopter)
+                    .and_then(|session| self.boss.employee(session.id))
+                    .map(|employee| employee.identity.name)
+                    .unwrap_or_else(|| "another employee".to_owned());
+                bail!(
+                    "the employee's worktree was adopted by {adopter}; summon a fresh employee instead of resuming it"
+                );
+            }
             let (workspace, base_branch) = match &session.workspace {
                 SessionWorkspace::Worktree { base_branch, .. } => {
                     (AgentWorkspace::Worktree, base_branch.clone())
@@ -8656,6 +8831,7 @@ impl WakuBackend {
                 project,
                 workspace: Some(workspace),
                 base_branch,
+                adopt_worktree: None,
                 resources: waku_protocol::resources::ResourceSet::default(),
                 allow_burst: false,
                 pending_prompts: Vec::new(),
@@ -14060,6 +14236,7 @@ mod tests {
             name: "worktree".into(),
             branch: None,
             base_branch: None,
+            adopted_by: None,
         };
         worktree_session.begin_turn("seed");
         worktree_session.finish_active_turn(TurnStatus::Completed);
@@ -15277,6 +15454,7 @@ mod tests {
                 reasoning_effort: None,
                 workspace: Some(AgentWorkspace::Worktree),
                 base_branch: Some("main".into()),
+                adopt_worktree: None,
                 permissions: None,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                 icon: None,
@@ -15411,6 +15589,327 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Test scaffolding for the worktree-adoption tests: a Git project,
+    /// a backend whose provider binary is missing so every launch fails
+    /// after the session persists, and a summon builder.
+    struct AdoptFixture {
+        root: PathBuf,
+        project: PathBuf,
+        backend: WakuBackend,
+        boss: Uuid,
+    }
+
+    impl AdoptFixture {
+        fn new(label: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("boss-adopt-{label}-{}", Uuid::new_v4()));
+            let project = root.join("project");
+            std::fs::create_dir_all(&project).unwrap();
+            let git = |args: &[&str]| {
+                let output = crate::command_env::search_path_command("git")
+                    .args(args)
+                    .current_dir(&project)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "git {args:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            };
+            git(&["init", "--quiet", "-b", "main"]);
+            git(&["config", "core.autocrlf", "false"]);
+            std::fs::write(project.join("README.md"), "main\n").unwrap();
+            git(&["add", "."]);
+            git(&[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "initial",
+            ]);
+
+            let (backend, boss) = surface_test_backend(&root);
+            backend.boss.set_session_id(boss).unwrap();
+            let mut daemon_settings = backend.settings.get();
+            daemon_settings.provider_binary_overrides.insert(
+                ProviderKind::Codex,
+                root.join("missing-codex").display().to_string(),
+            );
+            backend.settings.replace(daemon_settings).unwrap();
+            Self {
+                root,
+                project,
+                backend,
+                boss,
+            }
+        }
+
+        fn summon(
+            &self,
+            workspace: Option<AgentWorkspace>,
+            adopt_worktree: Option<PathBuf>,
+        ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+            use waku_protocol::boss::BossOperation;
+            self.backend.handle_boss_operation(
+                Some(self.boss),
+                BossOperation::Summon {
+                    persona_id: self.backend.boss.document().personas[1].id,
+                    job_title: "Adopt job".into(),
+                    prompt: "Continue the work".into(),
+                    project: self.project.display().to_string(),
+                    provider: Some(ProviderKind::Codex),
+                    model: None,
+                    reasoning_effort: None,
+                    workspace,
+                    base_branch: Some("main".into()),
+                    adopt_worktree,
+                    permissions: None,
+                    work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                    icon: None,
+                    resources: None,
+                    allow_burst: false,
+                    group_id: None,
+                    priority: None,
+                    goal_id: None,
+                    request_id: None,
+                },
+                &EventSink::detached(),
+            )
+        }
+
+        /// The newest non-boss session's workspace — summons land one
+        /// each, so index order tracks summon order.
+        fn session_workspace(&self, index: usize) -> (Uuid, SessionWorkspace) {
+            let state = self.backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .filter(|session| session.id != self.boss)
+                .nth(index)
+                .expect("the employee session persisted");
+            (session.id, session.workspace.clone())
+        }
+
+        fn workspace_path(&self, index: usize) -> PathBuf {
+            let (_, workspace) = self.session_workspace(index);
+            match workspace {
+                SessionWorkspace::Worktree { path, .. } => path,
+                other => panic!("expected a worktree workspace, got {other:?}"),
+            }
+        }
+    }
+
+    impl Drop for AdoptFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// `workspace: "adopt"` hands a finished employee's daemon worktree to
+    /// a new summon: the adopter's session binds the same checkout with
+    /// its dirty state untouched, the previous session stops claiming it,
+    /// and the assignment names the previous owner.
+    #[test]
+    fn boss_summon_adopts_a_finished_employees_worktree() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let fixture = AdoptFixture::new("adopt");
+
+        // The first employee launches into a managed worktree, fails to
+        // start its provider, and expires — the worktree stays on disk.
+        assert!(
+            fixture
+                .summon(Some(AgentWorkspace::Worktree), None)
+                .is_err()
+        );
+        let (dead_id, _) = fixture.session_workspace(0);
+        let worktree_path = fixture.workspace_path(0);
+        std::fs::write(worktree_path.join("wip.txt"), "uncommitted work\n").unwrap();
+
+        // The adopter's own launch fails the same way, but the session it
+        // leaves behind owns the adopted checkout.
+        assert!(
+            fixture
+                .summon(Some(AgentWorkspace::Adopt), Some(worktree_path.clone()))
+                .is_err()
+        );
+        let (adopter_id, workspace) = fixture.session_workspace(1);
+        let SessionWorkspace::Worktree {
+            path,
+            base_branch,
+            adopted_by,
+            ..
+        } = &workspace
+        else {
+            panic!("expected a worktree workspace")
+        };
+        assert_eq!(*path, worktree_path);
+        assert_eq!(base_branch.as_deref(), Some("main"));
+        assert!(adopted_by.is_none());
+        assert_eq!(
+            std::fs::read_to_string(worktree_path.join("wip.txt")).unwrap(),
+            "uncommitted work\n"
+        );
+
+        // Ownership moved: the dead employee's session records the
+        // adopter and no longer claims the path.
+        let SessionWorkspace::Worktree {
+            adopted_by: dead_adopted_by,
+            ..
+        } = fixture.session_workspace(0).1
+        else {
+            panic!("expected a worktree workspace")
+        };
+        assert_eq!(dead_adopted_by, Some(adopter_id));
+
+        // The assignment tells the adopter whose work it inherited.
+        {
+            let mut state = fixture.backend.task_state.lock();
+            let adopter = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == adopter_id)
+                .unwrap();
+            fixture.backend.task_store.hydrate(adopter).unwrap();
+            let dead_name = fixture.backend.boss.employee(dead_id).unwrap().identity.name;
+            assert!(
+                adopter
+                    .messages
+                    .iter()
+                    .any(|message| message.content.contains(&format!(
+                        "adopted from {dead_name}"
+                    ))),
+                "the envelope should name the previous owner"
+            );
+        }
+
+        // The dead employee cannot resume into the adopted checkout.
+        let resume = fixture.backend.handle_boss_operation(
+            Some(fixture.boss),
+            BossOperation::Control {
+                session_id: dead_id,
+                action: EmployeeControl::Prompt {
+                    prompt: "keep going".into(),
+                },
+            },
+            &EventSink::detached(),
+        );
+        let error = format!("{:#}", resume.unwrap_err());
+        assert!(error.contains("worktree was adopted"), "{error}");
+    }
+
+    /// Adoption refuses worktrees it cannot safely take: a live owner's,
+    /// a checkout that is not a daemon worktree of the project repo, a
+    /// path nobody owns, and a summon missing its field pair.
+    #[test]
+    fn boss_summon_rejects_unadoptable_worktrees() {
+        let fixture = AdoptFixture::new("reject");
+        let adopt = |path: PathBuf| fixture.summon(Some(AgentWorkspace::Adopt), Some(path));
+
+        // A live owner's worktree rejects, naming the holder.
+        let live = fixture
+            .backend
+            .boss
+            .prepare_employee(
+                fixture.boss,
+                fixture.backend.boss.document().personas[1].id,
+                "Live job".into(),
+                None,
+                waku_protocol::boss::EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let live_id = live.session_id;
+        let live_name = live.identity.name.clone();
+        fixture.backend.boss.add_employee(live).unwrap();
+        let live_worktree = crate::worktree::create(
+            &dunce::canonicalize(&fixture.project).unwrap(),
+            None,
+            Some("main"),
+            false,
+            &[],
+        )
+        .unwrap();
+        let mut live_session = AgentSession::new(
+            fixture
+                .backend
+                .register_agent_project(&dunce::canonicalize(&fixture.project).unwrap())
+                .unwrap()
+                .0,
+            ProviderKind::Codex,
+        );
+        live_session.id = live_id;
+        live_session.boss_managed = true;
+        live_session.workspace = SessionWorkspace::Worktree {
+            path: live_worktree.path.clone(),
+            name: live_worktree.name,
+            branch: None,
+            base_branch: Some("main".into()),
+            adopted_by: None,
+        };
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state.push_session(live_session);
+            fixture.backend.task_store.save(&mut state).unwrap();
+        }
+        let error = format!("{:#}", adopt(live_worktree.path.clone()).unwrap_err());
+        assert!(error.contains("still owned"), "{error}");
+        assert!(error.contains(&live_name), "{error}");
+
+        // A plain checkout — the project itself — is not a worktree.
+        let error = format!("{:#}", adopt(fixture.project.clone()).unwrap_err());
+        assert!(error.contains("not a registered worktree"), "{error}");
+
+        // A worktree of a different repository is still not the project's.
+        let foreign = fixture.root.join("foreign");
+        std::fs::create_dir_all(&foreign).unwrap();
+        let git = |args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(&foreign)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}");
+        };
+        git(&["init", "--quiet", "-b", "main"]);
+        std::fs::write(foreign.join("f.txt"), "f\n").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=Goddard Tests",
+            "-c",
+            "user.email=waku@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "initial",
+        ]);
+        let foreign_worktree =
+            crate::worktree::create(&foreign, None, Some("main"), false, &[]).unwrap();
+        let error = format!("{:#}", adopt(foreign_worktree.path).unwrap_err());
+        assert!(error.contains("not a registered worktree"), "{error}");
+
+        // A path Git never registered reports as not daemon-managed.
+        let error = format!("{:#}", adopt(fixture.root.join("missing")).unwrap_err());
+        assert!(error.contains("does not exist"), "{error}");
+
+        // The field pair is validated before anything else.
+        let error = format!("{:#}", fixture.summon(Some(AgentWorkspace::Adopt), None).unwrap_err());
+        assert!(error.contains("require an adoptWorktree"), "{error}");
+        let error = format!(
+            "{:#}",
+            fixture
+                .summon(
+                    Some(AgentWorkspace::Worktree),
+                    Some(fixture.project.clone())
+                )
+                .unwrap_err()
+        );
+        assert!(error.contains("only applies"), "{error}");
+    }
+
     /// A summon's `reasoningEffort` pins the employee's session effort like
     /// `setModel` does: the resolved model's catalog bounds it, and an
     /// unsupported id fails the summon before the task persists — it does
@@ -15447,6 +15946,7 @@ mod tests {
                     reasoning_effort: effort.map(str::to_owned),
                     workspace: None,
                     base_branch: None,
+                    adopt_worktree: None,
                     permissions: None,
                     work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                     icon: None,
@@ -15597,6 +16097,7 @@ mod tests {
             reasoning_effort: None,
             workspace: None,
             base_branch: None,
+            adopt_worktree: None,
             permissions: None,
             work_goal: waku_protocol::boss::EmployeeGoal::Errand,
             icon: None,

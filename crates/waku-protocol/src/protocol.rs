@@ -921,8 +921,8 @@ pub enum Command {
 }
 
 /// Where an agent-created task runs. Mirrors the New Task flow's workspace
-/// choices; there is no attach-a-worktree path because a task created by an
-/// agent always starts fresh.
+/// choices; `Adopt` is summon-only — a task created by an agent always
+/// starts fresh, so only a Boss summon may attach an existing worktree.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentWorkspace {
@@ -931,6 +931,10 @@ pub enum AgentWorkspace {
     Local,
     /// A daemon-managed Git worktree branched from `base_branch`.
     Worktree,
+    /// A finished employee's existing daemon-managed worktree, named by
+    /// `adopt_worktree`. The new employee lands in the checkout as the
+    /// previous owner left it — uncommitted state included.
+    Adopt,
 }
 
 /// How an agent prompt reaches the target session.

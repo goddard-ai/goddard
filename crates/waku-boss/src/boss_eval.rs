@@ -49,13 +49,16 @@ persist between eval calls for this boss session.
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,requestId?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's
                                             lifetime (#{native_builds:1} for a device
                                             build) and a contested set queues instead
-                                            of erroring; summons sharing a groupId
+                                            of erroring; workspace \"adopt\" +
+                                            adoptWorktree hands a finished employee's
+                                            worktree to the new employee, uncommitted
+                                            state intact; summons sharing a groupId
                                             form a wave: one notice lands when every
                                             member finishes, fails, or is cancelled
   control(sessionId, \"stop\")               shorthand for a bare action
