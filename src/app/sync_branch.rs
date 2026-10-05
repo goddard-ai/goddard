@@ -155,6 +155,15 @@ fn sync_branch_targets(
     current
 }
 
+/// An implicitly resolved context folder's enclosing repository, if any.
+/// The check walks the canonical path — workspaces may hang beneath a
+/// symlink that leaves their project's checkout (the boss chat's detached
+/// workspace does), and `nearest_repo_root` on the lexical path would find
+/// a `.git` that `git` discovery never reaches.
+fn sync_branch_repo_root(path: &Path) -> Option<PathBuf> {
+    terminals::nearest_repo_root(&path.canonicalize().ok()?)
+}
+
 fn sync_branch_results_height(result_count: usize, show_placeholder: bool) -> f32 {
     let content_height = if show_placeholder {
         EMPTY_RESULTS_HEIGHT
@@ -179,22 +188,38 @@ impl Waku {
     }
 
     /// Open the picker over the session's repository — or the selected
-    /// project's when no task is selected. When neither resolves to a
-    /// folder, the palette's project step asks which project to sync and a
-    /// pick re-enters here through `open_sync_branch_in`; Esc there quietly
-    /// backs out. The search field takes real focus; closing restores
-    /// whatever held it before, on the next frame if the close came from a
-    /// background completion.
+    /// project's when no task is selected. A resolved folder that is not a
+    /// Git repository — a boss chat's detached workspace is one — counts as
+    /// no repository at all: the palette's project step asks which project
+    /// to sync and a pick re-enters here through `open_sync_branch_in`; Esc
+    /// there quietly backs out. Only an explicit pick reaches the picker's
+    /// "not a repository" state. The search field takes real focus; closing
+    /// restores whatever held it before, on the next frame if the close came
+    /// from a background completion.
     pub(super) fn open_sync_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_page.is_some() || self.sync_branch.open {
             return;
         }
+        // A remote path's repo check is its daemon's, not this filesystem's,
+        // so remote resolutions pass through for the fetch to validate.
+        let session_remote = self
+            .selected_session()
+            .is_some_and(|session| self.is_remote_project(session.project_id));
         let session_workspace = self
             .selected_workspace_path()
             .map(std::path::Path::to_path_buf);
         let Some(cwd) = session_workspace
             .clone()
-            .or_else(|| self.selected_project().map(|project| project.path.clone()))
+            .filter(|path| session_remote || sync_branch_repo_root(path).is_some())
+            .or_else(|| {
+                self.selected_project()
+                    .filter(|project| !project.is_projectless())
+                    .and_then(|project| {
+                        (self.is_remote_project(project.id)
+                            || sync_branch_repo_root(&project.path).is_some())
+                        .then(|| project.path.clone())
+                    })
+            })
         else {
             self.prompt_sync_branch_project(window, cx);
             return;
@@ -757,6 +782,31 @@ mod tests {
         assert_eq!(targets[0].branch, "main");
         assert_eq!(targets[0].cwd, PathBuf::from("/repo"));
         assert_eq!(targets[1].branch, "worktree-branch");
+    }
+
+    /// The context repo check walks the canonical path: a workspace hung
+    /// beneath a symlink that leaves its project's checkout — the boss
+    /// chat's detached workspace is one — resolves no repository even
+    /// though the lexical path's ancestors hold a `.git`.
+    #[test]
+    fn repo_root_check_follows_symlinks_out_of_the_checkout() {
+        let base = std::env::temp_dir().join(format!("waku-sync-{}", Uuid::new_v4()));
+        let repo = base.join("repo");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(outside.join("workspace")).unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("link")).unwrap();
+        let linked_workspace = repo.join("link").join("workspace");
+
+        assert_eq!(
+            sync_branch_repo_root(&repo),
+            Some(repo.canonicalize().unwrap())
+        );
+        assert!(terminals::nearest_repo_root(&linked_workspace).is_some());
+        assert!(sync_branch_repo_root(&linked_workspace).is_none());
+        assert!(sync_branch_repo_root(&base.join("missing")).is_none());
+
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// The session's own checkout leads as the "Current branch" row, matching
