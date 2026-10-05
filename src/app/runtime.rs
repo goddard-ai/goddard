@@ -4743,6 +4743,33 @@ impl Waku {
             .unwrap_or_else(|| model.to_owned())
     }
 
+    /// The effort half of a "Model · Effort" detail label — the catalog's
+    /// display label when the id is listed, else the recorded id itself.
+    pub(super) fn reasoning_effort_label_on(
+        &self,
+        key: waku_client::DaemonKey,
+        provider: ProviderKind,
+        model: Option<&str>,
+        effort: &str,
+    ) -> String {
+        model
+            .and_then(|model| self.provider_probe_on(key, provider)?.model(model))
+            .and_then(|metadata| {
+                metadata
+                    .reasoning_efforts
+                    .iter()
+                    .find(|option| option.id == effort)
+            })
+            .map(|option| {
+                option
+                    .label_i18n
+                    .as_ref()
+                    .map(waku_client::WireTranslation::render)
+                    .unwrap_or_else(|| option.label.clone())
+            })
+            .unwrap_or_else(|| effort.to_owned())
+    }
+
     pub(super) fn model_metadata_for_session(
         &self,
         session: &AgentSession,

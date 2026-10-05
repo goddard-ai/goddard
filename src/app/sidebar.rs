@@ -5778,22 +5778,13 @@ impl Waku {
             session.provider,
             options.model.as_deref(),
         );
-        let effort = options.reasoning_effort.as_deref().and_then(|effort| {
-            self.model_metadata_for_session(session)
-                .and_then(|model| {
-                    model
-                        .reasoning_efforts
-                        .iter()
-                        .find(|option| option.id == effort)
-                })
-                .map(|option| {
-                    option
-                        .label_i18n
-                        .as_ref()
-                        .map(waku_client::WireTranslation::render)
-                        .unwrap_or_else(|| option.label.clone())
-                })
-                .or_else(|| Some(effort.to_owned()))
+        let effort = options.reasoning_effort.as_deref().map(|effort| {
+            self.reasoning_effort_label_on(
+                self.daemons.session_owner(session.id),
+                session.provider,
+                options.model.as_deref(),
+                effort,
+            )
         });
         match effort {
             Some(effort) => format!("{model} · {effort}"),

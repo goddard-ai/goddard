@@ -2551,6 +2551,22 @@ impl Backend for WakuBackend {
                 self.purge_expired_archived_sessions();
                 self.start_archive_detail_prune();
                 let boss = self.boss.document();
+                // Boss-managed rows ride the catalog even unstarted — a
+                // queued employee's task shell is what its roster click
+                // selects. Other unstarted rows are client drafts:
+                // cataloguing one would project a phantom "New task"
+                // skeleton to every client.
+                let managed = |session_id: Uuid| {
+                    boss.session_id == Some(session_id)
+                        || boss
+                            .employees
+                            .iter()
+                            .any(|employee| employee.session_id == session_id)
+                        || boss
+                            .planning
+                            .iter()
+                            .any(|plan| plan.session_id == session_id)
+                };
                 let state = self.task_state.lock();
                 Ok(ResponsePayload::TaskState {
                     projects: state
@@ -2562,9 +2578,7 @@ impl Backend for WakuBackend {
                     sessions: state
                         .sessions
                         .iter()
-                        .filter(|session| {
-                            session.has_started() || boss.session_id == Some(session.id)
-                        })
+                        .filter(|session| session.has_started() || managed(session.id))
                         .map(AgentSession::list_projection)
                         .collect(),
                     default_cwd: self.default_cwd.clone(),
@@ -16208,6 +16222,81 @@ mod tests {
                 .blocker
                 .as_deref()
                 .is_some_and(|note| note.contains("Employee launch failed"))
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A queued ticket's unstarted task shell is what the roster click
+    /// selects — the catalog must project it even though no turn ran.
+    /// Unstarted rows the boss does not manage stay excluded: they are
+    /// client drafts, not selectable surfaces.
+    #[test]
+    fn the_task_catalog_projects_a_queued_employees_shell() {
+        use waku_protocol::boss::{BossResult, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-catalog-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        let (_held_task, _held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        let BossResult::Summoned {
+            session_id, state, ..
+        } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "queued job",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .expect("at capacity the summon must still be accepted")
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+
+        // A client-side draft has no business in the catalog — push one
+        // straight into the store so the projection must prove it skipped
+        // the unmanaged row while keeping the employee shell.
+        let mut draft = AgentSession::new(
+            backend.task_state.lock().sessions[0].project_id,
+            ProviderKind::Codex,
+        );
+        draft.id = Uuid::new_v4();
+        let draft_id = draft.id;
+        {
+            let mut state = backend.task_state.lock();
+            state.push_session(draft);
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        let response = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::LoadTaskState,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        let ResponsePayload::TaskState { sessions, .. } = response else {
+            panic!("expected catalog")
+        };
+        let shell = sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("a queued employee's shell belongs in the catalog");
+        assert!(!shell.detail_loaded);
+        assert!(
+            !sessions.iter().any(|session| session.id == draft_id),
+            "an unmanaged unstarted draft must not project"
         );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);

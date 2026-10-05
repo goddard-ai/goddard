@@ -74,7 +74,8 @@ pub(super) struct BossUi {
     /// Resolved ticket target for queued and dispatching employees, keyed by
     /// session id so sidebar and summon rows can reveal it without rescanning
     /// every Boss snapshot while rendering.
-    pub(super) queued_model_targets: HashMap<Uuid, (DaemonKey, ProviderKind, String)>,
+    pub(super) queued_model_targets:
+        HashMap<Uuid, (DaemonKey, ProviderKind, String, Option<String>)>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
@@ -481,7 +482,12 @@ impl Waku {
                     {
                         self.boss_ui.queued_model_targets.insert(
                             employee.session_id,
-                            (*key, ticket.provider, ticket.model.clone()),
+                            (
+                                *key,
+                                ticket.provider,
+                                ticket.model.clone(),
+                                ticket.reasoning_effort.clone(),
+                            ),
                         );
                     }
                     self.boss_ui
@@ -1889,10 +1895,24 @@ impl Waku {
                     session.map(|session| self.session_sidebar_model_detail(session)),
                     session.map(|session| session.provider),
                 ),
-                |(key, provider, model)| (
-                    Some(self.model_display_name_on(*key, *provider, Some(model))),
-                    Some(*provider),
-                ),
+                |(key, provider, model, effort)| {
+                    let name = self.model_display_name_on(*key, *provider, Some(model));
+                    (
+                        Some(match effort.as_deref() {
+                            Some(effort) => format!(
+                                "{name} · {}",
+                                self.reasoning_effort_label_on(
+                                    *key,
+                                    *provider,
+                                    Some(model),
+                                    effort,
+                                )
+                            ),
+                            None => name,
+                        }),
+                        Some(*provider),
+                    )
+                },
             )
         } else {
             (self.boss_ui.job_titles.get(&id).cloned(), None)
