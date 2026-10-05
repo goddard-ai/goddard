@@ -1,0 +1,1 @@
+- Summoned employees no longer collide on the same few human names — the name pool is much larger and draws rotate through it in order, so suffixes like "Selma A." are rare and released names return to the rotation after retirement.

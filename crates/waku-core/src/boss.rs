@@ -169,7 +169,6 @@ impl BossService {
         for index in 0..state.employees.len() {
             if state.employees[index].job_title.is_empty() {
                 state.employees[index].job_title = state.employees[index].identity.name.clone();
-                let id = state.employees[index].identity.id;
                 let existing_names = state
                     .employees
                     .iter()
@@ -177,7 +176,8 @@ impl BossService {
                     .filter(|(other_index, _)| *other_index != index)
                     .map(|(_, employee)| employee.identity.name.as_str())
                     .collect::<Vec<_>>();
-                state.employees[index].identity.name = employee_human_name(id, existing_names);
+                state.employees[index].identity.name =
+                    employee_human_name(existing_names, &mut state.name_cursor);
             }
         }
         const OLD_EXPIRY_GUIDANCE: &str = "Summon a fresh employee for a new job or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.";
@@ -514,18 +514,23 @@ impl BossService {
             });
         }
         let id = Uuid::new_v4();
+        let mut name = String::new();
+        self.update(|state| {
+            name = employee_human_name(
+                state
+                    .employees
+                    .iter()
+                    .map(|employee| employee.identity.name.as_str()),
+                &mut state.name_cursor,
+            );
+            Ok(())
+        })?;
         Ok(BossEmployee {
             session_id: id,
             supervisor_id: caller,
             identity: BossIdentity {
                 id,
-                name: employee_human_name(
-                    id,
-                    state
-                        .employees
-                        .iter()
-                        .map(|employee| employee.identity.name.as_str()),
-                ),
+                name,
                 avatar_seed: id.to_string(),
             },
             job_title: job_title.trim().to_owned(),
@@ -2290,209 +2295,459 @@ pub fn normalize_plan_file(raw: &str) -> anyhow::Result<String> {
     Ok(format!("plans/{rest}"))
 }
 
-fn employee_human_name<'a>(id: Uuid, existing_names: impl IntoIterator<Item = &'a str>) -> String {
-    const NAMES: &[&str] = &[
-        "Alden",
-        "Ansel",
-        "Blythe",
-        "Celia",
-        "Dorian",
-        "Edith",
-        "Elin",
-        "Emery",
-        "Estelle",
-        "Flora",
-        "Galen",
-        "Hugo",
-        "Ida",
-        "Inez",
-        "Ivo",
-        "Leander",
-        "Lenora",
-        "Linus",
-        "Lucian",
-        "Maren",
-        "Mavis",
-        "Milo",
-        "Nell",
-        "Orson",
-        "Otis",
-        "Petra",
-        "Rhea",
-        "Rosalind",
-        "Rufus",
-        "Selma",
-        "Soren",
-        "Sylvie",
-        "Thalia",
-        "Thea",
-        "Tobin",
-        "Vera",
-        "Willa",
-        "Cleo",
-        "Ada",
-        "Ambrose",
-        "Abigail",
-        "Adelaide",
-        "Agnes",
-        "Alma",
-        "Amara",
-        "Amos",
-        "Arthur",
-        "Astrid",
-        "Beatrice",
-        "Beckett",
-        "Benedict",
-        "Bernadette",
-        "Calder",
-        "Calliope",
-        "Cassian",
-        "Cecily",
-        "Clementine",
-        "Conrad",
-        "Cordelia",
-        "Cosima",
-        "Desmond",
-        "Dorothea",
-        "Eleanor",
-        "Elias",
-        "Eliza",
-        "Emmeline",
-        "Ephraim",
-        "Etta",
-        "Evelyn",
-        "Felix",
-        "Fern",
-        "Finch",
-        "Florence",
-        "Frances",
-        "Frederick",
-        "Genevieve",
-        "Georgia",
-        "Greta",
-        "Gwendolyn",
-        "Harriet",
-        "Hazel",
-        "Heath",
-        "Henrietta",
-        "Isadora",
-        "Isidore",
-        "Jasper",
-        "Josephine",
-        "Julian",
-        "Juniper",
-        "Lavinia",
-        "Lazarus",
-        "Lillian",
-        "Lottie",
-        "Louisa",
-        "Magnus",
-        "Matilda",
-        "Maude",
-        "Maxwell",
-        "Mirabel",
-        "Nico",
-        "Nina",
-        "Noel",
-        "Octavia",
-        "Opal",
-        "Oscar",
-        "Penelope",
-        "Percival",
-        "Phoebe",
-        "Quentin",
-        "Quincy",
-        "Ramona",
-        "Reuben",
-        "Rowan",
-        "Sabine",
-        "Silas",
-        "Simone",
-        "Sterling",
-        "Tamsin",
-        "Theodore",
-        "Ulysses",
-        "Valentina",
-        "Victor",
-        "Viola",
-        "Vivian",
-        "Wallace",
-        "Wilfred",
-        "Winifred",
-        "Xanthe",
-        "Yvette",
-        "Zelda",
-        "Zinnia",
-        "Aurelia",
-        "Basil",
-        "Cyrus",
-        "Delphine",
-        "Evander",
-        "Felicity",
-        "Gideon",
-        "Hollis",
-        "Imogen",
-        "Juno",
-        "Kit",
-        "Lydia",
-        "Marcel",
-        "Nadia",
-        "Odette",
-        "Peregrine",
-        "Romy",
-        "Sasha",
-        "Tilda",
-        "Una",
-        "Violet",
-        "Wesley",
-        "Yara",
-        "Zachary",
-        "Alistair",
-        "Briony",
-        "Cora",
-        "Daphne",
-        "Edmund",
-        "Freya",
-        "Graham",
-        "Iris",
-        "Jonah",
-        "Kieran",
-        "Margot",
-        "Nora",
-        "Rafael",
-        "Stella",
-        "Thomas",
-        "Wren",
-        "Ari",
-        "Bram",
-        "Caspian",
-        "Della",
-        "Esme",
-        "Faye",
-        "Harlan",
-        "Ivolette",
-        "Lyle",
-        "Mina",
-        "Niles",
-        "Rory",
-    ];
-    let base = NAMES[(id.as_u128() % NAMES.len() as u128) as usize];
+/// First names employees draw from, in rotation order. The durable cursor
+/// `BossState::name_cursor` walks this pool, so the daemon exhausts it before
+/// a name repeats and a restart cannot reset the draw.
+const EMPLOYEE_NAMES: &[&str] = &[
+    "Alden",
+    "Ansel",
+    "Blythe",
+    "Celia",
+    "Dorian",
+    "Edith",
+    "Elin",
+    "Emery",
+    "Estelle",
+    "Flora",
+    "Galen",
+    "Hugo",
+    "Ida",
+    "Inez",
+    "Ivo",
+    "Leander",
+    "Lenora",
+    "Linus",
+    "Lucian",
+    "Maren",
+    "Mavis",
+    "Milo",
+    "Nell",
+    "Orson",
+    "Otis",
+    "Petra",
+    "Rhea",
+    "Rosalind",
+    "Rufus",
+    "Selma",
+    "Soren",
+    "Sylvie",
+    "Thalia",
+    "Thea",
+    "Tobin",
+    "Vera",
+    "Willa",
+    "Cleo",
+    "Ada",
+    "Ambrose",
+    "Abigail",
+    "Adelaide",
+    "Agnes",
+    "Alma",
+    "Amara",
+    "Amos",
+    "Arthur",
+    "Astrid",
+    "Beatrice",
+    "Beckett",
+    "Benedict",
+    "Bernadette",
+    "Calder",
+    "Calliope",
+    "Cassian",
+    "Cecily",
+    "Clementine",
+    "Conrad",
+    "Cordelia",
+    "Cosima",
+    "Desmond",
+    "Dorothea",
+    "Eleanor",
+    "Elias",
+    "Eliza",
+    "Emmeline",
+    "Ephraim",
+    "Etta",
+    "Evelyn",
+    "Felix",
+    "Fern",
+    "Finch",
+    "Florence",
+    "Frances",
+    "Frederick",
+    "Genevieve",
+    "Georgia",
+    "Greta",
+    "Gwendolyn",
+    "Harriet",
+    "Hazel",
+    "Heath",
+    "Henrietta",
+    "Isadora",
+    "Isidore",
+    "Jasper",
+    "Josephine",
+    "Julian",
+    "Juniper",
+    "Lavinia",
+    "Lazarus",
+    "Lillian",
+    "Lottie",
+    "Louisa",
+    "Magnus",
+    "Matilda",
+    "Maude",
+    "Maxwell",
+    "Mirabel",
+    "Nico",
+    "Nina",
+    "Noel",
+    "Octavia",
+    "Opal",
+    "Oscar",
+    "Penelope",
+    "Percival",
+    "Phoebe",
+    "Quentin",
+    "Quincy",
+    "Ramona",
+    "Reuben",
+    "Rowan",
+    "Sabine",
+    "Silas",
+    "Simone",
+    "Sterling",
+    "Tamsin",
+    "Theodore",
+    "Ulysses",
+    "Valentina",
+    "Victor",
+    "Viola",
+    "Vivian",
+    "Wallace",
+    "Wilfred",
+    "Winifred",
+    "Xanthe",
+    "Yvette",
+    "Zelda",
+    "Zinnia",
+    "Aurelia",
+    "Basil",
+    "Cyrus",
+    "Delphine",
+    "Evander",
+    "Felicity",
+    "Gideon",
+    "Hollis",
+    "Imogen",
+    "Juno",
+    "Kit",
+    "Lydia",
+    "Marcel",
+    "Nadia",
+    "Odette",
+    "Peregrine",
+    "Romy",
+    "Sasha",
+    "Tilda",
+    "Una",
+    "Violet",
+    "Wesley",
+    "Yara",
+    "Zachary",
+    "Alistair",
+    "Briony",
+    "Cora",
+    "Daphne",
+    "Edmund",
+    "Freya",
+    "Graham",
+    "Iris",
+    "Jonah",
+    "Kieran",
+    "Margot",
+    "Nora",
+    "Rafael",
+    "Stella",
+    "Thomas",
+    "Wren",
+    "Ari",
+    "Bram",
+    "Caspian",
+    "Della",
+    "Esme",
+    "Faye",
+    "Harlan",
+    "Ivolette",
+    "Lyle",
+    "Mina",
+    "Niles",
+    "Rory",
+    "Agatha",
+    "Albert",
+    "Alfred",
+    "Althea",
+    "Amalia",
+    "Anton",
+    "Antonia",
+    "Arlo",
+    "Aubrey",
+    "Augustine",
+    "Barnaby",
+    "Bernice",
+    "Bertram",
+    "Blanche",
+    "Bramwell",
+    "Bridget",
+    "Bruno",
+    "Caleb",
+    "Camille",
+    "Carina",
+    "Cedric",
+    "Celeste",
+    "Chester",
+    "Clara",
+    "Clarence",
+    "Claude",
+    "Colette",
+    "Cornelius",
+    "Cressida",
+    "Dahlia",
+    "Damian",
+    "Dashiell",
+    "Deborah",
+    "Declan",
+    "Delia",
+    "Dinah",
+    "Dominic",
+    "Doris",
+    "Duncan",
+    "Edgar",
+    "Edwina",
+    "Eileen",
+    "Eliot",
+    "Eloise",
+    "Elsa",
+    "Elsie",
+    "Emilia",
+    "Emmett",
+    "Enid",
+    "Enzo",
+    "Ernest",
+    "Esther",
+    "Ethel",
+    "Eudora",
+    "Eunice",
+    "Ezra",
+    "Ferdinand",
+    "Fletcher",
+    "Florian",
+    "Francesca",
+    "Franklin",
+    "Frida",
+    "Gabriel",
+    "Gemma",
+    "Geoffrey",
+    "Gerald",
+    "Gilbert",
+    "Gloria",
+    "Gordon",
+    "Gregory",
+    "Guinevere",
+    "Gus",
+    "Hannah",
+    "Harold",
+    "Harvey",
+    "Hector",
+    "Helena",
+    "Herbert",
+    "Herman",
+    "Hester",
+    "Horace",
+    "Howard",
+    "Ignatius",
+    "Ilse",
+    "Ingrid",
+    "Ira",
+    "Irene",
+    "Irving",
+    "Isaac",
+    "Ivan",
+    "Jacques",
+    "Jerome",
+    "Joan",
+    "Jocelyn",
+    "Judith",
+    "Kathleen",
+    "Kenneth",
+    "Klaus",
+    "Lambert",
+    "Laurence",
+    "Leah",
+    "Leon",
+    "Leonard",
+    "Leopold",
+    "Lester",
+    "Lionel",
+    "Lorena",
+    "Lucille",
+    "Luther",
+    "Maeve",
+    "Malcolm",
+    "Margaret",
+    "Marian",
+    "Marina",
+    "Marjorie",
+    "Marlene",
+    "Martin",
+    "Matthias",
+    "Mercy",
+    "Millicent",
+    "Minerva",
+    "Miriam",
+    "Morris",
+    "Muriel",
+    "Myrtle",
+    "Nadine",
+    "Nathaniel",
+    "Nelson",
+    "Nicola",
+    "Nikolai",
+    "Norma",
+    "Obadiah",
+    "Odessa",
+    "Olive",
+    "Oliver",
+    "Olympia",
+    "Omar",
+    "Orville",
+    "Oswald",
+    "Otto",
+    "Owen",
+    "Pablo",
+    "Palmer",
+    "Patience",
+    "Patrick",
+    "Paul",
+    "Pearl",
+    "Philippa",
+    "Phineas",
+    "Phyllis",
+    "Porter",
+    "Prudence",
+    "Randall",
+    "Raphael",
+    "Raymond",
+    "Rebecca",
+    "Regina",
+    "Rex",
+    "Rhett",
+    "Rita",
+    "Roland",
+    "Rosamund",
+    "Rose",
+    "Rosemary",
+    "Ross",
+    "Roxana",
+    "Rudolph",
+    "Russell",
+    "Ruth",
+    "Sadie",
+    "Salvador",
+    "Samson",
+    "Samuel",
+    "Sebastian",
+    "Seraphina",
+    "Seymour",
+    "Shirley",
+    "Sibyl",
+    "Sidney",
+    "Solomon",
+    "Sonia",
+    "Stanley",
+    "Susannah",
+    "Sven",
+    "Tabitha",
+    "Tamara",
+    "Tatiana",
+    "Tessa",
+    "Thaddeus",
+    "Theodora",
+    "Theresa",
+    "Trudy",
+    "Ursula",
+    "Upton",
+    "Valentine",
+    "Vanessa",
+    "Vernon",
+    "Veronica",
+    "Vincent",
+    "Virgil",
+    "Virginia",
+    "Walter",
+    "Wendell",
+    "Wilbur",
+    "Wilhelmina",
+    "Winslow",
+    "Wolfgang",
+    "Woodrow",
+    "Xavier",
+    "Yolanda",
+    "Yusuf",
+    "Yvonne",
+    "Zadie",
+    "Zane",
+    "Zora",
+];
+
+/// Bijective base-26 suffix: 1 → "A", 26 → "Z", 27 → "AA", and so on.
+fn surname_suffix(mut value: usize) -> String {
+    let mut suffix = String::new();
+    while value > 0 {
+        value -= 1;
+        suffix.insert(0, (b'A' + (value % 26) as u8) as char);
+        value /= 26;
+    }
+    suffix
+}
+
+/// Draw the next employee name in rotation. `existing_names` is the live
+/// roster — retirement keeps no claim, so a retired employee's name rejoins
+/// the pool on its own. The draw scans forward from the durable `cursor`
+/// for the first pool name nobody holds and leaves the cursor past it, so
+/// names skipped while held re-enter rotation when they free up. Only with
+/// the whole pool held does the drawn name take a surname-initial suffix;
+/// the starting initial rotates per name instead of always landing on "A.".
+fn employee_human_name<'a>(
+    existing_names: impl IntoIterator<Item = &'a str>,
+    cursor: &mut u64,
+) -> String {
     let existing_names = existing_names
         .into_iter()
         .collect::<std::collections::HashSet<_>>();
-    if !existing_names.contains(base) {
-        return base.into();
+    let len = EMPLOYEE_NAMES.len() as u64;
+    for step in 0..len {
+        let index = ((*cursor % len) + step) % len;
+        if !existing_names.contains(EMPLOYEE_NAMES[index as usize]) {
+            *cursor = (*cursor).saturating_add(step + 1);
+            return EMPLOYEE_NAMES[index as usize].into();
+        }
     }
 
-    for suffix_len in 1.. {
-        let mut suffix = String::with_capacity(suffix_len);
-        let mut value = suffix_len;
-        while value > 0 {
-            value -= 1;
-            suffix.insert(0, (b'A' + (value % 26) as u8) as char);
-            value /= 26;
+    let base = EMPLOYEE_NAMES[(*cursor % len) as usize];
+    *cursor = (*cursor).saturating_add(1);
+    let start = base
+        .bytes()
+        .fold(0u8, |acc, byte| acc.wrapping_mul(31).wrapping_add(byte))
+        % 26;
+    for step in 0..26u8 {
+        let initial = (b'A' + (start + step) % 26) as char;
+        let candidate = format!("{base} {initial}.");
+        if !existing_names.contains(candidate.as_str()) {
+            return candidate;
         }
-        let candidate = format!("{base} {suffix}.");
+    }
+    for value in 27usize.. {
+        let candidate = format!("{base} {}.", surname_suffix(value));
         if !existing_names.contains(candidate.as_str()) {
             return candidate;
         }
@@ -2738,6 +2993,9 @@ fn fresh_state() -> BossState {
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
         next_event_id: 0,
+        // A random start keeps the first summon from being the same name on
+        // every fresh install; the rotation order itself is fixed.
+        name_cursor: (id.as_u128() % EMPLOYEE_NAMES.len() as u128) as u64,
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
@@ -2763,6 +3021,7 @@ fn disabled_state() -> BossState {
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
         next_event_id: 0,
+        name_cursor: 0,
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
@@ -2797,6 +3056,117 @@ mod tests {
         assert!(service.document().session_id.is_none());
         assert!(service.document().identity.id.is_nil());
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn employee_names_draw_in_rotation_and_wrap_the_pool() {
+        let mut cursor = 0;
+        let drawn: Vec<String> = (0..EMPLOYEE_NAMES.len())
+            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
+            .collect();
+        assert_eq!(
+            drawn,
+            EMPLOYEE_NAMES
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>(),
+            "the pool empties in order before a name repeats"
+        );
+        assert_eq!(
+            employee_human_name(std::iter::empty(), &mut cursor),
+            EMPLOYEE_NAMES[0]
+        );
+    }
+
+    #[test]
+    fn employee_name_rotation_skips_held_names_and_revisits_them() {
+        let mut cursor = 0;
+        assert_eq!(
+            employee_human_name([EMPLOYEE_NAMES[0]], &mut cursor),
+            EMPLOYEE_NAMES[1],
+            "a held name yields the next free name, not a suffix"
+        );
+        let drawn: Vec<String> = (0..EMPLOYEE_NAMES.len() - 1)
+            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
+            .collect();
+        assert_eq!(drawn.last().unwrap(), EMPLOYEE_NAMES[0]);
+    }
+
+    #[test]
+    fn employee_name_suffixes_vary_and_advance_their_initial() {
+        // Only a fully held pool forces a suffix.
+        let held: Vec<String> = EMPLOYEE_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        let mut cursor = 0;
+        let first = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+        let base = EMPLOYEE_NAMES[0];
+        let initial = first
+            .strip_prefix(&format!("{base} "))
+            .and_then(|rest| rest.strip_suffix('.'))
+            .expect("a held pool yields a surname-initial suffix");
+        assert_eq!(initial.chars().count(), 1);
+
+        // The next collision on the same name advances the alphabet.
+        let mut held: Vec<String> = held;
+        held.push(first.clone());
+        let mut cursor = 0;
+        let second = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+        let next = (b'A' + (initial.chars().next().unwrap() as u8 - b'A' + 1) % 26) as char;
+        assert_eq!(second, format!("{base} {next}."));
+
+        // Starting initials vary across names rather than all landing on "A.".
+        let initials: std::collections::HashSet<char> = (0..26)
+            .map(|index| {
+                let held: Vec<String> = EMPLOYEE_NAMES
+                    .iter()
+                    .map(|name| name.to_string())
+                    .collect();
+                let mut cursor = index as u64;
+                employee_human_name(held.iter().map(String::as_str), &mut cursor)
+                    .chars()
+                    .nth_back(1)
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            initials.len() > 1,
+            "suffixes should not all start at the same initial"
+        );
+    }
+
+    #[test]
+    fn employee_name_rotation_survives_a_restart() {
+        let root = std::env::temp_dir().join(format!("boss-name-rotation-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let first = service
+            .prepare_employee(boss, persona, "One".into(), None, EmployeeGoal::Errand)
+            .unwrap();
+        drop(service);
+
+        let reopened = BossService::open(root.clone()).unwrap();
+        let second = reopened
+            .prepare_employee(boss, persona, "Two".into(), None, EmployeeGoal::Errand)
+            .unwrap();
+        let first_index = EMPLOYEE_NAMES
+            .iter()
+            .position(|name| *name == first.identity.name)
+            .expect("a plain draw comes from the pool");
+        assert_eq!(
+            second.identity.name,
+            EMPLOYEE_NAMES[(first_index + 1) % EMPLOYEE_NAMES.len()],
+            "the draw resumes where the rotation left off"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2836,16 +3206,12 @@ mod tests {
         assert_eq!(retired.len(), 1);
         assert_eq!(retired[0].identity.name, name);
         assert!(!service.is_employee(session_id));
-        assert_eq!(
-            employee_human_name(
-                session_id,
-                service
-                    .document()
-                    .employees
-                    .iter()
-                    .map(|e| e.identity.name.as_str())
-            ),
-            name,
+        let mut cursor = service.document().name_cursor;
+        let rotation: Vec<String> = (0..EMPLOYEE_NAMES.len())
+            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
+            .collect();
+        assert!(
+            rotation.contains(&name),
             "the released name can be assigned again"
         );
 
@@ -3586,7 +3952,11 @@ mod tests {
             migrated.document().employees[0].job_title,
             "Release engineer"
         );
-        assert_eq!(migrated.document().employees[0].identity.name, human_name);
+        let migrated_name = migrated.document().employees[0].identity.name.clone();
+        assert!(
+            EMPLOYEE_NAMES.contains(&migrated_name.as_str()),
+            "migration draws a fresh name from the rotation: {migrated_name}"
+        );
         let operation: BossOperation = serde_json::from_value(serde_json::json!({
             "type": "summon", "personaId": persona, "name": "Release engineer",
             "prompt": "Check release", "project": "/project"

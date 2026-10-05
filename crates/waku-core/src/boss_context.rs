@@ -643,6 +643,7 @@ mod tests {
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,
+            name_cursor: 0,
             outbox: Vec::new(),
             waves: Vec::new(),
             wave_outbox: Vec::new(),

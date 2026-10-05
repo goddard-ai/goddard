@@ -543,6 +543,11 @@ pub struct BossState {
     /// Next dispatch-notification event id (1-based).
     #[serde(default)]
     pub next_event_id: u64,
+    /// Round-robin position in the employee name pool — the draw advances
+    /// it past every assignment so the pool empties before a name repeats
+    /// and a restart cannot reset the rotation.
+    #[serde(default)]
+    pub name_cursor: u64,
     /// Durable dispatch notifications awaiting delivery to supervisors —
     /// drained by id so restart can neither drop nor duplicate one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
