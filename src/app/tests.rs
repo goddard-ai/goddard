@@ -12,7 +12,8 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    merge_remote_session_catalog, session_accepts_immediate_steer, session_has_active_provider_turn,
+    merge_remote_session_catalog, merged_planning_activation_target,
+    session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -5409,18 +5410,70 @@ fn archived_filter_excludes_boss_managed_sessions() {
     );
 }
 
-#[test]
-fn archive_gate_admits_planning_sessions() {
-    // A planning session is an ordinary started task to the archive path:
-    // the row menu and ⌘⇧A share this gate, and they set the same
-    // `archived_at` the post-finalization grace sweep writes.
-    let mut planning = started_session(Uuid::new_v4());
-    planning.planning = Some(crate::model::SessionPlanning {
+/// A planning session skeleton, as `createPlan` stamps it into the merged
+/// catalog.
+fn planning_session(id: Uuid) -> AgentSession {
+    let mut session = started_session(id);
+    session.planning = Some(crate::model::SessionPlanning {
         plan_file: "plans/auth.md".into(),
         idea: "Auth".into(),
         label: waku_client::WireTranslation::new("boss.planning_label", []),
         finalized_at: None,
     });
+    session
+}
+
+#[test]
+fn merged_planning_steers_only_from_the_boss_chat() {
+    let plan = Uuid::new_v4();
+    let sessions = vec![planning_session(plan)];
+    let known = HashSet::new();
+
+    // On the boss chat the just-created plan takes the surface; anywhere
+    // else the row lists under its boss without stealing focus.
+    assert_eq!(
+        merged_planning_activation_target(&sessions, &known, false, true),
+        Some(plan)
+    );
+    assert_eq!(
+        merged_planning_activation_target(&sessions, &known, false, false),
+        None
+    );
+
+    // Fresh snapshots describe pre-existing state — a plan already running
+    // before connect must never steer on load.
+    assert_eq!(
+        merged_planning_activation_target(&sessions, &known, true, true),
+        None
+    );
+
+    // A plan the catalog already knew is not "just created".
+    let known = HashSet::from([plan]);
+    assert_eq!(
+        merged_planning_activation_target(&sessions, &known, false, true),
+        None
+    );
+}
+
+#[test]
+fn merged_planning_ignores_new_employee_and_task_sessions() {
+    // An employee summon or an externally created task lands in the same
+    // merge — neither is a steer target even from the boss chat.
+    let employee = Uuid::new_v4();
+    let task = Uuid::new_v4();
+    let sessions = vec![started_session(employee), started_session(task)];
+    assert_eq!(
+        merged_planning_activation_target(&sessions, &HashSet::new(), false, true),
+        None
+    );
+}
+
+#[test]
+fn archive_gate_admits_planning_sessions() {
+    // A planning session is an ordinary started task to the archive path:
+    // the row menu and ⌘⇧A share this gate, and they set the same
+    // `archived_at` the post-finalization grace sweep writes.
+    let mut planning = planning_session(Uuid::new_v4());
     assert!(session_archivable(&planning));
 
     // Archived is archived, whoever set it — the flag also keeps an
