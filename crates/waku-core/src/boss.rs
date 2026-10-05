@@ -1094,31 +1094,31 @@ impl BossService {
         queued
     }
 
-    /// Each queue group's head — its oldest queued ticket — in global
-    /// sequence order. These are the only tickets the scheduler may
-    /// attempt this pass; a blocked head delays its group but no other.
+    /// All queued tickets in admission order. Priority chooses which ticket
+    /// is attempted first; sequence breaks ties. A blocked ticket does not
+    /// prevent later tickets from being considered in the same pass.
     pub fn queued_heads(&self) -> Vec<BossEmployee> {
         let state = self.state.lock();
-        let mut heads: Vec<BossEmployee> = Vec::new();
-        let mut employees: Vec<&BossEmployee> = state
+        let mut queued: Vec<&BossEmployee> = state
             .employees
             .iter()
             .filter(|entry| entry.lifecycle() == EmployeeLifecycle::Queued)
             .collect();
-        employees.sort_by_key(|entry| {
-            entry
-                .ticket
-                .as_ref()
-                .map(|ticket| ticket.sequence)
+        queued.sort_by(|left, right| {
+            let left_ticket = left.ticket.as_ref();
+            let right_ticket = right.ticket.as_ref();
+            right_ticket
+                .and_then(|ticket| ticket.priority)
                 .unwrap_or(0)
+                .cmp(&left_ticket.and_then(|ticket| ticket.priority).unwrap_or(0))
+                .then_with(|| {
+                    left_ticket
+                        .map(|ticket| ticket.sequence)
+                        .unwrap_or(0)
+                        .cmp(&right_ticket.map(|ticket| ticket.sequence).unwrap_or(0))
+                })
         });
-        let mut seen = std::collections::HashSet::new();
-        for entry in employees {
-            if seen.insert(Self::queue_root(&state, entry)) {
-                heads.push(entry.clone());
-            }
-        }
-        heads
+        queued.into_iter().cloned().collect()
     }
 
     /// The employee's position inside its own queue group, 1-based —

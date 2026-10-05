@@ -7563,11 +7563,11 @@ impl WakuBackend {
         }
     }
 
-    /// One full dispatch pass: every queue group's head attempts an atomic
-    /// admission grant; a granted head launches, a denied head records its
-    /// wait reason and stalls only its own group. Repeats while progress
-    /// is made — a dispatch exposes the group's next entry, which may be
-    /// grantable on a different model.
+    /// One full dispatch pass: every queued ticket attempts an atomic
+    /// admission grant in priority/sequence order. A denied ticket records
+    /// its wait reason and is skipped; later tickets still get an attempt.
+    /// Repeat while progress is made so a released slot can admit another
+    /// ticket without waiting for the next wakeup.
     pub(crate) fn run_summon_scheduler(&self) {
         // The boss document owns the policy; the broker's file follows it
         // when one was set — a crash between the two writes reconciles
@@ -15533,9 +15533,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// Per-root FIFO: two queued tickets attempt in sequence order, which
-    /// the broker ledger's grant order records directly — the second
-    /// group's ticket never leapfrogs the first's.
+    /// Same-priority queued tickets attempt in sequence order, which the
+    /// broker ledger's grant order records directly.
     #[test]
     fn queued_tickets_dispatch_fifo_once_capacity_frees() {
         use waku_protocol::boss::{BossResult, EmployeeLifecycle};
@@ -15567,15 +15566,14 @@ mod tests {
             Some(2),
             "the second ticket waits behind the first"
         );
-        // The queue root yields exactly one head — the earlier ticket —
-        // so the second can never leapfrog it mid-dispatch.
+        // Both queued tickets are considered in admission order.
         let heads: Vec<Uuid> = backend
             .boss
             .queued_heads()
             .iter()
             .map(|entry| entry.session_id)
             .collect();
-        assert_eq!(heads, vec![first]);
+        assert_eq!(heads, vec![first, second]);
 
         backend
             .resource_broker()
@@ -15586,6 +15584,59 @@ mod tests {
         // missing binary.
         assert!(backend.boss.employee(first).unwrap().expired);
         assert!(backend.boss.employee(second).unwrap().expired);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A full model lane does not block a later ticket for a free model in
+    /// the same supervisor queue. The skipped ticket keeps its own reason.
+    #[test]
+    fn blocked_queue_ticket_does_not_stall_a_free_model_lane() {
+        use waku_protocol::boss::{AdmissionBlocker, BossResult, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("summon-lane-skip-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Devin, "swe-2", 1, 1);
+        let (_held_task, _held) = hold_model_slot(&backend, ProviderKind::Devin, "swe-2");
+
+        let summon = |job: &str, provider, model: &str| {
+            let BossResult::Summoned { session_id, .. } = backend
+                .handle_boss_operation(
+                    Some(boss),
+                    summon_op(&backend, &root, job, provider, Some(model)),
+                    &EventSink::detached(),
+                )
+                .unwrap()
+            else {
+                panic!("expected a summoned result")
+            };
+            session_id
+        };
+        let blocked = summon("blocked swe", ProviderKind::Devin, "swe-2");
+        // The free model is admitted immediately, then the missing Codex
+        // CLI makes launch fail. Its durable employee record proves it was
+        // attempted despite the earlier blocked ticket.
+        assert!(backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(&backend, &root, "free luna", ProviderKind::Codex, Some("gpt-6-luna")),
+                &EventSink::detached(),
+            )
+            .is_err());
+        let later = backend
+            .boss
+            .document()
+            .employees
+            .into_iter()
+            .find(|entry| entry.job_title == "free luna")
+            .unwrap()
+            .session_id;
+
+        let blocked_employee = backend.boss.employee(blocked).unwrap();
+        assert_eq!(blocked_employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert!(blocked_employee.ticket.as_ref().unwrap().blocked_by.iter().any(
+            |reason| matches!(reason, AdmissionBlocker::ModelLimit { used: 1, limit: 1 })
+        ));
+        assert!(backend.boss.employee(later).unwrap().expired);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -15627,33 +15678,26 @@ mod tests {
             waku_protocol::boss::AdmissionBlocker::ModelLimit { used: 0, limit: 0 }
         )));
 
-        // Strict per-root FIFO: a claude ticket behind the blocked codex
-        // head waits too — it is never even attempted, so it records no
-        // wait reason of its own. The codex rule's key never applies to
-        // it.
-        let queued = backend
+        // The distinct free model is considered immediately and its
+        // launch fails only because Claude Code is not installed.
+        assert!(backend
             .handle_boss_operation(
                 Some(boss),
                 summon_op(&backend, &root, "claude job", ProviderKind::Claude, None),
                 &EventSink::detached(),
             )
-            .unwrap();
-        let waku_protocol::boss::BossResult::Summoned {
-            session_id: claude_id,
-            state: claude_state,
-            admission: claude_admission,
-        } = queued
-        else {
-            panic!("expected a summoned result")
-        };
-        assert_eq!(claude_state, EmployeeLifecycle::Queued);
-        let claude_admission = claude_admission.unwrap();
-        assert_eq!(claude_admission.queue_position, Some(2));
-        assert!(claude_admission.blocked_by.is_empty());
+            .is_err());
+        let claude_id = backend
+            .boss
+            .document()
+            .employees
+            .into_iter()
+            .find(|entry| entry.job_title == "claude job")
+            .unwrap()
+            .session_id;
+        assert!(backend.boss.employee(claude_id).unwrap().expired);
 
-        // Once the blocked head leaves, the claude ticket dispatches —
-        // under its own (absent) cap, not the codex rule — and expires on
-        // the missing binary.
+        // The blocked Codex ticket remains queued until explicitly stopped.
         backend
             .handle_boss_operation(
                 Some(boss),
@@ -15664,7 +15708,6 @@ mod tests {
                 &EventSink::detached(),
             )
             .unwrap();
-        backend.run_summon_scheduler();
         assert!(backend.boss.employee(claude_id).unwrap().expired);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
@@ -15711,8 +15754,8 @@ mod tests {
                 AdmissionBlocker::ModelLimit { used: 2, limit: 2 }
             ))
         );
-        // Without the flag a ticket caps at the live pool — and behind
-        // the burst head it never even gets evaluated.
+        // Without the flag the ticket reports its own live cap, even
+        // while the earlier burst ticket remains blocked at the hard cap.
         let waku_protocol::boss::BossResult::Summoned { admission, .. } = backend
             .handle_boss_operation(
                 Some(boss),
@@ -15729,7 +15772,10 @@ mod tests {
         else {
             panic!("expected a summoned result")
         };
-        assert!(admission.unwrap().blocked_by.is_empty());
+        assert!(admission.unwrap().blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::ModelLimit { used: 2, limit: 1 }
+        )));
 
         // Free one slot: the burst head grants into the hard-cap half and
         // expires on launch; the plain ticket then reads its own live cap.
