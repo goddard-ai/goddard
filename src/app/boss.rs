@@ -63,6 +63,14 @@ pub(super) struct BossUi {
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
+    /// Queued employees' wait reason, keyed by session id — the sidebar row
+    /// and summon card read membership here to wear a pending state instead
+    /// of the finished/idle look an unstarted shell session would give them.
+    pub(super) queued: HashMap<Uuid, String>,
+    /// Employees mid-dispatch: the slot is granted but the provider has not
+    /// started, so the shell can still read Idle — the row shows a starting
+    /// spinner until the Working lifecycle lands.
+    pub(super) dispatching: HashSet<Uuid>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
@@ -127,6 +135,8 @@ impl Default for BossUi {
             active: HashMap::new(),
             working: HashSet::new(),
             expired: HashSet::new(),
+            queued: HashMap::new(),
+            dispatching: HashSet::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             command_deliverable: None,
@@ -265,28 +275,7 @@ impl Waku {
             }) {
                 continue;
             }
-            // Queue rank among every queued employee — errands included, so
-            // a goal's neutral wait detail accounts for the hidden work
-            // ahead of it without revealing a position number.
-            let mut queued: Vec<&waku_protocol::boss::BossEmployee> = state
-                .employees
-                .iter()
-                .filter(|employee| {
-                    employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
-                })
-                .collect();
-            queued.sort_by_key(|employee| {
-                employee
-                    .ticket
-                    .as_ref()
-                    .map(|ticket| ticket.sequence)
-                    .unwrap_or(u64::MAX)
-            });
-            let queue_rank: HashMap<Uuid, usize> = queued
-                .iter()
-                .enumerate()
-                .map(|(index, employee)| (employee.session_id, index + 1))
-                .collect();
+            let queue_rank = boss_queue_ranks(&state);
             let rows = Arc::new(
                 state
                     .employees
@@ -295,45 +284,10 @@ impl Waku {
                         employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
                     })
                     .map(|employee| {
-                        let queue_detail = (employee.lifecycle()
-                            == waku_protocol::boss::EmployeeLifecycle::Queued)
-                            .then(|| {
-                                match employee
-                                    .ticket
-                                    .as_ref()
-                                    .and_then(|ticket| ticket.blocked_by.first())
-                                {
-                                    Some(
-                                        waku_protocol::boss::AdmissionBlocker::ModelLimit {
-                                            used,
-                                            limit,
-                                        },
-                                    ) => tr!(
-                                        "boss.goals_queue_model",
-                                        model = employee
-                                            .ticket
-                                            .as_ref()
-                                            .map(|ticket| ticket.model.as_str())
-                                            .unwrap_or_default(),
-                                        used = used,
-                                        limit = limit
-                                    ),
-                                    Some(
-                                        waku_protocol::boss::AdmissionBlocker::HostResources {
-                                            detail,
-                                        },
-                                    ) => detail.clone(),
-                                    None => {
-                                        if queue_rank.get(&employee.session_id)
-                                            == Some(&1)
-                                        {
-                                            tr!("boss.goals_queue_admission")
-                                        } else {
-                                            tr!("boss.goals_queue_earlier")
-                                        }
-                                    }
-                                }
-                            });
+                        let queue_detail = boss_queue_detail(
+                            employee,
+                            queue_rank.get(&employee.session_id).copied(),
+                        );
                         BossGoalRow {
                             session_id: employee.session_id,
                             name: employee.identity.name.clone(),
@@ -386,6 +340,8 @@ impl Waku {
             self.boss_ui.employee_icons.clear();
             self.boss_ui.working.clear();
             self.boss_ui.expired.clear();
+            self.boss_ui.queued.clear();
+            self.boss_ui.dispatching.clear();
             let timestamps: HashMap<Uuid, u64> = self
                 .state
                 .sessions
@@ -396,6 +352,7 @@ impl Waku {
                 if let Some(id) = state.session_id {
                     self.boss_ui.managed.insert(id);
                 }
+                let queue_rank = boss_queue_ranks(state);
                 let mut employees = state.employees.iter().collect::<Vec<_>>();
                 employees.sort_by_key(|employee| {
                     std::cmp::Reverse(timestamps.get(&employee.session_id).copied().unwrap_or(0))
@@ -435,6 +392,16 @@ impl Waku {
                         self.boss_ui.expired.insert(employee.session_id);
                     } else {
                         self.boss_ui.working.insert(employee.session_id);
+                    }
+                    if let Some(detail) = boss_queue_detail(
+                        employee,
+                        queue_rank.get(&employee.session_id).copied(),
+                    ) {
+                        self.boss_ui.queued.insert(employee.session_id, detail);
+                    } else if employee.lifecycle()
+                        == waku_protocol::boss::EmployeeLifecycle::Dispatching
+                    {
+                        self.boss_ui.dispatching.insert(employee.session_id);
                     }
                     self.boss_ui
                         .identities
@@ -1719,14 +1686,60 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The pending marker a queued employee's row and summon card wear
+    /// instead of the shell session's status — an unstarted shell reads
+    /// Idle, which is the finished look the queue exists to avoid. The
+    /// tooltip carries the wait reason the scheduler recorded on the
+    /// ticket. `slot` disambiguates the element id when the same employee
+    /// shows on two surfaces at once. `None` for employees not queued.
+    pub(super) fn boss_queued_indicator(
+        &self,
+        session_id: Uuid,
+        slot: &str,
+        theme: &Theme,
+    ) -> Option<AnyElement> {
+        let detail = self.boss_ui.queued.get(&session_id)?;
+        Some(
+            div()
+                .id(SharedString::from(format!("boss-queued-{slot}-{session_id}")))
+                .flex_none()
+                .size(px(12.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .tooltip(Tooltip::text(format!(
+                    "{} · {}",
+                    tr!("boss.goals_status_queued"),
+                    detail
+                )))
+                .child(icon("icons/hourglass.svg", 12.0, theme.text_secondary))
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn render_boss_employee_row(&self, id: Uuid, cx: &mut Context<Self>) -> AnyElement {
         let Some(identity) = self.boss_ui.identities.get(&id) else {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
         let session = self.state.sessions.iter().find(|session| session.id == id);
-        let status_indicator =
-            session.and_then(|session| self.session_status_indicator(session, &theme));
+        // A queued employee wins over the session indicator — a requeued
+        // employee's shell can still carry its last turn's verdict marker,
+        // which would read as finished over the pending state.
+        let status_indicator = self
+            .boss_queued_indicator(id, "sidebar", &theme)
+            .or_else(|| {
+                session.and_then(|session| self.session_status_indicator(session, &theme))
+            })
+            .or_else(|| {
+                self.boss_ui.dispatching.contains(&id).then(|| {
+                    motion::spin_slow(icon(
+                        "icons/loader-circle.svg",
+                        12.0,
+                        theme.text_secondary,
+                    ))
+                })
+            });
         let selected = sidebar::sidebar_session_selected(
             self.state.selected_session,
             self.pending_session_activation
@@ -3125,6 +3138,69 @@ fn lines(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// 1-based admission order among the daemon's queued employees — errands
+/// included, so a goal's neutral wait detail accounts for the hidden work
+/// ahead of it without revealing a position number.
+fn boss_queue_ranks(state: &BossState) -> HashMap<Uuid, usize> {
+    let mut queued: Vec<&waku_protocol::boss::BossEmployee> = state
+        .employees
+        .iter()
+        .filter(|employee| {
+            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+        })
+        .collect();
+    queued.sort_by_key(|employee| {
+        employee
+            .ticket
+            .as_ref()
+            .map(|ticket| ticket.sequence)
+            .unwrap_or(u64::MAX)
+    });
+    queued
+        .iter()
+        .enumerate()
+        .map(|(index, employee)| (employee.session_id, index + 1))
+        .collect()
+}
+
+/// A queued employee's wait reason for the sidebar row tooltip and the
+/// Goals Pending row — the ticket's admission blocker when the scheduler
+/// recorded one, else a neutral admission label. `rank` is the employee's
+/// [`boss_queue_ranks`] position; non-queued employees return `None`.
+fn boss_queue_detail(
+    employee: &waku_protocol::boss::BossEmployee,
+    rank: Option<usize>,
+) -> Option<String> {
+    if employee.lifecycle() != waku_protocol::boss::EmployeeLifecycle::Queued {
+        return None;
+    }
+    let detail = match employee
+        .ticket
+        .as_ref()
+        .and_then(|ticket| ticket.blocked_by.first())
+    {
+        Some(waku_protocol::boss::AdmissionBlocker::ModelLimit { used, limit }) => tr!(
+            "boss.goals_queue_model",
+            model = employee
+                .ticket
+                .as_ref()
+                .map(|ticket| ticket.model.as_str())
+                .unwrap_or_default(),
+            used = used,
+            limit = limit
+        ),
+        Some(waku_protocol::boss::AdmissionBlocker::HostResources { detail }) => detail.clone(),
+        None => {
+            if rank == Some(1) {
+                tr!("boss.goals_queue_admission")
+            } else {
+                tr!("boss.goals_queue_earlier")
+            }
+        }
+    };
+    Some(detail)
+}
+
 #[track_caller]
 fn boss_sidebar_label(
     name: String,
@@ -3482,6 +3558,155 @@ mod tests {
             let frame = image.size(0);
             assert_eq!(frame.width.0, bucket as i32 * 2);
             assert_eq!(frame.height.0, bucket as i32 * 2);
+        }
+    }
+
+    fn ticket(
+        sequence: u64,
+        blocked_by: Vec<waku_protocol::boss::AdmissionBlocker>,
+    ) -> waku_protocol::boss::SummonTicket {
+        waku_protocol::boss::SummonTicket {
+            sequence,
+            generation: 1,
+            provider: ProviderKind::Codex,
+            model: "swe-2".into(),
+            reasoning_effort: None,
+            prompt: "do it".into(),
+            project: "/tmp".into(),
+            workspace: None,
+            base_branch: None,
+            resources: waku_protocol::resources::ResourceSet::default(),
+            allow_burst: false,
+            pending_prompts: Vec::new(),
+            group_id: None,
+            priority: None,
+            goal_id: None,
+            reservation: None,
+            blocked_by,
+            dispatch_event: None,
+        }
+    }
+
+    fn employee(
+        id: u128,
+        lifecycle: waku_protocol::boss::EmployeeLifecycle,
+        ticket: Option<waku_protocol::boss::SummonTicket>,
+    ) -> waku_protocol::boss::BossEmployee {
+        let session_id = Uuid::from_u128(id);
+        waku_protocol::boss::BossEmployee {
+            session_id,
+            supervisor_id: Uuid::from_u128(u128::MAX),
+            identity: BossIdentity {
+                id: session_id,
+                name: format!("Employee {id}"),
+                avatar_seed: String::new(),
+            },
+            job_title: "Tester".into(),
+            persona_id: Uuid::from_u128(u128::MAX - 1),
+            work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+            created_at: None,
+            icon: None,
+            permissions: PersonaPermissions::default(),
+            pinned_files: Vec::new(),
+            expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
+            expired_at: None,
+            blocker: None,
+            cancelled: false,
+            state: lifecycle,
+            ticket,
+            queued_at: (lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued).then_some(1),
+            request_id: None,
+            request_fingerprint: None,
+        }
+    }
+
+    #[test]
+    fn queue_ranks_follow_ticket_sequence() {
+        let mut state = boss_state_for_queue_test();
+        let head = employee(1, waku_protocol::boss::EmployeeLifecycle::Queued, Some(ticket(7, Vec::new())));
+        let tail = employee(2, waku_protocol::boss::EmployeeLifecycle::Queued, Some(ticket(3, Vec::new())));
+        let working = employee(3, waku_protocol::boss::EmployeeLifecycle::Working, None);
+        state.employees = vec![head.clone(), tail.clone(), working.clone()];
+
+        let ranks = boss_queue_ranks(&state);
+        // The lower sequence admitted first — insertion order does not
+        // matter, and working employees earn no rank.
+        assert_eq!(ranks.get(&tail.session_id), Some(&1));
+        assert_eq!(ranks.get(&head.session_id), Some(&2));
+        assert!(!ranks.contains_key(&working.session_id));
+    }
+
+    #[test]
+    fn queue_detail_reports_the_blocker_or_a_neutral_reason() {
+        use waku_protocol::boss::{AdmissionBlocker, EmployeeLifecycle};
+        let working = employee(1, EmployeeLifecycle::Working, None);
+        assert_eq!(boss_queue_detail(&working, None), None);
+        let expired = employee(2, EmployeeLifecycle::Expired, None);
+        assert_eq!(boss_queue_detail(&expired, None), None);
+
+        let limited = employee(
+            3,
+            EmployeeLifecycle::Queued,
+            Some(ticket(1, vec![AdmissionBlocker::ModelLimit { used: 6, limit: 6 }])),
+        );
+        assert_eq!(
+            boss_queue_detail(&limited, Some(1)),
+            Some(tr!(
+                "boss.goals_queue_model",
+                model = "swe-2",
+                used = 6u32,
+                limit = 6u32
+            ))
+        );
+
+        let waiting = employee(4, EmployeeLifecycle::Queued, Some(ticket(1, Vec::new())));
+        assert_eq!(
+            boss_queue_detail(&waiting, Some(1)),
+            Some(tr!("boss.goals_queue_admission"))
+        );
+        assert_eq!(
+            boss_queue_detail(&waiting, Some(2)),
+            Some(tr!("boss.goals_queue_earlier"))
+        );
+
+        let resources = employee(
+            5,
+            EmployeeLifecycle::Queued,
+            Some(ticket(
+                1,
+                vec![AdmissionBlocker::HostResources {
+                    detail: "waiting for a build slot".into(),
+                }],
+            )),
+        );
+        assert_eq!(
+            boss_queue_detail(&resources, Some(1)),
+            Some("waiting for a build slot".to_owned())
+        );
+    }
+
+    fn boss_state_for_queue_test() -> BossState {
+        BossState {
+            identity: BossIdentity {
+                id: Uuid::from_u128(u128::MAX - 2),
+                name: "Boss".into(),
+                avatar_seed: String::new(),
+            },
+            persona_id: Uuid::from_u128(u128::MAX - 3),
+            session_id: None,
+            personas: Vec::new(),
+            employees: Vec::new(),
+            retired_employees: Vec::new(),
+            deliverables: Vec::new(),
+            goals_viewed_at: None,
+            planning: Vec::new(),
+            resource_policy: waku_protocol::boss::BossResourcePolicy::default(),
+            next_sequence: 0,
+            next_event_id: 0,
+            outbox: Vec::new(),
+            waves: Vec::new(),
+            wave_outbox: Vec::new(),
+            revision: 0,
         }
     }
 

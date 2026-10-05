@@ -4089,6 +4089,8 @@ impl Waku {
         let commentary = commentary.trim();
         let status_label = if self.boss_ui.expired.contains(&employee_id) {
             tr!("boss.employee_finished")
+        } else if self.boss_ui.queued.contains_key(&employee_id) {
+            tr!("boss.goals_status_queued")
         } else {
             match employee.map(|session| session.status) {
                 Some(SessionStatus::Working | SessionStatus::Connecting) => {
@@ -4097,11 +4099,28 @@ impl Waku {
                 Some(SessionStatus::Waiting) => tr!("sidebar.status_waiting"),
                 Some(SessionStatus::Background) => tr!("sidebar.status_background"),
                 Some(SessionStatus::Failed) => tr!("sidebar.status_failed"),
+                // A dispatching ticket's shell still reads Idle — call it
+                // starting rather than letting it fall to the finished label.
+                _ if self.boss_ui.dispatching.contains(&employee_id) => {
+                    tr!("boss.goals_status_starting")
+                }
                 _ => tr!("boss.employee_finished"),
             }
         };
-        let status_indicator =
-            employee.and_then(|session| self.session_status_indicator(session, theme));
+        let status_indicator = self
+            .boss_queued_indicator(employee_id, &format!("summon-card-{owner_session}"), theme)
+            .or_else(|| {
+                employee.and_then(|session| self.session_status_indicator(session, theme))
+            })
+            .or_else(|| {
+                self.boss_ui.dispatching.contains(&employee_id).then(|| {
+                    motion::spin_slow(icon(
+                        "icons/loader-circle.svg",
+                        12.0,
+                        theme.text_secondary,
+                    ))
+                })
+            });
         let card_id = format!("summon-card-{owner_session}-{employee_id}");
         let focus = self.transcript_control_focus(card_id.clone(), cx);
         let card_surface = theme.surface.blend(theme.overlay.opacity(0.7));
