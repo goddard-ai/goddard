@@ -4,7 +4,14 @@ import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
 import type { ResourceSet } from "./ResourceSet";
 
-export type EmployeeControl = { "type": "prompt", prompt: string, } | { "type": "steer", prompt: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, interrupt?: boolean, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "setWorkspace", workspace: AgentWorkspace,
+export type EmployeeControl = { "type": "prompt", prompt: string, } | { "type": "steer", prompt: string,
+/**
+ * Retitles the job when the steer redirects the assignment —
+ * bookkeeping on the roster record only: it queues no prompt,
+ * wakes nothing, and writes no transcript entry. Omitted leaves
+ * the title unchanged.
+ */
+jobTitle?: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, interrupt?: boolean, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "setWorkspace", workspace: AgentWorkspace,
 /**
  * The ref the new worktree detaches at; required when `workspace`
  * is `worktree`, ignored for `local`.

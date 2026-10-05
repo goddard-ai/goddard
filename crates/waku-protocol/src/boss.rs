@@ -1108,6 +1108,13 @@ pub enum EmployeeControl {
     },
     Steer {
         prompt: String,
+        /// Retitles the job when the steer redirects the assignment —
+        /// bookkeeping on the roster record only: it queues no prompt,
+        /// wakes nothing, and writes no transcript entry. Omitted leaves
+        /// the title unchanged.
+        #[serde(default)]
+        #[ts(optional)]
+        job_title: Option<String>,
     },
     /// Apply a catalog-listed provider/model selection to the next turn.
     SetModel {

@@ -7151,9 +7151,21 @@ impl WakuBackend {
                             .any(|e| e.session_id == session_id);
                     if was_expired {
                         return match &action {
-                            EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } => {
+                            EmployeeControl::Prompt { prompt }
+                            | EmployeeControl::Steer { prompt, .. } => {
                                 if prompt.trim().is_empty() {
                                     bail!("employee prompts cannot be empty");
+                                }
+                                // A redirecting steer may retitle the job;
+                                // the label lands before requeue so the
+                                // revived record already carries it.
+                                if let EmployeeControl::Steer {
+                                    job_title: Some(job_title),
+                                    ..
+                                } = &action
+                                {
+                                    self.boss
+                                        .set_employee_job_title(session_id, job_title)?;
                                 }
                                 let prompt = prompt.clone();
                                 self.requeue_employee(session_id, |ticket, started| {
@@ -7181,7 +7193,7 @@ impl WakuBackend {
                         EmployeeControl::Prompt { prompt } => {
                             self.queue_agent_prompt(session_id, prompt, caller, events)?;
                         }
-                        EmployeeControl::Steer { prompt } => {
+                        EmployeeControl::Steer { prompt, job_title } => {
                             if prompt.trim().is_empty() {
                                 bail!("employee prompts cannot be empty");
                             }
@@ -7193,6 +7205,14 @@ impl WakuBackend {
                                 .ok_or_else(|| anyhow!("employee has no running runtime"))?;
                             if !driver.supports_steer() || !self.agent.has_open_turn(session_id) {
                                 bail!("employee has no steerable running turn");
+                            }
+                            // A redirecting steer may retitle the job —
+                            // bookkeeping on the roster record, applied only
+                            // once the steer is deliverable; it is neither a
+                            // prompt nor a transcript entry.
+                            if let Some(job_title) = &job_title {
+                                self.boss
+                                    .set_employee_job_title(session_id, job_title)?;
                             }
                             let transport =
                                 agent_prompt_envelope(&self.task_state, session_id, caller, &prompt);
@@ -17436,7 +17456,8 @@ mod tests {
         );
         assert!(
             control(EmployeeControl::Steer {
-                prompt: "nope".into()
+                prompt: "nope".into(),
+                job_title: None,
             })
             .is_err()
         );
@@ -17616,6 +17637,97 @@ mod tests {
         // The session already ran — the revive prompt replays as a turn,
         // not as a fresh envelope.
         assert_eq!(ticket.pending_prompts, vec!["try again".to_owned()]);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A steer carrying `jobTitle` retitles the job as it requeues —
+    /// bookkeeping on the roster record, not a queued prompt; a steer
+    /// without one leaves the label alone.
+    #[test]
+    fn a_redirecting_steer_retitles_the_resumed_employee() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle};
+        let root = std::env::temp_dir().join(format!("steer-retitle-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+
+        // The first summon grants and fails at launch — expired record.
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "revive",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        let session_id = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .unwrap()
+            .id;
+        assert_eq!(
+            backend.boss.employee(session_id).unwrap().job_title,
+            "revive"
+        );
+
+        // Close the pool, then steer the expired employee with a new
+        // title — it requeues with the steer as a parked prompt and the
+        // roster record relabels.
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+        let control = |action: EmployeeControl| {
+            backend.handle_boss_operation(
+                Some(boss),
+                BossOperation::Control { session_id, action },
+                &EventSink::detached(),
+            )
+        };
+        control(EmployeeControl::Steer {
+            prompt: "redirect: review the patch instead".into(),
+            job_title: Some("Patch review".into()),
+        })
+        .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert_eq!(employee.job_title, "Patch review");
+        assert_eq!(
+            employee.ticket.as_ref().unwrap().pending_prompts,
+            vec!["redirect: review the patch instead".to_owned()]
+        );
+
+        // Expire it again and steer without a title — the label stays.
+        control(EmployeeControl::Stop).unwrap();
+        control(EmployeeControl::Steer {
+            prompt: "one more pass".into(),
+            job_title: None,
+        })
+        .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert_eq!(employee.job_title, "Patch review");
+
+        // An empty title is rejected — the steer never queued.
+        control(EmployeeControl::Stop).unwrap();
+        assert!(
+            control(EmployeeControl::Steer {
+                prompt: "bad retitle".into(),
+                job_title: Some("   ".into()),
+            })
+            .is_err()
+        );
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.job_title, "Patch review");
+        assert_eq!(
+            employee.ticket.as_ref().unwrap().pending_prompts,
+            vec!["redirect: review the patch instead".to_owned(), "one more pass".to_owned()]
+        );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

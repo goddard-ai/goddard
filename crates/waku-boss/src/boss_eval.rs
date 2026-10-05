@@ -70,7 +70,10 @@ persist between eval calls for this boss session.
                                             setResources takes a resource map like
                                             summon — a waiting ticket re-admits on
                                             the new set, a running employee swaps
-                                            once capacity frees
+                                            once capacity frees; steer takes an
+                                            optional jobTitle that retitles the
+                                            job when the steer redirects the
+                                            assignment — label only, no prompt
   transcript(sessionId[, turn])             transcript map
   readFile(path)                            #{path, content}
   writeFile(path, content)
