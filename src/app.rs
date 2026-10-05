@@ -837,6 +837,36 @@ fn fitted_panel_widths(
     (sidebar, right_panel)
 }
 
+/// The right-panel slot's `(rendered, content)` widths while the *sidebar*
+/// is the panel traveling. The slot holds its uncrowded fit — the width it
+/// takes when the sidebar crowds nothing — and the chat column absorbs the
+/// slide, until the moving edge would squeeze the chat under its minimum;
+/// past that the panel yields the difference. Tracking the rendered edge
+/// means both ends of the slide land exactly on the settled fit, so nothing
+/// snaps when the tween retires.
+///
+/// `content` stays at the uncrowded fit the whole way so the surface
+/// reflows once at the settle instead of every frame — the container clips
+/// the difference, as it does for the panel's own slide.
+fn sidebar_slide_right_panel_widths(
+    viewport_width: f32,
+    sidebar_rendered: f32,
+    right_panel_visible: bool,
+    right_panel_width: f32,
+) -> (f32, f32) {
+    let content = fitted_panel_widths(
+        viewport_width,
+        false,
+        right_panel_visible,
+        0.0,
+        right_panel_width,
+    )
+    .1;
+    let rendered =
+        content.min((viewport_width - sidebar_rendered - MAIN_PANEL_MIN_WIDTH).max(0.0));
+    (rendered, content)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RightPanelSurface {
     Browser(Uuid),
@@ -3341,6 +3371,12 @@ pub struct Waku {
     /// while one is running.
     sidebar_rendered_width: f32,
     right_panel_rendered_width: f32,
+    /// The width the right-panel slot's surface lays its content out at —
+    /// what `right_panel_rendered_width` settles to, or the uncrowded fit
+    /// while the sidebar travels so its slide clips rather than reflows the
+    /// surface. Published each frame by `settle_panel_slides` so the pane
+    /// islands — which lay out later — agree with the frame's geometry.
+    right_panel_content_width: f32,
     /// The closed sidebar's hover-peek overlay — see [`SidebarPeek`].
     sidebar_peek: SidebarPeek,
     /// A hover exit the peek overlay deferred because a menu card — or the
@@ -7099,6 +7135,11 @@ impl Waku {
                 right_panel_slide: None,
                 sidebar_rendered_width: if sidebar_visible { sidebar_width } else { 0.0 },
                 right_panel_rendered_width: if right_panel_visible {
+                    right_panel_width
+                } else {
+                    0.0
+                },
+                right_panel_content_width: if right_panel_visible {
                     right_panel_width
                 } else {
                     0.0

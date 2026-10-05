@@ -172,8 +172,8 @@ impl Waku {
         // surface: the slot stretches to the sidebar so the diff column gets
         // everything the transcript had. The pane reads the unexpanded width
         // back out of `effective_panel_widths` for its own column.
-        let right_panel_content = if self.git_panel_visible && self.git_panel_commit_diff.is_some()
-        {
+        let commit_expanded = self.git_panel_visible && self.git_panel_commit_diff.is_some();
+        let mut right_panel_content = if commit_expanded {
             (f32::from(window.viewport_size().width) - sidebar_content).max(right_panel_fitted)
         } else {
             right_panel_fitted
@@ -186,7 +186,7 @@ impl Waku {
                 0.0
             },
         );
-        let right_panel = slide_width(
+        let mut right_panel = slide_width(
             &mut self.right_panel_slide,
             if self.right_panel_visible || self.git_panel_visible {
                 right_panel_content
@@ -194,6 +194,31 @@ impl Waku {
                 0.0
             },
         );
+        // While the sidebar travels, the right panel holds its own width —
+        // the chat column absorbs the slide — until holding it would squeeze
+        // the chat under its minimum; past that edge the panel yields the
+        // difference, tracking the rendered sidebar so the slide lands on
+        // the settled fit without a snap. The surface keeps laying out at
+        // the uncrowded fit meanwhile, so it reflows once at the settle —
+        // the container clips the difference, like the slot's own slide.
+        // An expanded commit deliberately covers the chat column, and a
+        // slide of the slot's own already owns the edge; that pair still
+        // may not squeeze the chat under its minimum.
+        if self.sidebar_slide.is_some() && !commit_expanded {
+            if self.right_panel_slide.is_none() {
+                (right_panel, right_panel_content) = sidebar_slide_right_panel_widths(
+                    f32::from(window.viewport_size().width),
+                    sidebar,
+                    self.right_panel_visible || self.git_panel_visible,
+                    self.right_panel_slot_width(),
+                );
+            } else {
+                right_panel = right_panel.min(
+                    (f32::from(window.viewport_size().width) - sidebar - MAIN_PANEL_MIN_WIDTH)
+                        .max(0.0),
+                );
+            }
+        }
         let panel_fullscreen = slide_width(
             &mut self.panel_fullscreen_slide,
             if self.fullscreen_surface.is_some() {
@@ -207,6 +232,7 @@ impl Waku {
         );
         self.sidebar_rendered_width = sidebar;
         self.right_panel_rendered_width = right_panel;
+        self.right_panel_content_width = right_panel_content;
         self.panel_fullscreen_rendered_width = panel_fullscreen;
         let sliding = self.panels_sliding();
         if was_sliding && !sliding {
@@ -475,11 +501,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Inside the fullscreen layer the panel lays out at the layer's own
-        // (possibly still sliding) width; docked, at its fitted width.
+        // (possibly still sliding) width; docked, at the content width
+        // `settle_panel_slides` published for this frame.
         let width = if self.panel_fullscreen_active() {
             self.panel_fullscreen_rendered_width
         } else {
-            self.effective_panel_widths(window).1
+            self.right_panel_content_width
         };
         self.render_right_panel(width, window, cx)
             .into_any_element()
@@ -932,9 +959,14 @@ impl Render for Waku {
                         .w(px(panels.right_panel))
                         .flex()
                         .relative()
-                        .when(panels.right_panel_sliding, |element| {
-                            element.overflow_hidden()
-                        })
+                        // The slide clip, plus any frame a sidebar squeeze
+                        // or reveal leaves the slot narrower than the
+                        // surface laid out inside it.
+                        .when(
+                            panels.right_panel_sliding
+                                || panels.right_panel < panels.right_panel_content,
+                            |element| element.overflow_hidden(),
+                        )
                         // Pinned to the window's right edge, so the panel is
                         // uncovered from that edge inward rather than dragged
                         // across the screen. While the fullscreen layer owns

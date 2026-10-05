@@ -3470,7 +3470,9 @@ impl Waku {
     /// as on screen and keeps its full width here: the slide narrows the
     /// container that clips it, so nothing inside reflows on the way out.
     /// What the panel actually occupies this frame is
-    /// [`Waku::sidebar_rendered_width`] / [`Waku::right_panel_rendered_width`].
+    /// [`Waku::sidebar_rendered_width`] / [`Waku::right_panel_rendered_width`];
+    /// the right slot's surface reads [`Waku::right_panel_content_width`],
+    /// which this settles to except while the sidebar travels.
     pub(super) fn effective_panel_widths(&self, window: &Window) -> (f32, f32) {
         fitted_panel_widths(
             f32::from(window.viewport_size().width),

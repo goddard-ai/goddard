@@ -41,7 +41,8 @@ use super::{
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
     retain_fading_working_indicator, row_starts_followup_turn, session_accepts_turn_output,
     session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
-    should_show_navigation_rail, should_show_scroll_to_bottom, still_archived_sessions,
+    should_show_navigation_rail, should_show_scroll_to_bottom, sidebar_slide_right_panel_widths,
+    still_archived_sessions,
     tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
     transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
@@ -2876,6 +2877,54 @@ fn hidden_panels_do_not_consume_layout_width() {
 
     assert_eq!(sidebar, 0.0);
     assert_eq!(right_panel, 620.0);
+}
+
+#[test]
+fn sidebar_slide_holds_the_right_panel_until_the_chat_minimum() {
+    // While the sidebar travels the chat column absorbs it: a 1400 window
+    // with a 260 sidebar and an 800 panel leaves 340 for the chat, under
+    // the 360 minimum — but only once the rendered edge is past 240.
+    let (rendered, content) = sidebar_slide_right_panel_widths(1400.0, 100.0, true, 800.0);
+    assert_eq!(rendered, 800.0);
+    assert_eq!(content, 800.0);
+
+    // Past that the chat pins at its minimum and the panel yields the
+    // difference, tracking the edge so the slide's end lands on the
+    // settled fit with no snap.
+    let (rendered, _) = sidebar_slide_right_panel_widths(1400.0, 240.0, true, 800.0);
+    assert_eq!(rendered, 800.0);
+    let (rendered, content) = sidebar_slide_right_panel_widths(1400.0, 260.0, true, 800.0);
+    assert_eq!(rendered, 780.0);
+    assert_eq!(rendered, fitted_panel_widths(1400.0, true, true, 260.0, 800.0).1);
+    // The surface stays laid out at the uncrowded fit: the container clips
+    // it rather than reflowing every frame.
+    assert_eq!(content, 800.0);
+}
+
+#[test]
+fn sidebar_slide_out_grows_the_panel_back_without_a_snap() {
+    // The reverse slide takes the room back as the edge frees it — the
+    // same tracking, so hiding the sidebar never pops the panel wider on
+    // the last frame.
+    let (rendered, content) = sidebar_slide_right_panel_widths(1400.0, 260.0, true, 800.0);
+    assert_eq!(rendered, 780.0);
+    assert_eq!(content, 800.0);
+
+    let (rendered, _) = sidebar_slide_right_panel_widths(1400.0, 100.0, true, 800.0);
+    assert_eq!(rendered, 800.0);
+}
+
+#[test]
+fn sidebar_slide_past_the_panel_hides_the_slot() {
+    // A sidebar wider than the window can host squeezes the slot to
+    // nothing rather than the chat under its minimum.
+    let (rendered, _) = sidebar_slide_right_panel_widths(700.0, 400.0, true, 800.0);
+    assert_eq!(rendered, 0.0);
+
+    // A hidden panel renders and lays out at zero either way.
+    let (rendered, content) = sidebar_slide_right_panel_widths(1400.0, 260.0, false, 800.0);
+    assert_eq!(rendered, 0.0);
+    assert_eq!(content, 0.0);
 }
 
 #[test]

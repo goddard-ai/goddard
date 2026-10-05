@@ -3168,16 +3168,11 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (sidebar, panel) = self.effective_panel_widths(window);
-        // With a commit open the slot stretches to the sidebar (see
-        // `settle_panel_slides`); the pane lays out at that same target so
-        // the slide only clips it.
-        let width = if self.git_panel_commit_diff.is_some() {
-            (f32::from(window.viewport_size().width) - sidebar).max(panel)
-        } else {
-            panel
-        };
-        self.render_git_panel(width, window, cx).into_any_element()
+        // The slot's published content width already folds in a commit's
+        // stretch and any sidebar travel (see `settle_panel_slides`); the
+        // pane lays out at that same target so a slide only clips it.
+        self.render_git_panel(self.right_panel_content_width, window, cx)
+            .into_any_element()
     }
 
     fn render_git_panel(
