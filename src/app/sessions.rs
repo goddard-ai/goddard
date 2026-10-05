@@ -885,14 +885,13 @@ impl Waku {
         // page may have been mounted over this same session, in which case
         // the page's strip is what needs parking.
         self.sync_right_panel_owner(cx);
-        // The preview page belongs to the activation that carried it in —
-        // a landing that is not re-arming one drops it even on the same
-        // session: a history hop back to the chat re-shows the transcript.
+        // The preview page and its armed boss command belong to the
+        // activation that carried them in — a landing that is not re-arming
+        // one drops both even on the same session: a history hop back to
+        // the chat re-shows the transcript.
         self.boss_ui.deliverable_page = None;
+        self.boss_ui.command_deliverable = None;
         if session_changed {
-            // A new session is a new context: a deliverable click's armed boss
-            // command belongs to whatever was on screen before.
-            self.boss_ui.command_deliverable = None;
             self.restore_selected_composer_draft(cx);
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);

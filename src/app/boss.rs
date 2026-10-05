@@ -75,7 +75,8 @@ pub(super) struct BossUi {
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
     /// composer submission commands the boss with this file attached.
-    /// Cleared by a send or a session selection.
+    /// Cleared by a send or any landing that is not re-arming it — the
+    /// `pending_deliverable` half carries it across its own navigation.
     pub command_deliverable: Option<(DaemonKey, Uuid)>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
@@ -1311,8 +1312,12 @@ impl Waku {
             return;
         }
         // Re-opening the boss chat hands the deliverable preview page back to
-        // the chat transcript it covers, even when it was already selected.
+        // the chat transcript it covers, even when it was already selected —
+        // the armed composer context and any parked landing die with it.
         self.boss_ui.deliverable_page = None;
+        self.boss_ui.command_deliverable = None;
+        self.boss_ui.pending_deliverable = None;
+        self.sync_composer_placeholder(cx);
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -2363,10 +2368,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.mark_deliverable_viewed(key, deliverable_id, cx);
+        self.chat_with_boss(key, cx);
         self.boss_ui.command_deliverable = Some((key, deliverable_id));
         self.boss_ui.pending_deliverable = Some((key, deliverable_id, true));
         self.sync_composer_placeholder(cx);
-        self.chat_with_boss(key, cx);
         cx.notify();
     }
 
