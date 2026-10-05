@@ -893,10 +893,41 @@ impl WakuBackend {
     /// left open, then tick. Called once by the daemon executable before it
     /// starts serving — the service needs the backend's `Arc` for dispatch.
     pub fn start_automations(self: &Arc<Self>) {
-        self.boss.bind_backend(self);
+        self.bind_boss_finish_callback();
         self.start_summon_scheduler();
         self.automations.start(self);
         self.auto_prompts.start(self);
+    }
+
+    fn bind_boss_finish_callback(self: &Arc<Self>) {
+        let backend = Arc::downgrade(self);
+        self.boss.set_finish_employee(Arc::new(move |session_id| {
+            let backend = backend
+                .upgrade()
+                .ok_or_else(|| anyhow::anyhow!("daemon is shutting down"))?;
+            backend.finish_boss_employee(session_id)
+        }));
+        let backend = Arc::downgrade(self);
+        self.boss.set_recover_employee(Arc::new(move |session_id| {
+            let Some(backend) = backend.upgrade() else {
+                return Ok(());
+            };
+            backend.recover_boss_employee(session_id)
+        }));
+        let backend = Arc::downgrade(self);
+        self.boss.set_session_active(Arc::new(move |session_id| {
+            backend
+                .upgrade()
+                .map_or(true, |backend| backend.session_active(session_id))
+        }));
+        let backend = Arc::downgrade(self);
+        self.boss.set_archive_sessions(Arc::new(move |sessions| {
+            let Some(backend) = backend.upgrade() else {
+                return Ok(false);
+            };
+            backend.archive_sessions(sessions)?;
+            Ok(true)
+        }));
     }
 
     /// Point the `waku-link` ALPN at the daemon's metadata and pairing
@@ -4998,87 +5029,88 @@ impl WakuBackend {
         if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
             bail!("only the boss can start a planning session");
         }
-        let _lock = self.boss.operation_lock.lock();
-        let title = title.trim().to_owned();
-        if title.is_empty() {
-            bail!("a planning session needs a title");
-        }
-        if prompt.trim().is_empty() {
-            bail!("a planning session needs the user prompt that prompted it");
-        }
-        let plan_file = crate::boss::normalize_plan_file(&plan_file)?;
-        let boss = self.boss.document();
-        // Two sessions cannot share one document — a name the registry
-        // already holds would fork writes across both.
-        if self.boss.plan_for_file(&plan_file).is_some() {
-            bail!("a plan named {plan_file} already exists");
-        }
-        // The planning session lives in the Boss project with the boss
-        // chat. `create_agent_task_inner` resolves projects by path, so the
-        // Boss project must already name this path — register it the same
-        // way `Open` does when it has not been.
-        let workspace = dunce::canonicalize(&self.boss.owned_workspace()?)?;
-        let project = {
-            let mut state = self.task_state.lock();
-            let found = state
-                .projects
-                .iter_mut()
-                .find(|entry| {
-                    entry.id == boss.identity.id
-                        || dunce::canonicalize(&entry.path)
-                            .is_ok_and(|path| path == workspace)
-                })
-                .cloned();
-            match found {
-                Some(project) => project,
-                None => {
-                    let mut project = Project::from_path(workspace.clone());
-                    project.id = boss.identity.id;
-                    project.name = "Boss".into();
-                    state.projects.push(project.clone());
-                    project
-                }
+        self.boss.with_operation_lock(|| {
+            let title = title.trim().to_owned();
+            if title.is_empty() {
+                bail!("a planning session needs a title");
             }
-        };
-        let sender = caller.or(boss.session_id);
-        let plan = waku_protocol::boss::BossPlan {
-            session_id: Uuid::new_v4(),
-            plan_file: plan_file.clone(),
-            idea: title.clone(),
-            finalized_at: None,
-        };
-        let (opener, _) = localized!("boss.plan_seed_opener", path = format!("memory/{plan_file}"));
-        let seed = format!("{}\n\n{}", prompt.trim(), opener);
-        let selection = AgentCreateSelection {
-            provider,
-            model,
-            title: Some(title),
-            reasoning_effort: None,
-            service_tier: None,
-            context_window: None,
-        };
-        let session_id = self.create_agent_task_inner(
-            sender,
-            selection,
-            workspace,
-            AgentWorkspace::Local,
-            None,
-            AgentTaskPrompt::Fixed(seed),
-            events,
-            None,
-            Some(plan),
-        )?;
-        let session = self
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("planning session {session_id} is missing"))?;
-        Ok(BossResult::Session {
-            session: Box::new(session),
-            project: Box::new(project),
+            if prompt.trim().is_empty() {
+                bail!("a planning session needs the user prompt that prompted it");
+            }
+            let plan_file = crate::boss::normalize_plan_file(&plan_file)?;
+            let boss = self.boss.document();
+            // Two sessions cannot share one document — a name the registry
+            // already holds would fork writes across both.
+            if self.boss.plan_for_file(&plan_file).is_some() {
+                bail!("a plan named {plan_file} already exists");
+            }
+            // The planning session lives in the Boss project with the boss
+            // chat. `create_agent_task_inner` resolves projects by path, so the
+            // Boss project must already name this path — register it the same
+            // way `Open` does when it has not been.
+            let workspace = dunce::canonicalize(&self.boss.owned_workspace()?)?;
+            let project = {
+                let mut state = self.task_state.lock();
+                let found = state
+                    .projects
+                    .iter_mut()
+                    .find(|entry| {
+                        entry.id == boss.identity.id
+                            || dunce::canonicalize(&entry.path)
+                                .is_ok_and(|path| path == workspace)
+                    })
+                    .cloned();
+                match found {
+                    Some(project) => project,
+                    None => {
+                        let mut project = Project::from_path(workspace.clone());
+                        project.id = boss.identity.id;
+                        project.name = "Boss".into();
+                        state.projects.push(project.clone());
+                        project
+                    }
+                }
+            };
+            let sender = caller.or(boss.session_id);
+            let plan = waku_protocol::boss::BossPlan {
+                session_id: Uuid::new_v4(),
+                plan_file: plan_file.clone(),
+                idea: title.clone(),
+                finalized_at: None,
+            };
+            let (opener, _) = localized!("boss.plan_seed_opener", path = format!("memory/{plan_file}"));
+            let seed = format!("{}\n\n{}", prompt.trim(), opener);
+            let selection = AgentCreateSelection {
+                provider,
+                model,
+                title: Some(title),
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+            };
+            let session_id = self.create_agent_task_inner(
+                sender,
+                selection,
+                workspace,
+                AgentWorkspace::Local,
+                None,
+                AgentTaskPrompt::Fixed(seed),
+                events,
+                None,
+                Some(plan),
+            )?;
+            let session = self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("planning session {session_id} is missing"))?;
+            Ok(BossResult::Session {
+                session: Box::new(session),
+                project: Box::new(project),
+            })
         })
     }
 
@@ -5921,20 +5953,14 @@ impl WakuBackend {
         if let Some(employee) = employee {
             // Publish the role only after its task exists, so a revision
             // subscriber can immediately open the new employee's transcript.
-            self.boss.update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })?;
+            self.boss.add_employee(employee)?;
         }
         if let Some(plan) = planning {
             // Same ordering as the roster push: the plan registers only
             // after its task exists, and a failed launch leaves both the
             // record and the session behind — retrying the prompt revives
             // it like any managed session.
-            self.boss.update(|state| {
-                state.planning.push(plan);
-                Ok(())
-            })?;
+            self.boss.add_plan(plan)?;
         }
         // The adopted prompt above already persisted, so a launch failure
         // still leaves a normal task behind. Delivering it now starts the
@@ -6638,57 +6664,55 @@ impl WakuBackend {
                 if caller.is_some() {
                     bail!("only the human can open the boss");
                 }
-                let _lock = self.boss.operation_lock.lock();
-                let boss = self.boss.document();
-                let mut state = self.task_state.lock();
-                let mut project = Project::from_path(self.boss.owned_workspace()?);
-                project.id = boss.identity.id;
-                project.name = "Boss".into();
-                if let Some(existing) = state
-                    .projects
-                    .iter_mut()
-                    .find(|entry| entry.id == project.id)
-                {
-                    *existing = project.clone();
-                } else {
-                    state.projects.push(project.clone());
-                }
-                if let Some(id) = boss.session_id {
-                    if let Some(session) =
-                        state.sessions.iter_mut().find(|session| session.id == id)
+                self.boss.with_operation_lock(|| {
+                    let boss = self.boss.document();
+                    let mut state = self.task_state.lock();
+                    let mut project = Project::from_path(self.boss.owned_workspace()?);
+                    project.id = boss.identity.id;
+                    project.name = "Boss".into();
+                    if let Some(existing) = state
+                        .projects
+                        .iter_mut()
+                        .find(|entry| entry.id == project.id)
                     {
-                        self.task_store.hydrate(session)?;
-                        session.project_id = project.id;
-                        session.workspace = SessionWorkspace::default();
-                        let session = session.clone();
-                        state.mark_session_dirty(id);
-                        self.task_store.save(&mut state)?;
-                        return Ok(BossResult::Session {
-                            session: Box::new(session),
-                            project: Box::new(project),
-                        });
+                        *existing = project.clone();
+                    } else {
+                        state.projects.push(project.clone());
                     }
-                }
-                let project_id = project.id;
-                let mut session = AgentSession::new(project_id, provider);
-                session.model = model;
-                session.runtime_mode = mode;
-                session.title = boss.identity.name;
-                session.agent_rename_allowed = false;
-                session.boss_managed = true;
-                let id = session.id;
-                state.push_session(session.clone());
-                self.task_store.save(&mut state)?;
-                drop(state);
-                self.boss.update(|state| {
-                    state.session_id = Some(id);
-                    Ok(())
-                })?;
-                Ok(BossResult::Session {
-                    session: Box::new(session),
-                    project: Box::new(project),
+                    if let Some(id) = boss.session_id {
+                        if let Some(session) =
+                            state.sessions.iter_mut().find(|session| session.id == id)
+                        {
+                            self.task_store.hydrate(session)?;
+                            session.project_id = project.id;
+                            session.workspace = SessionWorkspace::default();
+                            let session = session.clone();
+                            state.mark_session_dirty(id);
+                            self.task_store.save(&mut state)?;
+                            return Ok(BossResult::Session {
+                                session: Box::new(session),
+                                project: Box::new(project),
+                            });
+                        }
+                    }
+                    let project_id = project.id;
+                    let mut session = AgentSession::new(project_id, provider);
+                    session.model = model;
+                    session.runtime_mode = mode;
+                    session.title = boss.identity.name;
+                    session.agent_rename_allowed = false;
+                    session.boss_managed = true;
+                    let id = session.id;
+                    state.push_session(session.clone());
+                    self.task_store.save(&mut state)?;
+                    drop(state);
+                    self.boss.set_session_id(id)?;
+                    Ok(BossResult::Session {
+                        session: Box::new(session),
+                        project: Box::new(project),
+                    })
                 })
-            }
+            },
             BossOperation::CreatePlan {
                 title,
                 plan_file,
@@ -6750,9 +6774,7 @@ impl WakuBackend {
                 priority,
                 goal_id,
                 request_id,
-            } => {
-                let _lock = self.boss.operation_lock.lock();
-                self.summon_employee(
+            } => self.boss.with_operation_lock(|| self.summon_employee(
                     caller,
                     persona_id,
                     job_title,
@@ -6773,296 +6795,296 @@ impl WakuBackend {
                     goal_id,
                     request_id,
                     events,
-                )
-            }
+                )),
             BossOperation::Control { session_id, action } => {
-                let _operation = self.boss.operation_lock.lock();
-                self.boss.require_control(caller, session_id)?;
-                use waku_protocol::boss::EmployeeLifecycle;
-                match self.boss.employee_lifecycle(session_id) {
-                    Some(EmployeeLifecycle::Queued) => {
-                        return self.control_queued_employee(caller, session_id, action);
-                    }
-                    Some(EmployeeLifecycle::Dispatching) => {
-                        // Mid-launch: prompts park in the mirrored queue and
-                        // drain once the runtime lands; stop unwinds the
-                        // in-flight grant; everything else retries against
-                        // a settled state.
-                        return match action {
-                            EmployeeControl::Prompt { prompt } => {
-                                if prompt.trim().is_empty() {
-                                    bail!("employee prompts cannot be empty");
+                self.boss.with_operation_lock(|| {
+                    self.boss.require_control(caller, session_id)?;
+                    use waku_protocol::boss::EmployeeLifecycle;
+                    match self.boss.employee_lifecycle(session_id) {
+                        Some(EmployeeLifecycle::Queued) => {
+                            return self.control_queued_employee(caller, session_id, action);
+                        }
+                        Some(EmployeeLifecycle::Dispatching) => {
+                            // Mid-launch: prompts park in the mirrored queue and
+                            // drain once the runtime lands; stop unwinds the
+                            // in-flight grant; everything else retries against
+                            // a settled state.
+                            return match action {
+                                EmployeeControl::Prompt { prompt } => {
+                                    if prompt.trim().is_empty() {
+                                        bail!("employee prompts cannot be empty");
+                                    }
+                                    self.queue_agent_prompt(session_id, prompt, caller, events)?;
+                                    Ok(BossResult::Saved)
                                 }
-                                self.queue_agent_prompt(session_id, prompt, caller, events)?;
-                                Ok(BossResult::Saved)
-                            }
-                            EmployeeControl::Stop => {
-                                record_boss_event(
-                                    &self.task_state,
-                                    &self.task_store,
-                                    session_id,
-                                    &DriverEvent::TurnFinished {
-                                        success: false,
-                                        summary: Some("Cancelled during dispatch".into()),
-                                        summary_i18n: None,
-                                    },
-                                )?;
-                                self.boss.mark_cancelled(session_id)?;
-                                self.finish_boss_employee(session_id)?;
-                                Ok(BossResult::Saved)
-                            }
-                            _ => bail!("employee is dispatching — retry once it is working"),
-                        };
+                                EmployeeControl::Stop => {
+                                    record_boss_event(
+                                        &self.task_state,
+                                        &self.task_store,
+                                        session_id,
+                                        &DriverEvent::TurnFinished {
+                                            success: false,
+                                            summary: Some("Cancelled during dispatch".into()),
+                                            summary_i18n: None,
+                                        },
+                                    )?;
+                                    self.boss.mark_cancelled(session_id)?;
+                                    self.finish_boss_employee(session_id)?;
+                                    Ok(BossResult::Saved)
+                                }
+                                _ => bail!("employee is dispatching — retry once it is working"),
+                            };
+                        }
+                        Some(EmployeeLifecycle::Finishing) => {
+                            bail!("employee is finishing; summon a fresh employee")
+                        }
+                        _ => {}
                     }
-                    Some(EmployeeLifecycle::Finishing) => {
-                        bail!("employee is finishing; summon a fresh employee")
-                    }
-                    _ => {}
-                }
-                if let EmployeeControl::SetModel {
-                    provider,
-                    model,
-                    reasoning_effort,
-                    interrupt,
-                } = &action
-                {
-                    let working = self.agent.is_working(session_id);
-                    let interrupt = interrupt.unwrap_or(false);
-                    if working && !interrupt {
-                        bail!(
-                            "wait for the employee's current turn to finish before changing its model"
-                        );
-                    }
-                    let catalog = crate::model_catalog::cached_models(*provider)
-                        .unwrap_or_else(|| crate::model_catalog::fallback_models(*provider));
-                    let selected = waku_protocol::model_catalog::packed_catalog_model(
-                        &catalog, model, *provider,
-                    )
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "model {model:?} is not listed for {}",
-                            provider.display_name()
+                    if let EmployeeControl::SetModel {
+                        provider,
+                        model,
+                        reasoning_effort,
+                        interrupt,
+                    } = &action
+                    {
+                        let working = self.agent.is_working(session_id);
+                        let interrupt = interrupt.unwrap_or(false);
+                        if working && !interrupt {
+                            bail!(
+                                "wait for the employee's current turn to finish before changing its model"
+                            );
+                        }
+                        let catalog = crate::model_catalog::cached_models(*provider)
+                            .unwrap_or_else(|| crate::model_catalog::fallback_models(*provider));
+                        let selected = waku_protocol::model_catalog::packed_catalog_model(
+                            &catalog, model, *provider,
                         )
-                    })?;
-                    let effort = reasoning_effort
-                        .clone()
-                        .map(|effort| {
-                            if effort == "default" {
-                                Ok(None)
-                            } else if selected
-                                .model
-                                .reasoning_efforts
-                                .iter()
-                                .any(|option| option.id == effort)
-                            {
-                                Ok(Some(effort))
-                            } else {
-                                Err(anyhow!(
-                                    "reasoning effort is not supported by model {model:?}"
-                                ))
-                            }
-                        })
-                        .transpose()?
-                        .flatten();
-                    let model_id = selected.model.id.clone();
-                    let current = self
-                        .task_state
-                        .lock()
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == session_id)
-                        .map(|session| (session.provider, session.model.clone()))
-                        .ok_or_else(|| anyhow!("employee session is missing"))?;
-                    let model_changed =
-                        current.0 != *provider || current.1.as_deref() != Some(model_id.as_str());
-                    // A different provider+model pair is a different
-                    // capacity claim — the employee re-enters admission
-                    // against the new cap rather than jumping between
-                    // pools mid-flight.
-                    if model_changed {
-                        self.requeue_employee(session_id, |ticket, _started| {
-                            ticket.provider = *provider;
-                            ticket.model = model_id;
-                            ticket.reasoning_effort = effort.clone();
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "model {model:?} is not listed for {}",
+                                provider.display_name()
+                            )
                         })?;
-                        let removed = self.sessions.lock().remove(&session_id);
-                        if let Some(entry) = &removed {
-                            entry.driver.begin_shutdown();
-                        }
-                        drop_detached(removed);
-                        self.agent.revoke_session(session_id);
-                        return Ok(BossResult::Saved);
-                    }
-                    let runtime = self
-                        .sessions
-                        .lock()
-                        .get(&session_id)
-                        .map(|entry| entry.driver.clone());
-                    if working && interrupt {
-                        if let Some(driver) = &runtime {
-                            driver.cancel();
-                        }
-                    }
-                    let applied_in_place = runtime.as_ref().is_some_and(|driver| {
-                        let mode = self
+                        let effort = reasoning_effort
+                            .clone()
+                            .map(|effort| {
+                                if effort == "default" {
+                                    Ok(None)
+                                } else if selected
+                                    .model
+                                    .reasoning_efforts
+                                    .iter()
+                                    .any(|option| option.id == effort)
+                                {
+                                    Ok(Some(effort))
+                                } else {
+                                    Err(anyhow!(
+                                        "reasoning effort is not supported by model {model:?}"
+                                    ))
+                                }
+                            })
+                            .transpose()?
+                            .flatten();
+                        let model_id = selected.model.id.clone();
+                        let current = self
                             .task_state
                             .lock()
                             .sessions
                             .iter()
                             .find(|session| session.id == session_id)
-                            .map(|session| session.runtime_mode)
-                            .unwrap_or_default();
-                        driver.apply_options(crate::driver::SessionOptions {
-                            mode,
-                            model: Some(model_id.clone()),
-                            reasoning_effort: effort.clone(),
-                            service_tier: None,
-                            context_window: None,
-                        })
-                    });
-                    {
-                        let mut state = self.task_state.lock();
-                        let session = state
-                            .sessions
-                            .iter_mut()
-                            .find(|session| session.id == session_id)
+                            .map(|session| (session.provider, session.model.clone()))
                             .ok_or_else(|| anyhow!("employee session is missing"))?;
-                        session.provider = *provider;
-                        session.model = Some(model_id);
-                        session.reasoning_effort = effort;
-                        session.service_tier = None;
-                        session.context_window = None;
-                        session.auto_route = false;
-                        session.route_decision = None;
-                        session.updated_at = crate::model::unix_time();
-                        state.mark_session_dirty(session_id);
-                        self.task_store.save(&mut state)?;
-                    }
-                    if !applied_in_place {
-                        let removed = self.sessions.lock().remove(&session_id);
-                        if let Some(entry) = &removed {
-                            entry.driver.begin_shutdown();
-                        }
-                        drop_detached(removed);
-                        self.agent.revoke_session(session_id);
-                    }
-                    return Ok(BossResult::Saved);
-                }
-                if let EmployeeControl::SetPermissions { permissions } = &action {
-                    self.boss
-                        .set_employee_permissions(caller, session_id, permissions.clone())?;
-                    // The employee's next prompt re-injects its persona
-                    // block so the revised grants reach it.
-                    self.boss.reset_context(session_id);
-                    return Ok(BossResult::Saved);
-                }
-                if let EmployeeControl::SetWorkspace {
-                    workspace,
-                    base_branch,
-                } = &action
-                {
-                    return self.control_employee_workspace(
-                        caller,
-                        session_id,
-                        *workspace,
-                        base_branch.clone(),
-                        events,
-                    );
-                }
-                // A prompt or steer to a finished employee re-enters
-                // admission with the same transcript — the ticket resumes
-                // it once capacity frees; a steer has no open turn to
-                // fold into, so it becomes the next queued prompt. Stop
-                // remains live-only.
-                let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
-                    || self
-                        .boss
-                        .document()
-                        .retired_employees
-                        .iter()
-                        .any(|e| e.session_id == session_id);
-                if was_expired {
-                    return match &action {
-                        EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } => {
-                            if prompt.trim().is_empty() {
-                                bail!("employee prompts cannot be empty");
-                            }
-                            let prompt = prompt.clone();
-                            self.requeue_employee(session_id, |ticket, started| {
-                                // A session that already ran replays the
-                                // prompt as a new turn behind its parked
-                                // backlog — the transcript owns the
-                                // original envelope, so the ticket's copy
-                                // goes; a never-launched shell folds the
-                                // prompt into the envelope instead.
-                                if started {
-                                    ticket.prompt.clear();
-                                    ticket.pending_prompts.push(prompt);
-                                } else {
-                                    ticket.prompt = prompt;
-                                    ticket.pending_prompts.clear();
-                                }
+                        let model_changed =
+                            current.0 != *provider || current.1.as_deref() != Some(model_id.as_str());
+                        // A different provider+model pair is a different
+                        // capacity claim — the employee re-enters admission
+                        // against the new cap rather than jumping between
+                        // pools mid-flight.
+                        if model_changed {
+                            self.requeue_employee(session_id, |ticket, _started| {
+                                ticket.provider = *provider;
+                                ticket.model = model_id;
+                                ticket.reasoning_effort = effort.clone();
                             })?;
-                            Ok(BossResult::Saved)
+                            let removed = self.sessions.lock().remove(&session_id);
+                            if let Some(entry) = &removed {
+                                entry.driver.begin_shutdown();
+                            }
+                            drop_detached(removed);
+                            self.agent.revoke_session(session_id);
+                            return Ok(BossResult::Saved);
                         }
-                        _ => bail!("employee has expired; prompt or steer can resume it"),
-                    };
-                }
-                self.boss.require_active(session_id)?;
-                match action {
-                    EmployeeControl::Prompt { prompt } => {
-                        self.queue_agent_prompt(session_id, prompt, caller, events)?;
-                    }
-                    EmployeeControl::Steer { prompt } => {
-                        if prompt.trim().is_empty() {
-                            bail!("employee prompts cannot be empty");
-                        }
-                        let driver = self
+                        let runtime = self
                             .sessions
                             .lock()
                             .get(&session_id)
-                            .map(|entry| entry.driver.clone())
-                            .ok_or_else(|| anyhow!("employee has no running runtime"))?;
-                        if !driver.supports_steer() || !self.agent.has_open_turn(session_id) {
-                            bail!("employee has no steerable running turn");
+                            .map(|entry| entry.driver.clone());
+                        if working && interrupt {
+                            if let Some(driver) = &runtime {
+                                driver.cancel();
+                            }
                         }
-                        let transport =
-                            agent_prompt_envelope(&self.task_state, session_id, caller, &prompt);
-                        self.agent.record_pending_steer(
+                        let applied_in_place = runtime.as_ref().is_some_and(|driver| {
+                            let mode = self
+                                .task_state
+                                .lock()
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == session_id)
+                                .map(|session| session.runtime_mode)
+                                .unwrap_or_default();
+                            driver.apply_options(crate::driver::SessionOptions {
+                                mode,
+                                model: Some(model_id.clone()),
+                                reasoning_effort: effort.clone(),
+                                service_tier: None,
+                                context_window: None,
+                            })
+                        });
+                        {
+                            let mut state = self.task_state.lock();
+                            let session = state
+                                .sessions
+                                .iter_mut()
+                                .find(|session| session.id == session_id)
+                                .ok_or_else(|| anyhow!("employee session is missing"))?;
+                            session.provider = *provider;
+                            session.model = Some(model_id);
+                            session.reasoning_effort = effort;
+                            session.service_tier = None;
+                            session.context_window = None;
+                            session.auto_route = false;
+                            session.route_decision = None;
+                            session.updated_at = crate::model::unix_time();
+                            state.mark_session_dirty(session_id);
+                            self.task_store.save(&mut state)?;
+                        }
+                        if !applied_in_place {
+                            let removed = self.sessions.lock().remove(&session_id);
+                            if let Some(entry) = &removed {
+                                entry.driver.begin_shutdown();
+                            }
+                            drop_detached(removed);
+                            self.agent.revoke_session(session_id);
+                        }
+                        return Ok(BossResult::Saved);
+                    }
+                    if let EmployeeControl::SetPermissions { permissions } = &action {
+                        self.boss
+                            .set_employee_permissions(caller, session_id, permissions.clone())?;
+                        // The employee's next prompt re-injects its persona
+                        // block so the revised grants reach it.
+                        self.boss.reset_context(session_id);
+                        return Ok(BossResult::Saved);
+                    }
+                    if let EmployeeControl::SetWorkspace {
+                        workspace,
+                        base_branch,
+                    } = &action
+                    {
+                        return self.control_employee_workspace(
+                            caller,
                             session_id,
-                            crate::agent::AgentPrompt {
-                                prompt: prompt.clone(),
-                                transport: transport.clone(),
-                                sender: caller,
-                                queued_id: None,
-                                context: None,
-                                hidden: false,
-                            },
+                            *workspace,
+                            base_branch.clone(),
+                            events,
                         );
-                        driver.steer(transport.unwrap_or(prompt));
                     }
-                    EmployeeControl::Stop => {
-                        record_boss_event(
-                            &self.task_state,
-                            &self.task_store,
-                            session_id,
-                            &DriverEvent::TurnFinished {
-                                success: false,
-                                summary: Some("Stopped by supervisor".into()),
-                                summary_i18n: None,
-                            },
-                        )?;
-                        self.boss.mark_cancelled(session_id)?;
-                        self.finish_boss_employee(session_id)?;
+                    // A prompt or steer to a finished employee re-enters
+                    // admission with the same transcript — the ticket resumes
+                    // it once capacity frees; a steer has no open turn to
+                    // fold into, so it becomes the next queued prompt. Stop
+                    // remains live-only.
+                    let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
+                        || self
+                            .boss
+                            .document()
+                            .retired_employees
+                            .iter()
+                            .any(|e| e.session_id == session_id);
+                    if was_expired {
+                        return match &action {
+                            EmployeeControl::Prompt { prompt } | EmployeeControl::Steer { prompt } => {
+                                if prompt.trim().is_empty() {
+                                    bail!("employee prompts cannot be empty");
+                                }
+                                let prompt = prompt.clone();
+                                self.requeue_employee(session_id, |ticket, started| {
+                                    // A session that already ran replays the
+                                    // prompt as a new turn behind its parked
+                                    // backlog — the transcript owns the
+                                    // original envelope, so the ticket's copy
+                                    // goes; a never-launched shell folds the
+                                    // prompt into the envelope instead.
+                                    if started {
+                                        ticket.prompt.clear();
+                                        ticket.pending_prompts.push(prompt);
+                                    } else {
+                                        ticket.prompt = prompt;
+                                        ticket.pending_prompts.clear();
+                                    }
+                                })?;
+                                Ok(BossResult::Saved)
+                            }
+                            _ => bail!("employee has expired; prompt or steer can resume it"),
+                        };
                     }
-                    EmployeeControl::SetModel { .. }
-                    | EmployeeControl::SetPermissions { .. }
-                    | EmployeeControl::SetWorkspace { .. } => {
-                        unreachable!("handled above")
+                    self.boss.require_active(session_id)?;
+                    match action {
+                        EmployeeControl::Prompt { prompt } => {
+                            self.queue_agent_prompt(session_id, prompt, caller, events)?;
+                        }
+                        EmployeeControl::Steer { prompt } => {
+                            if prompt.trim().is_empty() {
+                                bail!("employee prompts cannot be empty");
+                            }
+                            let driver = self
+                                .sessions
+                                .lock()
+                                .get(&session_id)
+                                .map(|entry| entry.driver.clone())
+                                .ok_or_else(|| anyhow!("employee has no running runtime"))?;
+                            if !driver.supports_steer() || !self.agent.has_open_turn(session_id) {
+                                bail!("employee has no steerable running turn");
+                            }
+                            let transport =
+                                agent_prompt_envelope(&self.task_state, session_id, caller, &prompt);
+                            self.agent.record_pending_steer(
+                                session_id,
+                                crate::agent::AgentPrompt {
+                                    prompt: prompt.clone(),
+                                    transport: transport.clone(),
+                                    sender: caller,
+                                    queued_id: None,
+                                    context: None,
+                                    hidden: false,
+                                },
+                            );
+                            driver.steer(transport.unwrap_or(prompt));
+                        }
+                        EmployeeControl::Stop => {
+                            record_boss_event(
+                                &self.task_state,
+                                &self.task_store,
+                                session_id,
+                                &DriverEvent::TurnFinished {
+                                    success: false,
+                                    summary: Some("Stopped by supervisor".into()),
+                                    summary_i18n: None,
+                                },
+                            )?;
+                            self.boss.mark_cancelled(session_id)?;
+                            self.finish_boss_employee(session_id)?;
+                        }
+                        EmployeeControl::SetModel { .. }
+                        | EmployeeControl::SetPermissions { .. }
+                        | EmployeeControl::SetWorkspace { .. } => {
+                            unreachable!("handled above")
+                        }
                     }
-                }
-                Ok(BossResult::Saved)
-            }
+                    Ok(BossResult::Saved)
+                })
+            },
             BossOperation::ReportBlocker { message } => {
                 let caller =
                     caller.ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;
@@ -7117,8 +7139,7 @@ impl WakuBackend {
                 expected_revision,
                 model_limits,
                 host,
-            } => {
-                let _lock = self.boss.operation_lock.lock();
+            } => self.boss.with_operation_lock(|| {
                 let policy =
                     self.boss
                         .set_resource_policy(caller, expected_revision, model_limits, host)?;
@@ -7127,7 +7148,7 @@ impl WakuBackend {
                 }
                 self.wake_summon_queue();
                 Ok(BossResult::ResourcePolicySet { policy })
-            }
+            }),
             BossOperation::Eval { script } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can eval boss scripts");
@@ -7399,16 +7420,7 @@ impl WakuBackend {
         // prompt queue. Marking the record expired first suppresses the
         // settle; the resurrect below restores it once the old turn's
         // events are known to have passed.
-        self.boss.update(|state| {
-            if let Some(entry) = state
-                .employees
-                .iter_mut()
-                .find(|entry| entry.session_id == session_id)
-            {
-                entry.expired = true;
-            }
-            Ok(())
-        })?;
+        self.boss.set_employee_expired(session_id, true)?;
         let switch = (|| -> anyhow::Result<()> {
             if self.agent.has_open_turn(session_id)
                 && let Some(entry) = self.sessions.lock().get(&session_id)
@@ -7497,16 +7509,12 @@ impl WakuBackend {
     /// the bounded reconciliation tick share. Nothing here holds
     /// `operation_lock`; admission decisions serialize through
     /// `BossService::update` and the broker's authority lock.
-    fn start_summon_scheduler(&self) {
+    fn start_summon_scheduler(self: &Arc<Self>) {
         use std::sync::atomic::Ordering;
-        let Some(backend) = self.boss.backend() else {
-            // Not bound yet — `start_automations` runs us once it is.
-            return;
-        };
         if !self.boss.is_active() || self.summon_scheduler_started.swap(true, Ordering::AcqRel) {
             return;
         }
-        let backend = Arc::downgrade(&backend);
+        let backend = Arc::downgrade(self);
         let wake = self.summon_wake.clone();
         let _ = std::thread::Builder::new()
             .name("summon-scheduler".into())
@@ -7548,11 +7556,9 @@ impl WakuBackend {
 
     /// Wake the scheduler for one dispatch pass — call after enqueueing a
     /// ticket, releasing a slot, or changing policy or a queued selection.
-    /// Without a scheduler thread (tests never bind the backend's `Arc`)
-    /// the pass runs inline, so admissions still land before the op
-    /// returns.
+    /// Without a scheduler thread (as in tests before startup) the pass
+    /// runs inline, so admissions still land before the op returns.
     fn wake_summon_queue(&self) {
-        self.start_summon_scheduler();
         if self
             .summon_scheduler_started
             .load(std::sync::atomic::Ordering::Acquire)
@@ -7700,18 +7706,7 @@ impl WakuBackend {
                 }
                 // The envelope has been adopted — the transcript owns it
                 // now, and a later requeue must not replay it.
-                let _ = self.boss.update(|state| {
-                    if let Some(entry) = state
-                        .employees
-                        .iter_mut()
-                        .find(|entry| entry.session_id == session_id)
-                        && let Some(ticket) = &mut entry.ticket
-                    {
-                        ticket.prompt.clear();
-                        ticket.pending_prompts.clear();
-                    }
-                    Ok(())
-                });
+                let _ = self.boss.clear_employee_prompt_queue(session_id);
                 self.boss.outbox_push(
                     session_id,
                     ticket.generation,
@@ -7732,16 +7727,10 @@ impl WakuBackend {
                 // `dispatching -> expired`: the blocker rides the finish
                 // report so the supervisor hears why the job died, and the
                 // summon RPC surfaces an immediate failure as an error.
-                let _ = self.boss.update(|state| {
-                    if let Some(entry) = state
-                        .employees
-                        .iter_mut()
-                        .find(|entry| entry.session_id == session_id)
-                    {
-                        entry.blocker = Some(format!("Employee launch failed: {error:#}"));
-                    }
-                    Ok(())
-                });
+                let _ = self.boss.set_employee_blocker(
+                    session_id,
+                    format!("Employee launch failed: {error:#}"),
+                );
                 self.finish_boss_employee(session_id)?;
                 Ok(true)
             }
@@ -7983,11 +7972,11 @@ impl WakuBackend {
     /// interrupted like any working employee, while an unstarted launch
     /// reverts to the queue — replaying it would double-dispatch, and
     /// reporting it would mourn a job that never ran.
-    pub(crate) fn recover_boss_employee(
-        &self,
-        entry: &waku_protocol::boss::BossEmployee,
-    ) -> anyhow::Result<()> {
+    pub(crate) fn recover_boss_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
         use waku_protocol::boss::EmployeeLifecycle;
+        let Some(entry) = self.boss.employee(session_id) else {
+            return Ok(());
+        };
         match entry.lifecycle() {
             EmployeeLifecycle::Dispatching => {
                 let started = self
@@ -7998,18 +7987,10 @@ impl WakuBackend {
                     .find(|session| session.id == entry.session_id)
                     .is_some_and(|session| session.has_started());
                 if started {
-                    let _ = self.boss.update(|state| {
-                        if let Some(employee) = state
-                            .employees
-                            .iter_mut()
-                            .find(|candidate| candidate.session_id == entry.session_id)
-                        {
-                            if employee.blocker.is_none() {
-                                employee.blocker = Some("interrupted by a daemon restart".into());
-                            }
-                        }
-                        Ok(())
-                    });
+                    let _ = self.boss.set_employee_blocker_if_empty(
+                        entry.session_id,
+                        "interrupted by a daemon restart".into(),
+                    );
                     self.finish_boss_employee(entry.session_id)
                 } else {
                     self.boss.revert_dispatch(entry.session_id)?;
@@ -8017,7 +7998,9 @@ impl WakuBackend {
                     Ok(())
                 }
             }
-            EmployeeLifecycle::Finishing => self.finish_boss_employee_tail(entry.session_id, entry),
+            EmployeeLifecycle::Finishing => {
+                self.finish_boss_employee_tail(session_id, &entry)
+            }
             _ => self.finish_boss_employee(entry.session_id),
         }
     }
@@ -12546,11 +12529,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("waku-boss-header-{}", Uuid::new_v4()));
         let boss = crate::boss::BossService::open(root.join("boss")).unwrap();
         let boss_id = Uuid::new_v4();
-        boss.update(|state| {
-            state.session_id = Some(boss_id);
-            Ok(())
-        })
-        .unwrap();
+        boss.set_session_id(boss_id).unwrap();
 
         let mut state = PersistedState::empty();
         let project = Project::from_path(root.join("app"));
@@ -14278,12 +14257,7 @@ mod tests {
         settings.replace(daemon_settings).unwrap();
         let backend = WakuBackend::new(settings, store).unwrap();
         backend
-            .boss
-            .update(|document| {
-                document.session_id = Some(boss_id);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss_id).unwrap();
 
         let search = |query: &str| match backend
             .agent_search_sessions(Some(boss_id), Uuid::nil(), query, None)
@@ -14471,12 +14445,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-finish-{}", Uuid::new_v4()));
         let (backend, supervisor) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -14484,12 +14453,7 @@ mod tests {
             .unwrap();
         let employee_id = employee.session_id;
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         let mut child = AgentSession::new(
             backend.task_state.lock().sessions[0].project_id,
             ProviderKind::Codex,
@@ -14555,12 +14519,7 @@ mod tests {
     ) {
         let (backend, supervisor) = surface_test_backend(root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -14568,12 +14527,7 @@ mod tests {
             .unwrap();
         let employee_id = employee.session_id;
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         let mut child = AgentSession::new(
             backend.task_state.lock().sessions[0].project_id,
             ProviderKind::Codex,
@@ -14622,10 +14576,7 @@ mod tests {
             employee_finish_fixture(&root);
         backend
             .boss
-            .update(|state| {
-                state.employees[0].blocker = Some("needs a release call".into());
-                Ok(())
-            })
+            .set_employee_blocker(employee_id, "needs a release call".into())
             .unwrap();
         backend.finish_boss_employee(employee_id).unwrap();
         backend.finish_boss_employee(employee_id).unwrap();
@@ -14721,10 +14672,7 @@ mod tests {
             employee_finish_fixture(&root);
         backend
             .boss
-            .update(|state| {
-                state.employees[0].work_goal = waku_protocol::boss::EmployeeGoal::Errand;
-                Ok(())
-            })
+            .set_employee_goal(employee_id, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         backend.finish_boss_employee(employee_id).unwrap();
         let prompts = parent_capture.prompts.lock();
@@ -14804,12 +14752,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-expire-notify-{}", Uuid::new_v4()));
         let (backend, supervisor) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -14817,12 +14760,7 @@ mod tests {
             .unwrap();
         let employee_id = employee.session_id;
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         {
             let mut state = backend.task_state.lock();
             let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
@@ -14875,12 +14813,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-resources-{}", Uuid::new_v4()));
         let (backend, boss) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         let error = backend
             .handle(
                 Request {
@@ -14914,12 +14847,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-revive-{}", Uuid::new_v4()));
         let (backend, supervisor) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -14928,12 +14856,7 @@ mod tests {
         let employee_id = employee.session_id;
         let employee_name = employee.identity.name.clone();
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         {
             let mut state = backend.task_state.lock();
             let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
@@ -15015,18 +14938,7 @@ mod tests {
         drop(prompts);
 
         backend.finish_boss_employee(employee_id).unwrap();
-        backend
-            .boss
-            .update(|state| {
-                state
-                    .employees
-                    .iter_mut()
-                    .find(|employee| employee.session_id == employee_id)
-                    .unwrap()
-                    .expired_at = Some(1);
-                Ok(())
-            })
-            .unwrap();
+        backend.boss.set_employee_expired_at(employee_id, 1).unwrap();
         assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
         assert!(backend.boss.employee(employee_id).is_none());
         assert!(
@@ -15049,12 +14961,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-retired-{}", Uuid::new_v4()));
         let (backend, supervisor) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -15062,12 +14969,7 @@ mod tests {
             .unwrap();
         let employee_id = employee.session_id;
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         {
             // A pre-flag employee task: persisted and on the roster, but
             // never stamped.
@@ -15097,19 +14999,7 @@ mod tests {
                 .iter()
                 .any(|session| session.id == employee_id && session.boss_managed)
         );
-        backend
-            .boss
-            .update(|state| {
-                let employee = state
-                    .employees
-                    .iter_mut()
-                    .find(|entry| entry.session_id == employee_id)
-                    .unwrap();
-                employee.expired = true;
-                employee.expired_at = Some(1);
-                Ok(())
-            })
-            .unwrap();
+        backend.boss.set_employee_expired_at(employee_id, 1).unwrap();
         assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
         assert!(backend.boss.employee(employee_id).is_none());
         assert!(
@@ -15164,12 +15054,7 @@ mod tests {
 
         let (backend, boss) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         let mut daemon_settings = backend.settings.get();
         daemon_settings.provider_binary_overrides.insert(
             ProviderKind::Codex,
@@ -15248,12 +15133,7 @@ mod tests {
         std::fs::create_dir_all(&project).unwrap();
         let (backend, boss) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         let mut daemon_settings = backend.settings.get();
         daemon_settings.provider_binary_overrides.insert(
             ProviderKind::Codex,
@@ -15323,12 +15203,7 @@ mod tests {
     fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
         let (backend, boss) = surface_test_backend(root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         *backend.broker_root.lock() = Some(root.join("broker"));
         let mut daemon_settings = backend.settings.get();
         for provider in [ProviderKind::Claude, ProviderKind::Codex] {
@@ -16500,12 +16375,7 @@ mod tests {
 
         let (backend, supervisor) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(supervisor);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(supervisor).unwrap();
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
@@ -16520,12 +16390,7 @@ mod tests {
             .unwrap();
         let employee_id = employee.session_id;
         backend
-            .boss
-            .update(|state| {
-                state.employees.push(employee);
-                Ok(())
-            })
-            .unwrap();
+            .boss.add_employee(employee).unwrap();
         let git_project = Project::from_path(dunce::canonicalize(&project).unwrap());
         let mut child = AgentSession::new(git_project.id, ProviderKind::Codex);
         child.id = employee_id;
@@ -16678,12 +16543,7 @@ mod tests {
         let (backend, _) = surface_test_backend(&root);
         let boss = backend.boss.document().identity.id;
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         let eval = |script: &str| {
             backend.handle_boss_operation(
                 None,
@@ -16739,12 +16599,7 @@ mod tests {
         };
         assert_eq!(value, serde_json::json!(40));
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(Uuid::new_v4());
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(Uuid::new_v4()).unwrap();
         assert!(eval("count").is_err());
         assert!(
             backend
@@ -16839,18 +16694,13 @@ mod tests {
     fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
         use waku_protocol::boss::{BossOperation, BossResult};
         let root = std::env::temp_dir().join(format!("boss-plan-final-{}", Uuid::new_v4()));
-        // The grace sweep reaches the backend through the weak binding
+        // The grace sweep reaches the backend through the weak callback
         // `start_automations` installs in production — bind it directly.
         let (backend, boss) = surface_test_backend(&root);
         let backend = Arc::new(backend);
-        backend.boss.bind_backend(&backend);
+        backend.bind_boss_finish_callback();
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         let mut daemon_settings = backend.settings.get();
         daemon_settings.provider_binary_overrides.insert(
             ProviderKind::Codex,
@@ -16951,10 +16801,7 @@ mod tests {
         // report would escalate to the boss session instead.
         backend
             .boss
-            .update(|state| {
-                state.planning[0].finalized_at = Some(1);
-                Ok(())
-            })
+            .set_plan_finalized_at(plan.session_id, 1)
             .unwrap();
         assert_eq!(
             backend
@@ -16992,12 +16839,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("boss-plan-card-{}", Uuid::new_v4()));
         let (backend, boss) = surface_test_backend(&root);
         backend
-            .boss
-            .update(|state| {
-                state.session_id = Some(boss);
-                Ok(())
-            })
-            .unwrap();
+            .boss.set_session_id(boss).unwrap();
         backend.sessions.lock().insert(
             boss,
             RuntimeEntry {

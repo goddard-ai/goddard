@@ -36,6 +36,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-localization = { path = "../waku-localization" }
+waku-boss = { path = "../waku-boss" }
 waku-memory-engine = { path = "../waku-memory-engine" }
 waku-protocol = { path = "../waku-protocol" }
 waku-repo-map = { path = "../waku-repo-map" }
@@ -44,7 +45,6 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2
 cron = "0.15"
 chrono-tz = "0.10"
 mdns-sd = "0.21.3"
-rhai = { version = "1.26.1", features = ["sync"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

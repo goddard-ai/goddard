@@ -11203,6 +11203,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-boss"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "parking_lot",
+ "rhai",
+ "serde",
+ "serde_json",
+ "url",
+ "uuid",
+ "waku-memory-engine",
+ "waku-protocol",
+]
+
+[[package]]
 name = "waku-client"
 version = "0.1.0"
 dependencies = [
@@ -11254,7 +11269,6 @@ dependencies = [
  "nucleo-matcher",
  "objc2-foundation 0.3.2",
  "parking_lot",
- "rhai",
  "rusqlite",
  "serde",
  "serde-saphyr",
@@ -11268,6 +11282,7 @@ dependencies = [
  "tungstenite 0.30.0",
  "url",
  "uuid",
+ "waku-boss",
  "waku-client",
  "waku-localization",
  "waku-memory-engine",
