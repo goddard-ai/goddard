@@ -637,6 +637,9 @@ fn blocked(
         .iter()
         .filter(|key| !held.iter().any(|r| r.resources.exclusive.contains(key)))
         .collect();
+    // An external device conflicts only with a request for that same
+    // exclusive key. It is user-owned, so it does not consume our shared
+    // resident-device capacity.
     if request.resident_devices > 0
         && (!observation.errors.is_empty()
             || external.iter().any(|key| request.exclusive.contains(key)))
@@ -653,7 +656,6 @@ fn blocked(
                     .iter()
                     .map(|r| u64::from(r.resources.resident_devices))
                     .sum::<u64>()
-                + external.len() as u64
                 > u64::from(policy.resident_devices))
         || request.native_builds > 0
             && (u64::from(request.native_builds)
@@ -1101,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_platform_resident_capacity_counts_retained_idle_and_user_owned_devices() {
+    fn cross_platform_resident_capacity_counts_retained_idle_but_not_user_owned_devices() {
         let h = Harness::new();
         let a = Uuid::new_v4();
         let b = Uuid::new_v4();
@@ -1126,24 +1128,22 @@ mod tests {
             .broker
             .transaction(a, acquisition(android(), None), observed())
             .unwrap();
-        assert!(!granted(&user_device, id(&user_device)));
+        assert!(granted(&user_device, id(&user_device)));
         assert_eq!(user_device.external_devices, ios().exclusive);
-        // External resident overage does not reserve the independent build pool.
+        // The unrelated Android claim is admitted despite the external iOS
+        // device. Native builds remain an independent pool.
         let native = external_host
             .broker
             .transaction(b, acquisition(build(), None), observed())
             .unwrap();
-        assert!(!granted(&native, id(&native))); // strict FIFO, blocked behind device request
-        external_host.op(
-            a,
-            ResourceOperation::Cancel {
-                id: id(&user_device),
-            },
-        );
-        assert!(granted(
-            &external_host.op(b, ResourceOperation::Status { id: None }),
-            id(&native)
-        ));
+        assert!(granted(&native, id(&native)));
+
+        let same_device_host = Harness::new();
+        let same_device = same_device_host
+            .broker
+            .transaction(a, acquisition(ios(), None), observed())
+            .unwrap();
+        assert!(!granted(&same_device, id(&same_device)));
     }
 
     #[test]
