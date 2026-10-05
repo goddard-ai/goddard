@@ -63,11 +63,10 @@ impl Waku {
     /// the voice-briefing pause. It rides the composer suggestion rows
     /// when one claims the slot; otherwise `render_composer_float_chips`
     /// hangs it off the composer card's top edge in the same place.
-    /// Clicking sends the approval prompt through the normal send path —
-    /// it lands as a real transcript message, queues behind a live turn,
-    /// and the session then calls `finalizePlan` itself — freezing the
-    /// document and handing implementation to the boss chat — rather than
-    /// the chip freezing the document directly.
+    /// Clicking sends the human's `finalizePlan` request directly, so this
+    /// action is the approval and does not ask the user to confirm it again.
+    /// An agent-initiated `finalizePlan` still uses its separate permission
+    /// card.
     pub(super) fn plan_approval_chip(
         &self,
         theme: &Theme,
@@ -78,7 +77,8 @@ impl Waku {
             return None;
         }
         let session_id = session.id;
-        let prompt = self.plan_approval_prompt()?;
+        let plan_file = session.planning.as_ref()?.plan_file.clone();
+        let key = self.daemons.session_owner(session_id);
         let (icon_path, label) = self.suggestion_parts(PLAN_APPROVAL_ACTION)?;
         Some(
             div()
@@ -100,10 +100,12 @@ impl Waku {
                 .child(label)
                 .tooltip(Tooltip::text(tr_cow!("boss.plan_approve_hint")))
                 .on_activation(cx, move |this, _, cx| {
-                    this.submit_canned_prompt_to(
-                        session_id,
-                        PLAN_APPROVAL_ACTION,
-                        prompt.clone(),
+                    this.boss_request(
+                        key,
+                        waku_client::boss::BossOperation::FinalizePlan {
+                            plan_file: Some(plan_file.clone()),
+                        },
+                        super::boss::BossReply::Finalize,
                         cx,
                     );
                 }),

@@ -270,6 +270,7 @@ pub(super) enum BossReply {
     List,
     Read,
     Saved,
+    Finalize,
 }
 
 /// Sidebar employee order: newest summon first. `created_at` is the
@@ -783,6 +784,11 @@ impl Waku {
                             }
                             BossResult::File { path, content } => {
                                 this.boss_ui.loaded_file = Some((key, path, content));
+                            }
+                            BossResult::PlanFinalized { .. }
+                                if matches!(reply, BossReply::Finalize) =>
+                            {
+                                this.boss_request(key, BossOperation::View, BossReply::List, cx);
                             }
                             _ => {}
                         }

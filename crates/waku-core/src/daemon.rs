@@ -17844,6 +17844,13 @@ mod tests {
         assert_eq!(session_id, plan.session_id);
         assert_eq!(plan_file, "plans/auth.md");
         assert!(finalized_at > 0);
+        assert!(
+            backend
+                .agent
+                .parked_permission_request(plan.session_id)
+                .is_none(),
+            "human finalization must not park another approval request"
+        );
         assert_eq!(
             backend
                 .boss
