@@ -6119,11 +6119,11 @@ boss.new_face:
 boss.planning_label:
   en: Planning
 boss.plan_seed_opener:
-  en: This planning session is yours for the request above, and your role is product designer — think through the feature from the user's perspective. Explain your understanding of the request, then draft and revise the design doc at %{path} with `writeFile`. The doc covers the user experience, flows, states, edge cases, tradeoffs, open questions, and decisions with their rationale — implementation details like file paths, code structure, and migration steps are out of scope; the employees who implement it decide the technical how. When the design is ready for the user's approval, call `finalizePlan` — approval freezes the document. Approval is your cue to build, not to stop — implement the approved design by summoning employees for the work, coordinating them, and reporting progress to the boss chat.
+  en: This planning session is yours for the request above, and your role is product designer — think through the feature from the user's perspective. Explain your understanding of the request, then draft and revise the design doc at %{path} with `writeFile`. The doc covers the user experience, flows, states, edge cases, tradeoffs, open questions, and decisions with their rationale — implementation details like file paths, code structure, and migration steps are out of scope; the employees who implement it decide the technical how. While drafting you may summon employees for design research and audits, but never to build. When the design is ready for the user's approval, call `finalizePlan` — approval freezes the document and reports the design to the boss chat, which coordinates implementation from there. Approval is where your job ends.
 boss.plan_finalize_title:
   en: Finalize plan?
 boss.plan_finalize_detail:
-  en: Freeze %{file} ("%{idea}") as the approved design? The document becomes read-only; the planning session then implements it via employees and archives once its grace period ends.
+  en: Freeze %{file} ("%{idea}") as the approved design? The document becomes read-only and the boss takes over implementation; the planning session stays open briefly for questions, then archives.
 boss.plan_finalize:
   en: Finalize plan
 boss.plan_finalized:
@@ -6131,15 +6131,15 @@ boss.plan_finalized:
 boss.plan_finalized_ago:
   en: Finalized %{ago}
 boss.plan_approve_prompt:
-  en: The design is approved — finalize it and begin implementing. Summon employees for the work.
+  en: The design is approved — finalize it and hand implementation to the boss.
 boss.plan_approve_hint:
-  en: Approve the design — the planning session finalizes it and starts the work
+  en: Approve the design — the session finalizes it and the boss starts the work
 boss.plan_sent_for_execution:
-  en: Design sent for implementation
+  en: Handing the design to the boss
 boss.plan_sent_hint:
   en: This session no longer takes prompts.
 boss.plan_sealed_hint:
-  en: The design doc is frozen — this session is read-only.
+  en: The design doc is frozen — the boss runs implementation; this session only answers questions.
 boss.plan_unavailable:
   en: The design doc could not be loaded.
 boss.plan_select:

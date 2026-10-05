@@ -683,7 +683,8 @@ pub enum BossOperation {
     /// Freeze a plan document after user approval. A planning session
     /// finalizes its own plan (`plan_file` omitted); the boss chat or a
     /// human names the file. Approval lands on a daemon-owned request card;
-    /// the session archives once the grace period elapses.
+    /// the approved design is handed to the boss chat for implementation,
+    /// and the session archives once the grace period elapses.
     FinalizePlan {
         #[serde(default)]
         plan_file: Option<String>,

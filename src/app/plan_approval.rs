@@ -65,8 +65,9 @@ impl Waku {
     /// hangs it off the composer card's top edge in the same place.
     /// Clicking sends the approval prompt through the normal send path —
     /// it lands as a real transcript message, queues behind a live turn,
-    /// and the session's boss then calls `finalizePlan` itself and starts
-    /// delegating — rather than freezing the document directly.
+    /// and the session then calls `finalizePlan` itself — freezing the
+    /// document and handing implementation to the boss chat — rather than
+    /// the chip freezing the document directly.
     pub(super) fn plan_approval_chip(
         &self,
         theme: &Theme,

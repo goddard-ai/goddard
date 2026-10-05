@@ -5121,6 +5121,9 @@ impl WakuBackend {
     /// only the `finalize` answer stamps `finalized_at`, freezes writes,
     /// and starts the post-approval grace period before archival. A human
     /// caller is the approver, so a master-token call finalizes directly.
+    /// Freezing also queues the implementation handoff on the boss chat —
+    /// a durable hidden prompt naming the frozen doc — so the boss
+    /// coordinates the work from one surface.
     fn finalize_plan(
         &self,
         caller: Option<Uuid>,
@@ -5245,6 +5248,23 @@ impl WakuBackend {
         // The next prompt re-injects the persona block so the agent learns
         // the plan froze.
         self.boss.reset_context(plan.session_id);
+        // Approval hands implementation to the boss: the handoff rides the
+        // same durable hidden-prompt path employee reports use — the parked
+        // mirror survives a restart, so a failed launch only delays it.
+        if let Some(boss_session) = self.boss.document().session_id {
+            let handoff = format!(
+                "Planning session \"{}\" ({}) finalized its design at memory/{} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
+                finalized.idea, plan.session_id, finalized.plan_file,
+            );
+            if let Err(error) = self.queue_agent_prompt_hidden(
+                boss_session,
+                handoff,
+                Some(plan.session_id),
+                events,
+            ) {
+                eprintln!("could not hand the finalized plan to the boss chat: {error:#}");
+            }
+        }
         Ok(BossResult::PlanFinalized {
             session_id: plan.session_id,
             plan_file: finalized.plan_file,
@@ -16688,8 +16708,9 @@ mod tests {
 
     /// A human `finalizePlan` is its own approver — no card parks — and the
     /// stamp lands on the registry record, the session marker, and the
-    /// document freeze. After the grace sweep the session is archived like
-    /// any managed task and can no longer summon.
+    /// document freeze, while the implementation handoff parks on the boss
+    /// chat's durable queue. After the grace sweep the session is archived
+    /// like any managed task and can no longer summon.
     #[test]
     fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
         use waku_protocol::boss::{BossOperation, BossResult};
@@ -16763,6 +16784,29 @@ mod tests {
                 Some(finalized_at)
             );
             assert!(session.archived_at.is_none());
+        }
+        // The boss chat carries the handoff: a hidden daemon-owned prompt
+        // naming the frozen document, mirrored into the session document so
+        // a restart cannot drop it. The boss session has no live runtime
+        // here, so delivery waits in the parked queue.
+        {
+            let mut state = backend.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == boss)
+                .unwrap();
+            backend
+                .task_store
+                .hydrate(&mut state.sessions[index])
+                .unwrap();
+            let handoff = state.sessions[index]
+                .queued_messages
+                .iter()
+                .find(|queued| queued.is_agent_owned() && queued.hidden)
+                .expect("the boss chat holds the parked handoff");
+            assert!(handoff.content.contains("finalized its design"));
+            assert!(handoff.content.contains("memory/plans/auth.md"));
         }
         // The document is frozen and re-finalizing is refused.
         assert!(
@@ -16840,11 +16884,12 @@ mod tests {
         let (backend, boss) = surface_test_backend(&root);
         backend
             .boss.set_session_id(boss).unwrap();
+        let boss_capture = Arc::new(CaptureDriver::default());
         backend.sessions.lock().insert(
             boss,
             RuntimeEntry {
                 runtime_id: Uuid::new_v4(),
-                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                driver: DriverHandle::from_control(boss_capture.clone()),
                 last_active: std::time::Instant::now(),
                 resumable: false,
                 computer_use_available: false,
@@ -16914,6 +16959,16 @@ mod tests {
                     .finalized_at
                     .is_some(),
                 true
+            );
+            // Approval handed implementation to the boss chat — the
+            // handoff prompt drained straight into its idle runtime.
+            let prompts = boss_capture.prompts.lock().clone();
+            assert!(
+                prompts
+                    .iter()
+                    .any(|prompt| prompt.contains("finalized its design")
+                        && prompt.contains("memory/plans/auth.md")),
+                "the boss chat received the implementation handoff"
             );
             let call = scope.spawn(finalize("billing.md"));
             let request_id = loop {
