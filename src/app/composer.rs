@@ -5034,7 +5034,12 @@ impl Waku {
                     .get(&session.id)
                     .is_some_and(|runtime| runtime.driver.supports_steer()));
         let mut list = div().flex().flex_col().py(px(4.0));
-        for (index, message) in session.queued_messages.iter().enumerate() {
+        // Painted rows, not message indices: hidden entries leave gaps, and
+        // the card's overflow_hidden clips to a rectangle rather than its
+        // rounded corners — so the first rendered row carries the card's top
+        // radii itself and only later rows draw a separator.
+        let mut rows = 0usize;
+        for message in &session.queued_messages {
             let message_id = message.id;
             // The parked continue nudge is client work too: it renders as a
             // labelled row with a remove control instead of hiding, so the
@@ -5047,7 +5052,10 @@ impl Waku {
                         .id(SharedString::from(format!("queued-message-{message_id}")))
                         .min_h(px(30.0))
                         .overflow_hidden()
-                        .when(index > 0, |row| {
+                        .when(rows == 0, |row| {
+                            row.rounded_tl(px(14.0)).rounded_tr(px(14.0))
+                        })
+                        .when(rows > 0, |row| {
                             row.border_t(hairline()).border_color(theme.separator)
                         })
                         .pl(px(12.0))
@@ -5073,6 +5081,7 @@ impl Waku {
                         )
                         .child(div().h(px(30.0)).flex().items_center().child(remove_button)),
                 );
+                rows += 1;
                 continue;
             }
             if message.hidden {
@@ -5183,7 +5192,10 @@ impl Waku {
                     .id(SharedString::from(format!("queued-message-{message_id}")))
                     .min_h(px(30.0))
                     .overflow_hidden()
-                    .when(index > 0, |row| {
+                    .when(rows == 0, |row| {
+                        row.rounded_tl(px(14.0)).rounded_tr(px(14.0))
+                    })
+                    .when(rows > 0, |row| {
                         row.border_t(hairline()).border_color(theme.separator)
                     })
                     .pl(px(12.0))
@@ -5252,6 +5264,7 @@ impl Waku {
                         ))
                     }),
             );
+            rows += 1;
         }
         Some(
             div()
@@ -5262,8 +5275,8 @@ impl Waku {
                 .border_r(hairline())
                 .border_color(theme.separator)
                 .bg(theme.composer)
-                // Row hover fills are full-width rectangles; clip
-                // them to the card's rounded corners.
+                // overflow_hidden clips to a rectangle, not these rounded
+                // corners — the first row above carries the matching radii.
                 .overflow_hidden()
                 .child(list),
         )
