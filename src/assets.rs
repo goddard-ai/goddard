@@ -397,14 +397,24 @@ mod tests {
         }
     }
 
-    /// Every `"icons/…svg"` literal in the crate's source must resolve through
-    /// the embedded `AssetSource` — an SVG left out of `icons!` renders blank
-    /// with no error anywhere.
+    /// Every `"icons/…svg"` literal in the workspace's source must resolve
+    /// through the embedded `AssetSource` — an SVG left out of `icons!`
+    /// renders blank with no error anywhere.
     #[test]
     fn every_referenced_icon_is_embedded() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        use crate::persistence::CustomCommandIcon;
+
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut files = Vec::new();
-        rust_sources(&root, &mut files);
+        rust_sources(&manifest.join("src"), &mut files);
+        // Workspace crates name the same embedded set — e.g. the `icon()`
+        // methods on waku-protocol's enums — so their literals count too.
+        for entry in std::fs::read_dir(manifest.join("crates")).unwrap() {
+            let src = entry.unwrap().path().join("src");
+            if src.is_dir() {
+                rust_sources(&src, &mut files);
+            }
+        }
         let mut missing = Vec::new();
         for file in files {
             let source = std::fs::read_to_string(&file).unwrap();
@@ -420,6 +430,24 @@ mod tests {
                 }
             }
         }
+
+        // Vocabularies that resolve an icon *name* to a path are checked by
+        // enumeration too: every `CustomCommandIcon` variant — the
+        // persona/employee job icons, whose snake_case wire names map to
+        // kebab-case files through `icon_path` — plus every icon the
+        // job-title classifier can emit.
+        for icon in CustomCommandIcon::ALL {
+            let path = crate::custom_commands::icon_path(icon);
+            if Assets.load(path).unwrap().is_none() {
+                missing.push(format!("{path} (CustomCommandIcon::{icon:?})"));
+            }
+        }
+        for path in crate::app::job_title_icon_paths() {
+            if Assets.load(path).unwrap().is_none() {
+                missing.push(format!("{path} (job-title icon)"));
+            }
+        }
+
         assert!(
             missing.is_empty(),
             "icon paths referenced but not embedded:\n{}",

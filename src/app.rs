@@ -4185,6 +4185,10 @@ use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
 pub use big_picture::init as init_big_picture_keys;
+// The asset guard in `crate::assets` enumerates the job-title icon
+// vocabulary without widening `mod boss`.
+#[cfg(test)]
+pub(crate) use boss::job_title_icon_paths;
 pub use close_dialog::init as init_close_dialog_keys;
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;

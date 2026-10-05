@@ -3485,6 +3485,16 @@ pub(super) fn job_title_icon(title: &str) -> &'static str {
         .unwrap_or(JOB_TITLE_FALLBACK_ICON)
 }
 
+/// Every icon path the classifier can emit — the category table plus the
+/// fallback — for the asset guard in `crate::assets`.
+#[cfg(test)]
+pub(crate) fn job_title_icon_paths() -> impl Iterator<Item = &'static str> {
+    JOB_TITLE_ICON_CATEGORIES
+        .iter()
+        .map(|(_, icon)| *icon)
+        .chain([JOB_TITLE_FALLBACK_ICON])
+}
+
 #[cfg(test)]
 mod job_title_icon_tests {
     use super::{JOB_TITLE_FALLBACK_ICON, JOB_TITLE_ICON_CATEGORIES, job_title_icon};
