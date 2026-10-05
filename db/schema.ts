@@ -141,6 +141,9 @@ export const messages = sqliteTable(
     /** JSON-serialized ContextMark — set when the boss context router attached
      *  the work digest to this prompt. */
     contextMark: text("context_mark"),
+    /** JSON-serialized ReportTrigger — the employee report this hidden prompt
+     *  delivered, so the transcript can mark which report woke the turn. */
+    reportTrigger: text("report_trigger"),
     /** Provider-facing text no client renders — the internal "continue" nudge. */
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
   },

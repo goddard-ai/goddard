@@ -383,6 +383,7 @@ impl CloudDriver {
                         message: text.to_owned(),
                         sent_by_task: None,
                         hidden: false,
+                        report_trigger: None,
                     },
                 );
             }
@@ -395,6 +396,7 @@ impl CloudDriver {
                         message: text.to_owned(),
                         sent_by_task: None,
                         hidden: false,
+                        report_trigger: None,
                     },
                 );
                 Self::start_watch(backend, state, sink);

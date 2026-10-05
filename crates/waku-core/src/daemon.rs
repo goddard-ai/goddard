@@ -3683,6 +3683,7 @@ impl Backend for WakuBackend {
                         message_id: submitted_message_id,
                         sent_by_task: None,
                         hidden: *hidden,
+                        report_trigger: None,
                     };
                     if self.boss.is_managed(session_id) {
                         record_boss_event(
@@ -3749,6 +3750,7 @@ impl Backend for WakuBackend {
                             queued_id: None,
                             context: None,
                             hidden: true,
+                            report_trigger: None,
                         },
                     );
                 }
@@ -6081,7 +6083,7 @@ impl WakuBackend {
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
-        session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender, false);
+        session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender, false, None);
         {
             let mut state = self.task_state.lock();
             state.push_session(session);
@@ -6128,6 +6130,7 @@ impl WakuBackend {
             message_id,
             sent_by_task: sender,
             hidden: false,
+            report_trigger: None,
         })?)?;
         if driver.supports_steer() {
             // The prompt reaches the provider exactly as typed — title
@@ -6384,6 +6387,7 @@ impl WakuBackend {
                     crate::agent::ContextSteer::Blocks
                 }),
                 hidden: false,
+                report_trigger: None,
             },
         );
         driver.steer(steer);
@@ -6728,6 +6732,7 @@ impl WakuBackend {
                         queued_id: None,
                         context: Some(crate::agent::ContextSteer::Blocks),
                         hidden: false,
+                        report_trigger: None,
                     },
                 );
                 driver.steer(steer);
@@ -7200,6 +7205,7 @@ impl WakuBackend {
                                     queued_id: None,
                                     context: None,
                                     hidden: false,
+                                    report_trigger: None,
                                 },
                             );
                             driver.steer(transport.unwrap_or(prompt));
@@ -7239,7 +7245,17 @@ impl WakuBackend {
                         employee.session_id,
                         employee.blocker.as_deref().unwrap_or_default()
                     );
-                    self.deliver_employee_report(supervisor, prompt, employee.session_id, events)?;
+                    let trigger = crate::model::ReportTrigger::new(
+                        &employee,
+                        crate::model::ReportTriggerKind::Blocker,
+                    );
+                    self.deliver_employee_report(
+                        supervisor,
+                        prompt,
+                        employee.session_id,
+                        Some(trigger),
+                        events,
+                    )?;
                 }
                 Ok(BossResult::Saved)
             }
@@ -7498,8 +7514,26 @@ impl WakuBackend {
                 "Employee {} ({session_id}) has finished and expired.{blocker} Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
                 employee.identity.name
             );
+            // Failure outranks a flagged blocker — the marker's wording and
+            // glyph carry the verdict the finish settled on.
+            let kind = if failed {
+                crate::model::ReportTriggerKind::Failed
+            } else if employee.blocker.is_some() {
+                crate::model::ReportTriggerKind::FinishedWithBlocker
+            } else {
+                crate::model::ReportTriggerKind::Finished
+            };
+            let trigger = crate::model::ReportTrigger::new(employee, kind);
             let events = self.event_source.lock().clone();
-            self.queue_agent_prompt_hidden(supervisor, prompt, Some(session_id), &events)?;
+            self.queue_agent_prompt_with_id(
+                supervisor,
+                prompt,
+                Some(session_id),
+                true,
+                None,
+                Some(trigger),
+                &events,
+            )?;
         }
         // This finish may have resolved a wave — drain its notice.
         self.deliver_wave_notifications();
@@ -8099,6 +8133,7 @@ impl WakuBackend {
                 message_id,
                 Some(employee.supervisor_id),
                 false,
+                None,
             );
             session.updated_at = crate::model::unix_time();
             state.mark_session_dirty(session_id);
@@ -8270,6 +8305,7 @@ impl WakuBackend {
                     Some(note.session_id),
                     true,
                     Some(queued_id),
+                    None,
                     &events,
                 )
                 .is_ok()
@@ -8335,7 +8371,7 @@ impl WakuBackend {
                 format!("Wave \"{}\" resolved — {}.", note.wave_id, parts.join(", "))
             };
             if self
-                .queue_agent_prompt_with_id(target, prompt, None, true, Some(queued_id), &events)
+                .queue_agent_prompt_with_id(target, prompt, None, true, Some(queued_id), None, &events)
                 .is_ok()
             {
                 let _ = self.boss.wave_outbox_mark_delivered(note.id);
@@ -9009,6 +9045,7 @@ impl WakuBackend {
         target: Uuid,
         prompt: String,
         sender: Uuid,
+        report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
         let driver = self
@@ -9031,12 +9068,24 @@ impl WakuBackend {
                     queued_id: None,
                     context: None,
                     hidden: true,
+                    report_trigger: report_trigger.map(|mut trigger| {
+                        trigger.boundary = crate::model::ReportTriggerBoundary::Steer;
+                        trigger
+                    }),
                 },
             );
             driver.steer(transport.unwrap_or(prompt));
             return Ok(());
         }
-        self.queue_agent_prompt_hidden(target, prompt, Some(sender), events)
+        self.queue_agent_prompt_with_id(
+            target,
+            prompt,
+            Some(sender),
+            true,
+            None,
+            report_trigger,
+            events,
+        )
     }
 
     /// `agent prompt`: deliver a message to an existing task, by Waku task
@@ -9132,6 +9181,7 @@ impl WakuBackend {
                         queued_id: None,
                         context: None,
                         hidden: false,
+                        report_trigger: None,
                     },
                 );
                 driver.steer(transport.unwrap_or(prompt));
@@ -9155,7 +9205,7 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        self.queue_agent_prompt_with_id(target, prompt, sender, false, None, events)
+        self.queue_agent_prompt_with_id(target, prompt, sender, false, None, None, events)
     }
 
     fn queue_agent_prompt_hidden(
@@ -9165,7 +9215,7 @@ impl WakuBackend {
         sender: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        self.queue_agent_prompt_with_id(target, prompt, sender, true, None, events)
+        self.queue_agent_prompt_with_id(target, prompt, sender, true, None, None, events)
     }
 
     /// A deterministic `queued_id` rides durable deliveries — dispatch
@@ -9178,9 +9228,17 @@ impl WakuBackend {
         sender: Option<Uuid>,
         hidden: bool,
         queued_id: Option<Uuid>,
+        report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
         let queued_id = queued_id.unwrap_or_else(Uuid::new_v4);
+        // The parked id doubles as the delivered message's — the trigger's
+        // dedupe identity matches it so a redriven delivery folds onto the
+        // same marker.
+        let report_trigger = report_trigger.map(|mut trigger| {
+            trigger.event_id = queued_id;
+            trigger
+        });
         self.agent.enqueue(
             target,
             crate::agent::AgentPrompt {
@@ -9192,6 +9250,7 @@ impl WakuBackend {
                 queued_id: Some(queued_id),
                 context: None,
                 hidden,
+                report_trigger: report_trigger.clone(),
             },
         );
         let managed = self.boss.is_managed(target);
@@ -9206,6 +9265,7 @@ impl WakuBackend {
                 &prompt,
                 sender,
                 hidden,
+                report_trigger.clone(),
             )?;
         }
         // A queued or dispatching ticket owns no settled runtime — park
@@ -9234,6 +9294,7 @@ impl WakuBackend {
                     &prompt,
                     sender,
                     hidden,
+                    report_trigger,
                 )?;
             }
             if let Some(runtime_id) = self.runtime_id_for(target) {
@@ -10549,8 +10610,16 @@ fn record_boss_event(
             message_id,
             sent_by_task,
             hidden,
+            report_trigger,
         } => {
-            session.adopt_submitted_prompt(message, *turn_id, *message_id, *sent_by_task, *hidden);
+            session.adopt_submitted_prompt(
+                message,
+                *turn_id,
+                *message_id,
+                *sent_by_task,
+                *hidden,
+                report_trigger.clone(),
+            );
         }
         DriverEvent::PromptContextMarked { message_id, focus } => {
             session.mark_prompt_context(*message_id, focus.clone());
@@ -10766,8 +10835,19 @@ fn forward_driver_events(
                 let hidden = steer
                     .as_ref()
                     .is_some_and(|steer| steer.hidden || steer.context.is_some());
+                let report_trigger = steer
+                    .as_ref()
+                    .and_then(|steer| steer.report_trigger.clone());
                 if let Some(sender) = sent_by_task {
-                    record_agent_steer(&task_state, &task_store, session_id, &message, sender);
+                    record_agent_steer(
+                        &task_state,
+                        &task_store,
+                        session_id,
+                        &message,
+                        sender,
+                        hidden,
+                        report_trigger.clone(),
+                    );
                 }
                 // A context steer carrying project memory settled the
                 // session's injection — later prompts stay untouched. A
@@ -10801,6 +10881,7 @@ fn forward_driver_events(
                     message,
                     sent_by_task,
                     hidden,
+                    report_trigger,
                 }
             }
             DriverEvent::SteerRejected {
@@ -11101,7 +11182,7 @@ fn agent_prompt_envelope(
 fn deliver_agent_prompt(
     session_id: Uuid,
     driver: &DriverHandle,
-    entry: crate::agent::AgentPrompt,
+    mut entry: crate::agent::AgentPrompt,
     sink: &EventSink,
     agent: &crate::agent::AgentState,
     auto_prompts: &AutoPromptService,
@@ -11115,6 +11196,11 @@ fn deliver_agent_prompt(
         let mut entry = entry;
         entry.transport =
             agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt);
+        // The report joins the parked turn rather than opening one — its
+        // marker sits at the accepted steer boundary.
+        if let Some(trigger) = &mut entry.report_trigger {
+            trigger.boundary = crate::model::ReportTriggerBoundary::Steer;
+        }
         let prompt = entry
             .transport
             .clone()
@@ -11129,6 +11215,10 @@ fn deliver_agent_prompt(
     // message's id: clients folding `promptSubmitted` drop the chip and
     // adopt the transcript row in one move.
     let message_id = entry.queued_id.unwrap_or_else(Uuid::new_v4);
+    if let Some(trigger) = &mut entry.report_trigger {
+        trigger.boundary = crate::model::ReportTriggerBoundary::Opening;
+        trigger.event_id = message_id;
+    }
     persist_agent_prompt(
         task_state,
         task_store,
@@ -11139,6 +11229,7 @@ fn deliver_agent_prompt(
         entry.sender,
         entry.queued_id,
         entry.hidden,
+        entry.report_trigger.clone(),
     )?;
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
@@ -11146,6 +11237,7 @@ fn deliver_agent_prompt(
         message_id,
         sent_by_task: entry.sender,
         hidden: entry.hidden,
+        report_trigger: entry.report_trigger.clone(),
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
     let handoff = {
@@ -11216,6 +11308,7 @@ fn persist_agent_prompt(
     sent_by_task: Option<Uuid>,
     queued_id: Option<Uuid>,
     hidden: bool,
+    report_trigger: Option<crate::model::ReportTrigger>,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -11233,8 +11326,14 @@ fn persist_agent_prompt(
             .retain(|queued| queued.id != queued_id);
         session.queued_messages.len() != before
     });
-    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, hidden)
-        || dequeued
+    if session.adopt_submitted_prompt(
+        message,
+        turn_id,
+        message_id,
+        sent_by_task,
+        hidden,
+        report_trigger,
+    ) || dequeued
     {
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
@@ -11253,6 +11352,7 @@ fn mirror_agent_queued_prompt(
     prompt: &str,
     sent_by: Option<Uuid>,
     hidden: bool,
+    report_trigger: Option<crate::model::ReportTrigger>,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -11273,6 +11373,7 @@ fn mirror_agent_queued_prompt(
     let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
     entry.id = queued_id;
     entry.hidden = hidden;
+    entry.report_trigger = report_trigger;
     session.queued_messages.push(entry);
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
@@ -11344,6 +11445,7 @@ fn rehydrate_agent_queue(
                         queued_id: Some(queued.id),
                         context: None,
                         hidden: queued.hidden,
+                        report_trigger: queued.report_trigger.clone(),
                     })
                 }
                 crate::model::QueuedMessageSource::User => None,
@@ -11383,13 +11485,17 @@ fn send_agent_queue_changed(
 }
 
 /// Mirror a provider-accepted agent steer into the stored task the way
-/// [`persist_agent_prompt`] mirrors a queued prompt.
+/// [`persist_agent_prompt`] mirrors a queued prompt. `hidden` keeps a
+/// provider-facing steer out of the transcript the same way clients keep it,
+/// and `report_trigger` is the employee report's wake record.
 fn record_agent_steer(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
     message: &str,
     sent_by_task: Uuid,
+    hidden: bool,
+    report_trigger: Option<crate::model::ReportTrigger>,
 ) {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -11402,13 +11508,22 @@ fn record_agent_steer(
     if task_store.hydrate(session).is_err() {
         return;
     }
-    session.push_user_message_with_presentation(
+    let message_id = session.push_user_message_with_presentation(
         message,
         None,
         Vec::new(),
         Vec::new(),
         Some(sent_by_task),
     );
+    if (hidden || report_trigger.is_some())
+        && let Some(stored) = session
+            .messages
+            .iter_mut()
+            .find(|stored| stored.id == message_id)
+    {
+        stored.hidden = hidden;
+        stored.report_trigger = report_trigger;
+    }
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(
@@ -12114,6 +12229,7 @@ mod tests {
                 message_id: queued_id,
                 sent_by_task: None,
                 hidden: false,
+                report_trigger: None,
             },
         )
         .unwrap();
@@ -12789,6 +12905,7 @@ mod tests {
             message_id,
             sent_by_task: None,
             hidden: false,
+            report_trigger: None,
         })
         .unwrap();
         assert_eq!(wire.kind, "promptSubmitted");
@@ -12811,6 +12928,7 @@ mod tests {
             message_id: Uuid::new_v4(),
             sent_by_task: Some(sender),
             hidden: false,
+            report_trigger: None,
         })
         .unwrap();
         assert_eq!(wire.payload["sentByTask"], sender.to_string());
@@ -14522,6 +14640,7 @@ mod tests {
                 queued_id: Some(Uuid::new_v4()),
                 context: None,
                 hidden: false,
+                report_trigger: None,
             },
         );
 
@@ -14866,6 +14985,7 @@ mod tests {
                 message_id: Uuid::new_v4(),
                 sent_by_task: None,
                 hidden: false,
+                report_trigger: None,
             },
             DriverEvent::TurnStarted,
             DriverEvent::TextDelta("Checking ".into()),
@@ -15209,6 +15329,159 @@ mod tests {
                 .status,
             SessionStatus::Failed
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The report's wake marker data lands with the delivered prompt: the
+    /// session document's hidden message carries the event-time snapshot
+    /// and the turn it opened — the transcript's durable event→turn record.
+    #[test]
+    fn an_errand_finish_marks_the_turn_it_opened() {
+        use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+        let root = std::env::temp_dir().join(format!("boss-trigger-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .boss
+            .set_employee_goal(employee_id, waku_protocol::boss::EmployeeGoal::Errand)
+            .unwrap();
+        let employee = backend.boss.employee(employee_id).unwrap();
+        backend.finish_boss_employee(employee_id, false).unwrap();
+        assert_eq!(parent_capture.prompts.lock().len(), 1);
+
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        let turn_id = session.active_turn_id().expect("the report opened a turn");
+        let report = session
+            .messages
+            .iter()
+            .find(|message| message.report_trigger.is_some())
+            .expect("the delivered report carries its trigger");
+        assert!(report.hidden);
+        assert_eq!(report.turn_id, Some(turn_id));
+        assert_eq!(report.sent_by_task, Some(employee_id));
+        let trigger = report.report_trigger.as_ref().unwrap();
+        assert_eq!(trigger.boundary, ReportTriggerBoundary::Opening);
+        assert_eq!(trigger.kind, ReportTriggerKind::Finished);
+        assert_eq!(trigger.employee, employee_id);
+        assert_eq!(trigger.employee_name, employee.identity.name);
+        assert_eq!(trigger.job_title, employee.job_title);
+        assert_eq!(trigger.event_id, report.id);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A blocker reported while the supervisor's turn is parked steers in:
+    /// the pending steer and the transcript record it writes both keep the
+    /// trigger, marked at the steer boundary rather than a turn opening.
+    #[test]
+    fn a_blocker_steer_marks_its_accepted_boundary() {
+        use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+        let root = std::env::temp_dir().join(format!("boss-steer-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        // The supervisor's turn is open and parked — the steer lands in it
+        // rather than opening a fresh turn.
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnParked);
+        backend
+            .handle_boss_operation(
+                Some(employee_id),
+                waku_protocol::boss::BossOperation::ReportBlocker {
+                    message: "red build".into(),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert_eq!(parent_capture.steers.lock().len(), 1);
+
+        let steer = backend
+            .agent
+            .take_pending_steer(supervisor, &parent_capture.steers.lock()[0])
+            .expect("the report steer is pending");
+        let trigger = steer.report_trigger.as_ref().unwrap().clone();
+        assert_eq!(trigger.boundary, ReportTriggerBoundary::Steer);
+        assert_eq!(trigger.kind, ReportTriggerKind::Blocker);
+        record_agent_steer(
+            &backend.task_state,
+            &backend.task_store,
+            supervisor,
+            &steer.prompt,
+            employee_id,
+            true,
+            Some(trigger),
+        );
+
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        let report = session
+            .messages
+            .iter()
+            .find(|message| message.report_trigger.is_some())
+            .expect("the accepted steer records its trigger");
+        assert!(report.hidden);
+        assert_eq!(
+            report.report_trigger.as_ref().unwrap().boundary,
+            ReportTriggerBoundary::Steer
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A report parked behind a busy supervisor keeps its trigger through
+    /// the durable mirror — a restart rehydrates the queue with the wake
+    /// record intact.
+    #[test]
+    fn a_parked_report_keeps_its_trigger_through_the_mirror() {
+        let root = std::env::temp_dir().join(format!("boss-mirror-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .boss
+            .set_employee_goal(employee_id, waku_protocol::boss::EmployeeGoal::Errand)
+            .unwrap();
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+        backend.finish_boss_employee(employee_id, false).unwrap();
+        assert!(backend.agent.has_queued(supervisor));
+
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        let mirrored = session
+            .queued_messages
+            .iter()
+            .find(|queued| queued.report_trigger.is_some())
+            .expect("the parked mirror keeps the trigger");
+        let queued_id = mirrored.id;
+        let event_id = mirrored.report_trigger.as_ref().unwrap().event_id;
+        drop(state);
+
+        // The rehydrated queue entry carries the same record forward.
+        rehydrate_agent_queue(
+            &backend.agent,
+            &backend.task_state,
+            &backend.task_store,
+            supervisor,
+        );
+        let entry = backend.agent.pop_queued(supervisor).unwrap();
+        let trigger = entry.report_trigger.expect("rehydrated trigger");
+        assert_eq!(trigger.event_id, event_id);
+        assert_eq!(event_id, queued_id);
         let _ = std::fs::remove_dir_all(root);
     }
 

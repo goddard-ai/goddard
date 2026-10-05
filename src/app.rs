@@ -3163,6 +3163,9 @@ pub struct Waku {
     expanded_activity_items: HashMap<Uuid, bool>,
     /// Settled turns whose folded work the user has reopened.
     expanded_turns: HashSet<Uuid>,
+    /// Burst turn-trigger markers the user expanded, keyed by the group's
+    /// anchor event id. Runtime-only, like the other disclosures.
+    expanded_trigger_groups: HashSet<Uuid>,
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
@@ -7041,6 +7044,7 @@ impl Waku {
                 activities_expanded: HashMap::new(),
                 expanded_activity_items: HashMap::new(),
                 expanded_turns: HashSet::new(),
+                expanded_trigger_groups: HashSet::new(),
                 expanded_changed_files: HashSet::new(),
                 expanded_landed_notices: HashSet::new(),
                 landed_notice_show_all: HashSet::new(),

@@ -988,6 +988,7 @@ async fn run_sdk_connection(
                                     message: text,
                                     sent_by_task: None,
                                     hidden: false,
+                                    report_trigger: None,
                                 });
                             }
                             Err(error) => {

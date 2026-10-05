@@ -522,7 +522,7 @@ impl Waku {
         self.remeasure_transcript_row(target);
     }
 
-    fn remeasure_transcript_row(&self, target: TranscriptRowKind) {
+    pub(super) fn remeasure_transcript_row(&self, target: TranscriptRowKind) {
         self.sync_transcript_rows();
         let row = self
             .transcript_row_kinds
@@ -557,6 +557,11 @@ pub(super) enum TranscriptRowKind {
     /// turn's indicator is held for [`WORKING_INDICATOR_FADE_OUT`] while it
     /// fades out.
     WorkingIndicator,
+    /// The "what woke this turn" marker for a boss session — a quiet row in
+    /// place of the hidden employee report it stands for. The id is the
+    /// anchor report's message id: the first opening report of a turn, or
+    /// the first of an adjacent run accepted into an open turn.
+    BossTrigger(Uuid),
 }
 
 /// How long a settled turn's working indicator stays mounted while it fades
@@ -873,7 +878,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::TurnFold(_)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
-                | TranscriptRowKind::WorkingIndicator => None,
+                | TranscriptRowKind::WorkingIndicator
+                | TranscriptRowKind::BossTrigger(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1097,6 +1103,9 @@ pub(super) fn transcript_rows_fingerprint(
     for message in &session.messages {
         hash = mix(hash, message.role as u64);
         hash = mix(hash, message.hidden as u64);
+        // A report trigger arriving moves rows: the marker appears where the
+        // hidden prompt sat.
+        hash = mix(hash, message.report_trigger.is_some() as u64);
         hash = mix_turn_id(hash, message.turn_id);
         // The fold counts a blank text part as work, so a part crossing that
         // line moves rows. `trim` stops at the first non-space character, so
@@ -1219,17 +1228,44 @@ pub(super) fn folded_transcript_row_kinds(
     }
 
     let mut rows = Vec::with_capacity(raw_rows.len() + fold_anchors.len() + 1);
+    // Turn boundaries the marker pipeline already claimed: every opening
+    // report of a turn collapses into the first one's row, and an accepted
+    // steer run shares one row only while no boss output separates it.
+    let mut opened_trigger_turns = HashSet::new();
+    let mut steer_run_open = false;
     for row in raw_rows {
         // A hidden prompt stays in `session.messages` so every client's
-        // projection names the same ids — it just renders no row.
+        // projection names the same ids — it just renders no row. An
+        // employee report's hidden prompt is the exception: its trigger
+        // record renders as the turn's wake marker.
         if let TranscriptRowKind::Message(message_index) = row
-            && session
-                .messages
-                .get(message_index)
-                .is_some_and(|message| message.hidden)
+            && let Some(message) = session.messages.get(message_index)
+            && message.hidden
         {
+            match message
+                .report_trigger
+                .as_ref()
+                .map(|trigger| trigger.boundary)
+            {
+                Some(crate::model::ReportTriggerBoundary::Opening) => {
+                    if opened_trigger_turns.insert(message.turn_id.unwrap_or(message.id)) {
+                        rows.push(TranscriptRowKind::BossTrigger(message.id));
+                    }
+                    steer_run_open = false;
+                }
+                Some(crate::model::ReportTriggerBoundary::Steer) => {
+                    if !steer_run_open {
+                        rows.push(TranscriptRowKind::BossTrigger(message.id));
+                        steer_run_open = true;
+                    }
+                }
+                // A hidden message that never renders sits invisible between
+                // two accepted reports — the run still reads adjacent.
+                None => {}
+            }
             continue;
         }
+        steer_run_open = false;
         if let Some(turn_id) = fold_anchors.get(&row).copied() {
             rows.push(TranscriptRowKind::TurnFold(turn_id));
         }
@@ -1376,7 +1412,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => None,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::BossTrigger(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1390,7 +1427,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::TurnFold(_)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => None,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::BossTrigger(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1413,7 +1451,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => false,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::BossTrigger(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1445,6 +1484,13 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
+        TranscriptRowKind::BossTrigger(message_id) => {
+            session
+                .messages
+                .iter()
+                .find(|message| message.id == message_id)?
+                .turn_id
+        }
         TranscriptRowKind::WorkingIndicator => None,
     }
 }
@@ -1462,6 +1508,9 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .turn_id
         }
         TranscriptRowKind::WorkingIndicator => None,
+        // The marker precedes the response it woke — like the prompt it
+        // stands in for, it is not part of the response's hover group.
+        TranscriptRowKind::BossTrigger(_) => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
@@ -1614,4 +1663,275 @@ pub(super) fn row_starts_followup_turn(
                             .is_some_and(|message| message.role == MessageRole::User)
                 )
             })
+}
+
+/// The reports a [`TranscriptRowKind::BossTrigger`] row stands for, in
+/// delivery order. Every opening report of a turn collapses behind the
+/// first one's row; an accepted steer run gathers while no boss output —
+/// a visible message or a turn block — separates it. Retries that redeliver
+/// the same event fold onto its first landing.
+pub(super) fn boss_trigger_group(session: &AgentSession, anchor: Uuid) -> Vec<&Message> {
+    let Some(anchor_index) = session
+        .messages
+        .iter()
+        .position(|message| message.id == anchor)
+    else {
+        return Vec::new();
+    };
+    let Some(trigger) = session.messages[anchor_index].report_trigger.as_ref() else {
+        return Vec::new();
+    };
+    let members: Vec<usize> = match trigger.boundary {
+        crate::model::ReportTriggerBoundary::Opening => {
+            match session.messages[anchor_index].turn_id {
+                Some(turn_id) => session
+                    .messages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, message)| {
+                        message.turn_id == Some(turn_id)
+                            && message.report_trigger.as_ref().is_some_and(|trigger| {
+                                trigger.boundary == crate::model::ReportTriggerBoundary::Opening
+                            })
+                    })
+                    .map(|(index, _)| index)
+                    .collect(),
+                None => vec![anchor_index],
+            }
+        }
+        crate::model::ReportTriggerBoundary::Steer => {
+            let is_run_member = |message: &Message| {
+                message.hidden
+                    && message.report_trigger.as_ref().is_some_and(|trigger| {
+                        trigger.boundary == crate::model::ReportTriggerBoundary::Steer
+                    })
+            };
+            let mut members = vec![anchor_index];
+            let mut index = anchor_index;
+            while index > 0 {
+                index -= 1;
+                let message = &session.messages[index];
+                if is_run_member(message) {
+                    if steer_run_separated(session, index, *members.first().unwrap()) {
+                        break;
+                    }
+                    members.insert(0, index);
+                } else if !message.hidden || message.report_trigger.is_some() {
+                    break;
+                }
+            }
+            let mut index = anchor_index;
+            while index + 1 < session.messages.len() {
+                index += 1;
+                let message = &session.messages[index];
+                if is_run_member(message) {
+                    if steer_run_separated(session, *members.last().unwrap(), index) {
+                        break;
+                    }
+                    members.push(index);
+                } else if !message.hidden || message.report_trigger.is_some() {
+                    break;
+                }
+            }
+            members
+        }
+    };
+    let mut seen = HashSet::new();
+    members
+        .into_iter()
+        .filter(|index| {
+            session.messages[*index]
+                .report_trigger
+                .as_ref()
+                .is_some_and(|trigger| seen.insert(trigger.event_id))
+        })
+        .map(|index| &session.messages[index])
+        .collect()
+}
+
+/// Whether boss output — a message or a transcript block that renders —
+/// separates the messages at `lo` and `hi`. Hidden prompts are invisible,
+/// so an accepted run closes over them; another marker still separates.
+fn steer_run_separated(session: &AgentSession, lo: usize, hi: usize) -> bool {
+    session.messages[lo + 1..hi].iter().any(|message| {
+        !message.hidden
+            || message.report_trigger.as_ref().is_some_and(|trigger| {
+                trigger.boundary == crate::model::ReportTriggerBoundary::Opening
+            })
+    }) || session
+        .transcript_blocks
+        .iter()
+        .any(|block| block.after_message > lo && block.after_message <= hi)
+}
+
+/// The marker's layout family: an opening report takes the turn-boundary
+/// gap and tight bottom padding; an accepted steer keeps ordinary spacing.
+pub(super) fn boss_trigger_boundary(
+    session: &AgentSession,
+    anchor: Uuid,
+) -> Option<crate::model::ReportTriggerBoundary> {
+    session
+        .messages
+        .iter()
+        .find(|message| message.id == anchor)?
+        .report_trigger
+        .as_ref()
+        .map(|trigger| trigger.boundary)
+}
+
+/// Whether the row at `index` is an opening marker earning the turn gap —
+/// the boundary space the hidden prompt it stands in for would have taken.
+pub(super) fn boss_trigger_starts_followup_turn(
+    session: &AgentSession,
+    kind: TranscriptRowKind,
+) -> bool {
+    let TranscriptRowKind::BossTrigger(anchor) = kind else {
+        return false;
+    };
+    let boundary = boss_trigger_boundary(session, anchor);
+    let message_index = session
+        .messages
+        .iter()
+        .position(|message| message.id == anchor);
+    matches!(boundary, Some(crate::model::ReportTriggerBoundary::Opening))
+        && message_index.is_some_and(|index| message_starts_followup_turn(&session.messages, index))
+}
+
+/// The marker row's minimum height and a burst entry's inset — the entry
+/// glyph lands under the header's text (padding + chevron + gap + status
+/// glyph + gap).
+pub(super) const BOSS_TRIGGER_ROW_HEIGHT: f32 = 28.0;
+pub(super) const BOSS_TRIGGER_ENTRY_INDENT: f32 = 11.5 + 8.0 + 12.0 + 8.0;
+
+/// A report entry's leading glyph: the outcome's icon and tone. Color lives
+/// only on this glyph — the words carry the meaning.
+pub(super) fn boss_trigger_status(
+    kind: crate::model::ReportTriggerKind,
+    theme: &Theme,
+) -> (&'static str, Hsla) {
+    use crate::model::ReportTriggerKind;
+    match kind {
+        ReportTriggerKind::Finished => ("icons/circle-check.svg", theme.text_tertiary),
+        ReportTriggerKind::Failed => ("icons/octagon-x.svg", theme.danger),
+        ReportTriggerKind::Blocker | ReportTriggerKind::FinishedWithBlocker => {
+            ("icons/circle-alert.svg", theme.warning)
+        }
+    }
+}
+
+/// The burst header's glyph: the worst outcome in the group — danger when
+/// any report failed, warning when any flagged a blocker, tertiary
+/// otherwise.
+pub(super) fn boss_trigger_group_status(
+    group: &[crate::model::ReportTrigger],
+    theme: &Theme,
+) -> (&'static str, Hsla) {
+    use crate::model::ReportTriggerKind;
+    if group
+        .iter()
+        .any(|trigger| trigger.kind == ReportTriggerKind::Failed)
+    {
+        return ("icons/octagon-x.svg", theme.danger);
+    }
+    if group.iter().any(|trigger| {
+        matches!(
+            trigger.kind,
+            ReportTriggerKind::Blocker | ReportTriggerKind::FinishedWithBlocker
+        )
+    }) {
+        return ("icons/circle-alert.svg", theme.warning);
+    }
+    ("icons/circle-check.svg", theme.text_tertiary)
+}
+
+/// The event-time label for one report: `{name} {outcome phrase}`, plus
+/// "during this turn" when the provider accepted it into a turn already
+/// open. `name` falls back to a generic employee — never a UUID.
+pub(super) fn boss_trigger_entry_label(
+    trigger: &crate::model::ReportTrigger,
+    during_turn: bool,
+) -> String {
+    use crate::model::ReportTriggerKind;
+    let name = if trigger.employee_name.is_empty() {
+        tr!("boss.trigger_employee")
+    } else {
+        trigger.employee_name.clone()
+    };
+    let label = match trigger.kind {
+        ReportTriggerKind::Finished => tr!("boss.trigger_finished", name = name),
+        ReportTriggerKind::Failed => tr!("boss.trigger_failed", name = name),
+        ReportTriggerKind::Blocker => tr!("boss.trigger_blocker", name = name),
+        ReportTriggerKind::FinishedWithBlocker => {
+            tr!("boss.trigger_finished_blocker", name = name)
+        }
+    };
+    if during_turn {
+        tr!("boss.trigger_during_turn", label = label)
+    } else {
+        label
+    }
+}
+
+/// The full label including the job title — what the tooltip repeats when
+/// the row truncates.
+pub(super) fn boss_trigger_entry_tooltip(
+    trigger: &crate::model::ReportTrigger,
+    during_turn: bool,
+) -> String {
+    let label = boss_trigger_entry_label(trigger, during_turn);
+    if trigger.job_title.is_empty() {
+        label
+    } else {
+        format!("{label} · {}", trigger.job_title)
+    }
+}
+
+/// The collapsed burst header: one uniform outcome from distinct employees
+/// names them, anything else counts updates and calls out failures and
+/// blockers.
+pub(super) fn boss_trigger_burst_label(group: &[crate::model::ReportTrigger]) -> String {
+    use crate::model::ReportTriggerKind;
+    let count = group.len();
+    let distinct = group
+        .iter()
+        .map(|trigger| trigger.employee)
+        .collect::<HashSet<_>>()
+        .len()
+        == count;
+    let all = |kind: ReportTriggerKind| group.iter().all(|trigger| trigger.kind == kind);
+    if distinct && all(ReportTriggerKind::Finished) {
+        return tr!("boss.trigger_employees_finished", count = count);
+    }
+    if distinct && all(ReportTriggerKind::Failed) {
+        return tr!("boss.trigger_employees_failed", count = count);
+    }
+    let mut label = tr!("boss.trigger_updates", count = count);
+    let failed = group
+        .iter()
+        .filter(|trigger| trigger.kind == ReportTriggerKind::Failed)
+        .count();
+    let blockers = group
+        .iter()
+        .filter(|trigger| {
+            matches!(
+                trigger.kind,
+                ReportTriggerKind::Blocker | ReportTriggerKind::FinishedWithBlocker
+            )
+        })
+        .count();
+    if failed > 0 {
+        label = format!(
+            "{label} · {}",
+            tr!("boss.trigger_updates_failed", count = failed)
+        );
+    }
+    if blockers > 0 {
+        let suffix = if blockers == 1 {
+            tr!("boss.trigger_updates_blocker_one", count = blockers)
+        } else {
+            tr!("boss.trigger_updates_blocker_many", count = blockers)
+        };
+        label = format!("{label} · {suffix}");
+    }
+    label
 }

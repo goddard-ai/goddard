@@ -1,0 +1,1 @@
+- Boss chat now shows a quiet marker at the top of a turn naming which employee report woke it — a finish, failure, or blocker — and several reports arriving together collapse into one expandable row. Clicking a marker opens the reporting employee's transcript.

@@ -5837,6 +5837,7 @@ impl Waku {
             self.activities_expanded.clear();
             self.expanded_activity_items.clear();
             self.expanded_turns.clear();
+            self.expanded_trigger_groups.clear();
             self.expanded_changed_files.clear();
             self.changed_files_diff_hover = None;
             self.changed_files_diffs.clear();
@@ -7255,6 +7256,7 @@ impl Waku {
             self.activities_expanded.clear();
             self.expanded_activity_items.clear();
             self.expanded_turns.clear();
+            self.expanded_trigger_groups.clear();
             self.expanded_changed_files.clear();
             self.changed_files_diff_hover = None;
             self.changed_files_diffs.clear();

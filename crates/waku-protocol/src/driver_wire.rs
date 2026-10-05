@@ -117,6 +117,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message_id,
             sent_by_task,
             hidden,
+            report_trigger,
         } => (
             "promptSubmitted",
             json!({
@@ -125,15 +126,17 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "messageId": message_id,
                 "sentByTask": sent_by_task,
                 "hidden": hidden,
+                "reportTrigger": report_trigger,
             }),
         ),
         DriverEvent::SteerAccepted {
             message,
             sent_by_task,
             hidden,
+            report_trigger,
         } => (
             "steerAccepted",
-            json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden }),
+            json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden, "reportTrigger": report_trigger }),
         ),
         DriverEvent::PromptContextMarked { message_id, focus } => (
             "promptContextMarked",
@@ -279,6 +282,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message_id: submitted.message_id,
                 sent_by_task: submitted.sent_by_task,
                 hidden: submitted.hidden,
+                report_trigger: submitted.report_trigger,
             }
         }
         "steerAccepted" => {
@@ -287,6 +291,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: steer.message,
                 sent_by_task: steer.sent_by_task,
                 hidden: steer.hidden,
+                report_trigger: steer.report_trigger,
             }
         }
         "promptContextMarked" => {
@@ -364,6 +369,8 @@ struct SubmittedPromptWire {
     sent_by_task: Option<Uuid>,
     #[serde(default)]
     hidden: bool,
+    #[serde(default)]
+    report_trigger: Option<crate::model::ReportTrigger>,
 }
 
 #[derive(Deserialize)]
@@ -427,6 +434,8 @@ struct AcceptedSteerWire {
     sent_by_task: Option<Uuid>,
     #[serde(default)]
     hidden: bool,
+    #[serde(default)]
+    report_trigger: Option<crate::model::ReportTrigger>,
 }
 
 #[derive(Deserialize)]
@@ -734,6 +743,7 @@ mod tests {
             message: "context".into(),
             sent_by_task: None,
             hidden: true,
+            report_trigger: None,
         })
         .unwrap();
         assert_eq!(wire.payload["hidden"], true);
@@ -749,6 +759,7 @@ mod tests {
             hidden: true,
         })
         .unwrap();
+        assert_eq!(wire.payload["hidden"], true);
         let DriverEvent::SteerRejected { hidden, .. } = event_from_wire(wire).unwrap() else {
             panic!("the event changed variants during its wire round trip");
         };
@@ -766,6 +777,64 @@ mod tests {
                 _ => panic!("{kind} failed to decode"),
             };
             assert!(!hidden, "{kind} without the flag decodes visible");
+        }
+    }
+
+    #[test]
+    fn the_report_trigger_round_trips_and_defaults_off() {
+        use crate::model::{
+            ReportTrigger, ReportTriggerBoundary, ReportTriggerKind,
+        };
+        let event_id = Uuid::new_v4();
+        let employee = Uuid::new_v4();
+        let trigger = ReportTrigger {
+            event_id,
+            employee,
+            employee_name: "Dorothea".into(),
+            job_title: "Deliverable annotations".into(),
+            kind: ReportTriggerKind::Finished,
+            boundary: ReportTriggerBoundary::Opening,
+        };
+        let wire = event_to_wire(DriverEvent::PromptSubmitted {
+            message: "report".into(),
+            turn_id: Uuid::new_v4(),
+            message_id: event_id,
+            sent_by_task: Some(employee),
+            hidden: true,
+            report_trigger: Some(trigger.clone()),
+        })
+        .unwrap();
+        assert_eq!(wire.payload["reportTrigger"]["eventId"], event_id.to_string());
+        assert_eq!(wire.payload["reportTrigger"]["employee"], employee.to_string());
+        assert_eq!(
+            wire.payload["reportTrigger"]["kind"],
+            serde_json::json!("finished")
+        );
+        let DriverEvent::PromptSubmitted {
+            report_trigger: decoded,
+            ..
+        } = event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(decoded, Some(trigger));
+
+        // Older daemons omit the field — decode defaults to no trigger.
+        for kind in ["promptSubmitted", "steerAccepted"] {
+            let legacy = crate::protocol::WireDriverEvent {
+                kind: kind.into(),
+                payload: serde_json::json!({
+                    "message": "go",
+                    "turnId": Uuid::new_v4(),
+                    "messageId": Uuid::new_v4(),
+                }),
+            };
+            let trigger = match event_from_wire(legacy).unwrap() {
+                DriverEvent::PromptSubmitted { report_trigger, .. } => report_trigger,
+                DriverEvent::SteerAccepted { report_trigger, .. } => report_trigger,
+                _ => panic!("{kind} failed to decode"),
+            };
+            assert!(trigger.is_none(), "{kind} without the field decodes empty");
         }
     }
 

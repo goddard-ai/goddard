@@ -2281,6 +2281,7 @@ fn handle_codex_message(
                 message,
                 sent_by_task: None,
                 hidden: false,
+                report_trigger: None,
             });
         }
         return;

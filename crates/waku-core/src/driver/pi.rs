@@ -603,6 +603,7 @@ impl PiDriver {
                                         message: prompt,
                                         sent_by_task: None,
                                         hidden: false,
+                                        report_trigger: None,
                                     });
                                 }
                                 Err(error) => {

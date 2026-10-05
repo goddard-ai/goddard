@@ -6090,6 +6090,32 @@ boss.finished_ago:
   en: "%{name} finished %{ago} ago"
 boss.expired_hint:
   en: This employee has finished. Send another request to the boss.
+boss.trigger_employee:
+  en: Employee
+boss.trigger_finished:
+  en: "%{name} finished"
+boss.trigger_failed:
+  en: "%{name} failed"
+boss.trigger_blocker:
+  en: "%{name} reported a blocker"
+boss.trigger_finished_blocker:
+  en: "%{name} finished with a blocker"
+boss.trigger_during_turn:
+  en: "%{label} during this turn"
+boss.trigger_employees_finished:
+  en: "%{count} employees finished"
+boss.trigger_employees_failed:
+  en: "%{count} employees failed"
+boss.trigger_updates:
+  en: "%{count} employee updates"
+boss.trigger_updates_failed:
+  en: "%{count} failed"
+boss.trigger_updates_blocker_one:
+  en: "%{count} blocker"
+boss.trigger_updates_blocker_many:
+  en: "%{count} blockers"
+boss.trigger_unavailable:
+  en: Employee transcript unavailable
 boss.command_placeholder:
   en: Command the boss...
 boss.command_hint:

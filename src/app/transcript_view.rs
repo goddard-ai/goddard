@@ -1741,16 +1741,39 @@ impl Waku {
         // this frame. Recomputing the row list here would rebuild the whole
         // transcript's row kinds — several allocations proportional to the
         // session — once for every visible row, every frame.
-        let (row_count, kind, starts_followup_turn) = {
+        let (row_count, kind, starts_followup_turn, opening_trigger, follows_opening_trigger) = {
             let kinds = self.transcript_row_kinds.borrow();
             let kind = kinds
                 .get(index)
                 .copied()
                 .unwrap_or(TranscriptRowKind::Message(index));
-            let starts_followup_turn = self
-                .selected_session()
-                .is_some_and(|session| row_starts_followup_turn(session, &kinds, index));
-            (kinds.len(), kind, starts_followup_turn)
+            let session = self.selected_session();
+            let starts_followup_turn = session.is_some_and(|session| {
+                row_starts_followup_turn(session, &kinds, index)
+                    || boss_trigger_starts_followup_turn(session, kind)
+            });
+            let is_opening_trigger = |candidate: TranscriptRowKind| {
+                let TranscriptRowKind::BossTrigger(anchor) = candidate else {
+                    return false;
+                };
+                session
+                    .and_then(|session| boss_trigger_boundary(session, anchor))
+                    .is_some_and(|boundary| {
+                        boundary == crate::model::ReportTriggerBoundary::Opening
+                    })
+            };
+            let opening_trigger = is_opening_trigger(kind);
+            let follows_opening_trigger = index
+                .checked_sub(1)
+                .and_then(|previous| kinds.get(previous))
+                .is_some_and(|previous| is_opening_trigger(*previous));
+            (
+                kinds.len(),
+                kind,
+                starts_followup_turn,
+                opening_trigger,
+                follows_opening_trigger,
+            )
         };
         let response_turn_id = self
             .selected_session()
@@ -2014,6 +2037,9 @@ impl Waku {
                 .render_changed_files_row(turn_id, &theme, window, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
+            TranscriptRowKind::BossTrigger(anchor) => {
+                self.render_boss_trigger_row(anchor, &theme, cx)
+            }
         };
         let new_content_dot = self
             .transcript_new_content_dot
@@ -2127,10 +2153,14 @@ impl Waku {
                 matches!(kind, TranscriptRowKind::ResponseFooter(_, _)),
                 |element| element.pt(px(0.0)),
             )
+            // An opening marker owns the turn boundary: the gap lands on it
+            // alone, and it hugs the turn it woke.
+            .when(opening_trigger, |element| element.pb(px(4.0)))
             .when(index == 0, |element| element.pt(px(22.0)))
             .when(starts_followup_turn, |element| {
                 element.pt(px(FOLLOWUP_TURN_TOP_GAP))
             })
+            .when(follows_opening_trigger, |element| element.pt(px(0.0)))
             .when(index + 1 == row_count, |element| element.pb(px(22.0)))
             .child(
                 div()
@@ -3166,6 +3196,230 @@ impl Waku {
             )
             .child(div().h(hairline()).flex_1().bg(theme.separator))
             .into_any_element()
+    }
+
+    /// The "what woke this turn" marker: a quiet left-aligned row standing
+    /// in for the hidden employee report a supervisor turn opened on, or —
+    /// mid-turn — for the reports the provider accepted as steers. A burst
+    /// of reports collapses into one disclosure header.
+    fn render_boss_trigger_row(
+        &mut self,
+        anchor: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let group = self
+            .selected_session()
+            .map(|session| {
+                boss_trigger_group(session, anchor)
+                    .into_iter()
+                    .filter_map(|message| message.report_trigger.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let Some(anchor_trigger) = group.first() else {
+            return div().into_any_element();
+        };
+        let during_turn = anchor_trigger.boundary == crate::model::ReportTriggerBoundary::Steer;
+        if group.len() == 1 {
+            return self.render_boss_trigger_entry(anchor_trigger, during_turn, 0.0, theme, cx);
+        }
+        let group_id = anchor_trigger.event_id;
+        let expanded = self.expanded_trigger_groups.contains(&group_id);
+        let label = boss_trigger_burst_label(&group);
+        let tooltip = label.clone();
+        let focus_id = format!("boss-trigger-{group_id}");
+        let focus = self.transcript_control_focus(focus_id.clone(), cx);
+        let (status_icon, status_color) = boss_trigger_group_status(&group, theme);
+        let header_focus = focus.clone();
+        let header = div()
+            .id(SharedString::from(focus_id))
+            .track_focus(&focus)
+            .tab_index(0)
+            .w_full()
+            .min_w_0()
+            .min_h(px(BOSS_TRIGGER_ROW_HEIGHT))
+            .px(px(4.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .active(|style| style.opacity(0.8))
+            .tooltip(Tooltip::text(tooltip))
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                11.5,
+                theme.affordance_icon(),
+            ))
+            .child(icon(status_icon, 12.0, status_color).self_center())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .line_height(sp(18.0))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(label)),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_boss_trigger_group(anchor, group_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_boss_trigger_group(anchor, group_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        let mut column = div().w_full().min_w_0().flex().flex_col().child(header);
+        if expanded {
+            let entries = group
+                .iter()
+                .map(|trigger| {
+                    self.render_boss_trigger_entry(
+                        trigger,
+                        during_turn,
+                        BOSS_TRIGGER_ENTRY_INDENT,
+                        theme,
+                        cx,
+                    )
+                })
+                .collect::<Vec<_>>();
+            column = column.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "boss-trigger-entries-{group_id}"
+                    )))
+                    .w_full()
+                    .min_w_0()
+                    .mt(px(4.0))
+                    .max_h(px(240.0))
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .children(entries)
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "escape" {
+                            this.toggle_boss_trigger_group(anchor, group_id, cx);
+                            header_focus.focus(window, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+        column.into_any_element()
+    }
+
+    /// One report entry: a status glyph, the event-time label, and a
+    /// navigation affordance while the employee's transcript remains
+    /// reachable. `indent` tucks burst entries under the header's text.
+    fn render_boss_trigger_entry(
+        &self,
+        trigger: &crate::model::ReportTrigger,
+        during_turn: bool,
+        indent: f32,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let openable = self.sent_by_task_openable(trigger.employee);
+        let label = boss_trigger_entry_label(trigger, during_turn);
+        let focus_id = format!("boss-trigger-{}", trigger.event_id);
+        let focus = self.transcript_control_focus(focus_id.clone(), cx);
+        let employee = trigger.employee;
+        let (status_icon, status_color) = boss_trigger_status(trigger.kind, theme);
+        let mut entry = div()
+            .id(SharedString::from(focus_id))
+            .w_full()
+            .min_w_0()
+            .min_h(px(BOSS_TRIGGER_ROW_HEIGHT))
+            .px(px(4.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .child(
+                div()
+                    .flex_none()
+                    .when(indent > 0.0, |element| element.ml(px(indent)))
+                    .child(icon(status_icon, 12.0, status_color)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_baseline()
+                    .child(
+                        div()
+                            .flex_none()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(label)),
+                    )
+                    .when(!trigger.job_title.is_empty(), |row| {
+                        row.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_tertiary)
+                                .child(SharedString::from(format!(" · {}", trigger.job_title))),
+                        )
+                    }),
+            );
+        let tooltip = if openable {
+            boss_trigger_entry_tooltip(trigger, during_turn)
+        } else {
+            tr!("boss.trigger_unavailable")
+        };
+        entry = entry.tooltip(Tooltip::text(tooltip));
+        if openable {
+            entry = entry
+                .track_focus(&focus)
+                .tab_index(0)
+                .cursor_pointer()
+                .hover(|style| style.bg(theme.overlay))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .active(|style| style.opacity(0.8))
+                .child(div().flex_none().child(icon(
+                    "icons/arrow-up-right.svg",
+                    11.0,
+                    theme.affordance_icon(),
+                )))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_sent_by_task(employee, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.open_sent_by_task(employee, cx);
+                        cx.stop_propagation();
+                    }
+                }));
+        }
+        entry.into_any_element()
+    }
+
+    /// Disclosure for a burst marker — local UI state keyed by the group's
+    /// anchor event id, so reopening the chat defaults to collapsed.
+    fn toggle_boss_trigger_group(&mut self, anchor: Uuid, group_id: Uuid, cx: &mut Context<Self>) {
+        self.pin_transcript_for_disclosure();
+        if !self.expanded_trigger_groups.remove(&group_id) {
+            self.expanded_trigger_groups.insert(group_id);
+        }
+        self.remeasure_transcript_row(TranscriptRowKind::BossTrigger(anchor));
+        cx.notify();
     }
 
     /// The live turn's closing row: the thinking mark and "Working for Ns". It is

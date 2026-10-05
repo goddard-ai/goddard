@@ -31,8 +31,8 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, Checkpoint, CheckpointStatus, ContextMark, FavoriteModel, Message, MessageAtom,
-    MessageAttachment, MessageRole, Project, ProviderKind, RuntimeEventCursor, RuntimeMode,
-    SessionPlanning, SessionWorkspace, TranscriptNotice,
+    MessageAttachment, MessageRole, Project, ProviderKind, ReportTrigger, RuntimeEventCursor,
+    RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::custom_commands::CustomCommand;
@@ -1622,7 +1622,8 @@ impl StateStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments, atoms,
-                        created_at, streaming, sent_by_task, hidden, notice, context_mark
+                        created_at, streaming, sent_by_task, hidden, notice, context_mark,
+                        report_trigger
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1642,6 +1643,7 @@ impl StateStore {
                     row.get::<_, i64>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2379,6 +2381,7 @@ type MessageColumns = (
     i64,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -2396,6 +2399,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         hidden,
         notice,
         context_mark,
+        report_trigger,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
@@ -2414,6 +2418,8 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
             .and_then(|id| Uuid::parse_str(id).ok()),
         context_mark: context_mark.and_then(|json| serde_json::from_str::<ContextMark>(&json).ok()),
         hidden: hidden != 0,
+        report_trigger: report_trigger
+            .and_then(|json| serde_json::from_str::<ReportTrigger>(&json).ok()),
     })
 }
 
@@ -2491,8 +2497,8 @@ fn is_terminal_checkpoint(checkpoint: &Checkpoint) -> bool {
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
          attachments, atoms, created_at, streaming, sent_by_task, hidden, notice,
-         context_mark
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         context_mark, report_trigger
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -2507,7 +2513,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          sent_by_task = excluded.sent_by_task,
          hidden     = excluded.hidden,
          notice     = excluded.notice,
-         context_mark = excluded.context_mark";
+         context_mark = excluded.context_mark,
+         report_trigger = excluded.report_trigger";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -2561,6 +2568,12 @@ fn write_messages(
             .map(serde_json::to_string)
             .transpose()
             .map_err(to_io_error)?;
+        let report_trigger = message
+            .report_trigger
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(to_io_error)?;
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -2587,6 +2600,7 @@ fn write_messages(
                     Value::Integer(i64::from(message.hidden)),
                     notice.map_or(Value::Null, Value::Text),
                     context_mark.map_or(Value::Null, Value::Text),
+                    report_trigger.map_or(Value::Null, Value::Text),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -2675,6 +2689,14 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     if let Some(mark) = &message.context_mark {
         fold(1);
         if let Ok(json) = serde_json::to_string(mark) {
+            fold(fingerprint(&json));
+        }
+    } else {
+        fold(0);
+    }
+    if let Some(trigger) = &message.report_trigger {
+        fold(1);
+        if let Ok(json) = serde_json::to_string(trigger) {
             fold(fingerprint(&json));
         }
     } else {

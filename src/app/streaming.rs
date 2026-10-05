@@ -331,6 +331,7 @@ impl Waku {
                 message_id,
                 sent_by_task,
                 hidden,
+                report_trigger,
             } => {
                 // A prompt reached this runtime: another client's submission,
                 // or the echo of this one. The session decides whether that
@@ -344,6 +345,7 @@ impl Waku {
                         message_id,
                         sent_by_task,
                         hidden,
+                        report_trigger,
                     )
                 {
                     self.state.mark_session_dirty(session_id);
@@ -616,6 +618,7 @@ impl Waku {
                 message,
                 sent_by_task,
                 hidden,
+                report_trigger,
             } => {
                 // An accepted steer folds into the running turn; one that
                 // lands after the turn ended — after Stop, say — would
@@ -633,9 +636,15 @@ impl Waku {
                 if hidden {
                     // The daemon's context steer — provider-facing text, so
                     // it lands in the turn's record without a transcript row
-                    // and never entered the composer's pending steers.
+                    // and never entered the composer's pending steers. An
+                    // employee report rides the same path: its trigger record
+                    // is what the transcript's wake marker renders instead.
                     if let Some(session) = self.state.session_mut(session_id) {
-                        session.push_hidden_user_message(message.clone());
+                        session.push_hidden_user_message(
+                            message.clone(),
+                            sent_by_task,
+                            report_trigger,
+                        );
                         // A project-move steer acknowledged while the turn
                         // was parked reached the provider — retire the
                         // pending notice so the next prompt does not repeat

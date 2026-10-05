@@ -1576,6 +1576,35 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
+            // The wake marker reads as one quiet line in the overview.
+            TranscriptRowKind::BossTrigger(anchor) => {
+                let group = boss_trigger_group(session, anchor);
+                let line = match group.as_slice() {
+                    [] => String::new(),
+                    [trigger] => trigger
+                        .report_trigger
+                        .as_ref()
+                        .map(|trigger| {
+                            boss_trigger_entry_label(
+                                trigger,
+                                trigger.boundary == crate::model::ReportTriggerBoundary::Steer,
+                            )
+                        })
+                        .unwrap_or_default(),
+                    _ => boss_trigger_burst_label(
+                        &group
+                            .iter()
+                            .filter_map(|message| message.report_trigger.clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                };
+                div()
+                    .truncate()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(line))
+                    .into_any_element()
+            }
             // Only a pending capture's ChangedFiles survives the fold retain;
             // it renders the compact pending row rather than the full card.
             TranscriptRowKind::ChangedFiles(turn_id)

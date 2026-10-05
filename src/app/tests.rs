@@ -31,7 +31,8 @@ use super::{
     TranscriptLanding, TranscriptRowKind::*, TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT,
     WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
     activity_header_title, append_text_delta_to_session, assistant_response_footer,
-    assistant_response_footer_index, assistant_response_footer_time, compact_driver_error,
+    assistant_response_footer_index, assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_group,
+    compact_driver_error,
     disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
     folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
     maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
@@ -6787,4 +6788,216 @@ fn memory_log_entries_parse_structure() {
     let undated = parse_memory_log_entry("no stamp on this one", 0, 20);
     assert_eq!(undated.date, None);
     assert_eq!(undated.body, "no stamp on this one");
+}
+
+fn report_trigger(
+    kind: crate::model::ReportTriggerKind,
+    boundary: crate::model::ReportTriggerBoundary,
+) -> crate::model::ReportTrigger {
+    crate::model::ReportTrigger {
+        event_id: Uuid::new_v4(),
+        employee: Uuid::new_v4(),
+        employee_name: "Dorothea".into(),
+        job_title: "Deliverable annotations".into(),
+        kind,
+        boundary,
+    }
+}
+
+#[test]
+fn an_opening_report_marker_sits_above_the_turn_it_woke() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.status = SessionStatus::Idle;
+    let turn_id = Uuid::new_v4();
+    let report_id = Uuid::new_v4();
+    assert!(session.adopt_submitted_prompt(
+        "report",
+        turn_id,
+        report_id,
+        Some(Uuid::new_v4()),
+        true,
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Opening
+        ))
+    ));
+
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![BossTrigger(report_id), WorkingIndicator]
+    );
+    assert_eq!(
+        boss_trigger_group(&session, report_id)
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>(),
+        vec![report_id]
+    );
+}
+
+/// A failed or interrupted turn keeps its marker: the row is bound to the
+/// report message, not to the turn's outcome.
+#[test]
+fn an_interrupted_turn_keeps_its_trigger_marker() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.status = SessionStatus::Idle;
+    let turn_id = Uuid::new_v4();
+    let report_id = Uuid::new_v4();
+    session.adopt_submitted_prompt(
+        "report",
+        turn_id,
+        report_id,
+        Some(Uuid::new_v4()),
+        true,
+        Some(report_trigger(
+            ReportTriggerKind::Blocker,
+            ReportTriggerBoundary::Opening,
+        )),
+    );
+    session.finish_active_turn(TurnStatus::Interrupted);
+    session.status = SessionStatus::Idle;
+
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![BossTrigger(report_id)]
+    );
+}
+
+#[test]
+fn a_burst_of_opening_reports_collapses_into_one_marker() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.status = SessionStatus::Idle;
+    let turn_id = Uuid::new_v4();
+    let first_id = Uuid::new_v4();
+    session.adopt_submitted_prompt(
+        "report one",
+        turn_id,
+        first_id,
+        Some(Uuid::new_v4()),
+        true,
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Opening,
+        )),
+    );
+    // A second opening record for the same turn — the batch the provider
+    // consumed in one go — collapses behind the first marker.
+    let second_id = session.push_hidden_user_message(
+        "report two",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Opening,
+        )),
+    );
+
+    let rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
+    assert_eq!(rows, vec![BossTrigger(first_id), WorkingIndicator]);
+    let group = boss_trigger_group(&session, first_id);
+    assert_eq!(
+        group.iter().map(|message| message.id).collect::<Vec<_>>(),
+        vec![first_id, second_id]
+    );
+    let triggers = group
+        .iter()
+        .map(|message| message.report_trigger.clone().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(boss_trigger_burst_label(&triggers), "2 employees finished");
+}
+
+#[test]
+fn adjacent_steer_reports_share_one_marker_until_output_separates() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("Keep going");
+    session.push_message(MessageRole::Assistant, "On it.");
+    let first_steer = session.push_hidden_user_message(
+        "blocker",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Blocker,
+            ReportTriggerBoundary::Steer,
+        )),
+    );
+    let second_steer = session.push_hidden_user_message(
+        "finish",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Steer,
+        )),
+    );
+    session.push_message(MessageRole::Assistant, "Acknowledged.");
+    let third_steer = session.push_hidden_user_message(
+        "late blocker",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Blocker,
+            ReportTriggerBoundary::Steer,
+        )),
+    );
+
+    let rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
+    assert_eq!(
+        rows,
+        vec![
+            Message(0),
+            Message(1),
+            BossTrigger(first_steer),
+            Message(4),
+            BossTrigger(third_steer)
+        ]
+    );
+    // The adjacent pair groups together; the late report stands alone
+    // because the boss's reply separated it.
+    let group = boss_trigger_group(&session, first_steer);
+    assert_eq!(
+        group.iter().map(|message| message.id).collect::<Vec<_>>(),
+        vec![first_steer, second_steer]
+    );
+    let solo = boss_trigger_group(&session, third_steer);
+    assert_eq!(solo.len(), 1);
+    let triggers = group
+        .iter()
+        .map(|message| message.report_trigger.clone().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        boss_trigger_burst_label(&triggers),
+        "2 employee updates · 1 blocker"
+    );
+}
+
+/// A redelivered report — the same event landing twice — folds onto its
+/// first landing instead of doubling the row's count.
+#[test]
+fn a_retried_report_dedupes_its_marker_entry() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.status = SessionStatus::Idle;
+    let turn_id = Uuid::new_v4();
+    let first_id = Uuid::new_v4();
+    let trigger = report_trigger(ReportTriggerKind::Finished, ReportTriggerBoundary::Opening);
+    session.adopt_submitted_prompt(
+        "report one",
+        turn_id,
+        first_id,
+        Some(Uuid::new_v4()),
+        true,
+        Some(trigger.clone()),
+    );
+    let retry_id =
+        session.push_hidden_user_message("report one", Some(Uuid::new_v4()), Some(trigger));
+
+    assert_eq!(
+        boss_trigger_group(&session, first_id)
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>(),
+        vec![first_id],
+        "the retry's event id already lands in the group"
+    );
+    let _ = retry_id;
 }

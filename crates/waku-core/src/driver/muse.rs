@@ -554,6 +554,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                         message: text,
                         sent_by_task: None,
                         hidden: false,
+                        report_trigger: None,
                     });
                 }
                 Err(error) => {

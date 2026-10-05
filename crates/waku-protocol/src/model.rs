@@ -1391,6 +1391,10 @@ pub struct QueuedMessage {
     /// the internal "continue" nudge parked behind a busy session.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// The employee report this parked prompt delivers — it must survive a
+    /// restart so the resumed delivery still records the turn's trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_trigger: Option<ReportTrigger>,
     /// Which queue owns the entry. Absent in documents written before the
     /// field existed — those are all composer-owned, so `User` is default.
     #[serde(default, skip_serializing_if = "QueuedMessageSource::is_user")]
@@ -1413,6 +1417,7 @@ impl QueuedMessage {
             attachments: Vec::new(),
             atoms: Vec::new(),
             hidden: false,
+            report_trigger: None,
             source: QueuedMessageSource::User,
             created_at: unix_time(),
         }
@@ -2802,6 +2807,7 @@ impl AgentSession {
         message_id: Uuid,
         sent_by_task: Option<Uuid>,
         hidden: bool,
+        report_trigger: Option<ReportTrigger>,
     ) -> bool {
         let now = unix_time();
         // The daemon reuses a mirrored queue entry's id as the delivered
@@ -2818,12 +2824,43 @@ impl AgentSession {
                 candidate.turn_id == Some(active) && candidate.role == MessageRole::User
             });
             if has_prompt {
-                return dequeued;
+                // The submission landed on a turn already opened — an echo,
+                // or a queued report delivered while the drain's first
+                // prompt was still starting. The report still fed this
+                // turn: keep its record so the marker shows the whole set
+                // the turn consumed, deduped by event id.
+                let Some(mut trigger) = report_trigger else {
+                    return dequeued;
+                };
+                if self.messages.iter().any(|candidate| {
+                    candidate.id == message_id
+                        || candidate
+                            .report_trigger
+                            .as_ref()
+                            .is_some_and(|held| held.event_id == trigger.event_id)
+                }) {
+                    return dequeued;
+                }
+                trigger.boundary = ReportTriggerBoundary::Steer;
+                let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
+                prompt.id = message_id;
+                prompt.sent_by_task = sent_by_task;
+                prompt.hidden = hidden;
+                prompt.report_trigger = Some(trigger);
+                self.messages.push(prompt);
+                self.updated_at = now;
+                return true;
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
             prompt.sent_by_task = sent_by_task;
             prompt.hidden = hidden;
+            prompt.report_trigger = report_trigger.map(|mut trigger| {
+                // An open turn adopted the prompt — it did not open the
+                // turn, whatever the delivery assumed.
+                trigger.boundary = ReportTriggerBoundary::Steer;
+                trigger
+            });
             self.messages.push(prompt);
             self.updated_at = now;
             return true;
@@ -2845,6 +2882,7 @@ impl AgentSession {
         prompt.id = message_id;
         prompt.sent_by_task = sent_by_task;
         prompt.hidden = hidden;
+        prompt.report_trigger = report_trigger;
         self.messages.push(prompt);
         self.status = SessionStatus::Connecting;
         self.last_reply_at = Some(now);
@@ -3000,12 +3038,19 @@ impl AgentSession {
     /// daemon-injected context steer the provider folded into the turn.
     /// The message stays in the record so the session documents the text the
     /// provider actually saw.
-    pub fn push_hidden_user_message(&mut self, content: impl Into<String>) -> Uuid {
+    pub fn push_hidden_user_message(
+        &mut self,
+        content: impl Into<String>,
+        sent_by_task: Option<Uuid>,
+        report_trigger: Option<ReportTrigger>,
+    ) -> Uuid {
         let mut message = match self.active_turn_id() {
             Some(turn_id) => Message::new_for_turn(MessageRole::User, content, turn_id),
             None => Message::new(MessageRole::User, content),
         };
         message.hidden = true;
+        message.sent_by_task = sent_by_task;
+        message.report_trigger = report_trigger;
         let id = message.id;
         self.messages.push(message);
         id
@@ -3609,6 +3654,65 @@ pub struct ContextMark {
     pub focus: Option<String>,
 }
 
+/// The outcome an employee's report carried to its supervisor.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ReportTriggerKind {
+    /// The employee's job finished cleanly.
+    Finished,
+    /// The job failed — failure takes precedence when a finish is also
+    /// flagged with a blocker.
+    Failed,
+    /// The employee raised a blocker for its supervisor's attention.
+    Blocker,
+    /// The job finished with an unresolved blocker still flagged.
+    FinishedWithBlocker,
+}
+
+/// Where the report landed relative to the turn it reached.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ReportTriggerBoundary {
+    /// The report opened the turn — its marker sits at the turn boundary.
+    Opening,
+    /// The provider accepted the report into a turn already open, so its
+    /// marker sits at the accepted boundary mid-turn.
+    Steer,
+}
+
+/// The event-time record of the employee report behind a supervisor turn —
+/// the transcript's "what woke this turn" marker. Everything renderable is
+/// a snapshot taken at delivery: a later rename, resurrection, or status
+/// change must not rewrite a marker already shown.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportTrigger {
+    /// The delivery's dedupe identity — the parked queued entry's id for a
+    /// queued report, a fresh id for a steer that never parked.
+    pub event_id: Uuid,
+    /// The reporting employee's session — the marker's navigation target.
+    pub employee: Uuid,
+    pub employee_name: String,
+    pub job_title: String,
+    pub kind: ReportTriggerKind,
+    pub boundary: ReportTriggerBoundary,
+}
+
+impl ReportTrigger {
+    /// A snapshot for the report `employee` is delivering, pending the
+    /// delivery decision that fixes its boundary.
+    pub fn new(employee: &crate::boss::BossEmployee, kind: ReportTriggerKind) -> Self {
+        Self {
+            event_id: Uuid::new_v4(),
+            employee: employee.session_id,
+            employee_name: employee.identity.name.clone(),
+            job_title: employee.job_title.clone(),
+            kind,
+            boundary: ReportTriggerBoundary::Opening,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct Message {
     pub id: Uuid,
@@ -3645,6 +3749,12 @@ pub struct Message {
     /// record so every projection carries the same ids.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// The employee report this hidden prompt delivered — the transcript's
+    /// turn-trigger record. `None` for every other message: human prompts,
+    /// visible task-to-task sends, nudges, and context injections carry no
+    /// marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_trigger: Option<ReportTrigger>,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -3663,6 +3773,7 @@ impl Message {
             sent_by_task: None,
             context_mark: None,
             hidden: false,
+            report_trigger: None,
             created_at: unix_time(),
             streaming: false,
         }
@@ -4099,6 +4210,9 @@ pub enum DriverEvent {
         /// The prompt is provider-facing only — no client renders a
         /// transcript row for it. Set for the internal "continue" nudge.
         hidden: bool,
+        /// The employee report this prompt delivered — the supervisor's
+        /// turn-trigger record. `None` for every other submission.
+        report_trigger: Option<ReportTrigger>,
     },
     TurnStarted,
     /// The provider's turn ended while detached work it will wake the
@@ -4154,6 +4268,8 @@ pub enum DriverEvent {
         /// The steer carried daemon-injected context rather than user or
         /// agent text — clients record it on the turn but render no row.
         hidden: bool,
+        /// The employee report this steer delivered into the open turn.
+        report_trigger: Option<ReportTrigger>,
     },
     /// The boss context router's verdict for a submitted prompt attached the
     /// work digest — this event exists only when it did. `focus` is the
@@ -7754,7 +7870,7 @@ mod tests {
             .push(QueuedMessage::new("user draft"));
 
         let turn_id = Uuid::new_v4();
-        assert!(session.adopt_submitted_prompt("parked prompt", turn_id, queued_id, None, false));
+        assert!(session.adopt_submitted_prompt("parked prompt", turn_id, queued_id, None, false, None));
 
         // Only the matching entry left; the delivered message reuses its id.
         assert_eq!(session.queued_messages.len(), 1);
@@ -7777,6 +7893,7 @@ mod tests {
             message_id,
             Some(Uuid::new_v4()),
             true,
+            None,
         ));
         let prompt = session
             .messages
@@ -8114,7 +8231,7 @@ mod tests {
     fn marking_prompt_context_sets_the_mark_once() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         let message_id = Uuid::new_v4();
-        session.adopt_submitted_prompt("route me", Uuid::new_v4(), message_id, None, false);
+        session.adopt_submitted_prompt("route me", Uuid::new_v4(), message_id, None, false, None);
 
         assert!(session.mark_prompt_context(message_id, Some("app".into())));
         assert_eq!(
@@ -8145,7 +8262,7 @@ mod tests {
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
 
-        assert!(session.adopt_submitted_prompt("second", turn_id, message_id, None, false));
+        assert!(session.adopt_submitted_prompt("second", turn_id, message_id, None, false, None));
 
         assert_eq!(session.status, SessionStatus::Connecting);
         assert_eq!(session.active_turn_id(), Some(turn_id));
@@ -8166,7 +8283,7 @@ mod tests {
         session.status = SessionStatus::Connecting;
         let message_id = session.messages[0].id;
 
-        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id, None, false));
+        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id, None, false, None));
 
         assert_eq!(session.turns.len(), 1);
         assert_eq!(session.messages.len(), 1);
@@ -8186,7 +8303,8 @@ mod tests {
             Uuid::new_v4(),
             message_id,
             None,
-            false
+            false,
+            None
         ));
 
         assert_eq!(session.turns.len(), 1);
@@ -8195,6 +8313,120 @@ mod tests {
         assert_eq!(prompt.turn_id, Some(provider_turn));
         assert_eq!(prompt.role, MessageRole::User);
         assert_eq!(session.status, SessionStatus::Working);
+    }
+
+    fn report_trigger(employee: Uuid, kind: ReportTriggerKind) -> ReportTrigger {
+        ReportTrigger {
+            event_id: Uuid::new_v4(),
+            employee,
+            employee_name: "Dorothea".into(),
+            job_title: "Deliverable annotations".into(),
+            kind,
+            boundary: ReportTriggerBoundary::Opening,
+        }
+    }
+
+    #[test]
+    fn a_report_prompt_opens_its_turn_with_the_trigger_record() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("first");
+        session.push_message(MessageRole::Assistant, "done");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        let employee = Uuid::new_v4();
+        let trigger = report_trigger(employee, ReportTriggerKind::Finished);
+        let turn_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+
+        assert!(session.adopt_submitted_prompt(
+            "report",
+            turn_id,
+            message_id,
+            Some(employee),
+            true,
+            Some(trigger.clone())
+        ));
+
+        let prompt = session.messages.last().unwrap();
+        assert_eq!(prompt.turn_id, Some(turn_id));
+        assert!(prompt.hidden);
+        let held = prompt.report_trigger.as_ref().unwrap();
+        assert_eq!(held.boundary, ReportTriggerBoundary::Opening);
+        assert_eq!(held.employee_name, "Dorothea");
+        assert_eq!(held.job_title, "Deliverable annotations");
+    }
+
+    /// Two queued reports draining before the first turn's `TurnStarted`
+    /// lands both feed the same open turn: the second still records its
+    /// report, as a mid-turn delivery, and a retry carrying the same event
+    /// folds onto it.
+    #[test]
+    fn a_second_report_absorbed_by_the_open_turn_marks_a_steer() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.status = SessionStatus::Idle;
+        let employee = Uuid::new_v4();
+        let turn_id = Uuid::new_v4();
+        assert!(session.adopt_submitted_prompt(
+            "report one",
+            turn_id,
+            Uuid::new_v4(),
+            Some(employee),
+            true,
+            Some(report_trigger(employee, ReportTriggerKind::Finished))
+        ));
+        let second = report_trigger(employee, ReportTriggerKind::Blocker);
+        let second_event = second.event_id;
+        let second_message = Uuid::new_v4();
+
+        assert!(session.adopt_submitted_prompt(
+            "report two",
+            Uuid::new_v4(),
+            second_message,
+            Some(employee),
+            true,
+            Some(second.clone())
+        ));
+
+        assert_eq!(session.turns.len(), 1, "the open turn absorbed it");
+        let prompt = session.messages.last().unwrap();
+        assert_eq!(prompt.id, second_message);
+        assert_eq!(prompt.turn_id, Some(turn_id));
+        assert_eq!(
+            prompt.report_trigger.as_ref().unwrap().boundary,
+            ReportTriggerBoundary::Steer
+        );
+
+        // A redriven delivery of the same event — or of the very same
+        // message id — lands nothing twice.
+        assert!(!session.adopt_submitted_prompt(
+            "report two",
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Some(employee),
+            true,
+            Some(second)
+        ));
+        assert!(!session.adopt_submitted_prompt(
+            "report two",
+            Uuid::new_v4(),
+            second_message,
+            Some(employee),
+            true,
+            Some(report_trigger(employee, ReportTriggerKind::Blocker))
+        ));
+        assert_eq!(
+            session
+                .messages
+                .iter()
+                .filter(|message| {
+                    message
+                        .report_trigger
+                        .as_ref()
+                        .is_some_and(|trigger| trigger.event_id == second_event)
+                })
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -5051,6 +5051,25 @@ impl Waku {
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }
+            // The side chat keeps the wake marker to one quiet line.
+            TranscriptRowKind::BossTrigger(anchor) => {
+                let line = boss_trigger_group(session, anchor)
+                    .first()
+                    .and_then(|message| message.report_trigger.as_ref())
+                    .map(|trigger| {
+                        boss_trigger_entry_label(
+                            trigger,
+                            trigger.boundary == crate::model::ReportTriggerBoundary::Steer,
+                        )
+                    })
+                    .unwrap_or_default();
+                div()
+                    .truncate()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(line))
+                    .into_any_element()
+            }
             TranscriptRowKind::ChangedFiles(turn_id) => {
                 if self.blocked_checkpoint_turn(session.id) == Some(turn_id) {
                     self.render_card_checkpoint_pending_row(turn_id, &theme)

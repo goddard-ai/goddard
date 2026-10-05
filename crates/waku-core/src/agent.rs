@@ -57,6 +57,10 @@ pub struct AgentPrompt {
     /// the transcript, but it settles nothing on the daemon side beyond the
     /// echo itself.
     pub hidden: bool,
+    /// The employee report this prompt carries — the supervisor's
+    /// turn-trigger record. It rides the queue mirror and the pending-steer
+    /// record so the marker survives parking and delivery retries.
+    pub report_trigger: Option<crate::model::ReportTrigger>,
 }
 
 /// What accepting a hidden context steer settles for the session.
@@ -964,6 +968,7 @@ mod tests {
             queued_id: Some(Uuid::new_v4()),
             context: None,
             hidden: false,
+            report_trigger: None,
         }
     }
 
@@ -1051,6 +1056,7 @@ mod tests {
                     queued_id: Some(restored_id),
                     context: None,
                     hidden: false,
+                    report_trigger: None,
                 },
                 prompt("three", None),
             ],
@@ -1084,6 +1090,7 @@ mod tests {
                 queued_id: None,
                 context: None,
                 hidden: false,
+                report_trigger: None,
             },
         );
 
@@ -1127,6 +1134,7 @@ mod tests {
                 queued_id: None,
                 context: Some(ContextSteer::Memory),
                 hidden: false,
+                report_trigger: None,
             },
         );
         assert!(state.context_steer_pending(session));
