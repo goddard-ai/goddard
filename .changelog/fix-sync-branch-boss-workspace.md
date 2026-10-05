@@ -1,0 +1,1 @@
+- ⌘S in a boss chat no longer opens "Sync branch…" on a "not a repository" error — a resolved workspace that isn't a Git checkout now asks which project to sync, same as having no repository context at all.
