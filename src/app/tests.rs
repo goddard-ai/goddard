@@ -5776,6 +5776,34 @@ fn archive_gate_admits_planning_sessions() {
 }
 
 #[test]
+fn archive_gate_admits_planning_sessions() {
+    // A planning session is an ordinary started task to the archive path:
+    // the row menu and ⌘⇧A share this gate, and they set the same
+    // `archived_at` the post-finalization grace sweep writes.
+    let mut planning = started_session(Uuid::new_v4());
+    planning.planning = Some(crate::model::SessionPlanning {
+        plan_file: "plans/auth.md".into(),
+        idea: "Auth".into(),
+        label: waku_client::WireTranslation::new("boss.planning_label", []),
+        finalized_at: None,
+    });
+    assert!(session_archivable(&planning));
+
+    // Archived is archived, whoever set it — the flag also keeps an
+    // abandoned plan's row from resurrecting.
+    planning.archived_at = Some(1);
+    assert!(!session_archivable(&planning));
+    planning.archived_at = None;
+
+    // The gate's other exclusions still apply: side chats are delete-only
+    // and an unstarted draft has nothing to archive.
+    planning.side_chat_of = Some(Uuid::new_v4());
+    assert!(!session_archivable(&planning));
+    let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    assert!(!session_archivable(&draft));
+}
+
+#[test]
 fn archived_filter_matches_transcript_hits() {
     use crate::persistence::SessionMessageMatch;
 
