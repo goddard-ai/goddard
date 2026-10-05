@@ -218,8 +218,14 @@ impl Broker {
                     if purpose.trim().is_empty() || purpose.len() > 512 {
                         bail!("purpose must contain 1–512 bytes");
                     }
-                    denied_blockers =
-                        admission_blockers(&resources, &claim, &ledger, &policy, &observation);
+                    denied_blockers = admission_blockers(
+                        &resources,
+                        &claim,
+                        task,
+                        &ledger,
+                        &policy,
+                        &observation,
+                    );
                     if denied_blockers.is_empty() {
                         ledger.reservations.push(Reservation {
                             id,
@@ -529,9 +535,15 @@ fn validate_set(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
 /// admission that would leave an earlier parked `Acquire` still blocked
 /// on the same resources also denies: admissions never starve the
 /// broker's FIFO clients.
+///
+/// The requesting task's own granted claims stay out of the count: a
+/// daemon re-admission under a fresh id is a swap that releases the old
+/// reservation on grant, so counting it against itself could never
+/// succeed under a saturated cap.
 fn admission_blockers(
     request: &ResourceSet,
     claim: &AdmissionClaim,
+    task: Uuid,
     ledger: &Ledger,
     policy: &ResourcePolicy,
     observation: &Observation,
@@ -541,7 +553,8 @@ fn admission_blockers(
         .reservations
         .iter()
         .filter(|r| {
-            r.granted_at.is_some()
+            r.task != task
+                && r.granted_at.is_some()
                 && !r.released
                 && !r.cancelled
                 && r.admission.as_ref().is_some_and(|held| {
@@ -559,7 +572,7 @@ fn admission_blockers(
     if used >= cap {
         blockers.push(AdmissionBlocker::ModelLimit { used, limit: cap });
     }
-    if blocked(request, ledger, policy, observation) {
+    if blocked(request, ledger, policy, observation, Some(task)) {
         blockers.push(AdmissionBlocker::HostResources {
             detail: "host capacity is occupied".into(),
         });
@@ -597,22 +610,27 @@ fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observat
             continue;
         }
         // Strict FIFO prevents a stream of small requests starving an atomic multi-resource request.
-        if blocked(&r.resources, ledger, policy, observation) {
+        if blocked(&r.resources, ledger, policy, observation, None) {
             break;
         }
         ledger.reservations[index].granted_at = Some(now);
     }
 }
+/// Whether `request` cannot grant now. `exclude` names a task whose own
+/// granted claims should not count — a re-admission swap releases them
+/// on grant, so they are not part of the capacity the request competes
+/// for.
 fn blocked(
     request: &ResourceSet,
     ledger: &Ledger,
     policy: &ResourcePolicy,
     observation: &Observation,
+    exclude: Option<Uuid>,
 ) -> bool {
     let held: Vec<_> = ledger
         .reservations
         .iter()
-        .filter(|r| r.granted_at.is_some())
+        .filter(|r| r.granted_at.is_some() && Some(r.task) != exclude)
         .collect();
     let external: Vec<_> = observation
         .devices
@@ -1167,6 +1185,58 @@ mod tests {
                 .transaction(task, acquisition(build(), None), Observation::default())
                 .is_err()
         );
+    }
+
+    /// A re-admission under a fresh id is the daemon's swap: the
+    /// requesting task's own held claims — model slot and host set —
+    /// stay out of the count, while every other task still sees the
+    /// full pool.
+    #[test]
+    fn a_readmission_ignores_the_requesting_tasks_own_claims() {
+        let h = Harness::new();
+        let claim = || AdmissionClaim {
+            daemon: Uuid::new_v4(),
+            provider: "codex".into(),
+            model: "gpt-5.5".into(),
+            live_limit: 1,
+            hard_cap: 1,
+            allow_burst: false,
+        };
+        let task = Uuid::new_v4();
+        let first = h
+            .broker
+            .try_admission(task, Uuid::new_v4(), build(), "first".into(), claim())
+            .unwrap();
+        assert!(first.granted);
+
+        // Same task, fresh id, same claim + set: without the self
+        // exclusion both the model lane (1/1) and the build pool (1/1)
+        // would report full forever.
+        let swap_id = Uuid::new_v4();
+        let swap = h
+            .broker
+            .try_admission(task, swap_id, build(), "swap".into(), claim())
+            .unwrap();
+        assert!(
+            swap.granted,
+            "the swap re-admission blocked on its own claims: {:?}",
+            swap.blockers
+        );
+
+        // Another task sees the pool as full as it is: both of the first
+        // task's reservations count against it until one releases.
+        let other = h
+            .broker
+            .try_admission(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                build(),
+                "other".into(),
+                claim(),
+            )
+            .unwrap();
+        assert!(!other.granted);
+        h.broker.release_admission(task, swap_id);
     }
 
     #[test]

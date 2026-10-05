@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceSet {
     #[serde(default)]

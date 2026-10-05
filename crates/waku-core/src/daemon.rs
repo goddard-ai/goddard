@@ -7010,6 +7010,9 @@ impl WakuBackend {
                             events,
                         );
                     }
+                    if let EmployeeControl::SetResources { resources } = &action {
+                        return self.control_employee_resources(session_id, resources.clone());
+                    }
                     // A prompt or steer to a finished employee re-enters
                     // admission with the same transcript — the ticket resumes
                     // it once capacity frees; a steer has no open turn to
@@ -7098,7 +7101,8 @@ impl WakuBackend {
                         }
                         EmployeeControl::SetModel { .. }
                         | EmployeeControl::SetPermissions { .. }
-                        | EmployeeControl::SetWorkspace { .. } => {
+                        | EmployeeControl::SetWorkspace { .. }
+                        | EmployeeControl::SetResources { .. } => {
                             unreachable!("handled above")
                         }
                     }
@@ -7282,14 +7286,14 @@ impl WakuBackend {
         }
         drop_detached(removed);
         // Capacity releases exactly once, after the runtime is gone —
-        // `complete_expiry` hands back the ticket's reservation only on
+        // `complete_expiry` hands back the ticket's reservations only on
         // the winning expiry, and the broker's release keeps resident
         // devices under their own retention rules. Waking the scheduler
         // is what pulls the next queued ticket forward.
-        if let Some(reservation) = self.boss.complete_expiry(session_id)?
-            && let Ok(broker) = self.resource_broker()
-        {
-            broker.release_admission(session_id, reservation);
+        for reservation in self.boss.complete_expiry(session_id)? {
+            if let Ok(broker) = self.resource_broker() {
+                broker.release_admission(session_id, reservation);
+            }
         }
         self.wake_summon_queue();
         let (body, failed, chunk) = {
@@ -7544,7 +7548,8 @@ impl WakuBackend {
                         return;
                     };
                     backend.run_summon_scheduler();
-                    let queued = !backend.boss.queued_heads().is_empty();
+                    let queued = !backend.boss.queued_heads().is_empty()
+                        || !backend.boss.pending_resource_updates().is_empty();
                     let (lock, condvar) = &*wake;
                     let mut signaled = lock.lock();
                     // Queued tickets get a bounded tick so broker-side changes
@@ -7611,7 +7616,8 @@ impl WakuBackend {
         self.deliver_wave_notifications();
         loop {
             let heads = self.boss.queued_heads();
-            if heads.is_empty() {
+            let updates = self.boss.pending_resource_updates();
+            if heads.is_empty() && updates.is_empty() {
                 return;
             }
             let mut progressed = false;
@@ -7627,9 +7633,124 @@ impl WakuBackend {
                     }
                 }
             }
+            // Parked resource updates attempt after queued tickets — new
+            // work sees capacity first; a granted update swaps in place
+            // and its release may admit another ticket next round.
+            for employee in updates {
+                match self.try_resource_update(&employee) {
+                    Ok(true) => progressed = true,
+                    Ok(false) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "resource update for {} failed: {error:#}",
+                            employee.session_id
+                        );
+                    }
+                }
+            }
             if !progressed {
                 return;
             }
+        }
+    }
+
+    /// One parked resource update's admission try: the broker grants the
+    /// new set under the parked id only when capacity outside the
+    /// employee's own claims allows, then the ticket swaps to it
+    /// atomically and the old claims release. A denied or stale attempt
+    /// changes nothing — the employee keeps running on its current set.
+    fn try_resource_update(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+    ) -> anyhow::Result<bool> {
+        let session_id = employee.session_id;
+        let Some(ticket) = employee.ticket.clone() else {
+            return Ok(false);
+        };
+        let (Some(resources), Some(reservation_id)) = (
+            ticket.pending_resources.clone(),
+            ticket.pending_reservation,
+        ) else {
+            return Ok(false);
+        };
+        let attempt = self.resource_broker().and_then(|broker| {
+            broker.try_admission(
+                session_id,
+                reservation_id,
+                resources,
+                employee.job_title.clone(),
+                self.admission_claim(&ticket),
+            )
+        });
+        let attempt = match attempt {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                self.boss.record_blocked(
+                    session_id,
+                    vec![waku_protocol::boss::AdmissionBlocker::HostResources {
+                        detail: format!("{error:#}"),
+                    }],
+                )?;
+                return Ok(false);
+            }
+        };
+        if !attempt.granted {
+            self.boss.record_blocked(session_id, attempt.blockers)?;
+            return Ok(false);
+        }
+        match self.boss.apply_resource_update(session_id, reservation_id)? {
+            (true, stale_reservation) => {
+                if let Some(stale) = stale_reservation
+                    && let Ok(broker) = self.resource_broker()
+                {
+                    broker.release_admission(session_id, stale);
+                }
+                // The launch-time shim bakes the reservation id — rewrite
+                // it so the employee's next `resource` call borrows from
+                // the new set. Provider processes that carry the id in
+                // their own environment keep the old one until relaunch.
+                match self
+                    .agent_launch_env(session_id)
+                    .and_then(|env| crate::agent::write_session_shim(&env))
+                {
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "could not refresh the session shim for {session_id}: {error:#}"
+                        );
+                    }
+                }
+                Ok(true)
+            }
+            (false, _) => {
+                // Superseded, requeued, or finished while the grant was in
+                // flight — drop the claims it just took.
+                if let Ok(broker) = self.resource_broker() {
+                    broker.release_admission(session_id, reservation_id);
+                }
+                Ok(false)
+            }
+        }
+    }
+
+    /// The model-slot claim one admission attempt carries — the ticket's
+    /// provider and concrete model against the boss-set limits, burst
+    /// allowed only when the ticket says so.
+    fn admission_claim(
+        &self,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> waku_protocol::resources::AdmissionClaim {
+        let rule = self.boss.model_limit(ticket.provider, &ticket.model);
+        waku_protocol::resources::AdmissionClaim {
+            daemon: self.boss.document().identity.id,
+            provider: ticket.provider.id().to_owned(),
+            model: ticket.model.clone(),
+            live_limit: rule
+                .as_ref()
+                .map(|rule| rule.live_limit)
+                .unwrap_or(u32::MAX),
+            hard_cap: rule.as_ref().map(|rule| rule.hard_cap).unwrap_or(u32::MAX),
+            allow_burst: ticket.allow_burst,
         }
     }
 
@@ -7645,18 +7766,7 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
-        let rule = self.boss.model_limit(ticket.provider, &ticket.model);
-        let claim = waku_protocol::resources::AdmissionClaim {
-            daemon: self.boss.document().identity.id,
-            provider: ticket.provider.id().to_owned(),
-            model: ticket.model.clone(),
-            live_limit: rule
-                .as_ref()
-                .map(|rule| rule.live_limit)
-                .unwrap_or(u32::MAX),
-            hard_cap: rule.as_ref().map(|rule| rule.hard_cap).unwrap_or(u32::MAX),
-            allow_burst: ticket.allow_burst,
-        };
+        let claim = self.admission_claim(&ticket);
         // The reservation key is stable per generation, so a retry after a
         // lost response or a restart re-issues instead of double-claiming.
         let reservation_id = Uuid::from_u128(session_id.as_u128() ^ u128::from(ticket.generation));
@@ -8140,6 +8250,8 @@ impl WakuBackend {
             priority,
             goal_id,
             reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
             blocked_by: Vec::new(),
             dispatch_event: None,
         };
@@ -8323,6 +8435,20 @@ impl WakuBackend {
                 self.wake_summon_queue();
                 Ok(BossResult::Saved)
             }
+            EmployeeControl::SetResources { resources } => {
+                if !resource_set_empty(&resources) {
+                    self.resource_broker()?.validate_set(&resources)?;
+                }
+                if !self.boss.reticket(session_id, |ticket| {
+                    ticket.resources = resources.clone();
+                })? {
+                    bail!("employee is no longer queued");
+                }
+                // The next scheduler pass re-attempts admission against the
+                // edited set — a ticket that now over-declares simply waits.
+                self.wake_summon_queue();
+                Ok(BossResult::Saved)
+            }
             EmployeeControl::SetWorkspace {
                 workspace,
                 base_branch,
@@ -8349,6 +8475,36 @@ impl WakuBackend {
                 Ok(BossResult::Saved)
             }
         }
+    }
+
+    /// `setResources` on a live employee: park the new set on its ticket
+    /// under a fresh reservation id and let the scheduler re-admit it in
+    /// place. The running turn is never interrupted — a set that cannot
+    /// grant yet simply waits on the record while the employee keeps its
+    /// current claims.
+    fn control_employee_resources(
+        &self,
+        session_id: Uuid,
+        resources: waku_protocol::resources::ResourceSet,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        self.boss.require_active(session_id)?;
+        if !resource_set_empty(&resources) {
+            self.resource_broker()?.validate_set(&resources)?;
+        }
+        let (base, _started) = self.ticket_base_for(session_id)?;
+        let reservation = Uuid::new_v4();
+        let replaced =
+            self.boss
+                .request_resource_update(session_id, base, resources, reservation)?;
+        // A superseded parked id may already hold a grant — release it so
+        // the ledger never orphans capacity.
+        if let Some(stale) = replaced
+            && let Ok(broker) = self.resource_broker()
+        {
+            broker.release_admission(session_id, stale);
+        }
+        self.wake_summon_queue();
+        Ok(waku_protocol::boss::BossResult::Saved)
     }
 
     /// Re-enter an employee into admission — resurrection and `setModel`
@@ -8395,7 +8551,7 @@ impl WakuBackend {
             }
         }
         self.agent.clear_session(session_id);
-        let (_employee, stale_reservation) =
+        let (_employee, stale_reservations) =
             self.boss.requeue_employee(session_id, base, |ticket| {
                 if !parked.is_empty() {
                     let mut combined = parked;
@@ -8404,10 +8560,10 @@ impl WakuBackend {
                 }
                 adjust(ticket, started);
             })?;
-        if let Some(reservation) = stale_reservation
-            && let Ok(broker) = self.resource_broker()
-        {
-            broker.release_admission(session_id, reservation);
+        for reservation in stale_reservations {
+            if let Ok(broker) = self.resource_broker() {
+                broker.release_admission(session_id, reservation);
+            }
         }
         self.wake_summon_queue();
         Ok(())
@@ -8483,6 +8639,8 @@ impl WakuBackend {
                 priority: None,
                 goal_id: None,
                 reservation: None,
+                pending_resources: None,
+                pending_reservation: None,
                 blocked_by: Vec::new(),
                 dispatch_event: None,
             },
@@ -15490,6 +15648,313 @@ mod tests {
         // missing binary.
         assert!(backend.boss.employee(first).unwrap().expired);
         assert!(backend.boss.employee(second).unwrap().expired);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `setResources` rewrites a queued ticket in place: the next
+    /// admission attempt must satisfy the declared host set, so a ticket
+    /// that would have dispatched on the freed model slot keeps waiting
+    /// until the claimed capacity is also free.
+    #[test]
+    fn set_resources_on_a_queued_ticket_changes_its_admission() {
+        use waku_protocol::boss::{
+            AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+        };
+        use waku_protocol::resources::{ResourceOperation, ResourceSet};
+        let root = std::env::temp_dir().join(format!("summon-setres-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+        // Occupy the host's single native-build slot so the edited set
+        // cannot grant the moment the model pool frees.
+        let build_holder = Uuid::new_v4();
+        let held_build = backend
+            .resource_broker()
+            .unwrap()
+            .operate(
+                build_holder,
+                ResourceOperation::Acquire {
+                    resources: ResourceSet {
+                        native_builds: 1,
+                        ..Default::default()
+                    },
+                    purpose: "fixture build".into(),
+                    holder_pid: std::process::id(),
+                    wait_seconds: 60,
+                    parent: None,
+                },
+            )
+            .unwrap()
+            .request_id
+            .unwrap();
+
+        let BossResult::Summoned {
+            session_id, state, ..
+        } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "resourced job",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+
+        let result = backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetResources {
+                        resources: ResourceSet {
+                            native_builds: 1,
+                            ..Default::default()
+                        },
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(matches!(result, BossResult::Saved));
+        let ticket = backend
+            .boss
+            .employee(session_id)
+            .unwrap()
+            .ticket
+            .unwrap();
+        assert_eq!(ticket.resources.native_builds, 1);
+
+        // The freed model slot no longer suffices — admission now also
+        // waits on the claimed build capacity.
+        backend
+            .resource_broker()
+            .unwrap()
+            .release_admission(held_task, held);
+        backend.run_summon_scheduler();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        let ticket = employee.ticket.clone().unwrap();
+        assert!(
+            ticket
+                .blocked_by
+                .iter()
+                .any(|blocker| matches!(blocker, AdmissionBlocker::HostResources { .. })),
+            "expected host capacity as the wait reason: {:?}",
+            ticket.blocked_by
+        );
+
+        // Once the host set frees, admission proceeds — the fixture's
+        // missing binary expires the launch like any dispatch.
+        backend
+            .resource_broker()
+            .unwrap()
+            .operate(build_holder, ResourceOperation::Release { id: held_build })
+            .unwrap();
+        backend.run_summon_scheduler();
+        assert!(backend.boss.employee(session_id).unwrap().expired);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `setResources` on a working employee parks the new set on its
+    /// ticket: the record never leaves `working`, the held claims stand
+    /// until the new set grants, and the swap then releases the old
+    /// reservation atomically.
+    #[test]
+    fn set_resources_on_a_working_employee_swaps_in_place() {
+        use waku_protocol::boss::{
+            AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+        };
+        use waku_protocol::resources::{AdmissionClaim, ResourceOperation, ResourceSet};
+        let root = std::env::temp_dir().join(format!("summon-swap-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+        let _fixture_slot = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+        // Walk a queued ticket to `working` the way the dispatch
+        // notification fixture does — grant its reservation id by hand,
+        // then settle the durable transitions. `allowBurst` is set on the
+        // ticket so the parked update's claim re-qualifies under the
+        // burst half of the pool the fixture occupies.
+        let BossResult::Summoned {
+            session_id, state, ..
+        } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "swap job",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        assert!(
+            backend
+                .boss
+                .reticket(session_id, |ticket| ticket.allow_burst = true)
+                .unwrap()
+        );
+        let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+        let attempt = backend
+            .resource_broker()
+            .unwrap()
+            .try_admission(
+                session_id,
+                reservation,
+                ResourceSet::default(),
+                "summon dispatch".into(),
+                AdmissionClaim {
+                    daemon: backend.boss.document().identity.id,
+                    provider: ProviderKind::Codex.id().into(),
+                    model: "gpt-5.5".into(),
+                    // The fixture's slot is held — this grant spends the
+                    // pool's burst half.
+                    live_limit: 1,
+                    hard_cap: 2,
+                    allow_burst: true,
+                },
+            )
+            .unwrap();
+        assert!(attempt.granted);
+        assert!(
+            backend
+                .boss
+                .mark_dispatching(session_id, 1, Some(reservation))
+                .unwrap()
+        );
+        assert!(backend.boss.mark_working(session_id, 1).unwrap());
+
+        // Occupy the native-build slot so the parked update must wait.
+        let build_holder = Uuid::new_v4();
+        let held_build = backend
+            .resource_broker()
+            .unwrap()
+            .operate(
+                build_holder,
+                ResourceOperation::Acquire {
+                    resources: ResourceSet {
+                        native_builds: 1,
+                        ..Default::default()
+                    },
+                    purpose: "fixture build".into(),
+                    holder_pid: std::process::id(),
+                    wait_seconds: 60,
+                    parent: None,
+                },
+            )
+            .unwrap()
+            .request_id
+            .unwrap();
+
+        let result = backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetResources {
+                        resources: ResourceSet {
+                            native_builds: 1,
+                            ..Default::default()
+                        },
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(matches!(result, BossResult::Saved));
+
+        // Nothing was re-admitted or torn down: still working, still the
+        // old reservation and the old zero set — the parked update only
+        // records intent plus its wait reason.
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+        let ticket = employee.ticket.clone().unwrap();
+        assert_eq!(ticket.reservation, Some(reservation));
+        assert_eq!(ticket.resources, ResourceSet::default());
+        let pending_id = ticket.pending_reservation.expect("the update parked");
+        assert_ne!(pending_id, reservation);
+        assert_eq!(
+            ticket.pending_resources.as_ref().map(|set| set.native_builds),
+            Some(1)
+        );
+        assert!(
+            ticket
+                .blocked_by
+                .iter()
+                .any(|blocker| matches!(blocker, AdmissionBlocker::HostResources { .. })),
+            "the parked update carries its wait reason: {:?}",
+            ticket.blocked_by
+        );
+
+        // Capacity frees: the next pass grants the new set, swaps the
+        // ticket onto it, and releases the old claims — all while the
+        // record never left `working`.
+        backend
+            .resource_broker()
+            .unwrap()
+            .operate(build_holder, ResourceOperation::Release { id: held_build })
+            .unwrap();
+        backend.run_summon_scheduler();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+        let ticket = employee.ticket.clone().unwrap();
+        assert_eq!(ticket.reservation, Some(pending_id));
+        assert_eq!(ticket.resources.native_builds, 1);
+        assert!(ticket.pending_resources.is_none());
+        assert!(ticket.pending_reservation.is_none());
+        assert!(ticket.blocked_by.is_empty());
+
+        // The ledger agrees: the swapped-in reservation holds the new
+        // set and the old one's claims are gone.
+        let status = backend
+            .resource_broker()
+            .unwrap()
+            .operate(Uuid::new_v4(), ResourceOperation::Status { id: None })
+            .unwrap();
+        let held: Vec<_> = status
+            .reservations
+            .iter()
+            .filter(|r| r.task == session_id && r.granted_at.is_some() && !r.released)
+            .collect();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].id, pending_id);
+        assert_eq!(held[0].resources.native_builds, 1);
+
+        // Naming the held set again parks nothing — it is already the
+        // admission's set.
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetResources {
+                        resources: ResourceSet {
+                            native_builds: 1,
+                            ..Default::default()
+                        },
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let ticket = backend.boss.employee(session_id).unwrap().ticket.unwrap();
+        assert!(ticket.pending_reservation.is_none());
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

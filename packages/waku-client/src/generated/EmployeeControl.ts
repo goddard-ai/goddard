@@ -2,10 +2,11 @@
 import type { AgentWorkspace } from "./AgentWorkspace";
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { ProviderKind } from "./ProviderKind";
+import type { ResourceSet } from "./ResourceSet";
 
 export type EmployeeControl = { "type": "prompt", prompt: string, } | { "type": "steer", prompt: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, interrupt?: boolean, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "setWorkspace", workspace: AgentWorkspace,
 /**
  * The ref the new worktree detaches at; required when `workspace`
  * is `worktree`, ignored for `local`.
  */
-baseBranch: string | null, } | { "type": "stop" };
+baseBranch: string | null, } | { "type": "setResources", resources: ResourceSet, } | { "type": "stop" };

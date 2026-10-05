@@ -882,7 +882,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nGrant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and Git integration (cherry-picks, merges, and conflict resolution). Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nGrant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -1187,12 +1187,13 @@ impl BossService {
     }
 
     /// Close out a finishing (or cancelled queued) employee: mark the
-    /// record expired and hand back the admission reservation id still
-    /// owed a broker release — `None` when the slot is already free, so
-    /// the caller releases exactly once.
-    pub fn complete_expiry(&self, session: Uuid) -> anyhow::Result<Option<Uuid>> {
+    /// record expired and hand back the reservation ids still owed a
+    /// broker release — the held admission plus a parked update's id —
+    /// empty when the slot is already free, so the caller releases
+    /// exactly once.
+    pub fn complete_expiry(&self, session: Uuid) -> anyhow::Result<Vec<Uuid>> {
         let now = waku_protocol::model::unix_time();
-        let mut reservation = None;
+        let mut reservations = Vec::new();
         self.update(|state| {
             let Some(entry) = state
                 .employees
@@ -1203,11 +1204,13 @@ impl BossService {
             };
             entry.set_lifecycle(EmployeeLifecycle::Expired, now);
             if let Some(ticket) = &mut entry.ticket {
-                reservation = ticket.reservation.take();
+                reservations.extend(ticket.reservation.take());
+                reservations.extend(ticket.pending_reservation.take());
+                ticket.pending_resources = None;
             }
             Ok(())
         })?;
-        Ok(reservation)
+        Ok(reservations)
     }
 
     /// Whether the daemon loaded durable Boss state — a disabled service
@@ -1397,6 +1400,115 @@ impl BossService {
         Ok(done)
     }
 
+    /// Park a resource-set change on a working employee's ticket: the
+    /// scheduler retries admission for `resources` under `reservation`
+    /// — a fresh id distinct from the held claim's — and
+    /// [`Self::apply_resource_update`] swaps it in once granted. Naming
+    /// the currently held set cancels a parked update instead. `base`
+    /// supplies a ticket for employees whose record predates them, like
+    /// `requeue_employee`. Returns the superseded pending reservation
+    /// id, still owed a broker release by the caller.
+    pub fn request_resource_update(
+        &self,
+        session: Uuid,
+        base: SummonTicket,
+        resources: waku_protocol::resources::ResourceSet,
+        reservation: Uuid,
+    ) -> anyhow::Result<Option<Uuid>> {
+        let mut replaced = None;
+        self.update(|state| {
+            let entry = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+                .context("employee record is missing")?;
+            // A ticketless `queued` record is a pre-ticket employee the
+            // lifecycle fold reports as working — its update rides the
+            // synthesized ticket `base` supplies.
+            let working = entry.lifecycle() == EmployeeLifecycle::Working
+                || (entry.lifecycle() == EmployeeLifecycle::Queued
+                    && entry.ticket.is_none());
+            if !working {
+                bail!("employee is not running — its ticket cannot hold a resource update");
+            }
+            let mut ticket = entry.ticket.take().unwrap_or(base);
+            replaced = ticket.pending_reservation.take();
+            if ticket.resources == resources {
+                // Naming the held set retires a parked update without
+                // re-admitting.
+                ticket.pending_resources = None;
+                ticket.blocked_by.clear();
+            } else {
+                ticket.pending_resources = Some(resources);
+                ticket.pending_reservation = Some(reservation);
+            }
+            entry.ticket = Some(ticket);
+            Ok(())
+        })?;
+        Ok(replaced)
+    }
+
+    /// Employees carrying a parked resource update — the scheduler's
+    /// second pass tries their admissions each wake. A parked set only
+    /// ever lives on a running employee's ticket: queued tickets edit
+    /// `resources` outright and expiry clears the fields, so the parked
+    /// set alone is the signal.
+    pub fn pending_resource_updates(&self) -> Vec<BossEmployee> {
+        self.state
+            .lock()
+            .employees
+            .iter()
+            .filter(|entry| {
+                entry
+                    .ticket
+                    .as_ref()
+                    .is_some_and(|ticket| ticket.pending_resources.is_some())
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Settle a granted resource update: on a matching parked id the new
+    /// set and reservation replace the ticket's — `true` plus the
+    /// previous reservation id still owed a broker release by the
+    /// caller. Anything else — a superseded update, a requeue that
+    /// folded the set into a fresh admission, a record that left
+    /// `working` — is stale: `false`, and the caller releases the grant
+    /// it just took.
+    pub fn apply_resource_update(
+        &self,
+        session: Uuid,
+        reservation: Uuid,
+    ) -> anyhow::Result<(bool, Option<Uuid>)> {
+        let mut swapped = (false, None);
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            let Some(ticket) = &mut entry.ticket else {
+                return Ok(());
+            };
+            // The parked id match is the state check: a requeue folds
+            // the set and takes the id, and expiry takes it too — only
+            // the exact update this grant answers may swap in.
+            if ticket.pending_reservation != Some(reservation) {
+                return Ok(());
+            }
+            if let Some(resources) = ticket.pending_resources.take() {
+                ticket.resources = resources;
+            }
+            ticket.pending_reservation = None;
+            ticket.blocked_by.clear();
+            swapped = (true, ticket.reservation.replace(reservation));
+            Ok(())
+        })?;
+        Ok(swapped)
+    }
+
     /// Grant a queued ticket its claims and move it to `dispatching`.
     /// `false` means the generation went stale — the ticket was stopped
     /// or re-admitted while the broker grant was in flight, and the
@@ -1487,7 +1599,14 @@ impl BossService {
             else {
                 return Ok(());
             };
-            if entry.lifecycle() == EmployeeLifecycle::Queued
+            // A working employee carries a wait reason too when its parked
+            // resource update cannot grant.
+            let waits = entry.lifecycle() == EmployeeLifecycle::Queued
+                || entry
+                    .ticket
+                    .as_ref()
+                    .is_some_and(|ticket| ticket.pending_resources.is_some());
+            if waits
                 && let Some(ticket) = &mut entry.ticket
             {
                 ticket.blocked_by = blockers;
@@ -1500,15 +1619,17 @@ impl BossService {
     /// sequence at the tail — resurrection never inherits queue position.
     /// The employee record revives (from the roster or retirement) as
     /// `queued`. The previous ticket is kept and adjusted; `base` supplies
-    /// one for employees summoned before tickets existed. Returns the
-    /// employee plus the previous generation's reservation id, still owed
-    /// a broker release by the caller.
+    /// one for employees summoned before tickets existed. A parked
+    /// resource update folds into the fresh admission wholesale rather
+    /// than surviving as a second try. Returns the employee plus every
+    /// reservation id still owed a broker release by the caller — the
+    /// previous generation's claim and a parked update's id.
     pub fn requeue_employee(
         &self,
         session: Uuid,
         base: SummonTicket,
         adjust: impl FnOnce(&mut SummonTicket),
-    ) -> anyhow::Result<(BossEmployee, Option<Uuid>)> {
+    ) -> anyhow::Result<(BossEmployee, Vec<Uuid>)> {
         let now = waku_protocol::model::unix_time();
         let mut outcome = None;
         self.update(|state| {
@@ -1520,7 +1641,12 @@ impl BossService {
                 .and_then(|entry| entry.ticket.clone());
             let generation = previous.as_ref().map(|t| t.generation).unwrap_or(0) + 1;
             let mut ticket = previous.unwrap_or(base);
-            let stale_reservation = ticket.reservation.take();
+            let mut stale_reservations = Vec::new();
+            stale_reservations.extend(ticket.reservation.take());
+            stale_reservations.extend(ticket.pending_reservation.take());
+            if let Some(resources) = ticket.pending_resources.take() {
+                ticket.resources = resources;
+            }
             ticket.blocked_by.clear();
             ticket.dispatch_event = None;
             adjust(&mut ticket);
@@ -1557,7 +1683,7 @@ impl BossService {
             employee.cancelled = false;
             employee.queued_at = Some(now);
             employee.ticket = Some(ticket);
-            outcome = Some((employee.clone(), stale_reservation));
+            outcome = Some((employee.clone(), stale_reservations));
             // A re-admitted member is back in flight — its recorded
             // outcome clears, and a resolved wave reopens for one more
             // resolution.
@@ -5374,6 +5500,8 @@ mod memory_op_tests {
             priority: None,
             goal_id: None,
             reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
             blocked_by: Vec::new(),
             dispatch_event: None,
         };
@@ -5430,6 +5558,125 @@ mod memory_op_tests {
             2,
             "a distinct resolution, not a repeat"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A parked resource update rides the ticket until its swap applies:
+    /// `request_resource_update` only lands on `working`, the apply CAS
+    /// installs the new set and hands the old claim back, a requeue
+    /// folds the parked set into the fresh admission, and expiry returns
+    /// every live reservation id for release.
+    #[test]
+    fn resource_updates_park_swap_and_fold_into_a_requeue() {
+        let root = std::env::temp_dir().join(format!("boss-resupd-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let ticket = || SummonTicket {
+            sequence: 0,
+            generation: 1,
+            provider: ProviderKind::Codex,
+            model: "gpt-5.5".into(),
+            reasoning_effort: None,
+            prompt: "do it".into(),
+            project: "/tmp".into(),
+            workspace: None,
+            base_branch: None,
+            resources: waku_protocol::resources::ResourceSet::default(),
+            allow_burst: false,
+            pending_prompts: Vec::new(),
+            group_id: None,
+            priority: None,
+            goal_id: None,
+            reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
+            blocked_by: Vec::new(),
+            dispatch_event: None,
+        };
+        let builds = |count: u32| waku_protocol::resources::ResourceSet {
+            native_builds: count,
+            ..Default::default()
+        };
+        let employee = service
+            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand, None)
+            .unwrap();
+        let session = employee.session_id;
+        service.enqueue_ticket(employee, ticket()).unwrap();
+
+        // Queued tickets cannot park an update — they edit `resources`.
+        assert!(
+            service
+                .request_resource_update(session, ticket(), builds(1), Uuid::new_v4())
+                .is_err()
+        );
+
+        let held = Uuid::new_v4();
+        service.mark_dispatching(session, 1, Some(held)).unwrap();
+        service.mark_working(session, 1).unwrap();
+
+        let update = Uuid::new_v4();
+        assert_eq!(
+            service
+                .request_resource_update(session, ticket(), builds(1), update)
+                .unwrap(),
+            None
+        );
+        assert_eq!(service.pending_resource_updates().len(), 1);
+        // A stale apply settles nothing and hands nothing back.
+        assert_eq!(
+            service
+                .apply_resource_update(session, Uuid::new_v4())
+                .unwrap(),
+            (false, None)
+        );
+        // The matching apply swaps: new set, new reservation, old claim
+        // back for the caller's release.
+        assert_eq!(
+            service.apply_resource_update(session, update).unwrap(),
+            (true, Some(held))
+        );
+        let settled = service.employee(session).unwrap().ticket.unwrap();
+        assert_eq!(settled.resources.native_builds, 1);
+        assert_eq!(settled.reservation, Some(update));
+        assert!(settled.pending_reservation.is_none());
+
+        // A requeue folds a parked update into the fresh admission and
+        // returns every live claim — the held swap and the parked id —
+        // for the caller's release.
+        let next = Uuid::new_v4();
+        service
+            .request_resource_update(session, ticket(), builds(2), next)
+            .unwrap();
+        let (_employee, stale) = service
+            .requeue_employee(session, ticket(), |_| {})
+            .unwrap();
+        let requeued = service.employee(session).unwrap().ticket.unwrap();
+        assert_eq!(requeued.resources.native_builds, 2);
+        assert!(requeued.pending_reservation.is_none());
+        assert!(requeued.pending_resources.is_none());
+        assert!(stale.contains(&update));
+        assert!(stale.contains(&next));
+
+        // Expiry hands back both a held reservation and a parked update
+        // id so nothing leaks mid-flight.
+        let held_two = Uuid::new_v4();
+        service.mark_dispatching(session, 2, Some(held_two)).unwrap();
+        service.mark_working(session, 2).unwrap();
+        let parked = Uuid::new_v4();
+        service
+            .request_resource_update(session, ticket(), builds(1), parked)
+            .unwrap();
+        service.begin_finishing(session, false).unwrap();
+        let released = service.complete_expiry(session).unwrap();
+        assert!(released.contains(&held_two));
+        assert!(released.contains(&parked));
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -259,6 +259,23 @@ pub struct SummonTicket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reservation: Option<Uuid>,
+    /// A resource-set change parked on a working employee — the
+    /// scheduler retries admission for this set under
+    /// `pending_reservation` and swaps it in on grant; until then the
+    /// employee's current claims stand. Only a working employee carries
+    /// one: queued tickets edit `resources` directly, and a requeue
+    /// folds a parked set into `resources` so the fresh admission claims
+    /// it wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending_resources: Option<crate::resources::ResourceSet>,
+    /// The reservation id the parked set's admission retries under —
+    /// stable per request so a lost response or restart re-issues rather
+    /// than double-claiming, and distinct from `reservation` so the swap
+    /// can tell the two claims apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending_reservation: Option<Uuid>,
     /// Why the head-of-line entry is still waiting — refreshed by the
     /// scheduler, empty while a dispatch path exists.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1103,6 +1120,17 @@ pub enum EmployeeControl {
         #[serde(default)]
         base_branch: Option<String>,
     },
+    /// Replace the host-resource set the assignment holds. A queued
+    /// ticket is rewritten in place and re-enters admission immediately —
+    /// it may now wait on the declared set. A working employee is never
+    /// stopped: the daemon retries admission for the new set under a
+    /// parked reservation id and swaps it in atomically once granted,
+    /// releasing the old claims — until then the employee keeps running
+    /// on its current set. Setting the currently held set cancels a
+    /// parked update.
+    SetResources {
+        resources: crate::resources::ResourceSet,
+    },
     Stop,
 }
 
@@ -1164,6 +1192,32 @@ mod tests {
             local,
             EmployeeControl::SetWorkspace { workspace, base_branch }
                 if workspace == crate::AgentWorkspace::Local && base_branch.is_none()
+        ));
+    }
+
+    #[test]
+    fn set_resources_control_decodes_a_host_set() {
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setResources",
+            "resources": {"exclusive": ["ios:ABC"], "resident_devices": 1, "native_builds": 1}
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            EmployeeControl::SetResources { resources }
+                if resources.native_builds == 1
+                    && resources.resident_devices == 1
+                    && resources.exclusive == ["ios:ABC".to_owned()]
+        ));
+        let empty: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setResources",
+            "resources": {}
+        }))
+        .unwrap();
+        assert!(matches!(
+            empty,
+            EmployeeControl::SetResources { resources }
+                if resources == crate::resources::ResourceSet::default()
         ));
     }
 

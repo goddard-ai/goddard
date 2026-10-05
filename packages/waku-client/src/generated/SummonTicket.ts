@@ -69,6 +69,23 @@ goalId?: string,
  */
 reservation?: string,
 /**
+ * A resource-set change parked on a working employee — the
+ * scheduler retries admission for this set under
+ * `pending_reservation` and swaps it in on grant; until then the
+ * employee's current claims stand. Only a working employee carries
+ * one: queued tickets edit `resources` directly, and a requeue
+ * folds a parked set into `resources` so the fresh admission claims
+ * it wholesale.
+ */
+pendingResources?: ResourceSet,
+/**
+ * The reservation id the parked set's admission retries under —
+ * stable per request so a lost response or restart re-issues rather
+ * than double-claiming, and distinct from `reservation` so the swap
+ * can tell the two claims apart.
+ */
+pendingReservation?: string,
+/**
  * Why the head-of-line entry is still waiting — refreshed by the
  * scheduler, empty while a dispatch path exists.
  */

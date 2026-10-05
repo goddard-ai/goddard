@@ -49,18 +49,25 @@ persist between eval calls for this boss session.
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,icon?,groupId?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,requestId?})
                                             employee session id — icon overrides the
-                                            persona icon for this employee; summons
-                                            sharing a groupId form a wave: one notice
-                                            lands when every member finishes, fails,
-                                            or is cancelled
+                                            persona icon for this employee; resources
+                                            declares host-resource needs for the job's
+                                            lifetime (#{native_builds:1} for a device
+                                            build) and a contested set queues instead
+                                            of erroring; summons sharing a groupId
+                                            form a wave: one notice lands when every
+                                            member finishes, fails, or is cancelled
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
-                        setWorkspace,...})
+                        setWorkspace|setResources,...})
                                             setWorkspace takes workspace:
                                             \"local\"|\"worktree\" plus baseBranch
-                                            for worktree — stops, rebinds, resumes
+                                            for worktree — stops, rebinds, resumes;
+                                            setResources takes a resource map like
+                                            summon — a waiting ticket re-admits on
+                                            the new set, a running employee swaps
+                                            once capacity frees
   transcript(sessionId[, turn])             transcript map
   readFile(path)                            #{path, content}
   writeFile(path, content)
