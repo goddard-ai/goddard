@@ -73,6 +73,10 @@ pub enum TableAlign {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListItem {
     pub task: Option<bool>,
+    /// The literal marker number for an item of an ordered list. CommonMark
+    /// only honors the list's start number, but a transcript must show the
+    /// numbers the author actually typed.
+    pub number: Option<u64>,
     pub blocks: Vec<Block>,
 }
 
@@ -259,7 +263,7 @@ pub fn parse_with_soft_breaks_as_newlines(
         .collect::<Vec<_>>();
     let Some((repaired, repairs)) = super::escape::repair_code_spans(source, &events) else {
         restore_blockquote_whitespace(source, &mut events);
-        return tree_from_events(&events, soft_breaks_as_newlines);
+        return tree_from_events(source, &events, soft_breaks_as_newlines);
     };
     // Reparse the repaired source, then map every event range back into the
     // original coordinates the caller slices.
@@ -275,14 +279,19 @@ pub fn parse_with_soft_breaks_as_newlines(
         .into_iter()
         .map(|(event, range)| (event.into_static(), range))
         .collect::<Vec<_>>();
-    tree_from_events(&events, soft_breaks_as_newlines)
+    tree_from_events(source, &events, soft_breaks_as_newlines)
 }
 
 fn tree_from_events(
+    source: &str,
     events: &[(Event<'_>, Range<usize>)],
     soft_breaks_as_newlines: bool,
 ) -> BlockTree {
-    let mut cursor = Cursor { events, index: 0 };
+    let mut cursor = Cursor {
+        events,
+        source,
+        index: 0,
+    };
     let mut blocks = Vec::new();
     while let Some((event, range)) = cursor.peek() {
         let range = range.clone();
@@ -312,6 +321,10 @@ fn tree_from_events(
 
 struct Cursor<'a, 'e> {
     events: &'a [(Event<'e>, Range<usize>)],
+    /// The source `events` ranges index into, so block parsers can read
+    /// literal text pulldown-cmark abstracts away — like an ordered list
+    /// item's own marker number.
+    source: &'a str,
     index: usize,
 }
 
@@ -503,12 +516,22 @@ fn parse_started_block(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Ve
         Tag::List(ordered_start) => {
             let mut items = Vec::new();
             loop {
-                match cursor.peek_event() {
-                    Some(Event::Start(Tag::Item)) => {
+                match cursor.peek() {
+                    Some((Event::Start(Tag::Item), range)) => {
+                        // pulldown-cmark drops each item's marker number — the
+                        // item's range starts at its marker, so read it back.
+                        let number = if ordered_start.is_some() {
+                            cursor
+                                .source
+                                .get(range.start..)
+                                .and_then(list_item_number)
+                        } else {
+                            None
+                        };
                         cursor.bump();
-                        items.push(parse_list_item(cursor, soft_breaks_as_newlines));
+                        items.push(parse_list_item(cursor, number, soft_breaks_as_newlines));
                     }
-                    Some(Event::End(_)) | None => {
+                    Some((Event::End(_), _)) | None => {
                         cursor.bump();
                         break;
                     }
@@ -575,8 +598,24 @@ fn parse_started_block(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Ve
     }
 }
 
+/// The literal digits of an ordered list marker at the item's source offset:
+/// up to three spaces of indent, then `7.` or `7)`. CommonMark renumbers
+/// items sequentially from the start; `number` keeps what the author typed.
+fn list_item_number(tail: &str) -> Option<u64> {
+    let tail = tail.trim_start_matches([' ', '\t']);
+    let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 || !matches!(tail.as_bytes().get(digits), Some(b'.' | b')')) {
+        return None;
+    }
+    tail[..digits].parse().ok()
+}
+
 /// Parse a list item, lifting a leading task-list marker out of its content.
-fn parse_list_item(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> ListItem {
+fn parse_list_item(
+    cursor: &mut Cursor,
+    number: Option<u64>,
+    soft_breaks_as_newlines: bool,
+) -> ListItem {
     let task = match cursor.peek_event() {
         Some(Event::TaskListMarker(checked)) => {
             let checked = *checked;
@@ -587,6 +626,7 @@ fn parse_list_item(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> ListIt
     };
     ListItem {
         task,
+        number,
         blocks: parse_block_sequence(cursor, soft_breaks_as_newlines),
     }
 }
@@ -1595,6 +1635,65 @@ mod tests {
         assert_eq!(items[2].task, None);
         assert_eq!(paragraph_text(&items[0].blocks[0]), "done");
         assert_eq!(paragraph_text(&items[2].blocks[0]), "plain");
+    }
+
+    #[test]
+    fn ordered_list_items_keep_their_source_numbers() {
+        let tree = parse("3. a\n7. b\n9. c\n");
+        let Block::List {
+            ordered_start,
+            items,
+        } = &tree.blocks[0].block
+        else {
+            panic!("expected a list");
+        };
+        assert_eq!(*ordered_start, Some(3));
+        assert_eq!(
+            items.iter().map(|item| item.number).collect::<Vec<_>>(),
+            vec![Some(3), Some(7), Some(9)]
+        );
+
+        let tree = parse("4) a\n2) b\n");
+        let Block::List { items, .. } = &tree.blocks[0].block else {
+            panic!("expected a list");
+        };
+        assert_eq!(
+            items.iter().map(|item| item.number).collect::<Vec<_>>(),
+            vec![Some(4), Some(2)]
+        );
+    }
+
+    #[test]
+    fn nested_ordered_list_items_keep_their_source_numbers() {
+        // An ordered list interrupting a paragraph must open with `1`, so the
+        // nested list starts at 1 and goes sparse on the second item.
+        let tree = parse("1. a\n   1. x\n   8. y\n3. b\n");
+        let Block::List { items, .. } = &tree.blocks[0].block else {
+            panic!("expected a list");
+        };
+        assert_eq!(items[0].number, Some(1));
+        assert_eq!(items[1].number, Some(3));
+        let Some(Block::List { items: nested, .. }) = items[0].blocks.get(1) else {
+            panic!("expected a nested list: {items:#?}");
+        };
+        assert_eq!(
+            nested.iter().map(|item| item.number).collect::<Vec<_>>(),
+            vec![Some(1), Some(8)]
+        );
+    }
+
+    #[test]
+    fn unordered_list_items_have_no_number() {
+        let tree = parse("- a\n- b\n");
+        let Block::List {
+            ordered_start,
+            items,
+        } = &tree.blocks[0].block
+        else {
+            panic!("expected a list");
+        };
+        assert_eq!(*ordered_start, None);
+        assert!(items.iter().all(|item| item.number.is_none()));
     }
 
     #[test]

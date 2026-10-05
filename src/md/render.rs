@@ -3095,7 +3095,8 @@ fn render_list(ordered_start: Option<u64>, items: &[ListItem], ctx: &Ctx) -> Any
                     .child(checkbox(checked, ctx))
                     .into_any_element(),
                 (Some(start), None) => {
-                    marker_text(format!("{}.", start + index as u64), marker_width, ctx)
+                    let number = item.number.unwrap_or(start + index as u64);
+                    marker_text(format!("{number}."), marker_width, ctx)
                 }
                 (None, None) => marker_text("•".to_owned(), marker_width, ctx),
             };
@@ -3106,7 +3107,9 @@ fn render_list(ordered_start: Option<u64>, items: &[ListItem], ctx: &Ctx) -> Any
                 (_, Some(checked)) => {
                     format!("- [{}] ", if checked { "x" } else { " " })
                 }
-                (Some(start), None) => format!("{}. ", start + index as u64),
+                (Some(start), None) => {
+                    format!("{}. ", item.number.unwrap_or(start + index as u64))
+                }
                 (None, None) => "- ".to_owned(),
             };
             let base = ctx.copy_margin();
