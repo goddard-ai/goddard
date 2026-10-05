@@ -250,7 +250,6 @@ enum BossEditorKind {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum BossReply {
     Open,
-    Finalize,
     List,
     Read,
     Saved,
@@ -601,13 +600,6 @@ impl Waku {
             .clone();
         window.focus(&focus, cx);
         cx.notify();
-    }
-
-    /// A boss operation is in flight — `boss_request` drops additional asks
-    /// until it settles, so callers that show a spinner or dim a button read
-    /// this rather than tracking the request themselves.
-    pub(super) fn boss_pending(&self) -> bool {
-        self.boss_ui.pending
     }
 
     pub(super) fn boss_request(

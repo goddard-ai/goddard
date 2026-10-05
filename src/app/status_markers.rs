@@ -1137,8 +1137,10 @@ impl Waku {
                                         },
                                     ))
                             }))
-                            // A voicing briefing's pause/resume trails the
-                            // row — same slot, same chip shell.
+                            // A pending plan approval and a voicing
+                            // briefing's pause/resume trail the row —
+                            // same slot, same chip shell.
+                            .children(self.plan_approval_chip(&theme, cx))
                             .children(self.voice_briefing_playback_chip(&theme, cx)),
                     ),
             ),

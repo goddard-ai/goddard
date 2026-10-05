@@ -5654,6 +5654,14 @@ impl Waku {
     }
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        // A sealed planning session no longer takes prompts — a muted card
+        // in the composer's slot carries the state instead.
+        if let Some(session) = self
+            .composer_session()
+            .filter(|session| self.plan_execution_locked(session))
+        {
+            return self.render_plan_sealed_card(session, cx);
+        }
         div()
             .flex_none()
             .px(px(20.0 - COMPOSER_OVERHANG))
@@ -5852,11 +5860,11 @@ impl Waku {
                     })
             })
             .children(self.render_annotation_chip_for(surface, cx))
-            // The briefing's pause/resume floats above the card like a
-            // suggestion chip — it rides the suggestion row instead while
-            // that slot is claimed.
+            // The plan-approval chip and the briefing's pause/resume float
+            // above the card like suggestion chips — they ride the
+            // suggestion row instead while that slot is claimed.
             .when(interactive, |card| {
-                card.children(self.render_voice_briefing_float(&theme, cx))
+                card.children(self.render_composer_float_chips(&theme, cx))
             })
             .child(div().pt(px(2.0)).child(composer))
             // The paste chip's floating editor, anchored below the

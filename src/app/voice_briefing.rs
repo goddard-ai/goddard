@@ -470,8 +470,8 @@ impl Waku {
     }
 
     /// The pause/resume control, styled as a suggestion chip. It rides the
-    /// composer suggestion row when that slot is claimed; otherwise
-    /// `render_voice_briefing_float` hangs it off the composer card's top
+    /// composer suggestion rows when one claims the slot; otherwise
+    /// `render_composer_float_chips` hangs it off the composer card's top
     /// edge in the same slot.
     pub(super) fn voice_briefing_playback_chip(
         &self,
@@ -517,28 +517,6 @@ impl Waku {
                 .on_activation(cx, |this, _, cx| {
                     this.toggle_voice_briefing_playback(cx);
                 }),
-        )
-    }
-
-    /// The chip's standalone mount — an absolute float off the composer
-    /// card's top edge at the suggestion chips' left inset. While the
-    /// suggestion row claims the slot the chip rides that row instead, so
-    /// the two never overlap; Big Picture mounts no suggestion row, so the
-    /// float always stands alone there.
-    pub(super) fn render_voice_briefing_float(
-        &self,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Option<Div> {
-        if self.action_suggestion_row_visible() && !self.big_picture.is_open() {
-            return None;
-        }
-        Some(
-            div()
-                .absolute()
-                .top(px(-32.0))
-                .left(px(COMPOSER_CHIP_INSET))
-                .child(self.voice_briefing_playback_chip(theme, cx)?),
         )
     }
 

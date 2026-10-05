@@ -10,6 +10,7 @@ use super::composer::{
 use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
 };
+use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
     merge_remote_session_catalog, session_accepts_immediate_steer, session_has_active_provider_turn,
 };
@@ -4280,6 +4281,40 @@ fn continue_state_tracks_the_queued_resume() {
     nudge.hidden = true;
     session.queued_messages.push(nudge);
     assert_eq!(continue_state(&session), ContinueState::Armed);
+}
+
+/// The approval gate watches both places a prompt can sit: parked in the
+/// follow-up queue or landed as a user turn's message. Hidden nudges and
+/// other roles never count, and the text match is the canned-prompt
+/// journal's normalization — trimmed and case-insensitive.
+#[test]
+fn plan_approval_sent_covers_queued_and_landed_prompts() {
+    let prompt = "The plan is approved — finalize it.";
+    let mut session = started_session(Uuid::new_v4());
+    assert!(!session_plan_approval_sent(&session, prompt));
+
+    session.queued_messages.push(QueuedMessage::new(prompt));
+    assert!(session_plan_approval_sent(&session, prompt));
+    session.queued_messages.clear();
+
+    session.messages.push(Message::new(
+        MessageRole::User,
+        format!("  {}  ", prompt.to_uppercase()),
+    ));
+    assert!(session_plan_approval_sent(&session, prompt));
+
+    // An assistant message with the same text is not the human's approval.
+    let mut session = started_session(Uuid::new_v4());
+    session
+        .messages
+        .push(Message::new(MessageRole::Assistant, prompt));
+    assert!(!session_plan_approval_sent(&session, prompt));
+
+    // A hidden continue nudge never carries the approval, even verbatim.
+    let mut nudge = Message::new(MessageRole::User, prompt);
+    nudge.hidden = true;
+    session.messages.push(nudge);
+    assert!(!session_plan_approval_sent(&session, prompt));
 }
 
 /// Only the client's hidden nudge counts as a queued continue — a visible

@@ -6130,6 +6130,16 @@ boss.plan_finalized:
   en: Plan finalized
 boss.plan_finalized_ago:
   en: Finalized %{ago}
+boss.plan_approve_prompt:
+  en: The plan is approved — finalize it and begin implementing. Summon employees for the work.
+boss.plan_approve_hint:
+  en: Approve the plan — the boss finalizes it and starts the work
+boss.plan_sent_for_execution:
+  en: Plan sent for execution
+boss.plan_sent_hint:
+  en: This session no longer takes prompts.
+boss.plan_sealed_hint:
+  en: The plan document is frozen — this session is read-only.
 boss.plan_unavailable:
   en: The plan could not be loaded.
 boss.plan_select:

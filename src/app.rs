@@ -4137,6 +4137,7 @@ mod keyboard_options;
 mod model_picker;
 mod notifications;
 mod phases;
+mod plan_approval;
 mod project_switcher;
 mod projects;
 mod provider_switch;

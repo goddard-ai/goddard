@@ -109,6 +109,7 @@ pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("open-pr", "suggestions.open_pr"),
     ("you-decide", "suggestions.you_decide_prompt"),
     ("implement-plan", "suggestions.implement_plan_prompt"),
+    ("approve-plan", "boss.plan_approve_prompt"),
     ("diagnose", "suggestions.diagnose_prompt"),
     ("whats-next", "suggestions.whats_next_prompt"),
     ("address-review", "suggestions.address_review_prompt"),
@@ -1424,6 +1425,7 @@ impl Waku {
             // These canned ids label the action rather than echoing the
             // prompt the chip sends.
             "implement-plan" => Some(("icons/compass.svg", tr!("suggestions.implement_plan"))),
+            "approve-plan" => Some(("icons/circle-check.svg", tr!("boss.plan_finalize"))),
             "whats-next" => Some(("icons/circle-help.svg", tr!("suggestions.whats_next"))),
             "address-review" => Some((
                 "icons/git-pull-request.svg",
@@ -1581,8 +1583,10 @@ impl Waku {
                                         },
                                     )),
                             )
-                            // A voicing briefing's pause/resume trails the
-                            // row — same slot, same chip shell.
+                            // A pending plan approval and a voicing
+                            // briefing's pause/resume trail the row —
+                            // same slot, same chip shell.
+                            .children(self.plan_approval_chip(&theme, cx))
                             .children(self.voice_briefing_playback_chip(&theme, cx)),
                     ),
             ),
