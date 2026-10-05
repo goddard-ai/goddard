@@ -305,6 +305,36 @@ fn employee_icon(
         })
 }
 
+/// `Waku::session_is_employee` without the self: an employee is managed by
+/// a boss — stamped `boss_managed` at summon or still in the live `managed`
+/// roster — while the boss's own surfaces (`boss_chat`, planning sessions)
+/// are not employees.
+fn employee_session(
+    session: &AgentSession,
+    managed: &HashSet<Uuid>,
+    boss_chat: bool,
+    experiment_enabled: bool,
+) -> bool {
+    experiment_enabled
+        && (session.boss_managed || managed.contains(&session.id))
+        && !boss_chat
+        && !session.is_planning()
+}
+
+/// An archived employee session, read off durable state: `archived_at`
+/// from the archive and `boss_managed` from the summon both survive the
+/// employee's roster retirement, which is how history and search still
+/// reach the task after the row is gone.
+fn archived_employee_session(
+    session: &AgentSession,
+    managed: &HashSet<Uuid>,
+    boss_chat: bool,
+    experiment_enabled: bool,
+) -> bool {
+    session.archived_at.is_some()
+        && employee_session(session, managed, boss_chat, experiment_enabled)
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -1118,7 +1148,30 @@ impl Waku {
     /// The `boss_managed` stamp keeps retired employees covered after they
     /// leave the daemon's roster.
     pub(super) fn session_is_employee(&self, session: &AgentSession) -> bool {
-        self.session_is_boss_managed(session) && !self.session_is_boss_owned(session)
+        employee_session(
+            session,
+            &self.boss_ui.managed,
+            self.boss_ui
+                .states
+                .values()
+                .any(|state| state.session_id == Some(session.id)),
+            self.state.boss_experiment_enabled,
+        )
+    }
+
+    /// Whether the session is an archived employee task — the read the
+    /// activation path's restore decision and the top bar's Archived chip
+    /// share.
+    pub(super) fn session_is_archived_employee(&self, session: &AgentSession) -> bool {
+        archived_employee_session(
+            session,
+            &self.boss_ui.managed,
+            self.boss_ui
+                .states
+                .values()
+                .any(|state| state.session_id == Some(session.id)),
+            self.state.boss_experiment_enabled,
+        )
     }
 
     fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
@@ -3736,6 +3789,70 @@ mod tests {
             request_id: None,
             request_fingerprint: None,
         }
+    }
+
+    #[test]
+    fn archived_employee_session_reads_durable_state() {
+        // A retired employee: off the live roster, but the `boss_managed`
+        // stamp and the archive flag are the session record's own.
+        let mut retired = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        retired.boss_managed = true;
+        retired.archived_at = Some(1);
+        assert!(archived_employee_session(
+            &retired,
+            &HashSet::new(),
+            false,
+            true
+        ));
+
+        // A rostered employee summoned before the stamp existed still
+        // qualifies through `managed`.
+        let mut rostered = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        rostered.archived_at = Some(1);
+        let managed = HashSet::from([rostered.id]);
+        assert!(archived_employee_session(&rostered, &managed, false, true));
+
+        // Live employees that were never archived, plain tasks, and the
+        // boss's own surfaces do not.
+        rostered.archived_at = None;
+        assert!(!archived_employee_session(&rostered, &managed, false, true));
+        let mut task = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        task.archived_at = Some(1);
+        assert!(!archived_employee_session(
+            &task,
+            &HashSet::new(),
+            false,
+            true
+        ));
+        assert!(!archived_employee_session(
+            &retired,
+            &HashSet::new(),
+            true,
+            true
+        ));
+        let mut planning = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        planning.boss_managed = true;
+        planning.archived_at = Some(1);
+        planning.planning = Some(crate::model::SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_client::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        assert!(!archived_employee_session(
+            &planning,
+            &HashSet::new(),
+            false,
+            true
+        ));
+
+        // With the experiment off the whole classification is inert.
+        assert!(!archived_employee_session(
+            &retired,
+            &HashSet::new(),
+            false,
+            false
+        ));
     }
 
     #[test]

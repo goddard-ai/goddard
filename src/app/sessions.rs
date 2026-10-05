@@ -565,13 +565,17 @@ impl Waku {
             return;
         }
         // Archived tasks stay reachable through explicit activation paths like
-        // notification clicks; opening one is intent to bring it back.
-        if self
+        // notification clicks; opening one is intent to bring it back. An
+        // employee's task is a boss record, not the user's own — a visit
+        // from history or search is inspection, so its flag stays put and
+        // the top bar marks the session Archived.
+        let visit_restores = self
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && session.archived_at.is_some())
-        {
+            .find(|session| session.id == session_id && session.archived_at.is_some())
+            .is_some_and(|session| !self.session_is_employee(session));
+        if visit_restores {
             self.unarchive_session(session_id, false, cx);
         }
         // Opening a dormant task does not wake it: selection is browsing,

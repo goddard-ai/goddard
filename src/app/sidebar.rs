@@ -6506,6 +6506,11 @@ impl Waku {
             None
         }
         .unwrap_or_default();
+        // The chip reads durable state — `archived_at` plus the
+        // `boss_managed` stamp — so it still answers after the employee's
+        // roster record retires.
+        let archived_chip = session_surface
+            && session.is_some_and(|session| self.session_is_archived_employee(session));
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
@@ -6611,6 +6616,24 @@ impl Waku {
                                 .text_color(theme.text)
                                 .child(SharedString::from(title.clone()))
                                 .into_any_element(),
+                        })
+                        .when(archived_chip, |element| {
+                            element.child(
+                                div()
+                                    .id("session-archived-badge")
+                                    .h(px(22.0))
+                                    .px(px(6.0))
+                                    .rounded(px(8.0))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon("icons/archive.svg", 11.0, theme.text_tertiary))
+                                    .child(tr_cow!("session.archived_chip")),
+                            )
                         })
                         .children(
                             managed_identity

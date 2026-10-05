@@ -2032,6 +2032,8 @@ session.archive:
   en: Archive
 session.archive_preparing:
   en: Preparing archive…
+session.archived_chip:
+  en: Archived
 session.pin:
   en: Pin
 session.unpin:
