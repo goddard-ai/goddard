@@ -2728,6 +2728,7 @@ impl Waku {
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             &rows,
             selected,
             pending,

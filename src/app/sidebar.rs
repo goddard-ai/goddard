@@ -1334,6 +1334,7 @@ impl Waku {
         let unread_target = sessions::next_unread_completion(
             &self.state.sessions,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             &rows,
             selected,
             pending,
@@ -1351,6 +1352,7 @@ impl Waku {
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             &rows,
             selected,
             pending,
@@ -1364,6 +1366,7 @@ impl Waku {
                 &self.state.sessions,
                 &self.state.projects,
                 &self.state.unseen_completions,
+                &self.boss_ui.states,
                 &rows,
                 selected,
                 pending,
@@ -1375,8 +1378,14 @@ impl Waku {
         }
         let enabled = unread_target.is_some();
         // A blocked or failed task outranks plain completions, so the
-        // target being one is what the badge warns about.
-        let blocked = target.is_some_and(|session_id| {
+        // target being one is what the badge warns about. A deliverable
+        // target carries no session status to warn about — it reads as the
+        // same informational-blue dot its row carries.
+        let target_session = match target {
+            Some(sessions::UnreadTarget::Session(session_id)) => Some(session_id),
+            _ => None,
+        };
+        let blocked = target_session.is_some_and(|session_id| {
             self.state.sessions.iter().any(|session| {
                 session.id == session_id
                     && matches!(
@@ -1385,13 +1394,13 @@ impl Waku {
                     )
             })
         });
-        let starred_target = target.is_some_and(|session_id| {
+        let starred_target = target_session.is_some_and(|session_id| {
             self.state
                 .sessions
                 .iter()
                 .any(|session| session.id == session_id && starred.contains(&session.project_id))
         });
-        let target_unseen = target
+        let target_unseen = target_session
             .is_some_and(|session_id| self.state.unseen_completions.contains_key(&session_id));
         div()
             .id("unseen-completion-bell")

@@ -1,0 +1,1 @@
+- ⌘D "Go to next unread completion" now covers the Boss surfaces too: an unread planning session or an unviewed deliverable can be the jump's target, and a boss chat with unseen replies joins the queue — always last, below every unread task, plan, and deliverable.

@@ -14,8 +14,8 @@ use super::runtime::{
     merge_remote_session_catalog, session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
-    dormant_session_ids, next_attention_target, next_idle_session, next_non_busy_session,
-    next_unread_completion,
+    UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
+    next_non_busy_session, next_unread_completion,
 };
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
@@ -1135,6 +1135,7 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
             next_unread_completion(
                 &sessions,
                 &unseen,
+                &HashMap::new(),
                 &rows,
                 selected,
                 None,
@@ -1142,7 +1143,7 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
                 None,
                 None,
             ),
-            Some(first)
+            Some(UnreadTarget::Session(first))
         );
     }
     // The selected session never targets itself, even while unread.
@@ -1150,6 +1151,7 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             Some(first),
             None,
@@ -1157,13 +1159,14 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
             None,
             None,
         ),
-        Some(third)
+        Some(UnreadTarget::Session(third))
     );
     // A pending activation is treated as on-screen too.
     assert_eq!(
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             Some(third),
             Some(first),
@@ -1177,6 +1180,7 @@ fn next_unread_completion_returns_the_topmost_unread_row() {
     assert_eq!(
         next_unread_completion(
             &sessions,
+            &HashMap::new(),
             &HashMap::new(),
             &rows,
             None,
@@ -1217,6 +1221,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
             next_unread_completion(
                 &sessions,
                 &unseen,
+                &HashMap::new(),
                 &rows,
                 selected,
                 None,
@@ -1224,7 +1229,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
                 None,
                 None,
             ),
-            Some(pinned_bottom)
+            Some(UnreadTarget::Session(pinned_bottom))
         );
     }
     // Two unread pinned tasks take their sidebar order.
@@ -1233,6 +1238,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
         next_unread_completion(
             &sessions,
             &both_pinned,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1240,7 +1246,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
             None,
             None
         ),
-        Some(pinned_top)
+        Some(UnreadTarget::Session(pinned_top))
     );
     // A blocked pinned task counts as unread too.
     let mut sessions = sessions;
@@ -1249,6 +1255,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
         next_unread_completion(
             &sessions,
             &HashMap::new(),
+            &HashMap::new(),
             &rows,
             Some(current),
             None,
@@ -1256,7 +1263,7 @@ fn next_unread_completion_lets_pinned_rows_lead_by_position() {
             None,
             None
         ),
-        Some(pinned_top)
+        Some(UnreadTarget::Session(pinned_top))
     );
 }
 
@@ -1288,6 +1295,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1295,7 +1303,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
             None,
             None
         ),
-        Some(settled_id)
+        Some(UnreadTarget::Session(settled_id))
     );
 
     // A blocked session with queued prompts is skipped the same way, and
@@ -1318,6 +1326,7 @@ fn next_unread_completion_skips_ineligible_sessions() {
         next_unread_completion(
             &sessions,
             &queued_only,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1353,6 +1362,7 @@ fn next_unread_completion_skips_chain_seen_sessions() {
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1360,7 +1370,7 @@ fn next_unread_completion_skips_chain_seen_sessions() {
             Some(&sweep),
             None
         ),
-        Some(unread)
+        Some(UnreadTarget::Session(unread))
     );
     // With every unread row seen there is no unread target, so the caller
     // falls to the idle rotation.
@@ -1369,6 +1379,7 @@ fn next_unread_completion_skips_chain_seen_sessions() {
         next_unread_completion(
             &sessions,
             &only_seen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1383,6 +1394,7 @@ fn next_unread_completion_skips_chain_seen_sessions() {
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1390,7 +1402,418 @@ fn next_unread_completion_skips_chain_seen_sessions() {
             None,
             None
         ),
-        Some(seen)
+        Some(UnreadTarget::Session(seen))
+    );
+}
+
+/// A Boss document carrying just what the unread-target scan reads: the
+/// chat's session id and the published deliverables.
+fn boss_state(
+    session_id: Option<Uuid>,
+    deliverables: Vec<waku_client::boss::BossDeliverable>,
+) -> waku_client::boss::BossState {
+    waku_client::boss::BossState {
+        identity: waku_client::boss::BossIdentity {
+            id: Uuid::new_v4(),
+            name: "Boss".into(),
+            avatar_seed: String::new(),
+        },
+        persona_id: Uuid::new_v4(),
+        session_id,
+        personas: Vec::new(),
+        employees: Vec::new(),
+        retired_employees: Vec::new(),
+        deliverables,
+        goals_viewed_at: None,
+        planning: Vec::new(),
+        resource_policy: waku_client::boss::BossResourcePolicy::default(),
+        next_sequence: 0,
+        next_event_id: 0,
+        outbox: Vec::new(),
+        waves: Vec::new(),
+        wave_outbox: Vec::new(),
+        revision: 0,
+    }
+}
+
+fn boss_deliverable(
+    id: Uuid,
+    updated_at: u64,
+    viewed_at: Option<u64>,
+) -> waku_client::boss::BossDeliverable {
+    waku_client::boss::BossDeliverable {
+        id,
+        name: "report.md".into(),
+        path: "/tmp/report.md".into(),
+        directory: false,
+        created_at: updated_at,
+        updated_at,
+        pinned_at: None,
+        dormant_at: None,
+        archived_at: None,
+        viewed_at,
+    }
+}
+
+#[test]
+fn next_unread_completion_covers_planning_deliverables_and_scans_boss_last() {
+    let key = waku_client::DaemonKey::Local;
+    let boss_chat = Uuid::new_v4();
+    let plan = Uuid::new_v4();
+    let task = Uuid::new_v4();
+    let deliverable_id = Uuid::new_v4();
+    let sessions = vec![
+        started_session(boss_chat),
+        started_session(plan),
+        started_session(task),
+    ];
+    let unread_deliverable = HashMap::from([(
+        key,
+        boss_state(
+            Some(boss_chat),
+            vec![boss_deliverable(deliverable_id, 100, None)],
+        ),
+    )]);
+    let viewed_deliverable = HashMap::from([(
+        key,
+        boss_state(
+            Some(boss_chat),
+            vec![boss_deliverable(deliverable_id, 100, Some(150))],
+        ),
+    )]);
+    // Sidebar order: the boss row first, its planning sessions, the
+    // deliverables group, then the task groups.
+    let rows = vec![
+        SidebarRow::Boss(key),
+        SidebarRow::Planning(plan),
+        SidebarRow::Deliverable(key, deliverable_id),
+        SidebarRow::Session(task),
+    ];
+
+    // A planning row is a session row: its unseen stamp makes it the
+    // topmost non-Boss candidate.
+    let all_unseen = HashMap::from([(boss_chat, 10), (plan, 20), (task, 30)]);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &all_unseen,
+            &unread_deliverable,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Session(plan))
+    );
+    // An unviewed deliverable is a candidate in its sidebar position —
+    // below the planning row, above the task rows.
+    let unseen = HashMap::from([(task, 30)]);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &unseen,
+            &unread_deliverable,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Deliverable(key, deliverable_id))
+    );
+    // The boss chat's unseen turns make it a candidate, but it answers
+    // last: an unread task — and even an unviewed deliverable — outrank
+    // it despite sitting lower in the sidebar.
+    let boss_and_task = HashMap::from([(boss_chat, 10), (task, 30)]);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &boss_and_task,
+            &viewed_deliverable,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Session(task))
+    );
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::from([(boss_chat, 10)]),
+            &unread_deliverable,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Deliverable(key, deliverable_id))
+    );
+    // With nothing else unread, the boss chat itself is the target.
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::from([(boss_chat, 10)]),
+            &viewed_deliverable,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Session(boss_chat))
+    );
+    // A boss whose chat session does not exist yet offers no chat target.
+    let no_chat = HashMap::from([(key, boss_state(None, Vec::new()))]);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::from([(boss_chat, 10)]),
+            &no_chat,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        None
+    );
+}
+
+#[test]
+fn next_unread_completion_deliverable_candidates_follow_the_viewed_marker() {
+    let key = waku_client::DaemonKey::Local;
+    let boss_chat = Uuid::new_v4();
+    let deliverable_id = Uuid::new_v4();
+    let sessions = vec![started_session(boss_chat)];
+    let rows = vec![
+        SidebarRow::Boss(key),
+        SidebarRow::Deliverable(key, deliverable_id),
+    ];
+
+    // Viewed, re-published, dormant, and archived states mirror the row's
+    // own unread dot and the swept-row rule.
+    let mut republished = boss_deliverable(deliverable_id, 200, Some(100));
+    let viewed = boss_deliverable(deliverable_id, 200, Some(300));
+    let mut dormant = boss_deliverable(deliverable_id, 200, None);
+    dormant.dormant_at = Some(1);
+    let mut archived = boss_deliverable(deliverable_id, 200, None);
+    archived.archived_at = Some(1);
+    let states = |deliverable| HashMap::from([(key, boss_state(Some(boss_chat), vec![deliverable]))]);
+
+    // Viewed at publish: not a candidate.
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::new(),
+            &states(viewed),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        None
+    );
+    // Re-published after the last view: unread again.
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::new(),
+            &states(republished.clone()),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Deliverable(key, deliverable_id))
+    );
+    // A pinned row keeps candidacy past a sweep, an unpinned one does not —
+    // even when the revealed fold has its row in the list.
+    republished.pinned_at = Some(1);
+    republished.dormant_at = Some(1);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::new(),
+            &states(republished),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+        ),
+        Some(UnreadTarget::Deliverable(key, deliverable_id))
+    );
+    for deliverable in [dormant, archived] {
+        assert_eq!(
+            next_unread_completion(
+                &sessions,
+                &HashMap::new(),
+                &states(deliverable),
+                &rows,
+                None,
+                None,
+                &HashSet::new(),
+                None,
+                None,
+            ),
+            None
+        );
+    }
+
+    // The chain's seen set is session ids: once the boss chat has been
+    // shown, its deliverables leave the candidates too.
+    let unseen_chat = HashSet::from([boss_chat]);
+    assert_eq!(
+        next_unread_completion(
+            &sessions,
+            &HashMap::new(),
+            &states(boss_deliverable(deliverable_id, 200, None)),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            Some(&unseen_chat),
+            None,
+        ),
+        None
+    );
+}
+
+#[test]
+fn next_attention_target_tiers_boss_rows_last() {
+    let starred_project = Uuid::new_v4();
+    let plain_project = Uuid::new_v4();
+    let projects = vec![
+        project(starred_project, true),
+        project(plain_project, false),
+    ];
+    let key = waku_client::DaemonKey::Local;
+    let boss_chat = Uuid::new_v4();
+    let starred_unseen = Uuid::new_v4();
+    let plain_unseen = Uuid::new_v4();
+    let deliverable_id = Uuid::new_v4();
+    let sessions = vec![
+        started_session(boss_chat),
+        project_session(plain_unseen, plain_project),
+        project_session(starred_unseen, starred_project),
+    ];
+    let boss_states = HashMap::from([(
+        key,
+        boss_state(
+            Some(boss_chat),
+            vec![boss_deliverable(deliverable_id, 100, None)],
+        ),
+    )]);
+    let rows = vec![
+        SidebarRow::Boss(key),
+        SidebarRow::Deliverable(key, deliverable_id),
+        SidebarRow::Session(plain_unseen),
+        SidebarRow::Session(starred_unseen),
+    ];
+
+    // The starred project's unseen completion leads every boss surface;
+    // the boss chat trails even the unstarred tier.
+    let unseen = HashMap::from([(boss_chat, 10), (plain_unseen, 20), (starred_unseen, 30)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &unseen,
+            &boss_states,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            false
+        ),
+        Some(UnreadTarget::Session(starred_unseen))
+    );
+    // Inside the unstarred attention tier, sidebar order rules among the
+    // non-Boss rows — the deliverable above the task — and the boss chat
+    // still answers last.
+    let unseen = HashMap::from([(boss_chat, 10), (plain_unseen, 20)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &unseen,
+            &boss_states,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            false
+        ),
+        Some(UnreadTarget::Deliverable(key, deliverable_id))
+    );
+    // The reordering preference moves the starred tier, not the boss: a
+    // starred seen-but-idle task still cannot drop the boss below it —
+    // the boss is never starred, so it stays an unstarred-tier answer.
+    let mut starred_idle = project_session(starred_unseen, starred_project);
+    starred_idle.status = SessionStatus::Idle;
+    let sessions_idle = vec![
+        started_session(boss_chat),
+        project_session(plain_unseen, plain_project),
+        starred_idle,
+    ];
+    assert_eq!(
+        next_attention_target(
+            &sessions_idle,
+            &projects,
+            &HashMap::from([(boss_chat, 10)]),
+            &boss_states,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            true
+        ),
+        Some(UnreadTarget::Session(starred_unseen))
+    );
+    // With no unread at all, boss surfaces never join the idle rotation.
+    let all_seen = HashMap::from([(
+        key,
+        boss_state(
+            Some(boss_chat),
+            vec![boss_deliverable(deliverable_id, 100, Some(150))],
+        ),
+    )]);
+    assert_eq!(
+        next_attention_target(
+            &sessions_idle,
+            &projects,
+            &HashMap::new(),
+            &all_seen,
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            false
+        ),
+        Some(UnreadTarget::Session(starred_unseen))
     );
 }
 
@@ -1777,40 +2200,6 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &sessions,
             &projects,
             &unseen,
-            &rows,
-            None,
-            None,
-            &HashSet::new(),
-            None,
-            None,
-            false
-        ),
-        Some(starred_unseen)
-    );
-    // Genuinely new activity outranks the starred project's already-seen
-    // idle task — the star leads inside each attention tier, not above it.
-    let only_plain_unseen = HashMap::from([(plain_unseen, 100)]);
-    assert_eq!(
-        next_attention_target(
-            &sessions,
-            &projects,
-            &only_plain_unseen,
-            &rows,
-            None,
-            None,
-            &HashSet::new(),
-            None,
-            None,
-            false
-        ),
-        Some(plain_unseen)
-    );
-    // Once the unseen queue is drained the starred project leads the idle
-    // rotation.
-    assert_eq!(
-        next_attention_target(
-            &sessions,
-            &projects,
             &HashMap::new(),
             &rows,
             None,
@@ -1820,7 +2209,44 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             false
         ),
-        Some(starred_idle)
+        Some(UnreadTarget::Session(starred_unseen))
+    );
+    // Genuinely new activity outranks the starred project's already-seen
+    // idle task — the star leads inside each attention tier, not above it.
+    let only_plain_unseen = HashMap::from([(plain_unseen, 100)]);
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &only_plain_unseen,
+            &HashMap::new(),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            false
+        ),
+        Some(UnreadTarget::Session(plain_unseen))
+    );
+    // Once the unseen queue is drained the starred project leads the idle
+    // rotation.
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &HashMap::new(),
+            &HashMap::new(),
+            &rows,
+            None,
+            None,
+            &HashSet::new(),
+            None,
+            None,
+            false
+        ),
+        Some(UnreadTarget::Session(starred_idle))
     );
     // With the starred project's sessions gone the unstarred unread leads.
     let starred_rows = vec![SidebarRow::Session(plain_unseen)];
@@ -1830,6 +2256,7 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &only_plain,
             &projects,
             &unseen,
+            &HashMap::new(),
             &starred_rows,
             None,
             None,
@@ -1838,7 +2265,7 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             false
         ),
-        Some(plain_unseen)
+        Some(UnreadTarget::Session(plain_unseen))
     );
     // Nothing starred: today's unread-then-idle order is unchanged.
     let unstarred = vec![
@@ -1850,6 +2277,7 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &sessions,
             &unstarred,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1858,7 +2286,7 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             None,
             false
         ),
-        Some(plain_unseen)
+        Some(UnreadTarget::Session(plain_unseen))
     );
 }
 
@@ -1893,6 +2321,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &sessions,
             &projects,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1901,7 +2330,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             None,
             true
         ),
-        Some(starred_unseen)
+        Some(UnreadTarget::Session(starred_unseen))
     );
     // The reorder the setting turns on: the starred project's seen-but-idle
     // task outranks the unstarred project's unseen completion.
@@ -1911,6 +2340,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &sessions,
             &projects,
             &only_plain_unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1919,7 +2349,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             None,
             true
         ),
-        Some(starred_idle)
+        Some(UnreadTarget::Session(starred_idle))
     );
     // A starred task blocked on its user is attention, not idle — it still
     // leads the starred tier ahead of other projects' unread.
@@ -1929,6 +2359,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &sessions,
             &projects,
             &only_plain_unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1937,7 +2368,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             None,
             true
         ),
-        Some(starred_idle)
+        Some(UnreadTarget::Session(starred_idle))
     );
     sessions[1].status = SessionStatus::Idle;
     // Once the starred project's tasks are all gone the unstarred unseen
@@ -1949,6 +2380,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &only_plain,
             &projects,
             &unseen,
+            &HashMap::new(),
             &plain_rows,
             None,
             None,
@@ -1957,7 +2389,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             None,
             true
         ),
-        Some(plain_unseen)
+        Some(UnreadTarget::Session(plain_unseen))
     );
     // Nothing starred: the flag changes nothing — unread still leads idle.
     let unstarred = vec![
@@ -1969,6 +2401,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &sessions,
             &unstarred,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -1977,7 +2410,7 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             None,
             true
         ),
-        Some(plain_unseen)
+        Some(UnreadTarget::Session(plain_unseen))
     );
 }
 
@@ -2009,6 +2442,7 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &sessions,
             &[],
             &unseen,
+            &HashMap::new(),
             &rows,
             Some(busy),
             None,
@@ -2017,7 +2451,7 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             Some(&visited),
             false
         ),
-        Some(second)
+        Some(UnreadTarget::Session(second))
     );
     // The whole rotation shown: no target, so the caller restarts the
     // sweep clean and lets the plain rotation answer.
@@ -2027,6 +2461,7 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &sessions,
             &[],
             &unseen,
+            &HashMap::new(),
             &rows,
             Some(busy),
             None,
@@ -2042,6 +2477,7 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &sessions,
             &[],
             &unseen,
+            &HashMap::new(),
             &rows,
             Some(busy),
             None,
@@ -2050,7 +2486,7 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             None,
             false
         ),
-        Some(first)
+        Some(UnreadTarget::Session(first))
     );
     // A session the sweep already showed still leads the moment it carries
     // fresh attention — the seen set only filters the idle rotation.
@@ -2060,23 +2496,6 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &sessions,
             &[],
             &unseen,
-            &rows,
-            Some(busy),
-            None,
-            &HashSet::new(),
-            None,
-            Some(&visited),
-            false
-        ),
-        Some(first)
-    );
-    // A task blocked on its user likewise outranks the filter — it is still
-    // waiting for an answer.
-    sessions[1].status = SessionStatus::Waiting;
-    assert_eq!(
-        next_attention_target(
-            &sessions,
-            &[],
             &HashMap::new(),
             &rows,
             Some(busy),
@@ -2086,7 +2505,26 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             Some(&visited),
             false
         ),
-        Some(first)
+        Some(UnreadTarget::Session(first))
+    );
+    // A task blocked on its user likewise outranks the filter — it is still
+    // waiting for an answer.
+    sessions[1].status = SessionStatus::Waiting;
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &[],
+            &HashMap::new(),
+            &HashMap::new(),
+            &rows,
+            Some(busy),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&visited),
+            false
+        ),
+        Some(UnreadTarget::Session(first))
     );
 }
 
@@ -2113,6 +2551,7 @@ fn next_unread_completion_scopes_to_a_starred_tier() {
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -2120,12 +2559,13 @@ fn next_unread_completion_scopes_to_a_starred_tier() {
             None,
             Some((&starred_set, true)),
         ),
-        Some(starred_id)
+        Some(UnreadTarget::Session(starred_id))
     );
     assert_eq!(
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -2133,12 +2573,13 @@ fn next_unread_completion_scopes_to_a_starred_tier() {
             None,
             Some((&starred_set, false)),
         ),
-        Some(plain_id)
+        Some(UnreadTarget::Session(plain_id))
     );
     assert_eq!(
         next_unread_completion(
             &sessions,
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -2146,7 +2587,7 @@ fn next_unread_completion_scopes_to_a_starred_tier() {
             None,
             None
         ),
-        Some(plain_id)
+        Some(UnreadTarget::Session(plain_id))
     );
 }
 
@@ -2162,7 +2603,7 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
     let unseen = HashMap::from([(shelved, 300)]);
 
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &rows, None, None, &dormant, None, None),
+        next_unread_completion(&sessions, &unseen, &HashMap::new(), &rows, None, None, &dormant, None, None),
         None
     );
     assert_eq!(
@@ -2174,6 +2615,7 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             &sessions,
             &[],
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,
@@ -2182,7 +2624,7 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             None,
             false
         ),
-        Some(live)
+        Some(UnreadTarget::Session(live))
     );
     // An all-dormant list has no target — the caller lands on New task.
     let all_dormant = HashSet::from([shelved, live]);
@@ -2191,6 +2633,7 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             &sessions,
             &[],
             &unseen,
+            &HashMap::new(),
             &rows,
             None,
             None,

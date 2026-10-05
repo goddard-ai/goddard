@@ -133,11 +133,61 @@ pub(super) fn dormant_session_ids(
         .collect()
 }
 
+/// Where a "next unread" jump lands. Session rows — ordinary tasks,
+/// planning sessions, and boss chats — resolve to the session itself; a
+/// boss-published deliverable lands on its boss chat with the file armed,
+/// the same landing a row click produces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum UnreadTarget {
+    Session(Uuid),
+    Deliverable(waku_client::DaemonKey, Uuid),
+}
+
+impl UnreadTarget {
+    /// The session the landing activates: the row's own session, or the
+    /// deliverable's boss chat when that chat exists — a boss that has
+    /// never opened its chat resolves to `None`.
+    fn session_id(
+        self,
+        boss_states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    ) -> Option<Uuid> {
+        match self {
+            UnreadTarget::Session(id) => Some(id),
+            UnreadTarget::Deliverable(key, _) => {
+                boss_states.get(&key).and_then(|state| state.session_id)
+            }
+        }
+    }
+}
+
+/// The unread rule a deliverable row's badge uses — never opened, or
+/// re-published since the last open — plus the parked-row rule sessions
+/// follow: a swept deliverable only opens on an explicit pick, so a
+/// dormant row is never a jump target even when the fold reveals it.
+fn sidebar_deliverable_unread(
+    boss_states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    key: waku_client::DaemonKey,
+    id: Uuid,
+) -> bool {
+    boss_states
+        .get(&key)
+        .and_then(|state| state.deliverables.iter().find(|d| d.id == id))
+        .is_some_and(|deliverable| {
+            deliverable.archived_at.is_none()
+                && (deliverable.dormant_at.is_none() || deliverable.pinned_at.is_some())
+                && deliverable
+                    .viewed_at
+                    .is_none_or(|viewed| viewed < deliverable.updated_at)
+        })
+}
+
 /// The topmost unread target in the sidebar — shared by
 /// GoToNextUnreadCompletion (⌘D), the unseen-completion
 /// bell, and the session-departure fallbacks. "Unread" is the
 /// unseen-completion set plus a task blocked on its user — a pending
-/// permission or question cannot make progress until someone answers.
+/// permission or question cannot make progress until someone answers —
+/// and, for boss surfaces, each surface's own unread marker: a deliverable
+/// is unread until viewed, a boss chat until its unseen turns are seen.
 /// Sessions with queued prompts are about to be busy again, so they are
 /// skipped, and the on-screen or pending-activation session is never a
 /// candidate. `excluded` lets the ⌘⇧D chain and the departure fallback pass
@@ -148,26 +198,30 @@ pub(super) fn dormant_session_ids(
 /// `starred_tier` scopes the scan: `Some((set, true))` considers only
 /// sessions in starred projects, `Some((set, false))` only sessions in
 /// unstarred ones, and `None` ignores starring. Sessions whose project is
-/// gone sort as unstarred.
+/// gone sort as unstarred. Deliverables belong to no project and the boss
+/// workspaces live outside `projects`, so both count as unstarred.
 ///
 /// Sidebar order is the importance order — pinned tasks sort to the top of
 /// the sidebar and lead automatically — and landing on a session clears its
-/// stamp, so repeated presses drain the queue top-down.
+/// stamp, so repeated presses drain the queue top-down. The Boss rows sit
+/// first in the sidebar but scan last: a boss chat's unseen turn never
+/// outranks real work still waiting.
 pub(super) fn next_unread_completion(
     sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
+    boss_states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
     dormant: &HashSet<Uuid>,
     excluded: Option<&HashSet<Uuid>>,
     starred_tier: Option<(&HashSet<Uuid>, bool)>,
-) -> Option<Uuid> {
+) -> Option<UnreadTarget> {
     let by_id = sessions
         .iter()
         .map(|session| (session.id, session))
         .collect::<HashMap<_, _>>();
-    sidebar::next_sidebar_session_in_rows(rows, 0, |session_id| {
+    let session_available = |session_id: Uuid| {
         Some(session_id) != selected_session
             && Some(session_id) != pending_activation
             && !dormant.contains(&session_id)
@@ -186,7 +240,48 @@ pub(super) fn next_unread_completion(
                                 goal.status == crate::model::ThreadGoalStatus::Active
                             })))
             })
-    })
+    };
+    for row in rows {
+        match row {
+            sidebar::SidebarRow::Session(id) | sidebar::SidebarRow::Planning(id)
+                if session_available(*id) =>
+            {
+                return Some(UnreadTarget::Session(*id));
+            }
+            sidebar::SidebarRow::Deliverable(key, id) => {
+                // A chain's seen set is session ids, and a deliverable's
+                // landing is its boss chat — the deliverable leaves the
+                // candidates once the chain has shown that chat.
+                let chat_shown = boss_states
+                    .get(key)
+                    .and_then(|state| state.session_id)
+                    .is_some_and(|chat| {
+                        excluded.is_some_and(|excluded| excluded.contains(&chat))
+                    });
+                if !chat_shown
+                    && starred_tier.is_none_or(|(_, want)| !want)
+                    && sidebar_deliverable_unread(boss_states, *key, *id)
+                {
+                    return Some(UnreadTarget::Deliverable(*key, *id));
+                }
+            }
+            _ => {}
+        }
+    }
+    // The Boss rows sit atop the sidebar but answer last — an unseen boss
+    // turn never outranks the tasks, plans, and deliverables below it.
+    for row in rows {
+        let sidebar::SidebarRow::Boss(key) = row else {
+            continue;
+        };
+        let Some(session_id) = boss_states.get(key).and_then(|state| state.session_id) else {
+            continue;
+        };
+        if session_available(session_id) {
+            return Some(UnreadTarget::Session(session_id));
+        }
+    }
+    None
 }
 
 /// The ⌘D landing, tiered by attention then starred projects: unseen
@@ -207,6 +302,7 @@ pub(super) fn next_attention_target(
     sessions: &[AgentSession],
     projects: &[Project],
     unseen_completions: &HashMap<Uuid, u64>,
+    boss_states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
     rows: &[sidebar::SidebarRow],
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
@@ -214,7 +310,7 @@ pub(super) fn next_attention_target(
     excluded: Option<&HashSet<Uuid>>,
     idle_excluded: Option<&HashSet<Uuid>>,
     starred_idle_first: bool,
-) -> Option<Uuid> {
+) -> Option<UnreadTarget> {
     let starred = starred_project_ids(projects);
     // (attention, starred) tier pairs. The default puts fresh attention
     // first with the star leading inside each class; `starred_idle_first`
@@ -230,6 +326,7 @@ pub(super) fn next_attention_target(
             next_unread_completion(
                 sessions,
                 unseen_completions,
+                boss_states,
                 rows,
                 selected_session,
                 pending_activation,
@@ -248,6 +345,7 @@ pub(super) fn next_attention_target(
                 idle_excluded,
                 Some((&starred, want)),
             )
+            .map(UnreadTarget::Session)
         };
         if target.is_some() {
             return target;
@@ -2134,10 +2232,11 @@ impl Waku {
             .pending_session_activation
             .map(|pending| pending.session_id);
         let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
-        if let Some(session_id) = next_attention_target(
+        match next_attention_target(
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             &rows,
             self.state.selected_session,
             pending,
@@ -2146,9 +2245,13 @@ impl Waku {
             None,
             self.state.starred_idle_before_unseen,
         ) {
-            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
-        } else {
-            self.compose_new_task(project_id, projectless, window, cx);
+            Some(UnreadTarget::Session(session_id)) => {
+                self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
+            }
+            Some(UnreadTarget::Deliverable(key, deliverable_id)) => {
+                self.open_deliverable_task(key, deliverable_id, cx);
+            }
+            None => self.compose_new_task(project_id, projectless, window, cx),
         }
     }
 
@@ -3757,17 +3860,30 @@ impl Waku {
                 self.sidebar_jump_flash_generation =
                     self.sidebar_jump_flash_generation.wrapping_add(1);
                 let generation = self.sidebar_jump_flash_generation;
-                self.sidebar_jump_flash = (self.sidebar_visible
-                    && !self.big_picture.is_open()
-                    && sidebar::sidebar_jump_skips_session(&rows, pending.or(selected), target))
-                .then_some((target, generation));
-                if self.sidebar_jump_flash.is_some() {
+                // Only a session row can flash — a deliverable's landing is
+                // its boss chat, which carries no row to wash.
+                let flash_target = match target {
+                    UnreadTarget::Session(session_id) => Some(session_id),
+                    UnreadTarget::Deliverable(..) => None,
+                };
+                self.sidebar_jump_flash = flash_target
+                    .filter(|session_id| {
+                        self.sidebar_visible
+                            && !self.big_picture.is_open()
+                            && sidebar::sidebar_jump_skips_session(
+                                &rows,
+                                pending.or(selected),
+                                *session_id,
+                            )
+                    })
+                    .map(|session_id| (session_id, generation));
+                if let Some(flash) = self.sidebar_jump_flash {
                     cx.spawn(async move |this, cx| {
                         cx.background_executor()
                             .timer(Duration::from_millis(450))
                             .await;
                         let _ = this.update(cx, |this, cx| {
-                            if this.sidebar_jump_flash == Some((target, generation)) {
+                            if this.sidebar_jump_flash == Some(flash) {
                                 this.sidebar_jump_flash = None;
                                 cx.notify();
                             }
@@ -3794,7 +3910,7 @@ impl Waku {
         selected: Option<Uuid>,
         pending: Option<Uuid>,
         dormant: &HashSet<Uuid>,
-    ) -> Option<Uuid> {
+    ) -> Option<UnreadTarget> {
         if self
             .unread_sweep_at
             .is_none_or(|at| unix_time().saturating_sub(at) >= UNREAD_SWEEP_TIMEOUT.as_secs())
@@ -3809,6 +3925,7 @@ impl Waku {
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             rows,
             selected,
             pending,
@@ -3824,6 +3941,7 @@ impl Waku {
                 &self.state.sessions,
                 &self.state.projects,
                 &self.state.unseen_completions,
+                &self.boss_ui.states,
                 rows,
                 selected,
                 pending,
@@ -3833,8 +3951,11 @@ impl Waku {
                 self.state.starred_idle_before_unseen,
             );
         }
-        if let Some(target) = target {
-            self.unread_sweep_visited.insert(target);
+        // The seen set is session ids: a deliverable records the boss chat
+        // it landed on, when that chat exists.
+        if let Some(session_id) = target.and_then(|target| target.session_id(&self.boss_ui.states))
+        {
+            self.unread_sweep_visited.insert(session_id);
         }
         target
     }
@@ -3842,8 +3963,25 @@ impl Waku {
     /// Shared landing for the unread-jump actions. With the overlay up the
     /// jump arms the card when it is on the grid and exits to the task when
     /// it is not — either way it never rewrites the selection invisibly
-    /// behind the scrim.
-    fn go_to_unread_target(&mut self, target: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+    /// behind the scrim. A deliverable lands like its row click: marked
+    /// viewed, armed on its boss chat's composer, preview page mounted.
+    fn go_to_unread_target(
+        &mut self,
+        target: UnreadTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match target {
+            UnreadTarget::Session(session_id) => session_id,
+            UnreadTarget::Deliverable(key, deliverable_id) => {
+                if self.big_picture.is_open() {
+                    self.close_big_picture(window, cx);
+                }
+                self.settings_page = None;
+                self.open_deliverable_task(key, deliverable_id, cx);
+                return;
+            }
+        };
         if self.big_picture.is_open() {
             if self.big_picture_card_visible(target) {
                 self.arm_big_picture_card(target, cx);
@@ -3949,6 +4087,7 @@ impl Waku {
             &self.state.sessions,
             &self.state.projects,
             &self.state.unseen_completions,
+            &self.boss_ui.states,
             &rows,
             selected,
             pending,
@@ -3959,7 +4098,11 @@ impl Waku {
         );
         match target {
             Some(target) => {
-                self.sweep_target = Some(target);
+                // The chain's aimed landing is the session activation — a
+                // deliverable's is its boss chat, absent until the chat
+                // exists, in which case the arriving activation ends the
+                // chain like any other.
+                self.sweep_target = target.session_id(&self.boss_ui.states);
                 self.go_to_unread_target(target, window, cx);
             }
             None => {
