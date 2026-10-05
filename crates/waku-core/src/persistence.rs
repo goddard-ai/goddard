@@ -1481,6 +1481,7 @@ impl StateStore {
                         kind: kind.and_then(|tag| {
                             serde_json::from_value(serde_json::Value::String(tag)).ok()
                         }),
+                        resolved_name: None,
                     })
                 },
             )

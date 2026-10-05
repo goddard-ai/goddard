@@ -5450,6 +5450,9 @@ impl Waku {
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
+        // Resolve colliding project names across the merged catalog — the
+        // persisted list plus every seeded remote one.
+        Project::resolve_display_names(&mut state.projects);
         let projectless_save_error = projectless_migrated
             .then(|| store.save(&mut state).err())
             .flatten();

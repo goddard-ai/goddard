@@ -1,0 +1,1 @@
+- Projects that share a folder name no longer render identically in the sidebar and project pickers — two `dev` directories now read `goddard/dev` and `text-coral/dev`, extending to more of the path when still ambiguous.

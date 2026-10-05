@@ -1179,7 +1179,7 @@ impl Waku {
                 .find(|share| share.peer_id == node_id && share.repo_path == project.path);
             let project_path = project.path.clone();
             let origin_url = shared.map(|share| share.origin_url.clone());
-            let unshare_message = tr!("friends.confirm_unshare", name = project.name.clone());
+            let unshare_message = tr!("friends.confirm_unshare", name = project.display_name());
             let peer = node_id.to_owned();
             children.push(
                 div()
@@ -1193,7 +1193,7 @@ impl Waku {
                             .min_w_0()
                             .text_size(sp(12.5))
                             .text_color(theme.text)
-                            .child(project.name.clone()),
+                            .child(project.display_name()),
                     )
                     .child(toggle_switch(
                         SharedString::from(format!("share-{}-{}", node_id, project.id)),

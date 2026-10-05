@@ -1099,6 +1099,14 @@ pub struct Project {
     /// rather than name so special projects carry their meaning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ProjectKind>,
+    /// The set-resolved label [`Self::display_name`] renders — `name`
+    /// extended with parent directories (`goddard/dev`, deeper while still
+    /// ambiguous) when another project uses the same name. Assigned by
+    /// [`Self::resolve_display_names`] where a project list is assembled;
+    /// skipped on the wire and in persistence so `name` stays canonical.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub resolved_name: Option<String>,
 }
 
 /// Special project roles. `Friends` is the pooled friend-deliveries
@@ -1213,7 +1221,9 @@ impl Project {
         if self.is_projectless() {
             tr!("project.no_project_name")
         } else {
-            self.name.clone()
+            self.resolved_name
+                .clone()
+                .unwrap_or_else(|| self.name.clone())
         }
     }
 
@@ -1234,6 +1244,7 @@ impl Project {
             starred: false,
             friend_peer_id: None,
             kind: None,
+            resolved_name: None,
         }
     }
 
@@ -1245,6 +1256,75 @@ impl Project {
     pub fn is_projectless(&self) -> bool {
         crate::projectless::is_projectless_path(&self.path)
     }
+
+    /// Re-derive [`Self::resolved_name`] across a project set: unique names
+    /// render alone, and a name shared across paths extends with parent
+    /// directories — `dev` becomes `goddard/dev`, then
+    /// `worktrees/goddard/dev` — until every label is distinct. Call it
+    /// wherever a project list is assembled or mutated so every surface
+    /// that renders `display_name` agrees.
+    pub fn resolve_display_names(projects: &mut [Project]) {
+        let mut groups: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (index, project) in projects.iter().enumerate() {
+            groups.entry(project.name.clone()).or_default().push(index);
+        }
+        for members in groups.into_values() {
+            if members.len() == 1 {
+                // A since-resolved collision leaves a stale label — the lone
+                // project with this name renders it plainly again.
+                projects[members[0]].resolved_name = None;
+                continue;
+            }
+            // Depth counts the name itself plus the parents prepended to it:
+            // 2 renders `parent/name`. Stop once labels are distinct or no
+            // member's path can supply more ancestors — identical paths tie
+            // at full depth, which no labeling can fix.
+            let deepest = members
+                .iter()
+                .map(|index| projects[*index].path.components().count())
+                .max()
+                .unwrap_or(0);
+            let mut depth = 2usize;
+            loop {
+                let labels = members
+                    .iter()
+                    .map(|index| disambiguated_project_label(&projects[*index], depth))
+                    .collect::<Vec<_>>();
+                if labels.iter().collect::<std::collections::HashSet<_>>().len()
+                    == members.len()
+                    || depth >= deepest
+                {
+                    for (member, label) in members.iter().zip(labels) {
+                        let project = &mut projects[*member];
+                        project.resolved_name = (!project.is_projectless()).then_some(label);
+                    }
+                    break;
+                }
+                depth += 1;
+            }
+        }
+    }
+}
+
+/// The collision label for `project` at `depth` rendered components — the
+/// last `depth - 1` path ancestors followed by the project's `name`, which
+/// can differ from the path's basename on daemon-named projects (Friends,
+/// boss workspaces). At full path depth the label is the path itself.
+fn disambiguated_project_label(project: &Project, depth: usize) -> String {
+    let components = project
+        .path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>();
+    let ancestor_count = components.len().saturating_sub(1);
+    let take = depth.saturating_sub(1).min(ancestor_count);
+    let mut label = components[ancestor_count - take..ancestor_count].join("/");
+    if !label.is_empty() && !label.ends_with('/') {
+        label.push('/');
+    }
+    label.push_str(&project.name);
+    label
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -8269,5 +8349,95 @@ mod tests {
             END = MESSAGE_ATOM_END,
         );
         assert_eq!(atom_visible_text(&span), "a*b_c`d[e]");
+    }
+
+    #[test]
+    fn resolve_display_names_leaves_unique_names_alone() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/Users/test/dev/goddard")),
+            Project::from_path(PathBuf::from("/Users/test/dev/octane-xplat")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].resolved_name, None);
+        assert_eq!(projects[1].resolved_name, None);
+        assert_eq!(projects[0].display_name(), "goddard");
+        assert_eq!(projects[1].display_name(), "octane-xplat");
+    }
+
+    #[test]
+    fn resolve_display_names_promotes_colliding_basenames_to_parent() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/worktrees/goddard/dev")),
+            Project::from_path(PathBuf::from("/worktrees/text-coral/dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "goddard/dev");
+        assert_eq!(projects[1].display_name(), "text-coral/dev");
+    }
+
+    #[test]
+    fn resolve_display_names_disambiguates_each_colliding_member() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/worktrees/goddard/dev")),
+            Project::from_path(PathBuf::from("/worktrees/text-coral/dev")),
+            Project::from_path(PathBuf::from("/apps/dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "goddard/dev");
+        assert_eq!(projects[1].display_name(), "text-coral/dev");
+        assert_eq!(projects[2].display_name(), "apps/dev");
+    }
+
+    #[test]
+    fn resolve_display_names_extends_past_a_shared_parent() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/a/x/dev")),
+            Project::from_path(PathBuf::from("/b/x/dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "a/x/dev");
+        assert_eq!(projects[1].display_name(), "b/x/dev");
+    }
+
+    #[test]
+    fn resolve_display_names_restores_the_plain_name_once_unique() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/worktrees/goddard/dev")),
+            Project::from_path(PathBuf::from("/worktrees/text-coral/dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "goddard/dev");
+        projects.remove(1);
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "dev");
+    }
+
+    #[test]
+    fn resolve_display_names_normalizes_trailing_slashes_and_home_prefixes() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from("/worktrees/goddard/dev/")),
+            Project::from_path(PathBuf::from("~/dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "goddard/dev");
+        assert_eq!(projects[1].display_name(), "~/dev");
+    }
+
+    #[test]
+    fn resolve_display_names_keeps_projectless_labels_untouched() {
+        let home = dirs::home_dir().expect("test user has a home directory");
+        let projectless_path =
+            home.join(crate::identity::HOME_DIRECTORY_NAME).join("projects/chat");
+        let mut projectless = Project::from_path(projectless_path);
+        projectless.name = Project::PROJECTLESS_NAME.to_owned();
+        // A user directory literally named "No project" collides with the
+        // projectless placeholder — it needs path context; the projectless
+        // row keeps its localized name.
+        let colliding = Project::from_path(PathBuf::from("/worktrees/scratch/No project"));
+        let mut projects = vec![projectless, colliding];
+        Project::resolve_display_names(&mut projects);
+        assert!(projects[0].is_projectless());
+        assert_eq!(projects[0].resolved_name, None);
+        assert_eq!(projects[1].resolved_name.as_deref(), Some("scratch/No project"));
     }
 }

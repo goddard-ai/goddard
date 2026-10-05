@@ -719,7 +719,7 @@ impl Waku {
                 .iter()
                 .find(|project| project.id == session.project_id)
                 .map_or(SharedString::default(), |project| {
-                    project.name.clone().into()
+                    project.display_name().into()
                 })
         };
         let mut sessions: Vec<&AgentSession> = self

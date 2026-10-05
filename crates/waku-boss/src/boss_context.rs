@@ -687,6 +687,7 @@ mod tests {
             starred: false,
             friend_peer_id: None,
             kind: None,
+            resolved_name: None,
         }
     }
 

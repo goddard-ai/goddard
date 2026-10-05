@@ -292,6 +292,7 @@ impl Waku {
         project.path = new_path.clone();
         project.bookmark = crate::bookmarks::create(&new_path);
         self.missing_projects.remove(&project_id);
+        Project::resolve_display_names(&mut self.state.projects);
         self.save();
 
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());

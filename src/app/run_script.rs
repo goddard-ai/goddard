@@ -556,6 +556,7 @@ mod tests {
             starred: false,
             friend_peer_id: None,
             kind: None,
+            resolved_name: None,
         };
         let current = project(0);
         let recent_a = project(0);

@@ -2633,6 +2633,7 @@ impl Waku {
         self.state
             .projects
             .extend(snapshot.projects.iter().cloned());
+        Project::resolve_display_names(&mut self.state.projects);
         // Sessions the merge just learned about were made outside this UI —
         // an automation run, the CLI, or another client on this daemon.
         for session in &self.state.sessions {
