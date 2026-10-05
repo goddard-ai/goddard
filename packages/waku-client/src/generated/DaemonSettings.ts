@@ -94,10 +94,6 @@ memory_experiment_enabled: boolean,
  */
 boss_experiment_enabled: boolean,
 /**
- * Opt-in for daemon-side Boss session rotation. Disabled by default.
- */
-boss_rotation_enabled: boolean,
-/**
  * Context fraction that makes a settled Boss session eligible to rotate.
  */
 boss_rotation_context_threshold: number,

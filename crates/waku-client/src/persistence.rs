@@ -2187,8 +2187,6 @@ pub struct PersistedState {
     #[serde(default = "default_experiment_enabled")]
     pub boss_experiment_enabled: bool,
     /// Daemon-owned Boss rotation policy mirrored for the settings UI.
-    #[serde(default)]
-    pub boss_rotation_enabled: bool,
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
     #[serde(skip)]
@@ -2502,7 +2500,6 @@ impl PersistedState {
             subagents_enabled: default_experiment_enabled(),
             memory_experiment_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
-            boss_rotation_enabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             boss_rotation_cache_ttl_secs: Default::default(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
@@ -2760,7 +2757,6 @@ impl PersistedState {
             subagents_enabled: self.subagents_enabled,
             memory_experiment_enabled: self.memory_experiment_enabled,
             boss_experiment_enabled: self.boss_experiment_enabled,
-            boss_rotation_enabled: self.boss_rotation_enabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
@@ -2799,7 +2795,6 @@ impl PersistedState {
         self.subagents_enabled = settings.subagents_enabled;
         self.memory_experiment_enabled = settings.memory_experiment_enabled;
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
-        self.boss_rotation_enabled = settings.boss_rotation_enabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;

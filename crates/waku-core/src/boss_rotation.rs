@@ -13,7 +13,6 @@ pub use waku_boss::boss_rotation::{
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BossRotationConfig {
-    pub enabled: bool,
     pub context_threshold: f64,
     pub provider_cache_ttl_secs: HashMap<ProviderKind, u64>,
 }
@@ -22,7 +21,6 @@ impl Default for BossRotationConfig {
     fn default() -> Self {
         let policy = BossRotationPolicy::default();
         Self {
-            enabled: policy.enabled,
             context_threshold: policy.context_threshold,
             provider_cache_ttl_secs: policy.provider_cache_ttl_secs,
         }
@@ -32,7 +30,6 @@ impl Default for BossRotationConfig {
 impl BossRotationConfig {
     pub fn from_settings(settings: &crate::DaemonSettings) -> Self {
         Self {
-            enabled: settings.boss_rotation_enabled,
             context_threshold: settings.boss_rotation_context_threshold,
             provider_cache_ttl_secs: settings
                 .boss_rotation_cache_ttl_secs
@@ -52,7 +49,6 @@ impl BossRotationConfig {
         now: u64,
     ) -> bool {
         BossRotationPolicy {
-            enabled: self.enabled,
             context_threshold: self.context_threshold,
             provider_cache_ttl_secs: self.provider_cache_ttl_secs.clone(),
         }

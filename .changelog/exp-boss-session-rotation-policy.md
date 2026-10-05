@@ -1,1 +1,1 @@
-- Configure the daemon's opt-in Boss session rotation policy with a context threshold and per-provider prompt-cache TTLs; rotation remains off by default.
+- Boss sessions now rotate automatically once their context crosses the configured threshold and the provider's prompt cache has gone cold; tune the context threshold and per-provider cache TTLs in daemon settings.

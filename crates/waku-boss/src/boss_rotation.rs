@@ -1,8 +1,9 @@
 //! Store-independent policy and durable intent records for Boss rotation.
 //!
-//! Rotation stays dormant unless `enabled` is explicitly set. The daemon owns
-//! provider session creation; this module makes the trigger and the journal
-//! decision deterministic and restart-readable.
+//! Rotation is always on: a settled Boss session rotates once its context
+//! crosses the configured threshold and the provider's prompt cache has gone
+//! cold. The daemon owns provider session creation; this module makes the
+//! trigger and the journal decision deterministic and restart-readable.
 
 use std::collections::HashMap;
 use std::fs;
@@ -14,7 +15,6 @@ use waku_protocol::model::ProviderKind;
 
 /// Snapshot of the daemon settings used by Boss rotation policy.
 pub trait BossRotationSettings {
-    fn boss_rotation_enabled(&self) -> bool;
     fn boss_rotation_context_threshold(&self) -> f64;
     fn boss_rotation_cache_ttls(&self) -> Vec<(ProviderKind, u64)>;
 }
@@ -24,7 +24,6 @@ const DEFAULT_CACHE_TTL_SECS: u64 = 5 * 60;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BossRotationConfig {
-    pub enabled: bool,
     /// Rotate once context reaches this fraction of the reported window.
     pub context_threshold: f64,
     /// Provider cache TTLs in seconds. A value of zero means no prompt cache.
@@ -34,7 +33,6 @@ pub struct BossRotationConfig {
 impl Default for BossRotationConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             context_threshold: 0.8,
             provider_cache_ttl_secs: HashMap::new(),
         }
@@ -44,7 +42,6 @@ impl Default for BossRotationConfig {
 impl BossRotationConfig {
     pub fn from_settings(settings: &impl BossRotationSettings) -> Self {
         Self {
-            enabled: settings.boss_rotation_enabled(),
             context_threshold: settings.boss_rotation_context_threshold(),
             provider_cache_ttl_secs: settings.boss_rotation_cache_ttls().into_iter().collect(),
         }
@@ -59,7 +56,7 @@ impl BossRotationConfig {
         last_cache_refresh_at: Option<u64>,
         now: u64,
     ) -> bool {
-        if !self.enabled || !self.context_threshold.is_finite() {
+        if !self.context_threshold.is_finite() {
             return false;
         }
         let Some(window) = context_window.filter(|window| *window > 0) else {
@@ -183,13 +180,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trigger_requires_opt_in_threshold_and_cold_cache() {
+    fn trigger_requires_threshold_and_cold_cache() {
         let provider = ProviderKind::Codex;
-        let mut config = BossRotationConfig::default();
-        assert!(!config.should_rotate(provider, 90, Some(100), true, None, 500));
-        config.enabled = true;
+        let config = BossRotationConfig::default();
         assert!(!config.should_rotate(provider, 79, Some(100), false, None, 500));
         assert!(!config.should_rotate(provider, 90, Some(100), true, Some(400), 500));
+        assert!(config.should_rotate(provider, 90, Some(100), true, None, 500));
         assert!(config.should_rotate(provider, 90, Some(100), true, Some(200), 500));
         assert!(config.should_rotate(provider, 90, Some(100), false, Some(400), 500));
     }
@@ -197,10 +193,7 @@ mod tests {
     #[test]
     fn provider_can_disable_cache_or_override_ttl() {
         let provider = ProviderKind::Codex;
-        let mut config = BossRotationConfig {
-            enabled: true,
-            ..Default::default()
-        };
+        let mut config = BossRotationConfig::default();
         config.provider_cache_ttl_secs.insert(provider, 0);
         assert!(config.should_rotate(provider, 90, Some(100), true, Some(499), 500));
         config.provider_cache_ttl_secs.insert(provider, 30);
