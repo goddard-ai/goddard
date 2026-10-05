@@ -4,7 +4,8 @@ use super::*;
 use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::boss::{
-    BossFile, BossIdentity, BossOperation, BossPersona, BossResult, BossState, PersonaPermissions,
+    BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
+    PersonaPermissions,
 };
 use waku_protocol::custom_commands::CustomCommandIcon;
 
@@ -1438,13 +1439,15 @@ impl Waku {
                 let mut permissions = editor.permissions.clone();
                 permissions.memory_folders = lines(editor.memory.read(cx).content());
                 BossOperation::UpsertPersona {
-                    persona: BossPersona {
+                    persona: BossPersonaUpsert {
                         id,
                         name,
                         markdown: content,
                         pinned_files: lines(editor.pinned.read(cx).content()),
                         permissions,
-                        icon: editor.icon,
+                        // The editor tracks the icon itself — always
+                        // replace rather than preserve.
+                        icon: Some(editor.icon),
                     },
                 }
             }
@@ -3173,295 +3176,231 @@ fn boss_sidebar_label(
         )
 }
 
+/// Fallback icon for job titles that match no category — an agent without
+/// a robot motif.
+const JOB_TITLE_FALLBACK_ICON: &str = "icons/brain.svg";
+
+/// Last-resort employee icon categories, in precedence order: the first
+/// category whose keyword list contains a complete title word wins, so
+/// specialized work (bug fixing, localization, packaging, infrastructure,
+/// database) is listed ahead of generic implementation. Keywords match
+/// exact words only — no stemming or prefix matching.
+const JOB_TITLE_ICON_CATEGORIES: &[(&[&str], &str)] = &[
+    (
+        &["bug", "fix", "bugfix", "debug"],
+        "icons/bug.svg",
+    ),
+    (
+        &[
+            "translate",
+            "translation",
+            "localize",
+            "localization",
+            "l10n",
+            "i18n",
+        ],
+        "icons/languages.svg",
+    ),
+    (
+        &[
+            "dependency",
+            "dependencies",
+            "package",
+            "packaging",
+            "publish",
+            "publishing",
+        ],
+        "icons/package.svg",
+    ),
+    (
+        &[
+            "infrastructure",
+            "infra",
+            "deploy",
+            "deployment",
+            "daemon",
+            "server",
+        ],
+        "icons/server.svg",
+    ),
+    (
+        &[
+            "database",
+            "databases",
+            "sql",
+            "query",
+            "queries",
+            "schema",
+            "schemas",
+        ],
+        "icons/database.svg",
+    ),
+    (
+        &["implement", "build", "migrate", "refactor"],
+        "icons/terminal.svg",
+    ),
+    (&["investigate"], "icons/search.svg"),
+    (&["verify", "validate", "smoke"], "icons/circle-check.svg"),
+    (&["test", "qa"], "icons/beaker.svg"),
+    (
+        &["integrate", "merge", "land", "release"],
+        "icons/git-merge.svg",
+    ),
+    (&["review", "audit"], "icons/eye.svg"),
+    (&["design", "spec"], "icons/pencil.svg"),
+    (&["research", "analyze"], "icons/folder-search.svg"),
+    (&["write", "docs"], "icons/file-text.svg"),
+    (&["security", "privacy"], "icons/lock.svg"),
+    (&["measure", "benchmark", "perf"], "icons/gauge.svg"),
+    (&["port", "migrate"], "icons/fork.svg"),
+];
+
+/// The icon a job title earns when no explicit icon was chosen: the first
+/// category containing one of the title's complete words, or the brain
+/// fallback. A word is a maximal run of Unicode letters or digits —
+/// spaces, punctuation, hyphens, and underscores separate words — matched
+/// case-insensitively against the category keywords.
 pub(super) fn job_title_icon(title: &str) -> &'static str {
-    let categories: &[(&[&str], &str)] = &[
-        (
-            &["bug", "debug", "incident", "investigator", "forensic"],
-            "icons/search.svg",
-        ),
-        (
-            &["integrator", "integration", "merge", "release"],
-            "icons/git-merge.svg",
-        ),
-        (&["review", "reviewer", "inspector"], "icons/eye.svg"),
-        (
-            &["verify", "verifier", "validation", "validator"],
-            "icons/circle-check.svg",
-        ),
-        (
-            &[
-                "tester",
-                "testing",
-                "test",
-                "qa",
-                "quality assurance",
-                "quality engineer",
-            ],
-            "icons/beaker.svg",
-        ),
-        (
-            &[
-                "engineer",
-                "developer",
-                "programmer",
-                "software",
-                "coder",
-                "architect",
-                "devops",
-                "sre",
-            ],
-            "icons/terminal-square.svg",
-        ),
-        (
-            &[
-                "research",
-                "scientist",
-                "analyst",
-                "data",
-                "statistician",
-                "economist",
-            ],
-            "icons/folder-search.svg",
-        ),
-        (
-            &[
-                "builder",
-                "build",
-                "construction",
-                "fabricator",
-                "maker",
-                "mechanic",
-            ],
-            "icons/hammer.svg",
-        ),
-        (
-            &[
-                "artist",
-                "creative",
-                "illustrator",
-                "designer",
-                "brand",
-                "fashion",
-                "ux",
-                "ui",
-                "user experience",
-                "user interface",
-            ],
-            "icons/pencil.svg",
-        ),
-        (
-            &[
-                "writer",
-                "editor",
-                "author",
-                "journalist",
-                "copywriter",
-                "documentation",
-            ],
-            "icons/file-text.svg",
-        ),
-        (
-            &[
-                "manager",
-                "lead",
-                "director",
-                "executive",
-                "chief",
-                "supervisor",
-                "producer",
-            ],
-            "icons/compass.svg",
-        ),
-        (
-            &[
-                "product",
-                "project",
-                "program",
-                "operations",
-                "coordinator",
-                "planner",
-            ],
-            "icons/list.svg",
-        ),
-        (
-            &[
-                "security",
-                "safety",
-                "trust",
-                "compliance",
-                "privacy",
-                "auditor",
-            ],
-            "icons/lock.svg",
-        ),
-        (
-            &[
-                "teacher",
-                "educator",
-                "instructor",
-                "tutor",
-                "trainer",
-                "professor",
-            ],
-            "icons/book-open.svg",
-        ),
-        (
-            &[
-                "doctor",
-                "medical",
-                "nurse",
-                "health",
-                "therapist",
-                "caregiver",
-                "clinical",
-            ],
-            "icons/hand.svg",
-        ),
-        (
-            &["lawyer", "legal", "counsel", "attorney", "paralegal"],
-            "icons/sigma.svg",
-        ),
-        (
-            &[
-                "sales",
-                "account executive",
-                "business development",
-                "seller",
-            ],
-            "icons/target.svg",
-        ),
-        (
-            &[
-                "marketing",
-                "growth",
-                "communications",
-                "public relations",
-                "community",
-                "social media",
-            ],
-            "icons/message-square.svg",
-        ),
-        (
-            &[
-                "finance",
-                "accountant",
-                "bookkeeper",
-                "investment",
-                "treasury",
-                "controller",
-            ],
-            "icons/chart-column.svg",
-        ),
-        (
-            &[
-                "support",
-                "customer success",
-                "service",
-                "help desk",
-                "concierge",
-            ],
-            "icons/headphones.svg",
-        ),
-        (
-            &[
-                "recruit",
-                "talent",
-                "human resources",
-                "people operations",
-                "hr ",
-            ],
-            "icons/user-round.svg",
-        ),
-        (
-            &[
-                "network",
-                "infrastructure",
-                "systems administrator",
-                "database",
-                "cloud",
-            ],
-            "icons/server.svg",
-        ),
-        (
-            &[
-                "logistics",
-                "supply chain",
-                "warehouse",
-                "shipping",
-                "delivery",
-            ],
-            "icons/package.svg",
-        ),
-        (
-            &[
-                "environment",
-                "sustainability",
-                "ecologist",
-                "agriculture",
-                "farmer",
-                "botanist",
-            ],
-            "icons/globe.svg",
-        ),
-        (
-            &["chef", "cook", "culinary", "hospitality", "barista"],
-            "icons/coffee.svg",
-        ),
-        (&["founder", "entrepreneur", "startup"], "icons/zap.svg"),
-        (
-            &["assistant", "administrator", "secretary", "office", "clerk"],
-            "icons/inbox.svg",
-        ),
-        (
-            &["translator", "interpreter", "linguist", "localization"],
-            "icons/languages.svg",
-        ),
-        (
-            &[
-                "video",
-                "film",
-                "photographer",
-                "camera",
-                "animator",
-                "media",
-            ],
-            "icons/monitor.svg",
-        ),
-        (
-            &["musician", "music", "sound", "audio", "composer"],
-            "icons/volume-2.svg",
-        ),
-    ];
-    categories
+    let words: Vec<String> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    JOB_TITLE_ICON_CATEGORIES
         .iter()
         .find(|(keywords, _)| {
             keywords
                 .iter()
-                .any(|keyword| title.contains_ascii_case_insensitive(keyword))
+                .any(|keyword| words.iter().any(|word| word == keyword))
         })
         .map(|(_, icon)| *icon)
-        .unwrap_or("icons/user-round.svg")
+        .unwrap_or(JOB_TITLE_FALLBACK_ICON)
 }
 
 #[cfg(test)]
 mod job_title_icon_tests {
-    use super::job_title_icon;
+    use super::{JOB_TITLE_FALLBACK_ICON, JOB_TITLE_ICON_CATEGORIES, job_title_icon};
 
     #[test]
-    fn common_employee_roles_have_distinct_icons_without_a_bot_fallback() {
-        assert_eq!(job_title_icon("Researcher"), "icons/folder-search.svg");
-        assert_eq!(
-            job_title_icon("Rust developer"),
-            "icons/terminal-square.svg"
-        );
-        assert_eq!(job_title_icon("Bug investigator"), "icons/search.svg");
-        assert_eq!(job_title_icon("Integrator"), "icons/git-merge.svg");
-        assert_eq!(job_title_icon("Verifier"), "icons/circle-check.svg");
-        assert_eq!(job_title_icon("Writer"), "icons/file-text.svg");
-        assert_eq!(job_title_icon("Designer"), "icons/pencil.svg");
-        assert_eq!(job_title_icon("Reviewer"), "icons/eye.svg");
-        assert_eq!(job_title_icon("Tester"), "icons/beaker.svg");
-        assert_eq!(job_title_icon("Uncategorized role"), "icons/user-round.svg");
+    fn every_keyword_resolves_to_its_category() {
+        let cases: &[(&str, &str)] = &[
+            // Bug fixing precedes every other category.
+            ("bug sweep", "icons/bug.svg"),
+            ("hot fix", "icons/bug.svg"),
+            ("bugfix release", "icons/bug.svg"),
+            ("Debug Build Failure", "icons/bug.svg"),
+            // Specialized categories beat generic implementation.
+            ("Translate Strings", "icons/languages.svg"),
+            ("Translation pass", "icons/languages.svg"),
+            ("Localize the app", "icons/languages.svg"),
+            ("Localization Crate Extraction", "icons/languages.svg"),
+            ("l10n audit", "icons/languages.svg"),
+            ("i18n support", "icons/languages.svg"),
+            ("Dependency Build", "icons/package.svg"),
+            ("untangle dependencies", "icons/package.svg"),
+            ("package the release", "icons/package.svg"),
+            ("packaging cleanup", "icons/package.svg"),
+            ("Publish Docs Site", "icons/package.svg"),
+            ("publishing pipeline", "icons/package.svg"),
+            ("infrastructure refresh", "icons/server.svg"),
+            ("infra work", "icons/server.svg"),
+            ("Deploy Preview", "icons/server.svg"),
+            ("deployment checklist", "icons/server.svg"),
+            ("Daemon Refactor", "icons/server.svg"),
+            ("server migration", "icons/server.svg"),
+            ("Database work", "icons/database.svg"),
+            ("sync databases", "icons/database.svg"),
+            ("SQL Tuning", "icons/database.svg"),
+            ("slow query", "icons/database.svg"),
+            ("answer queries", "icons/database.svg"),
+            ("Schema Migration", "icons/database.svg"),
+            ("split schemas", "icons/database.svg"),
+            ("Implement Feature", "icons/terminal.svg"),
+            ("Build System", "icons/terminal.svg"),
+            ("Migrate Store", "icons/terminal.svg"),
+            ("Refactor Parser", "icons/terminal.svg"),
+            ("Investigate Failure", "icons/search.svg"),
+            ("Verify Steps", "icons/circle-check.svg"),
+            ("Validate Results", "icons/circle-check.svg"),
+            ("smoke check", "icons/circle-check.svg"),
+            ("Test Runner", "icons/beaker.svg"),
+            ("QA Pass", "icons/beaker.svg"),
+            ("Integrate Branch", "icons/git-merge.svg"),
+            ("Merge Queue", "icons/git-merge.svg"),
+            ("Land Branch", "icons/git-merge.svg"),
+            ("Release Train", "icons/git-merge.svg"),
+            ("Review Diff", "icons/eye.svg"),
+            ("Audit Logs", "icons/eye.svg"),
+            ("Design Mockup", "icons/pencil.svg"),
+            ("Spec Draft", "icons/pencil.svg"),
+            ("Research Options", "icons/folder-search.svg"),
+            ("Analyze Traces", "icons/folder-search.svg"),
+            ("Write Docs", "icons/file-text.svg"),
+            ("docs refresh", "icons/file-text.svg"),
+            ("Security Hardening", "icons/lock.svg"),
+            ("Privacy Pass", "icons/lock.svg"),
+            ("Measure Startup", "icons/gauge.svg"),
+            ("Benchmark Suite", "icons/gauge.svg"),
+            ("perf work", "icons/gauge.svg"),
+            ("Port Driver", "icons/fork.svg"),
+        ];
+        for (title, expected) in cases {
+            assert_eq!(job_title_icon(title), *expected, "{title}");
+        }
+    }
+
+    #[test]
+    fn matches_only_complete_words() {
+        let brain = JOB_TITLE_FALLBACK_ICON;
+        for title in [
+            "Local Cache Extraction", // "Local" is not "localize".
+            "building",               // no stemming.
+            "support",                // not "port".
+            "performance",            // not "perf".
+            "prefix",
+            "Data Migration", // broad words stay unmatched.
+            "migrate1234",    // a word runs through digits.
+        ] {
+            assert_eq!(job_title_icon(title), brain, "{title}");
+        }
+        // Punctuation, hyphens, and underscores separate words.
+        assert_eq!(job_title_icon("smoke-test"), "icons/circle-check.svg");
+        assert_eq!(job_title_icon("code_review"), "icons/eye.svg");
+        assert_eq!(job_title_icon("qa-run"), "icons/beaker.svg");
+        assert_eq!(job_title_icon("fix: regression"), "icons/bug.svg");
+        assert_eq!(job_title_icon("write (docs)"), "icons/file-text.svg");
+        assert_eq!(job_title_icon(""), brain);
+        assert_eq!(job_title_icon("   "), brain);
+        assert_eq!(job_title_icon("Uncategorized role"), brain);
+    }
+
+    #[test]
+    fn category_order_breaks_ties() {
+        // "Localization" (2) beats "Extraction"; specialized categories beat
+        // implementation (6) regardless of title word order.
+        assert_eq!(job_title_icon("Debug Build Failure"), "icons/bug.svg");
+        assert_eq!(job_title_icon("Dependency Build"), "icons/package.svg");
+        assert_eq!(job_title_icon("Localization Build"), "icons/languages.svg");
+        assert_eq!(job_title_icon("Daemon Refactor"), "icons/server.svg");
+        assert_eq!(job_title_icon("Schema Migration"), "icons/database.svg");
+        // "migrate" belongs to implementation (6) and porting (17);
+        // implementation wins, so only "port" reaches fork.
+        assert_eq!(job_title_icon("Migrate Database"), "icons/database.svg");
+        assert_eq!(job_title_icon("Port and Migrate"), "icons/terminal.svg");
+    }
+
+    #[test]
+    fn every_category_icon_is_bundled() {
+        for (_, icon) in JOB_TITLE_ICON_CATEGORIES {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets")
+                .join(icon);
+            assert!(path.is_file(), "missing bundled icon {icon}");
+        }
+        let fallback = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join(JOB_TITLE_FALLBACK_ICON);
+        assert!(fallback.is_file(), "missing {JOB_TITLE_FALLBACK_ICON}");
     }
 }
 
@@ -3474,18 +3413,6 @@ mod loading_indicator_tests {
         assert!(!boss_loading_label_visible(true, Some(BossReply::Read)));
         assert!(boss_loading_label_visible(true, Some(BossReply::List)));
         assert!(!boss_loading_label_visible(false, Some(BossReply::List)));
-    }
-}
-
-trait ContainsAsciiCaseInsensitive {
-    fn contains_ascii_case_insensitive(&self, needle: &str) -> bool;
-}
-
-impl ContainsAsciiCaseInsensitive for str {
-    fn contains_ascii_case_insensitive(&self, needle: &str) -> bool {
-        self.as_bytes()
-            .windows(needle.len())
-            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
     }
 }
 

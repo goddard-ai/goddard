@@ -49,11 +49,12 @@ persist between eval calls for this boss session.
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,groupId?})
-                                            employee session id — summons sharing a
-                                            groupId form a wave: one notice lands
-                                            when every member finishes, fails, or
-                                            is cancelled
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,workGoal?,icon?,groupId?})
+                                            employee session id — icon overrides the
+                                            persona icon for this employee; summons
+                                            sharing a groupId form a wave: one notice
+                                            lands when every member finishes, fails,
+                                            or is cancelled
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
                         setWorkspace,...})
@@ -70,7 +71,9 @@ persist between eval calls for this boss session.
   speak(parts | \"whole utterance\")         client connections reached
   browse(url[, title])                     open an http(s) page in the boss chat panel
   terminal(title, cwd[, command])           pinned standalone terminal request
-  upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default
+  upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default;
+                                            icon takes an employee icon — omit
+                                            keeps, () clears
   setEmployeeIcon(sessionId, icon | ())
   rename(name)                              the boss's name
   renameEmployee(sessionId, name)

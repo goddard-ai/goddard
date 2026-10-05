@@ -91,6 +91,66 @@ pub struct BossPersona {
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
 }
 
+/// The upsert payload for a persona — identical to [`BossPersona`] except
+/// `icon` is tri-state: an absent field preserves the stored default,
+/// `null` clears it, and an identifier replaces it. A summon copies the
+/// resolved icon onto the employee record, so later edits here never
+/// reach existing employees.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossPersonaUpsert {
+    /// Nil assigns a fresh id on write.
+    pub id: Uuid,
+    pub name: String,
+    pub markdown: String,
+    /// Memory files pinned into the persona's context — paths relative to
+    /// `memory/` in the Boss files root, matching `memory_folders`.
+    /// Pinning also grants employees read access to the file.
+    #[serde(default, alias = "knowledgeFiles")]
+    pub pinned_files: Vec<String>,
+    pub permissions: PersonaPermissions,
+    /// Employee icon default — absent preserves the stored value, `null`
+    /// clears it, an identifier replaces it.
+    #[serde(
+        default,
+        deserialize_with = "double_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional)]
+    pub icon: Option<Option<crate::custom_commands::CustomCommandIcon>>,
+}
+
+/// Serde adapter for fields that must tell `null` apart from absent:
+/// deserialization sees the raw value — `null` becomes `Some(None)` and a
+/// value `Some(Some(..))` — while `#[serde(default)]` still covers the
+/// absent case with `None`.
+mod double_option {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Some)
+    }
+}
+
+impl From<BossPersona> for BossPersonaUpsert {
+    /// Round-trips a fetched record — `Some` makes the icon field
+    /// always-replace, writing back exactly what the record held.
+    fn from(persona: BossPersona) -> Self {
+        Self {
+            id: persona.id,
+            name: persona.name,
+            markdown: persona.markdown,
+            pinned_files: persona.pinned_files,
+            permissions: persona.permissions,
+            icon: Some(persona.icon),
+        }
+    }
+}
+
 /// The kind of bounded work a summon fixes. The boss picks it in the
 /// summon payload and it never changes afterward — it decides what a
 /// finish does, not the employee's persona or live state.
@@ -664,6 +724,12 @@ pub enum BossOperation {
         /// on the client's Goals page.
         #[serde(default)]
         work_goal: EmployeeGoal,
+        /// Icon for this employee — overrides the persona's icon for this
+        /// summon only. `None` inherits the persona default; when neither
+        /// names one the client derives the icon from the job title.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        icon: Option<crate::custom_commands::CustomCommandIcon>,
         /// Host resources the assignment reserves for its lifetime — the
         /// employee's own `resource run` calls borrow subsets of the
         /// granted set rather than re-queuing. Empty means the job claims
@@ -745,7 +811,7 @@ pub enum BossOperation {
         session_id: Option<Uuid>,
     },
     UpsertPersona {
-        persona: BossPersona,
+        persona: BossPersonaUpsert,
     },
     SetEmployeeIcon {
         session_id: Uuid,

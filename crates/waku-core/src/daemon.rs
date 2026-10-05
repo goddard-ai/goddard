@@ -6743,6 +6743,7 @@ impl WakuBackend {
                 base_branch,
                 permissions,
                 work_goal,
+                icon,
                 resources,
                 allow_burst,
                 group_id,
@@ -6764,6 +6765,7 @@ impl WakuBackend {
                     base_branch,
                     permissions,
                     work_goal,
+                    icon,
                     resources,
                     allow_burst,
                     group_id,
@@ -8042,6 +8044,7 @@ impl WakuBackend {
         base_branch: Option<String>,
         permissions: Option<waku_protocol::boss::PermissionOverrides>,
         work_goal: waku_protocol::boss::EmployeeGoal,
+        icon: Option<waku_protocol::custom_commands::CustomCommandIcon>,
         resources: Option<waku_protocol::resources::ResourceSet>,
         allow_burst: bool,
         group_id: Option<String>,
@@ -8061,7 +8064,7 @@ impl WakuBackend {
             "project": project, "provider": provider, "model": model,
             "reasoningEffort": reasoning_effort, "workspace": workspace,
             "baseBranch": base_branch, "permissions": permissions,
-            "workGoal": work_goal, "resources": resources,
+            "workGoal": work_goal, "icon": icon, "resources": resources,
             "allowBurst": allow_burst, "groupId": group_id,
             "priority": priority, "goalId": goal_id,
         }))?;
@@ -8086,6 +8089,7 @@ impl WakuBackend {
             job_title,
             permissions,
             work_goal,
+            icon,
         )?;
         let selection = AgentCreateSelection {
             provider,
@@ -14476,7 +14480,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal, None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -14560,7 +14564,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal, None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -14809,7 +14813,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Goal, None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -14919,7 +14923,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand, None)
             .unwrap();
         let employee_id = employee.session_id;
         let employee_name = employee.identity.name.clone();
@@ -15054,7 +15058,7 @@ mod tests {
         let persona = backend.boss.document().personas[1].id;
         let employee = backend
             .boss
-            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
+            .prepare_employee(supervisor, persona, "Release checks".into(), None, waku_protocol::boss::EmployeeGoal::Errand, None)
             .unwrap();
         let employee_id = employee.session_id;
         backend
@@ -15188,6 +15192,7 @@ mod tests {
                 base_branch: Some("main".into()),
                 permissions: None,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                icon: None,
                 resources: None,
                 allow_burst: false,
                 group_id: None,
@@ -15272,6 +15277,7 @@ mod tests {
                     base_branch: None,
                     permissions: None,
                     work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                    icon: None,
                     resources: None,
                     allow_burst: false,
                     group_id: None,
@@ -15426,6 +15432,7 @@ mod tests {
             base_branch: None,
             permissions: None,
             work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+            icon: None,
             resources: None,
             allow_burst: false,
             group_id: None,
@@ -16508,6 +16515,7 @@ mod tests {
                 "Move job".into(),
                 None,
                 waku_protocol::boss::EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         let employee_id = employee.session_id;
@@ -16935,7 +16943,7 @@ mod tests {
         let persona = backend.boss.document().personas[0].id;
         let employee = backend
             .boss
-            .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
+            .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand, None)
             .unwrap();
         assert_eq!(backend.boss.report_target(&employee), Some(plan.session_id));
         // Elapse the window and the sweep archives the session; afterwards
@@ -16967,7 +16975,7 @@ mod tests {
         assert!(
             backend
                 .boss
-                .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand)
+                .prepare_employee(plan.session_id, persona, "Follow-up".into(), None, waku_protocol::boss::EmployeeGoal::Errand, None)
                 .is_err()
         );
         assert_eq!(backend.boss.report_target(&employee), Some(boss));

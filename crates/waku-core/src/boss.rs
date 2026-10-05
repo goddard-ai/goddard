@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 use waku_protocol::boss::{
     AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
-    BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
+    BossPersona, BossPersonaUpsert, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
     DispatchNotification, EmployeeGoal, EmployeeLifecycle, ModelLimit, PermissionOverrides,
     PersonaPermissions, SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification,
 };
@@ -467,6 +467,7 @@ impl BossService {
         job_title: String,
         overrides: Option<PermissionOverrides>,
         work_goal: EmployeeGoal,
+        icon: Option<waku_protocol::custom_commands::CustomCommandIcon>,
     ) -> anyhow::Result<BossEmployee> {
         validate_name(&job_title)?;
         let state = self.document();
@@ -475,6 +476,14 @@ impl BossService {
             .iter()
             .find(|persona| persona.id == persona_id)
             .ok_or_else(|| anyhow!("unknown persona"))?;
+        // Summon overrides the persona default; either explicit choice is
+        // copied onto the record — a snapshot the client renders directly,
+        // untouched by later persona edits. `None` leaves the title
+        // heuristic in charge.
+        let icon = icon.or(persona.icon);
+        if icon.is_some_and(|icon| !icon.is_employee_icon()) {
+            bail!("icon is not in the employee icon set");
+        }
         let mut permissions = persona.permissions.clone();
         let mut pinned_files = persona.pinned_files.clone();
         if let Some(overrides) = &overrides {
@@ -537,7 +546,7 @@ impl BossService {
             persona_id,
             work_goal,
             created_at: Some(waku_protocol::model::unix_time()),
-            icon: None,
+            icon,
             permissions,
             pinned_files,
             expired: false,
@@ -1891,10 +1900,14 @@ impl BossService {
                     state: self.document(),
                 })
             }
-            BossOperation::UpsertPersona { mut persona } => {
+            BossOperation::UpsertPersona { persona } => {
                 self.require_owner(caller)?;
                 validate_name(&persona.name)?;
-                if persona.icon.is_some_and(|icon| !icon.is_employee_icon()) {
+                if persona
+                    .icon
+                    .flatten()
+                    .is_some_and(|icon| !icon.is_employee_icon())
+                {
                     bail!("persona icon is not in the employee icon set");
                 }
                 if persona.markdown.len() > MAX_FILE_BYTES {
@@ -1908,18 +1921,36 @@ impl BossService {
                     self.file_path(&format!("memory/{path}"), false)?;
                 }
                 self.validate_memory_folders(&persona.permissions.memory_folders)?;
-                if persona.id.is_nil() {
-                    persona.id = Uuid::new_v4();
-                }
                 self.update(|state| {
+                    let id = if persona.id.is_nil() {
+                        Uuid::new_v4()
+                    } else {
+                        persona.id
+                    };
+                    // `icon` is tri-state on the wire — an absent field
+                    // preserves the stored default, null clears it, an
+                    // identifier replaces it.
+                    let stored_icon = state
+                        .personas
+                        .iter()
+                        .find(|entry| entry.id == id)
+                        .and_then(|entry| entry.icon);
+                    let record = BossPersona {
+                        id,
+                        name: persona.name,
+                        markdown: persona.markdown,
+                        pinned_files: persona.pinned_files,
+                        permissions: persona.permissions,
+                        icon: persona.icon.unwrap_or(stored_icon),
+                    };
                     if let Some(existing) = state
                         .personas
                         .iter_mut()
-                        .find(|entry| entry.id == persona.id)
+                        .find(|entry| entry.id == record.id)
                     {
-                        *existing = persona;
+                        *existing = record;
                     } else {
-                        state.personas.push(persona);
+                        state.personas.push(record);
                     }
                     Ok(())
                 })?;
@@ -3182,7 +3213,7 @@ mod tests {
             .unwrap();
         let state = service.document();
         let employee = service
-            .prepare_employee(boss, state.personas[0].id, "Review".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(boss, state.personas[0].id, "Review".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         let session_id = employee.session_id;
         let name = employee.identity.name.clone();
@@ -3236,6 +3267,7 @@ mod tests {
                 "Review".into(),
                 None,
                 EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         let old_id = employee.session_id;
@@ -3261,6 +3293,7 @@ mod tests {
                 "New job".into(),
                 None,
                 EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         replacement.identity.name = old_name;
@@ -3290,7 +3323,7 @@ mod tests {
             .unwrap();
         let state = service.document();
         let employee = service
-            .prepare_employee(boss, state.personas[0].id, "Watch".into(), None, EmployeeGoal::Goal)
+            .prepare_employee(boss, state.personas[0].id, "Watch".into(), None, EmployeeGoal::Goal, None)
             .unwrap();
         let session_id = employee.session_id;
         service
@@ -3381,7 +3414,7 @@ mod tests {
             })
             .unwrap();
         let employee = service
-            .prepare_employee(boss, service.document().personas[0].id, "Review".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(boss, service.document().personas[0].id, "Review".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         let session_id = employee.session_id;
         service
@@ -3540,7 +3573,7 @@ mod tests {
                 .handle(
                     None,
                     BossOperation::UpsertPersona {
-                        persona: persona.clone()
+                        persona: persona.clone().into()
                     },
                 )
                 .is_err()
@@ -3548,8 +3581,125 @@ mod tests {
         persona.icon = Some(CustomCommandIcon::Search);
         assert!(
             service
-                .handle(None, BossOperation::UpsertPersona { persona })
+                .handle(
+                    None,
+                    BossOperation::UpsertPersona {
+                        persona: persona.into()
+                    }
+                )
                 .is_ok()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persona_icon_updates_distinguish_omission_from_null() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.icon = Some(Some(CustomCommandIcon::Eye));
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        assert_eq!(
+            service.document().personas[0].icon,
+            Some(CustomCommandIcon::Eye)
+        );
+        // An omitted field preserves the stored default.
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.markdown = "revised".into();
+        upsert.icon = None;
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        assert_eq!(
+            service.document().personas[0].icon,
+            Some(CustomCommandIcon::Eye)
+        );
+        // Null clears it.
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.icon = Some(None);
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        assert_eq!(service.document().personas[0].icon, None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn summon_icon_snapshots_the_resolved_explicit_choice() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        // Neither a summon icon nor a persona default — the explicit field
+        // stays unset so the title heuristic owns the render.
+        let plain = service
+            .prepare_employee(
+                boss,
+                persona,
+                "Research".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        assert_eq!(plain.icon, None);
+        // A summon override wins over the persona default and lands as a
+        // snapshot on the employee record.
+        let overridden = service
+            .prepare_employee(
+                boss,
+                persona,
+                "Research".into(),
+                None,
+                EmployeeGoal::Errand,
+                Some(CustomCommandIcon::FolderSearch),
+            )
+            .unwrap();
+        assert_eq!(overridden.icon, Some(CustomCommandIcon::FolderSearch));
+        // A configured persona default snapshots onto new summons.
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.icon = Some(Some(CustomCommandIcon::Eye));
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        let inherited = service
+            .prepare_employee(
+                boss,
+                persona,
+                "Research".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        assert_eq!(inherited.icon, Some(CustomCommandIcon::Eye));
+        // Later persona edits do not reach the earlier snapshot.
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.icon = Some(Some(CustomCommandIcon::Lock));
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        assert_eq!(inherited.icon, Some(CustomCommandIcon::Eye));
+        // An identifier outside the employee set fails before any record.
+        assert!(
+            service
+                .prepare_employee(
+                    boss,
+                    persona,
+                    "Research".into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    Some(CustomCommandIcon::Bot),
+                )
+                .is_err()
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -3668,7 +3818,7 @@ mod tests {
                 .handle(
                     Some(session_id),
                     BossOperation::UpsertPersona {
-                        persona: state.personas[0].clone()
+                        persona: state.personas[0].clone().into()
                     }
                 )
                 .is_err()
@@ -3726,7 +3876,7 @@ mod tests {
             })
             .unwrap();
         let parent = service
-            .prepare_employee(boss, persona, "Release".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(boss, persona, "Release".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         let parent_id = parent.session_id;
         service
@@ -3749,7 +3899,7 @@ mod tests {
             })
             .unwrap();
         let child = service
-            .prepare_employee(parent_id, persona, "Child".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(parent_id, persona, "Child".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         assert_eq!(child.permissions.memory_folders, vec!["work"]);
         assert!(!child.permissions.computer_use);
@@ -3782,7 +3932,7 @@ mod tests {
         assert!(service.expire(parent_id).unwrap().is_none());
         assert!(
             service
-                .prepare_employee(parent_id, persona, "Again".into(), None, EmployeeGoal::Errand)
+                .prepare_employee(parent_id, persona, "Again".into(), None, EmployeeGoal::Errand, None)
                 .is_err()
         );
         assert!(service.require_active(parent_id).is_err());
@@ -3820,6 +3970,7 @@ mod tests {
                     ..Default::default()
                 }),
                 EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         assert_eq!(employee.permissions.memory_folders, vec!["work"]);
@@ -3845,6 +3996,7 @@ mod tests {
                         ..Default::default()
                     }),
                     EmployeeGoal::Errand,
+                    None,
                 )
                 .is_err()
         );
@@ -3861,6 +4013,7 @@ mod tests {
                     ..Default::default()
                 }),
                 EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         assert_eq!(child.permissions.memory_folders, Vec::<String>::new());
@@ -3919,7 +4072,7 @@ mod tests {
             .unwrap();
         let persona = service.document().personas[1].id;
         let employee = service
-            .prepare_employee(supervisor, persona, "Release engineer".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(supervisor, persona, "Release engineer".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         assert_eq!(employee.job_title, "Release engineer");
         assert_ne!(employee.identity.name, employee.job_title);
@@ -4325,6 +4478,105 @@ mod tests {
     }
 
     #[test]
+    fn summon_icon_field_parses_and_rejects_unknown_identifiers() {
+        // Omitted and null both mean "no override" on the wire.
+        for extra in [
+            serde_json::json!({}),
+            serde_json::json!({ "icon": null }),
+        ] {
+            let mut payload = serde_json::json!({
+                "type": "summon", "personaId": Uuid::nil(), "jobTitle": "Review",
+                "prompt": "Check the diff", "project": "/project"
+            });
+            payload
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let operation: BossOperation = serde_json::from_value(payload).unwrap();
+            assert!(matches!(operation, BossOperation::Summon { icon: None, .. }));
+        }
+        let operation: BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "summon", "personaId": Uuid::nil(), "jobTitle": "Review",
+            "prompt": "Check the diff", "project": "/project", "icon": "eye"
+        }))
+        .unwrap();
+        assert!(matches!(
+            operation,
+            BossOperation::Summon {
+                icon: Some(CustomCommandIcon::Eye),
+                ..
+            }
+        ));
+        // An unknown identifier fails deserialization, so no summon runs.
+        assert!(
+            serde_json::from_value::<BossOperation>(serde_json::json!({
+                "type": "summon", "personaId": Uuid::nil(), "jobTitle": "Review",
+                "prompt": "Check the diff", "project": "/project", "icon": "banana"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn persona_icon_wire_contract() {
+        // Records written before the field existed still load.
+        let record: BossPersona = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(), "name": "Review", "markdown": "m", "permissions": {}
+        }))
+        .unwrap();
+        assert_eq!(record.icon, None);
+        // The upsert input is tri-state: absent preserves, null clears, an
+        // identifier replaces.
+        let upsert = |extra: serde_json::Value| {
+            let mut persona = serde_json::json!({
+                "id": Uuid::nil(), "name": "Review", "markdown": "m", "permissions": {}
+            });
+            persona
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let BossOperation::UpsertPersona { persona } =
+                serde_json::from_value::<BossOperation>(
+                    serde_json::json!({ "type": "upsertPersona", "persona": persona }),
+                )
+                .unwrap()
+            else {
+                panic!("expected upsertPersona");
+            };
+            persona.icon
+        };
+        assert_eq!(upsert(serde_json::json!({})), None);
+        assert_eq!(upsert(serde_json::json!({ "icon": null })), Some(None));
+        assert_eq!(
+            upsert(serde_json::json!({ "icon": "eye" })),
+            Some(Some(CustomCommandIcon::Eye))
+        );
+        // New identifiers round-trip snake_case.
+        for (icon, wire) in [
+            (CustomCommandIcon::Bug, "bug"),
+            (CustomCommandIcon::Languages, "languages"),
+            (CustomCommandIcon::Database, "database"),
+            (CustomCommandIcon::CircleCheck, "circle_check"),
+            (CustomCommandIcon::Beaker, "beaker"),
+            (CustomCommandIcon::GitMerge, "git_merge"),
+            (CustomCommandIcon::Eye, "eye"),
+            (CustomCommandIcon::Pencil, "pencil"),
+            (CustomCommandIcon::FolderSearch, "folder_search"),
+            (CustomCommandIcon::FileText, "file_text"),
+            (CustomCommandIcon::Lock, "lock"),
+            (CustomCommandIcon::Fork, "fork"),
+            (CustomCommandIcon::Brain, "brain"),
+        ] {
+            assert_eq!(serde_json::to_value(icon).unwrap(), serde_json::json!(wire));
+            assert_eq!(
+                serde_json::from_value::<CustomCommandIcon>(serde_json::json!(wire)).unwrap(),
+                icon
+            );
+            assert!(icon.is_employee_icon());
+        }
+    }
+
+    #[test]
     fn employee_rename_and_avatar_regeneration_are_owner_only() {
         let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
@@ -4493,7 +4745,7 @@ mod tests {
                 .handle(
                     None,
                     BossOperation::UpsertPersona {
-                        persona: persona_doc
+                        persona: persona_doc.into()
                     },
                 )
                 .is_err()
@@ -4612,6 +4864,7 @@ mod memory_op_tests {
                     ..Default::default()
                 }),
                 EmployeeGoal::Errand,
+                None,
             )
             .unwrap();
         let employee_id = employee.session_id;
@@ -4849,7 +5102,7 @@ mod memory_op_tests {
             })
             .unwrap();
         let mut employee = service
-            .prepare_employee(planning, service.document().personas[0].id, "Job".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(planning, service.document().personas[0].id, "Job".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         employee.supervisor_id = planning;
         assert_eq!(service.report_target(&employee), Some(planning));
@@ -4898,7 +5151,7 @@ mod memory_op_tests {
         };
         let member = |title: &str| {
             service
-                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand)
+                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
                 .unwrap()
         };
         let first = member("A");
@@ -4968,7 +5221,7 @@ mod memory_op_tests {
             .unwrap();
         let persona = service.document().personas[0].id;
         let employee = service
-            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand)
+            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand, None)
             .unwrap();
         let session_id = employee.session_id;
         // The wave record with the member still in flight, and an expired

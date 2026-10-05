@@ -41,6 +41,7 @@ export type { BossFile } from "./BossFile";
 export type { BossIdentity } from "./BossIdentity";
 export type { BossOperation } from "./BossOperation";
 export type { BossPersona } from "./BossPersona";
+export type { BossPersonaUpsert } from "./BossPersonaUpsert";
 export type { BossPlan } from "./BossPlan";
 export type { BossResourcePolicy } from "./BossResourcePolicy";
 export type { BossResult } from "./BossResult";

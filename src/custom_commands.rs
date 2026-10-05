@@ -222,6 +222,19 @@ pub fn icon_path(icon: CustomCommandIcon) -> &'static str {
         CustomCommandIcon::Chart => "icons/chart-column.svg",
         CustomCommandIcon::Refresh => "icons/rotate-cw.svg",
         CustomCommandIcon::Archive => "icons/archive.svg",
+        CustomCommandIcon::Bug => "icons/bug.svg",
+        CustomCommandIcon::Languages => "icons/languages.svg",
+        CustomCommandIcon::Database => "icons/database.svg",
+        CustomCommandIcon::CircleCheck => "icons/circle-check.svg",
+        CustomCommandIcon::Beaker => "icons/beaker.svg",
+        CustomCommandIcon::GitMerge => "icons/git-merge.svg",
+        CustomCommandIcon::Eye => "icons/eye.svg",
+        CustomCommandIcon::Pencil => "icons/pencil.svg",
+        CustomCommandIcon::FolderSearch => "icons/folder-search.svg",
+        CustomCommandIcon::FileText => "icons/file-text.svg",
+        CustomCommandIcon::Lock => "icons/lock.svg",
+        CustomCommandIcon::Fork => "icons/fork.svg",
+        CustomCommandIcon::Brain => "icons/brain.svg",
     }
 }
 

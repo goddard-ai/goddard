@@ -4165,7 +4165,15 @@ impl Waku {
                             .when(!job_title.is_empty(), |row| {
                                 row.child(
                                     icon(
-                                        boss::job_title_icon(&job_title),
+                                        self.boss_ui
+                                            .employee_icons
+                                            .get(&employee_id)
+                                            .copied()
+                                            .flatten()
+                                            .map(crate::custom_commands::icon_path)
+                                            .unwrap_or_else(|| {
+                                                boss::job_title_icon(&job_title)
+                                            }),
                                         11.0,
                                         theme.text_tertiary,
                                     )

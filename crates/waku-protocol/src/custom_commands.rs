@@ -34,6 +34,19 @@ pub enum CustomCommandIcon {
     Chart,
     Refresh,
     Archive,
+    Bug,
+    Languages,
+    Database,
+    CircleCheck,
+    Beaker,
+    GitMerge,
+    Eye,
+    Pencil,
+    FolderSearch,
+    FileText,
+    Lock,
+    Fork,
+    Brain,
 }
 
 /// A user-owned shell command listed in the command palette. Running one
@@ -93,7 +106,7 @@ impl CustomCommand {
 }
 
 impl CustomCommandIcon {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 37] = [
         Self::Terminal,
         Self::Command,
         Self::Zap,
@@ -118,12 +131,25 @@ impl CustomCommandIcon {
         Self::Chart,
         Self::Refresh,
         Self::Archive,
+        Self::Bug,
+        Self::Languages,
+        Self::Database,
+        Self::CircleCheck,
+        Self::Beaker,
+        Self::GitMerge,
+        Self::Eye,
+        Self::Pencil,
+        Self::FolderSearch,
+        Self::FileText,
+        Self::Lock,
+        Self::Fork,
+        Self::Brain,
     ];
 
     /// The subset personas and employees may wear: everything except `Bot`,
     /// which stays exclusive to the user's custom commands so managed
     /// identities never read as robots.
-    pub const EMPLOYEE: [Self; 23] = [
+    pub const EMPLOYEE: [Self; 36] = [
         Self::Terminal,
         Self::Command,
         Self::Zap,
@@ -147,6 +173,19 @@ impl CustomCommandIcon {
         Self::Chart,
         Self::Refresh,
         Self::Archive,
+        Self::Bug,
+        Self::Languages,
+        Self::Database,
+        Self::CircleCheck,
+        Self::Beaker,
+        Self::GitMerge,
+        Self::Eye,
+        Self::Pencil,
+        Self::FolderSearch,
+        Self::FileText,
+        Self::Lock,
+        Self::Fork,
+        Self::Brain,
     ];
 
     /// Whether this icon may represent a persona or employee.
@@ -181,6 +220,19 @@ impl CustomCommandIcon {
             Self::Chart => "Chart",
             Self::Refresh => "Refresh",
             Self::Archive => "Archive",
+            Self::Bug => "Bug",
+            Self::Languages => "Languages",
+            Self::Database => "Database",
+            Self::CircleCheck => "Circle check",
+            Self::Beaker => "Beaker",
+            Self::GitMerge => "Git merge",
+            Self::Eye => "Eye",
+            Self::Pencil => "Pencil",
+            Self::FolderSearch => "Folder search",
+            Self::FileText => "File text",
+            Self::Lock => "Lock",
+            Self::Fork => "Fork",
+            Self::Brain => "Brain",
         }
     }
 }
