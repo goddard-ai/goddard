@@ -15533,6 +15533,7 @@ mod tests {
                 reasoning_effort: None,
                 workspace: None,
                 base_branch: None,
+                adopt_worktree: None,
                 permissions: None,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                 icon: Some(waku_protocol::custom_commands::CustomCommandIcon::Beaker),
