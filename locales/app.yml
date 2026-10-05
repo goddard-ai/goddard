@@ -5948,6 +5948,36 @@ boss.group:
   en: Boss
 boss.brain:
   en: Memory and personas
+boss.brain_label:
+  en: Brain
+boss.local_host:
+  en: Local host
+boss.remote_host:
+  en: Remote host
+boss.identity:
+  en: Identity
+boss.deliverables:
+  en: Deliverables
+boss.phase_later:
+  en: Coming in a later phase.
+boss.search_file_names:
+  en: Search file names
+boss.search_no_matches:
+  en: No matching files
+boss.ask_correct:
+  en: Ask Boss to correct
+boss.correction_request_hint:
+  en: Ask the Boss to correct %{path} in chat.
+boss.memory_empty:
+  en: The Boss maintains its memory.
+boss.ask_remember:
+  en: Ask Boss to remember something
+boss.memory_select:
+  en: Select a memory file to read
+boss.memory_unavailable:
+  en: Could not load %{path}.
+boss.retry:
+  en: Retry
 boss.pause_voice:
   en: Pause boss voice message
 boss.resume_voice:

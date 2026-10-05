@@ -380,6 +380,7 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    BossMemoryTree,
     /// The horizontal divider between the Git panel's top region and its
     /// commit log — the one drag that moves on the y axis.
     GitPanelTop,
@@ -3915,6 +3916,8 @@ pub struct Waku {
     settings_memory_shown: usize,
     /// Filter query over the Memory page's notes.
     memory_search: Entity<TextInput>,
+    /// Filename query for the Boss's read-only Memory tree.
+    boss_memory_search: Entity<TextInput>,
     /// The rendered MEMORY.md document — cached per project so a refresh
     /// reuses the incremental parse until the text actually changes — and
     /// the page's text selection.
@@ -5476,6 +5479,13 @@ impl Waku {
                 .accessibility_label(tr!("settings.memory_filter"))
                 .placeholder(tr!("settings.memory_filter"))
         });
+        let boss_memory_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("boss.search_file_names"))
+                .placeholder(tr!("boss.search_file_names"))
+        });
         let drafts_edit_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -6495,6 +6505,15 @@ impl Waku {
                 }
             })
             .detach();
+            cx.subscribe(&boss_memory_search, |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                    // Searching is asynchronous. The Brain list is a bounded
+                    // UI surface, but all directory discovery stays in the
+                    // Boss request worker.
+                    this.ensure_boss_memory_search(cx);
+                }
+            }).detach();
             cx.subscribe(&memory_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -7415,6 +7434,7 @@ impl Waku {
                 settings_memory_generation: 0,
                 settings_memory_shown: projects::MEMORY_LOG_CHUNK,
                 memory_search,
+                boss_memory_search,
                 settings_memory_markdown: RefCell::new(None),
                 settings_memory_selection: TranscriptSelection::default(),
                 git_page_refresh_pending: false,

@@ -1,0 +1,1 @@
+- The Boss's Brain button now opens the last section you visited. Browse Memory in an expandable file tree, search filenames across folders, and read Markdown previews. Use Ask Boss to correct to send a selected memory file to the Boss as a correction request; memory remains Boss-managed.

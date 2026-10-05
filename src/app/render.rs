@@ -56,7 +56,7 @@ impl Waku {
                     .left(px(5.0))
                     .w(px(2.0))
                     .h_full())),
-            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => strip
+            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree | PanelResizeTarget::BossMemoryTree => strip
                 .top_0()
                 .left(px(-5.0))
                 .w(px(10.0))

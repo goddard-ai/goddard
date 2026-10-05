@@ -3517,6 +3517,7 @@ impl Waku {
                 self.right_panel_file_tree_width = width;
                 width
             }
+            PanelResizeTarget::BossMemoryTree => self.boss_ui.memory_tree_width,
             PanelResizeTarget::GitPanelTop => {
                 let height = fitted_git_panel_top_height(
                     f32::from(window.viewport_size().height),
@@ -3581,6 +3582,11 @@ impl Waku {
                 }
                 self.right_panel_file_tree_width = width;
             }
+            PanelResizeTarget::BossMemoryTree => {
+                let width = (drag.start_size - delta).clamp(180.0, 480.0);
+                if (self.boss_ui.memory_tree_width - width).abs() < 0.5 { return; }
+                self.boss_ui.memory_tree_width = width;
+            }
             PanelResizeTarget::GitPanelTop => {
                 let delta = f32::from(event.position.y) - drag.start_mouse_y;
                 let height = fitted_git_panel_top_height(
@@ -3605,7 +3611,7 @@ impl Waku {
         if event.button == MouseButton::Left
             && let Some(drag) = self.panel_resize_drag.take()
         {
-            if drag.target != PanelResizeTarget::FileTree {
+            if !matches!(drag.target, PanelResizeTarget::FileTree | PanelResizeTarget::BossMemoryTree) {
                 self.persist_panel_layout();
             }
             cx.notify();
