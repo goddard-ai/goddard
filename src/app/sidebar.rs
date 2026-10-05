@@ -6545,42 +6545,53 @@ impl Waku {
             .pr(px(14.0))
             .when(!self.sidebar_visible, |element| {
                 element
-                    .child(
-                        self.window_drag_region(
-                            div()
-                                .id("header-traffic-light-drag-region")
-                                .w(px(TRAFFIC_LIGHT_CLEARANCE - 8.0))
-                                .h_full()
-                                .flex_none(),
-                            cx,
-                        ),
-                    )
+                    // The drag region and icon cluster are one leading unit:
+                    // the header's own 2px gap must not slip between them, or
+                    // the icons land right of the sidebar titlebar's and jump
+                    // when the hover-peek rail slides in.
                     .child(
                         div()
+                            .h_full()
+                            .flex_none()
                             .flex()
                             .items_center()
-                            .gap(px(6.0))
-                            .child(self.render_sidebar_toggle(cx))
-                            .child(self.render_unseen_completion_bell(cx))
+                            .child(
+                                self.window_drag_region(
+                                    div()
+                                        .id("header-traffic-light-drag-region")
+                                        .w(px(TRAFFIC_LIGHT_CLEARANCE - 8.0))
+                                        .h_full()
+                                        .flex_none(),
+                                    cx,
+                                ),
+                            )
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap(px(2.0))
-                                    .child(self.render_history_button(
-                                        "navigate-back",
-                                        "icons/arrow-left.svg",
-                                        !self.session_navigation.back.is_empty(),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(self.render_history_button(
-                                        "navigate-forward",
-                                        "icons/arrow-right.svg",
-                                        !self.session_navigation.forward.is_empty(),
-                                        false,
-                                        cx,
-                                    )),
+                                    .gap(px(6.0))
+                                    .child(self.render_sidebar_toggle(cx))
+                                    .child(self.render_unseen_completion_bell(cx))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(2.0))
+                                            .child(self.render_history_button(
+                                                "navigate-back",
+                                                "icons/arrow-left.svg",
+                                                !self.session_navigation.back.is_empty(),
+                                                true,
+                                                cx,
+                                            ))
+                                            .child(self.render_history_button(
+                                                "navigate-forward",
+                                                "icons/arrow-right.svg",
+                                                !self.session_navigation.forward.is_empty(),
+                                                false,
+                                                cx,
+                                            )),
+                                    ),
                             ),
                     )
             })
