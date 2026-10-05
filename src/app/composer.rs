@@ -7048,6 +7048,7 @@ impl Waku {
             subject_projectless,
             project_name,
             subject_project_path,
+            subject_planning,
         ) = {
             let subject_session = subject_session_id.and_then(|session_id| {
                 self.state
@@ -7083,6 +7084,7 @@ impl Waku {
                 subject_project
                     .filter(|project| !project.is_projectless())
                     .map(|project| project.path.clone()),
+                subject_session.is_some_and(AgentSession::is_planning),
             )
         };
         let projectless_selected = subject_projectless;
@@ -7740,11 +7742,13 @@ impl Waku {
         // A boss-managed session with no catalog project — the boss
         // chat's daemon-owned workspace or a projectless employee — has
         // no project, workspace, or branch to pick, so the pickers' slot
-        // shows who the session is instead. An employee working in a
-        // project keeps the same chips as any task.
+        // shows who the session is instead. A planning session always
+        // runs in its boss's workspace, so its resolved Boss project still
+        // makes the same swap to the boss's own identity. An employee
+        // working in a project keeps the same chips as any task.
         let managed = subject_session_id
             .and_then(|id| self.boss_session_identity(id))
-            .filter(|_| subject_project_path.is_none())
+            .filter(|_| subject_project_path.is_none() || subject_planning)
             .map(|identity| {
                 div()
                     .flex()
@@ -8089,7 +8093,13 @@ impl Waku {
             worktree_trigger.into_any_element()
         };
 
-        let branch_selector = self.render_branch_selector(cx);
+        // The identity swap covers the branch too — the boss workspace's
+        // branch is no more the session's to pick than its project.
+        let branch_selector = if managed.is_some() {
+            None
+        } else {
+            self.render_branch_selector(cx)
+        };
 
         let usage_meter = self.render_usage_meter(cx);
         div()

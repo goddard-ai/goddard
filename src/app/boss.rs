@@ -342,6 +342,20 @@ fn archived_employee_session(
         && employee_session(session, managed, boss_chat, experiment_enabled)
 }
 
+/// The Boss state owning one of the boss's own surfaces — its chat's
+/// `session_id` or a `planning` record's. Employee sessions resolve
+/// through `boss_ui.identities` instead, so this answers only for the
+/// boss itself.
+fn boss_state_owning_session(
+    states: &HashMap<DaemonKey, BossState>,
+    session_id: Uuid,
+) -> Option<&BossState> {
+    states.values().find(|state| {
+        state.session_id == Some(session_id)
+            || state.planning.iter().any(|plan| plan.session_id == session_id)
+    })
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -1084,15 +1098,13 @@ impl Waku {
     }
 
     /// The boss-side identity of a managed session: an employee's persona
-    /// identity, or the boss's own for its chat. Plain tasks get `None`.
+    /// identity, or the boss's own for its chat and planning sessions.
+    /// Plain tasks get `None`.
     pub(super) fn boss_session_identity(&self, session_id: Uuid) -> Option<BossIdentity> {
         if let Some(identity) = self.boss_ui.identities.get(&session_id) {
             return Some(identity.clone());
         }
-        self.boss_ui
-            .states
-            .values()
-            .find(|state| state.session_id == Some(session_id))
+        boss_state_owning_session(&self.boss_ui.states, session_id)
             .map(|state| state.identity.clone())
     }
 
@@ -3919,6 +3931,31 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn owning_state_covers_the_chat_and_its_planning_sessions() {
+        let mut state = boss_state_for_queue_test();
+        let chat = Uuid::new_v4();
+        let planning = Uuid::new_v4();
+        state.session_id = Some(chat);
+        state.planning = vec![waku_protocol::boss::BossPlan {
+            session_id: planning,
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            finalized_at: None,
+        }];
+        let states = HashMap::from([(DaemonKey::Local, state)]);
+
+        assert_eq!(
+            boss_state_owning_session(&states, chat).and_then(|state| state.session_id),
+            Some(chat)
+        );
+        assert_eq!(
+            boss_state_owning_session(&states, planning).and_then(|state| state.session_id),
+            Some(chat)
+        );
+        assert!(boss_state_owning_session(&states, Uuid::new_v4()).is_none());
     }
 
     #[test]
