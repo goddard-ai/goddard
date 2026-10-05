@@ -237,6 +237,7 @@ impl Waku {
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
         let daemon_request = self.render_daemon_request(cx);
+        let queued_employee = self.render_queued_employee_prompt(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -455,6 +456,7 @@ impl Waku {
             ))
             .children(navigation_rail)
             .children(daemon_request)
+            .children(queued_employee)
             .children(scroll_to_bottom)
             .children(status_marker_float)
             .child(scrollbar::vertical(
@@ -474,6 +476,82 @@ impl Waku {
             .children(annotation_ref_tooltip)
             .children(commit_popover)
             .into_any_element()
+    }
+
+    /// The queued shell has no provider transcript yet. Keep the ticket's
+    /// immutable assignment visible above it until dispatch replaces this
+    /// surface with the live employee transcript.
+    fn render_queued_employee_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session_id = self.state.selected_session?;
+        let employee = self
+            .boss_ui
+            .states
+            .values()
+            .flat_map(|state| &state.employees)
+            .find(|employee| {
+                employee.session_id == session_id
+                    && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+            })?;
+        let ticket = employee.ticket.as_ref()?;
+        let detail = self.boss_ui.queued.get(&session_id)?;
+        let theme = Theme::current(cx);
+        Some(
+            div()
+                .id("queued-employee-prompt-layer")
+                .absolute()
+                .top(px(8.0))
+                .left_0()
+                .right_0()
+                .px(px(20.0))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .p(px(12.0))
+                        .rounded(px(15.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .shadow_md()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon("icons/hourglass.svg", 13.0, theme.text_secondary))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme.text)
+                                        .child(tr!("boss.goals_status_queued")),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(detail.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("queued-employee-prompt-content")
+                                .max_h(px(220.0))
+                                .overflow_y_scroll()
+                                .text_size(sp(13.0))
+                                .line_height(sp(19.0))
+                                .text_color(theme.text)
+                                .child(ticket.prompt.clone()),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The daemon-owned `agentRenameSelf`/`agentProposeArchive` request,
