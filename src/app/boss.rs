@@ -1814,8 +1814,13 @@ impl Waku {
                 .map(|pending| pending.session_id),
             id,
         );
-        div()
+        let waku = cx.entity().downgrade();
+        let menu = self.menu_handle(format!("boss-planning-{id}"), cx);
+        let row_focus = menu.trigger_focus_handle().clone();
+        let keyboard_menu = menu.clone();
+        let row = div()
             .id(format!("boss-planning-{id}"))
+            .track_focus(&row_focus)
             .tab_index(0)
             .h(px(42.0))
             .w_full()
@@ -1832,6 +1837,12 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
+            .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key.as_str() == "f10" && event.keystroke.modifiers.shift {
+                    keyboard_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(boss_sidebar_label(
                 planning.idea.clone(),
                 planning.label.render(),
@@ -1848,8 +1859,27 @@ impl Waku {
                         .text_color(theme.text_tertiary)
                         .child(sidebar::sidebar_shortcut_chip_label(index)),
                 )
-            })
-            .into_any_element()
+            });
+        // The row's only menu gesture is the dismissal a task row's Archive
+        // performs — an abandoned plan leaves the sidebar by the same flag
+        // the post-finalization grace sweep sets.
+        context_menu(
+            div().w_full().child(row),
+            SharedString::from(format!("boss-planning-menu-{id}")),
+            &menu,
+            move |_cx| {
+                let archive_waku = waku.clone();
+                vec![
+                    MenuItem::new(tr!("session.archive"), move |window, cx| {
+                        let _ = archive_waku.update(cx, |waku, cx| {
+                            waku.archive_session(id, window, cx);
+                        });
+                    })
+                    .shortcut_action(&ArchiveSession)
+                    .icon("icons/archive.svg"),
+                ]
+            },
+        )
     }
 
     /// A Recent deliverables row: the card chrome matches a task row, with the

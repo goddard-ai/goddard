@@ -117,6 +117,14 @@ pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
         .collect()
 }
 
+/// The gate every archive entry point applies: a started, unarchived,
+/// top-level task. A planning session passes it like any other row —
+/// `planning` is a kind marker, not a separate lifecycle. A side chat is
+/// delete-only: it hides in its parent's panel rather than an archive row.
+pub(super) fn session_archivable(session: &AgentSession) -> bool {
+    session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+}
+
 /// The sessions keyboard navigation must never land on. A dormant row can
 /// be revealed on screen — expanded Dormant section, revealed dormant tail —
 /// and still be non-busy or unread, so visibility alone is not a filter.
@@ -2312,11 +2320,7 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| {
-                // A side chat is delete-only: it hides in its parent's panel
-                // rather than an archive row.
-                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
-            })
+            .filter(|session| session_archivable(session))
         else {
             return;
         };
@@ -2452,15 +2456,19 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((project_id, is_busy)) = self
+        let Some((project_id, is_busy, boss_managed)) = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| {
-                session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+            .filter(|session| session_archivable(session))
+            .map(|session| {
+                (
+                    session.project_id,
+                    session.is_busy(),
+                    self.session_is_boss_managed(session),
+                )
             })
-            .map(|session| (session.project_id, session.is_busy()))
         else {
             return;
         };
@@ -2473,12 +2481,15 @@ impl Waku {
         for child_id in self.side_chat_descendants(session_id) {
             self.remove_session_inner(child_id, None, false, cx);
         }
+        // A boss-owned session's project is the boss's own workspace — it
+        // takes no user drafts, so the departure lands on a scratch task.
         let projectless = self
             .state
             .projects
             .iter()
             .find(|project| project.id == project_id)
-            .is_some_and(Project::is_projectless);
+            .is_some_and(Project::is_projectless)
+            || boss_managed;
         let was_selected = self.state.selected_session == Some(session_id);
         // The visit's attention stamp picks the landing — stamped before
         // the departure's own navigation re-stamps the next selection.
