@@ -1393,12 +1393,19 @@ impl WakuBackend {
             let mut state = self.task_state.lock();
             let now = crate::model::unix_time();
             for id in session_ids {
-                let archivable = state.sessions.iter().any(|session| {
+                let Some(session) = state.sessions.iter().find(|session| {
                     session.id == *id
                         && session.archived_at.is_none()
                         && session.side_chat_of.is_none()
-                });
-                if !archivable {
+                }) else {
+                    continue;
+                };
+                if let Some((path, reason)) = WakuBackend::employee_archive_blocker(session)? {
+                    // Bulk requests archive per task so one dirty employee
+                    // does not prevent clean tasks in the same request.
+                    if session_ids.len() == 1 {
+                        bail!("employee has {reason} in {}", path.display());
+                    }
                     continue;
                 }
                 let session = state
@@ -1472,6 +1479,45 @@ impl WakuBackend {
             self.agent.clear_session(id);
         }
         Ok(())
+    }
+
+    /// Return the reason and path when archiving would discard employee work.
+    /// The daemon owns this check so every archive surface applies the rule.
+    fn employee_archive_blocker(
+        session: &AgentSession,
+    ) -> anyhow::Result<Option<(PathBuf, &'static str)>> {
+        if !session.boss_managed {
+            return Ok(None);
+        }
+        let SessionWorkspace::Worktree {
+            path,
+            base_branch,
+            adopted_by: None,
+            ..
+        } = &session.workspace
+        else {
+            return Ok(None);
+        };
+
+        let status = crate::git_commit::git_stdout(
+            path,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        )?;
+        if !status.is_empty() {
+            return Ok(Some((path.clone(), "uncommitted work")));
+        }
+
+        let Some(base) = crate::git_panel::land_base(path, base_branch.as_deref())? else {
+            return Ok(Some((path.clone(), "unlanded commits")));
+        };
+        let range = format!("{base}..HEAD");
+        let ahead = crate::git_commit::git_optional_stdout(
+            path,
+            &["rev-list", "--count", &range],
+        )?
+        .and_then(|count| count.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+        Ok((ahead > 0).then(|| (path.clone(), "unlanded commits")))
     }
 
     /// Deletes archived tasks whose archive has outlived the retention
@@ -11358,6 +11404,63 @@ mod tests {
         session.begin_turn("Ask");
         session.push_message(MessageRole::Assistant, "an answer");
         session
+    }
+
+    #[test]
+    fn employee_archive_guard_preserves_dirty_and_unlanded_work() {
+        let root = std::env::temp_dir().join(format!("archive-guard-{}", Uuid::new_v4()));
+        let repository = root.join("repository");
+        let worktree = root.join("worktree");
+        std::fs::create_dir_all(&repository).unwrap();
+        let git = |cwd: &Path, args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&repository, &["init", "--quiet", "-b", "main"]);
+        git(&repository, &["config", "user.name", "Goddard Tests"]);
+        git(&repository, &["config", "user.email", "waku@example.com"]);
+        std::fs::write(repository.join("README.md"), "base\n").unwrap();
+        git(&repository, &["add", "."]);
+        git(&repository, &["commit", "--quiet", "-m", "initial"]);
+        git(
+            &repository,
+            &["worktree", "add", "--quiet", "--detach", worktree.to_str().unwrap()],
+        );
+
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.boss_managed = true;
+        session.workspace = SessionWorkspace::Worktree {
+            path: worktree.clone(),
+            name: "employee".into(),
+            branch: None,
+            base_branch: Some("main".into()),
+            adopted_by: None,
+        };
+        assert_eq!(WakuBackend::employee_archive_blocker(&session).unwrap(), None);
+
+        std::fs::write(worktree.join("scratch.txt"), "unfinished\n").unwrap();
+        assert!(matches!(
+            WakuBackend::employee_archive_blocker(&session).unwrap(),
+            Some((path, "uncommitted work")) if path == worktree
+        ));
+        std::fs::remove_file(worktree.join("scratch.txt")).unwrap();
+
+        std::fs::write(worktree.join("land-me.txt"), "commit\n").unwrap();
+        git(&worktree, &["add", "."]);
+        git(&worktree, &["commit", "--quiet", "-m", "employee work"]);
+        assert!(matches!(
+            WakuBackend::employee_archive_blocker(&session).unwrap(),
+            Some((path, "unlanded commits")) if path == worktree
+        ));
+        std::fs::remove_dir_all(root).ok();
     }
 
     /// The wire session a client sends after `baseline`: full scalars, but
