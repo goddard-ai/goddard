@@ -1991,6 +1991,7 @@ impl Waku {
                     name,
                     branch: Some(alert.branch.clone()),
                     base_branch: None,
+                    adopted_by: None,
                 };
             }
         }

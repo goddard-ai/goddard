@@ -71,6 +71,10 @@ pub(super) struct BossUi {
     /// started, so the shell can still read Idle — the row shows a starting
     /// spinner until the Working lifecycle lands.
     pub(super) dispatching: HashSet<Uuid>,
+    /// Resolved ticket target for queued and dispatching employees, keyed by
+    /// session id so sidebar and summon rows can reveal it without rescanning
+    /// every Boss snapshot while rendering.
+    pub(super) queued_model_targets: HashMap<Uuid, (DaemonKey, ProviderKind, String)>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
@@ -138,6 +142,7 @@ impl Default for BossUi {
             expired: HashSet::new(),
             queued: HashMap::new(),
             dispatching: HashSet::new(),
+            queued_model_targets: HashMap::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             command_deliverable: None,
@@ -411,6 +416,7 @@ impl Waku {
             self.boss_ui.expired.clear();
             self.boss_ui.queued.clear();
             self.boss_ui.dispatching.clear();
+            self.boss_ui.queued_model_targets.clear();
             let session_created_at: HashMap<Uuid, u64> = self
                 .state
                 .sessions
@@ -458,6 +464,17 @@ impl Waku {
                         == waku_protocol::boss::EmployeeLifecycle::Dispatching
                     {
                         self.boss_ui.dispatching.insert(employee.session_id);
+                    }
+                    if matches!(
+                        employee.lifecycle(),
+                        waku_protocol::boss::EmployeeLifecycle::Queued
+                            | waku_protocol::boss::EmployeeLifecycle::Dispatching
+                    ) && let Some(ticket) = &employee.ticket
+                    {
+                        self.boss_ui.queued_model_targets.insert(
+                            employee.session_id,
+                            (*key, ticket.provider, ticket.model.clone()),
+                        );
                     }
                     self.boss_ui
                         .identities
@@ -1853,10 +1870,19 @@ impl Waku {
         // Option trades the job title for the employee's model and effort,
         // the same reveal a task row's detail line performs.
         let alt_held = self.sidebar_alt_held;
-        let detail = if alt_held {
-            session.map(|session| self.session_sidebar_model_detail(session))
+        let (detail, detail_provider) = if alt_held {
+            self.boss_ui.queued_model_targets.get(&id).map_or_else(
+                || (
+                    session.map(|session| self.session_sidebar_model_detail(session)),
+                    session.map(|session| session.provider),
+                ),
+                |(key, provider, model)| (
+                    Some(self.model_display_name_on(*key, *provider, Some(model))),
+                    Some(*provider),
+                ),
+            )
         } else {
-            self.boss_ui.job_titles.get(&id).cloned()
+            (self.boss_ui.job_titles.get(&id).cloned(), None)
         };
         div()
             .id(format!("boss-employee-{id}"))
@@ -1892,11 +1918,7 @@ impl Waku {
                 },
                 true,
                 &theme,
-                if alt_held {
-                    session.map(|session| session.provider)
-                } else {
-                    None
-                },
+                detail_provider,
             ))
             .when_some(status_indicator, |row, indicator| row.child(indicator))
             .into_any_element()

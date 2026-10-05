@@ -150,6 +150,7 @@ impl Waku {
                                 name: created.name,
                                 branch: None,
                                 base_branch: base_branch.clone(),
+                                adopted_by: None,
                             };
                             true
                         });
@@ -388,6 +389,7 @@ impl Waku {
                 // The worktree adopted the source checkout's state; the
                 // primary-checkout fallback resolves that same branch.
                 base_branch: None,
+                adopted_by: None,
             };
             // A session that never started has no recorded paths to correct;
             // a started one's next prompt carries the move notice.

@@ -478,6 +478,7 @@ pub(super) fn prepare_submission(
                 name: created.name,
                 branch: None,
                 base_branch,
+                adopted_by: None,
             }
         }
         SessionWorkspace::Worktree {
@@ -485,6 +486,7 @@ pub(super) fn prepare_submission(
             name,
             branch,
             base_branch,
+            adopted_by: _,
         } => {
             // The directory can vanish between visits — archived tasks
             // outlive their worktrees once archive cleanup removes them.
@@ -539,6 +541,7 @@ pub(super) fn prepare_submission(
                 // reported checkout replaces the stale persisted one.
                 branch: if ensured.0 { ensured.1 } else { branch },
                 base_branch,
+                adopted_by: None,
             }
         }
         workspace => {
