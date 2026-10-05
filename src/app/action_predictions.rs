@@ -2035,6 +2035,7 @@ mod tests {
             name: "worktree".to_owned(),
             branch: None,
             base_branch: None,
+            adopted_by: None,
         };
         assert!(candidate_ids(&session, turn_id).contains(&"land"));
     }

@@ -1400,6 +1400,7 @@ mod tests {
             name: "draft".to_owned(),
             branch: None,
             base_branch: Some("main".to_owned()),
+            adopted_by: None,
         };
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         assert!(workspace_picks_base(&worktree, Some(&draft)));

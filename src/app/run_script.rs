@@ -607,6 +607,7 @@ mod tests {
                 name: "task".into(),
                 branch: None,
                 base_branch: None,
+                adopted_by: None,
             },
         );
         let bound = session(
@@ -616,6 +617,7 @@ mod tests {
                 name: "bound".into(),
                 branch: None,
                 base_branch: None,
+                adopted_by: None,
             },
         );
         let sessions = [selected, bound];

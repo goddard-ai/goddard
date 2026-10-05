@@ -7991,6 +7991,7 @@ mod tests {
             name: "my-worktree".to_owned(),
             branch: Some("feature/sidebar".to_owned()),
             base_branch: None,
+            adopted_by: None,
         };
 
         assert_eq!(persisted_sidebar_branch_label(&local), None);

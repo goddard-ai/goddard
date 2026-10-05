@@ -3782,6 +3782,7 @@ mod tests {
             project: "/tmp".into(),
             workspace: None,
             base_branch: None,
+            adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             pending_prompts: Vec::new(),
