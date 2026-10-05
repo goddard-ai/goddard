@@ -266,6 +266,25 @@ pub(super) enum BossReply {
     Saved,
 }
 
+/// Sidebar employee order: newest summon first. `created_at` is the
+/// summon stamp — records predating the field fall back to their
+/// session's creation time, also stamped at summon. Sorting on anything
+/// mutable, like session activity, would shuffle a row on every state
+/// revision; this key never changes after the employee appears.
+fn sort_boss_employees(
+    employees: &mut Vec<&waku_protocol::boss::BossEmployee>,
+    session_created_at: &HashMap<Uuid, u64>,
+) {
+    employees.sort_by_key(|employee| {
+        std::cmp::Reverse(
+            employee
+                .created_at
+                .or_else(|| session_created_at.get(&employee.session_id).copied())
+                .unwrap_or(0),
+        )
+    });
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -342,11 +361,11 @@ impl Waku {
             self.boss_ui.expired.clear();
             self.boss_ui.queued.clear();
             self.boss_ui.dispatching.clear();
-            let timestamps: HashMap<Uuid, u64> = self
+            let session_created_at: HashMap<Uuid, u64> = self
                 .state
                 .sessions
                 .iter()
-                .map(|session| (session.id, session.updated_at))
+                .map(|session| (session.id, session.created_at))
                 .collect();
             for (key, state) in &self.boss_ui.states {
                 if let Some(id) = state.session_id {
@@ -354,9 +373,7 @@ impl Waku {
                 }
                 let queue_rank = boss_queue_ranks(state);
                 let mut employees = state.employees.iter().collect::<Vec<_>>();
-                employees.sort_by_key(|employee| {
-                    std::cmp::Reverse(timestamps.get(&employee.session_id).copied().unwrap_or(0))
-                });
+                sort_boss_employees(&mut employees, &session_created_at);
                 self.boss_ui.recent.insert(
                     *key,
                     employees.iter().map(|entry| entry.session_id).collect(),
@@ -3534,6 +3551,71 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn boss_employee(created_at: Option<u64>) -> waku_protocol::boss::BossEmployee {
+        waku_protocol::boss::BossEmployee {
+            session_id: Uuid::new_v4(),
+            supervisor_id: Uuid::new_v4(),
+            identity: BossIdentity {
+                id: Uuid::new_v4(),
+                name: String::new(),
+                avatar_seed: String::new(),
+            },
+            job_title: String::new(),
+            persona_id: Uuid::new_v4(),
+            work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+            created_at,
+            icon: None,
+            permissions: PersonaPermissions::default(),
+            pinned_files: Vec::new(),
+            expired: false,
+            expired_at: None,
+            blocker: None,
+            cancelled: false,
+            state: waku_protocol::boss::EmployeeLifecycle::Working,
+            ticket: None,
+            queued_at: None,
+            request_id: None,
+            request_fingerprint: None,
+        }
+    }
+
+    #[test]
+    fn employees_sort_newest_summon_first_regardless_of_lifecycle() {
+        let oldest = boss_employee(Some(100));
+        let mut finished = boss_employee(Some(200));
+        finished.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 250);
+        let mut queued = boss_employee(Some(300));
+        queued.state = waku_protocol::boss::EmployeeLifecycle::Queued;
+        // A queued summon with no session yet still tops the list, and a
+        // finished employee holds the position its summon earned.
+        let mut employees = vec![&oldest, &queued, &finished];
+        sort_boss_employees(&mut employees, &HashMap::new());
+        assert_eq!(
+            employees
+                .iter()
+                .map(|employee| employee.session_id)
+                .collect::<Vec<_>>(),
+            vec![queued.session_id, finished.session_id, oldest.session_id]
+        );
+    }
+
+    #[test]
+    fn employees_without_a_summon_stamp_fall_back_to_session_creation() {
+        let legacy = boss_employee(None);
+        let stamped = boss_employee(Some(200));
+        let unknown = boss_employee(None);
+        let session_created_at = HashMap::from([(legacy.session_id, 300)]);
+        let mut employees = vec![&stamped, &legacy, &unknown];
+        sort_boss_employees(&mut employees, &session_created_at);
+        assert_eq!(
+            employees
+                .iter()
+                .map(|employee| employee.session_id)
+                .collect::<Vec<_>>(),
+            vec![legacy.session_id, stamped.session_id, unknown.session_id]
+        );
+    }
 
     #[test]
     fn avatar_buckets_round_up_to_eights() {
