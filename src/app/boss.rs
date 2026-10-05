@@ -1106,6 +1106,14 @@ impl Waku {
         session.is_planning()
     }
 
+    /// Whether the session is a summoned employee — managed by a boss but
+    /// not one of the boss's own surfaces (its chat, a planning session).
+    /// The `boss_managed` stamp keeps retired employees covered after they
+    /// leave the daemon's roster.
+    pub(super) fn session_is_employee(&self, session: &AgentSession) -> bool {
+        self.session_is_boss_managed(session) && !self.session_is_boss_owned(session)
+    }
+
     fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
         self.boss_ui
             .states

@@ -539,7 +539,10 @@ impl Waku {
                 ))
             })
             .when(session.status == SessionStatus::Idle, |entry| {
-                let unread = self.state.unseen_completions.contains_key(&session_id);
+                // Employees never read as unread — a finished turn is
+                // their steady state, so they settle at the seen-idle dot.
+                let unread = !self.session_is_employee(session)
+                    && self.state.unseen_completions.contains_key(&session_id);
                 entry.child(
                     div()
                         .flex_none()

@@ -5782,7 +5782,9 @@ impl Waku {
     /// indicators: a spinner while a turn runs, the attention glyphs for
     /// parked states, the unseen-completion dot, and the idle Jev marker.
     /// Session rows, boss rows, and employee rows all draw from this one
-    /// mapping so the sidebar reads one status language.
+    /// mapping so the sidebar reads one status language — employees alone
+    /// skip the unseen-completion dot, since a finished turn is their
+    /// steady state rather than news to surface.
     pub(super) fn session_status_indicator(
         &self,
         session: &AgentSession,
@@ -5820,16 +5822,21 @@ impl Waku {
                 )
                 .into_any_element(),
             ),
-            SessionStatus::Idle if self.state.unseen_completions.contains_key(&session_id) => Some(
-                div()
-                    .flex_none()
-                    .size(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(div().size(px(7.0)).rounded_full().bg(theme.info))
-                    .into_any_element(),
-            ),
+            SessionStatus::Idle
+                if !self.session_is_employee(session)
+                    && self.state.unseen_completions.contains_key(&session_id) =>
+            {
+                Some(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(px(7.0)).rounded_full().bg(theme.info))
+                        .into_any_element(),
+                )
+            }
             // An idle, all-seen task can still carry its last turn's
             // Jev verdict: the marker rides the slot as ambient state
             // until the next turn is scored.
