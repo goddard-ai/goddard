@@ -221,7 +221,7 @@ pub struct AutomationRun {
 /// Create or update payload for `upsertAutomation`. `id == None` creates;
 /// `Some(id)` replaces the matching record's editable fields.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AutomationInput {
     #[serde(default)]
     pub id: Option<Uuid>,

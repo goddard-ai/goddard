@@ -1,5 +1,5 @@
-//! The boss's Rhai eval loop: one script batches `BossOperation`s whose
-//! results feed later calls, with variables persisting per boss session.
+//! The boss's Rhai script loop: one stateless invocation batches
+//! `BossOperation`s whose results feed later calls in that script.
 //!
 //! Rhai functions must be `'static`, so the script cannot borrow the
 //! dispatching `&self` it needs. Instead the script runs on its own thread
@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope};
 use waku_protocol::boss::{BossOperation, BossResult};
 
-/// Longest script source an `eval` call accepts.
+/// Longest script source one `script` invocation accepts.
 pub const MAX_EVAL_SCRIPT_BYTES: usize = 256 * 1024;
 /// Wall-clock budget for one `eval` — script time plus every operation it
 /// dispatches. A script inside a bound operation when the deadline lands
@@ -40,9 +40,9 @@ const MAX_EVAL_EXPR_DEPTH_IN_FUNCTION: usize = 32;
 const MAX_EVAL_OUTPUT_CHARS: usize = 64 * 1024;
 
 const HELP: &str = "\
-Boss eval bindings — every call runs one BossOperation and returns its
+Boss script bindings — every call runs one BossOperation and returns its
 payload (state maps, strings, ids); Saved operations return (). Variables
-persist between eval calls for this boss session.
+exist only during this script invocation; use Boss files or memory for durable state.
 
   view()                                    boss state map
   roster()                                  compact employee status digest
@@ -94,9 +94,8 @@ persist between eval calls for this boss session.
   memory(#{type,...})                       memory store op: insert/importFolder/
                                             surface/listIndex/search/readChunk/
                                             zoom — returns its filled fields
-  op(#{type,...})                           escape hatch: any operation by its
-                                            JSON form, result returned whole
-                                            (e.g. pinDeliverable/sweepDeliverable/archiveDeliverable)
+  op(#{type,...})                           advanced escape hatch for supported
+                                            Boss operations, result returned whole
   help()                                    this text";
 
 /// The result of one `run` call: the script's scope when it could be
@@ -161,7 +160,16 @@ pub fn run(
                     .context("not a Boss operation")
                     .and_then(|operation| {
                         if matches!(operation, BossOperation::Eval { .. }) {
-                            bail!("boss eval cannot run inside an eval script");
+                            bail!("Boss scripts cannot invoke another script");
+                        }
+                        if matches!(operation,
+                            BossOperation::PinDeliverable { .. }
+                            | BossOperation::SweepDeliverable { .. }
+                            | BossOperation::ArchiveDeliverable { .. }
+                            | BossOperation::MarkDeliverableViewed { .. }
+                            | BossOperation::MarkGoalsViewed
+                        ) {
+                            bail!("sidebar presentation state is client-owned and unavailable to scripts");
                         }
                         dispatch(operation)
                     })
@@ -875,9 +883,20 @@ mod tests {
         );
         let error = outcome.value.as_ref().unwrap_err();
         assert!(
-            error.contains("boss eval cannot run inside an eval script"),
+            error.contains("Boss scripts cannot invoke another script"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn scripts_cannot_mutate_client_owned_sidebar_state() {
+        let outcome = eval_with(
+            "op(#{type: \"markGoalsViewed\"})",
+            Scope::new(),
+            &dispatch_ok,
+        );
+        let error = outcome.value.as_ref().unwrap_err();
+        assert!(error.contains("sidebar presentation state is client-owned"));
     }
 
     #[test]

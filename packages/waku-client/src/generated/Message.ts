@@ -3,6 +3,7 @@ import type { ContextMark } from "./ContextMark";
 import type { MessageAtom } from "./MessageAtom";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { MessageRole } from "./MessageRole";
+import type { ReportTrigger } from "./ReportTrigger";
 import type { TranscriptNotice } from "./TranscriptNotice";
 
 export type Message = { id: string, turn_id: string | null, role: MessageRole, content: string,
@@ -38,4 +39,11 @@ context_mark?: ContextMark | null,
  * "continue" sends to an interrupted session. The message stays in the
  * record so every projection carries the same ids.
  */
-hidden?: boolean, created_at: number, streaming: boolean, };
+hidden?: boolean,
+/**
+ * The employee report this hidden prompt delivered — the transcript's
+ * turn-trigger record. `None` for every other message: human prompts,
+ * visible task-to-task sends, nudges, and context injections carry no
+ * marker.
+ */
+report_trigger?: ReportTrigger | null, created_at: number, streaming: boolean, };

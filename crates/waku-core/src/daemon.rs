@@ -8674,6 +8674,7 @@ impl WakuBackend {
             admission: employee.ticket.as_ref().map(|ticket| SummonAdmission {
                 provider: ticket.provider,
                 model: ticket.model.clone(),
+                reasoning_effort: ticket.reasoning_effort.clone(),
                 queue_position: self.boss.queue_position(session_id),
                 blocked_by: ticket.blocked_by.clone(),
             }),
@@ -18346,11 +18347,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// The eval surface: scripts chain bound operations in one call,
-    /// variables persist across evals for the boss session's scope, and
-    /// non-boss sessions are refused.
+    /// Scripts chain bound operations in one invocation, and non-boss
+    /// sessions are refused. Rhai variables do not survive the call.
     #[test]
-    fn boss_eval_batches_operations_and_keeps_session_scope() {
+    fn boss_script_batches_operations_with_fresh_scope_per_invocation() {
         use waku_protocol::boss::{BossOperation, BossResult};
         let root = std::env::temp_dir().join(format!("boss-eval-{}", Uuid::new_v4()));
         let (backend, _) = surface_test_backend(&root);
@@ -18370,10 +18370,7 @@ mod tests {
             panic!("expected an eval result")
         };
         assert_eq!(value, serde_json::json!(42));
-        let BossResult::Eval { value, .. } = eval("count + 1").unwrap() else {
-            panic!("expected an eval result")
-        };
-        assert_eq!(value, serde_json::json!(41));
+        assert!(eval("count + 1").is_err(), "script variables must not persist between calls");
         // Bound functions run real boss operations — a file write lands in
         // the boss's files root, and `view()` unwraps to the state map.
         let BossResult::Eval { value, .. } = eval(
@@ -18396,9 +18393,8 @@ mod tests {
         };
         assert!(output.contains("ping"));
         assert!(eval("loop { }").is_err());
-        // The boss session caller shares that scope; a replaced boss chat
-        // keys a fresh one.
-        let BossResult::Eval { value, .. } = backend
+        // Boss session identity does not make Rhai variables persistent.
+        assert!(backend
             .handle_boss_operation(
                 Some(boss),
                 BossOperation::Eval {
@@ -18406,11 +18402,7 @@ mod tests {
                 },
                 &EventSink::detached(),
             )
-            .unwrap()
-        else {
-            panic!("expected an eval result")
-        };
-        assert_eq!(value, serde_json::json!(40));
+            .is_err());
         backend
             .boss.set_session_id(Uuid::new_v4()).unwrap();
         assert!(eval("count").is_err());

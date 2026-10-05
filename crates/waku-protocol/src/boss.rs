@@ -19,7 +19,7 @@ pub struct BossIdentity {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersonaPermissions {
     pub memory_folders: Vec<String>,
     pub integration_ids: Vec<String>,
@@ -51,7 +51,7 @@ impl PersonaPermissions {
 /// action applies them to the employee's live record. Either way an
 /// employee summoner stays clamped to its own grants.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct PermissionOverrides {
     pub memory_folders: Option<Vec<String>>,
     pub integration_ids: Option<Vec<String>>,
@@ -317,6 +317,9 @@ pub enum AdmissionBlocker {
 pub struct SummonAdmission {
     pub provider: ProviderKind,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub queue_position: Option<u64>,
@@ -659,7 +662,8 @@ pub struct BossFile {
 #[serde(
     tag = "type",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum BossOperation {
     View,
@@ -929,7 +933,8 @@ pub enum BossOperation {
 #[serde(
     tag = "type",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum AutomationOperation {
     List,
@@ -944,7 +949,8 @@ pub enum AutomationOperation {
 #[serde(
     tag = "type",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 pub enum MemoryOperation {
     Insert {
@@ -1193,7 +1199,13 @@ mod tests {
             "model": "gpt-5.5"
         }))
         .unwrap();
-        assert!(matches!(action, EmployeeControl::SetModel { interrupt: None, .. }));
+        assert!(matches!(
+            action,
+            EmployeeControl::SetModel {
+                interrupt: None,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1281,7 +1293,10 @@ mod tests {
         .unwrap();
         assert!(matches!(
             goal,
-            super::BossOperation::Summon { work_goal: super::EmployeeGoal::Goal, .. }
+            super::BossOperation::Summon {
+                work_goal: super::EmployeeGoal::Goal,
+                ..
+            }
         ));
         let action: EmployeeControl = serde_json::from_value(serde_json::json!({
             "type": "setPermissions",
@@ -1367,7 +1382,23 @@ mod tests {
             "title": null
         }))
         .unwrap();
-        assert!(matches!(result, super::BossResult::Browse { url, title: None, .. } if url == "https://example.com/docs"));
+        assert!(
+            matches!(result, super::BossResult::Browse { url, title: None, .. } if url == "https://example.com/docs")
+        );
+    }
+
+    #[test]
+    fn boss_operations_reject_unknown_fields() {
+        let error = serde_json::from_value::<super::BossOperation>(serde_json::json!({
+            "type": "summon",
+            "personaId": "00000000-0000-0000-0000-000000000001",
+            "jobTitle": "Worker",
+            "prompt": "Do work",
+            "project": "/tmp",
+            "misspelled": true
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]

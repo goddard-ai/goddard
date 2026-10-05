@@ -2,6 +2,7 @@
 import type { MessageAtom } from "./MessageAtom";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { QueuedMessageSource } from "./QueuedMessageSource";
+import type { ReportTrigger } from "./ReportTrigger";
 
 /**
  * A follow-up message queued while the agent is busy. It becomes its own
@@ -24,6 +25,11 @@ atoms?: Array<MessageAtom>,
  * the internal "continue" nudge parked behind a busy session.
  */
 hidden?: boolean,
+/**
+ * The employee report this parked prompt delivers — it must survive a
+ * restart so the resumed delivery still records the turn's trigger.
+ */
+report_trigger?: ReportTrigger | null,
 /**
  * Which queue owns the entry. Absent in documents written before the
  * field existed — those are all composer-owned, so `User` is default.

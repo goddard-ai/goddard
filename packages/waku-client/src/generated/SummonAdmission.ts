@@ -6,4 +6,4 @@ import type { ProviderKind } from "./ProviderKind";
  * Admission status attached to `Summoned` and control results — the
  * resolved selection plus, while queued, the position and wait reasons.
  */
-export type SummonAdmission = { provider: ProviderKind, model: string, queuePosition?: number, blockedBy?: Array<AdmissionBlocker>, };
+export type SummonAdmission = { provider: ProviderKind, model: string, reasoningEffort?: string, queuePosition?: number, blockedBy?: Array<AdmissionBlocker>, };

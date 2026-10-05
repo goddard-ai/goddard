@@ -1,0 +1,1 @@
+- Use `goddard-agent` commands with positional IDs and flags for common task and Boss work. Long prompts and file content can come directly from UTF-8 files or stdin; run any command with `--help` or `--schema` to discover its inputs.

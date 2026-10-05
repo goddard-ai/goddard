@@ -67,15 +67,10 @@ const PLANNING_GRACE_SECONDS: u64 = 60 * 60;
 /// context belongs in the transcript the finish report indexes.
 const MAX_BLOCKER_CHARS: usize = 1_000;
 
-/// A boss session's persisted eval scope — a replaced boss chat starts a
-/// fresh scope rather than inheriting its predecessor's variables, the
-/// same rule the router slot follows. The mutex also serializes evals so
-/// two concurrent calls cannot interleave one scope.
+/// Serializes scripts so their dispatched operations have a defined order.
+/// Each invocation creates a fresh Rhai scope.
 #[derive(Default)]
-struct BossEval {
-    session: Option<Uuid>,
-    scope: rhai::Scope<'static>,
-}
+struct BossEval;
 
 pub struct BossService {
     root: PathBuf,
@@ -2008,13 +2003,11 @@ impl BossService {
         Ok(parts)
     }
 
-    /// Run a Rhai script through `boss_eval` with `session`'s persisted
-    /// scope — a session id the service has not seen starts a fresh scope.
-    /// `dispatch` is the daemon's full operation path, so bound functions
+    /// Run one stateless Rhai script. `dispatch` is the daemon's full operation path, so bound functions
     /// keep each operation's own authorization and runtime effects.
     pub fn eval(
         &self,
-        session: Uuid,
+        _session: Uuid,
         script: &str,
         dispatch: &dyn Fn(BossOperation) -> anyhow::Result<BossResult>,
     ) -> anyhow::Result<BossResult> {
@@ -2024,17 +2017,8 @@ impl BossService {
                 crate::boss_eval::MAX_EVAL_SCRIPT_BYTES
             );
         }
-        let mut eval = self.evals.lock();
-        if eval.session != Some(session) {
-            eval.session = Some(session);
-            eval.scope = rhai::Scope::new();
-        }
-        let scope = std::mem::take(&mut eval.scope);
-        let outcome = crate::boss_eval::run(scope, script, dispatch);
-        if let Some(scope) = outcome.scope {
-            eval.session = Some(session);
-            eval.scope = scope;
-        }
+        let _serial = self.evals.lock();
+        let outcome = crate::boss_eval::run(rhai::Scope::new(), script, dispatch);
         let output = outcome.output;
         match outcome.value {
             Ok(value) => Ok(BossResult::Eval { value, output }),
