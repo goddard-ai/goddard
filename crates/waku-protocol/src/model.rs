@@ -1676,8 +1676,8 @@ pub struct RuntimeEventCursor {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPlanning {
-    /// The plan document, relative to `memory/` in the Boss files root —
-    /// always `plans/<name>.md`.
+    /// The plan document, relative to the Boss files root — always
+    /// `plans/<name>.md`.
     pub plan_file: String,
     /// What the session is planning — the session's title carries the same
     /// text.

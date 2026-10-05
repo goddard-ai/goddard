@@ -1,0 +1,1 @@
+- ⌘P file search now works in the Boss chat — it lists the boss's own files (plans, memory, personas) and opens the pick in a file preview. Planning-session documents also moved out of `memory/` into a top-level `plans/` folder in the boss's files; existing documents migrate on the next daemon start.

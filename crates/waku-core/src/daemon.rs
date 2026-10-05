@@ -5192,7 +5192,7 @@ impl WakuBackend {
                 idea: title.clone(),
                 finalized_at: None,
             };
-            let (opener, _) = localized!("boss.plan_seed_opener", path = format!("memory/{plan_file}"));
+            let (opener, _) = localized!("boss.plan_seed_opener", path = plan_file.clone());
             let seed = format!("{}\n\n{}", prompt.trim(), opener);
             let selection = AgentCreateSelection {
                 provider,
@@ -5304,7 +5304,7 @@ impl WakuBackend {
             let (title_text, title_i18n) = localized!("boss.plan_finalize_title");
             let (detail_text, detail_i18n) = localized!(
                 "boss.plan_finalize_detail",
-                file = format!("memory/{}", plan.plan_file),
+                file = plan.plan_file.clone(),
                 idea = plan.idea,
             );
             let wire = event_to_wire(DriverEvent::Permission {
@@ -5367,7 +5367,7 @@ impl WakuBackend {
         // mirror survives a restart, so a failed launch only delays it.
         if let Some(boss_session) = self.boss.document().session_id {
             let handoff = format!(
-                "Planning session \"{}\" ({}) finalized its design at memory/{} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
+                "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,
             );
             if let Err(error) = self.queue_agent_prompt_hidden(
@@ -18489,7 +18489,7 @@ mod tests {
         assert_eq!(planning.label.key, "boss.planning_label");
         let seed = &session.messages[0].content;
         assert!(seed.contains("plan the auth migration"));
-        assert!(seed.contains("memory/plans/auth.md"));
+        assert!(seed.contains("plans/auth.md"));
         // A second plan on the same document is refused; a different idea
         // runs alongside it.
         assert!(create(None, "Auth again", "memory/plans/auth.md", "dup").is_err());
@@ -18606,7 +18606,7 @@ mod tests {
                 .find(|queued| queued.is_agent_owned() && queued.hidden)
                 .expect("the boss chat holds the parked handoff");
             assert!(handoff.content.contains("finalized its design"));
-            assert!(handoff.content.contains("memory/plans/auth.md"));
+            assert!(handoff.content.contains("plans/auth.md"));
         }
         // The document is frozen and re-finalizing is refused.
         assert!(
@@ -18615,7 +18615,7 @@ mod tests {
                 .handle(
                     None,
                     BossOperation::WriteFile {
-                        path: "memory/plans/auth.md".into(),
+                        path: "plans/auth.md".into(),
                         content: "edit".into(),
                     },
                 )
@@ -18767,7 +18767,7 @@ mod tests {
                 prompts
                     .iter()
                     .any(|prompt| prompt.contains("finalized its design")
-                        && prompt.contains("memory/plans/auth.md")),
+                        && prompt.contains("plans/auth.md")),
                 "the boss chat received the implementation handoff"
             );
             let call = scope.spawn(finalize("billing.md"));

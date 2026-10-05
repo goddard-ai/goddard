@@ -3227,7 +3227,7 @@ impl Waku {
     }
 
     /// The Plans tab's reading pane — the selected frozen document through
-    /// the same boss-memory read the session's plan tab uses.
+    /// the same boss-file read the session's plan tab uses.
     fn render_boss_plan_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let empty = |label: String| {

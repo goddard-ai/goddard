@@ -1,4 +1,5 @@
-//! The `Cmd+P` file finder: jump to a file in the selected task's workspace.
+//! The `Cmd+P` file finder: jump to a file in the active files root — the
+//! selected task's workspace, a terminal's cwd, or the boss chat's files.
 //!
 //! The modal is a view over the composer's shared workspace file index —
 //! `mention_files` mirrored into `mention_file_index` by

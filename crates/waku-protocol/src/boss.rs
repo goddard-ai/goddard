@@ -564,7 +564,7 @@ pub struct BossDeliverable {
 
 /// A planning session the boss opened with `createPlan`: the managed task
 /// it drafts in and the plan document that task owns. `plan_file` is
-/// relative to `memory/` in the Boss files root — always `plans/<name>.md`.
+/// relative to the Boss files root — always `plans/<name>.md`.
 /// `finalized_at` freezes the document once the user approves
 /// `finalizePlan`; the daemon archives the session after a grace period.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -677,7 +677,7 @@ pub enum BossOperation {
     /// managed boss principal — the boss identity agents it — seeded with
     /// `prompt` (the user request that prompted planning) plus a canned
     /// opener. `plan_file` names the plan document under `plans/` in the
-    /// Boss memory root; `title` is the idea the sidebar row displays.
+    /// Boss files root; `title` is the idea the sidebar row displays.
     /// Boss-only; the user never creates one directly.
     CreatePlan {
         title: String,

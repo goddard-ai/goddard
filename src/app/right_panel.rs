@@ -54,7 +54,7 @@ pub(super) fn positive_number(value: &str) -> bool {
 /// The host whose Boss document lists `session_id`'s plan owns its reads —
 /// the caller's key when it lists the plan, else whichever connected host
 /// does, else the caller. `daemons.session_owner` resolves an unclaimed
-/// remote session to `Local`, where `memory/plans/<name>.md` does not
+/// remote session to `Local`, where `plans/<name>.md` does not
 /// exist, so callers resolving keys independently would otherwise
 /// re-arm — and blank — a healthy read under the wrong host.
 pub(super) fn plan_doc_host(
@@ -7794,10 +7794,10 @@ impl Waku {
     }
 
     /// Pulls a planning session's `plans/<name>.md` out of the owning
-    /// daemon's boss memory. The document lives outside every project
+    /// daemon's boss files root. The document lives outside every project
     /// workspace, so neither the file-tree reads a `File` editor uses nor
     /// the workspace client can reach it — only `BossOperation::ReadFile`
-    /// resolves the `memory/` prefix. The read re-arms whenever the boss
+    /// resolves the `plans/` prefix. The read re-arms whenever the boss
     /// document's revision moves — `drain_boss_events` calls in on each
     /// received state — so agent writes stream into the preview one sync
     /// later. A re-arm keeps the fetched text on screen until its
@@ -7856,7 +7856,7 @@ impl Waku {
                 content,
             },
         );
-        let path = format!("memory/{plan_file}");
+        let path = plan_file.to_owned();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -9911,23 +9911,37 @@ impl Waku {
                 if key != waku_client::DaemonKey::Local {
                     return None;
                 }
-                let (deliverable_key, deliverable_id) = self.boss_ui.command_deliverable?;
-                if deliverable_key != key {
+                if let Some((deliverable_key, deliverable_id)) = self.boss_ui.command_deliverable
+                    && deliverable_key == key
+                    && let Some(deliverable) = self
+                        .boss_ui
+                        .states
+                        .get(&key)
+                        .and_then(|state| {
+                            state
+                                .deliverables
+                                .iter()
+                                .find(|deliverable| deliverable.id == deliverable_id)
+                        })
+                {
+                    let path = PathBuf::from(&deliverable.path);
+                    return if deliverable.directory {
+                        Some(path)
+                    } else {
+                        path.parent().map(Path::to_path_buf)
+                    };
+                }
+                // Otherwise the boss chat's file surfaces and the `Cmd+P`
+                // finder root at the boss's own files — the `files/`
+                // sibling of the workspace its project names. The Boss
+                // page's strip admits no file tabs, so it resolves to
+                // nothing rather than opening dead-end previews.
+                if self.boss_ui.page.is_some() {
                     return None;
                 }
-                let deliverable = self
-                    .boss_ui
-                    .states
-                    .get(&key)?
-                    .deliverables
-                    .iter()
-                    .find(|deliverable| deliverable.id == deliverable_id)?;
-                let path = PathBuf::from(&deliverable.path);
-                if deliverable.directory {
-                    Some(path)
-                } else {
-                    path.parent().map(Path::to_path_buf)
-                }
+                let state = self.boss_ui.states.get(&key)?;
+                let project = self.boss_ui.projects.get(&state.identity.id)?;
+                project.path.parent().map(|boss| boss.join("files"))
             }
             RightPanelOwner::Inbox
             | RightPanelOwner::Drafts

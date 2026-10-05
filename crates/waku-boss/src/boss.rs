@@ -152,6 +152,7 @@ impl BossService {
             .map(|entry| entry.session_id)
             .collect();
         self.migrate_legacy_pins();
+        self.migrate_plan_documents();
         self.save(&self.state.lock())?;
         self.active.store(true, Ordering::Release);
         Ok(())
@@ -237,6 +238,7 @@ impl BossService {
             evals: Mutex::new(BossEval::default()),
         };
         service.migrate_legacy_pins();
+        service.migrate_plan_documents();
         service.save(&service.state.lock())?;
         Ok(service)
     }
@@ -382,6 +384,28 @@ impl BossService {
         }
     }
 
+    /// Plan documents moved out of `memory/` to `plans/` at the files
+    /// root — they are work product, not memory. Move a legacy
+    /// `memory/plans/` wholesale when `plans/` is absent, else merge the
+    /// entries the new root lacks and leave name conflicts behind.
+    fn migrate_plan_documents(&self) {
+        let (Ok(legacy), Ok(plans)) = (
+            self.file_path("memory/plans", false),
+            self.file_path("plans", false),
+        ) else {
+            return;
+        };
+        if !legacy.is_dir() {
+            return;
+        }
+        if !plans.exists() {
+            let _ = fs::rename(&legacy, &plans);
+            return;
+        }
+        move_missing_entries(&legacy, &plans);
+        let _ = fs::remove_dir(&legacy);
+    }
+
     fn migrate_pin_list(&self, pins: &mut Vec<String>) {
         pins.retain_mut(|entry| {
             if let Some(rest) = entry.strip_prefix("memory/") {
@@ -473,7 +497,7 @@ impl BossService {
     }
 
     /// The planning record for a session, or for a plan file when the
-    /// caller names `memory/`-relative `plans/<name>.md`.
+    /// caller names the files-root-relative `plans/<name>.md`.
     pub fn plan(&self, session: Uuid) -> Option<BossPlan> {
         self.state
             .lock()
@@ -515,14 +539,11 @@ impl BossService {
     /// plan document. Frozen plans reject writes; reads stay open.
     fn plan_file_frozen(&self, path: &str) -> bool {
         let normalized = normalize_plan_path(path);
-        let Some(rest) = normalized.strip_prefix("memory/") else {
-            return false;
-        };
         self.state
             .lock()
             .planning
             .iter()
-            .any(|plan| plan.plan_file == rest && plan.finalized_at.is_some())
+            .any(|plan| plan.plan_file == normalized && plan.finalized_at.is_some())
     }
 
     /// Archive planning sessions whose post-finalization grace period has
@@ -940,9 +961,9 @@ impl BossService {
             .find(|plan| plan.session_id == session)
             .map(|plan| {
                 if plan.finalized_at.is_some() {
-                    format!("\nThis planning session's design doc memory/{} is finalized and frozen — the document can no longer be edited. Implementation is the boss's job now: the approval was reported to the boss chat, which coordinates the work from there. Your remaining role is answering questions about the approved design — direct implementation requests back to the boss chat.", plan.plan_file)
+                    format!("\nThis planning session's design doc {} is finalized and frozen — the document can no longer be edited. Implementation is the boss's job now: the approval was reported to the boss chat, which coordinates the work from there. Your remaining role is answering questions about the approved design — direct implementation requests back to the boss chat.", plan.plan_file)
                 } else {
-                    format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at memory/{} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. While drafting you may summon employees for design research and audits, but never to build. When the design is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval ends your design work: the finalized doc is reported to the boss chat and the boss coordinates implementation from there.", plan.idea, plan.plan_file)
+                    format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at {} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. While drafting you may summon employees for design research and audits, but never to build. When the design is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval ends your design work: the finalized doc is reported to the boss chat and the boss coordinates implementation from there.", plan.idea, plan.plan_file)
                 }
             })
             .unwrap_or_default();
@@ -2313,6 +2334,8 @@ impl BossService {
                 })
             }
             BossOperation::ListFiles { path } => {
+                validate_relative(&path, true)?;
+                let path = remap_plan_path(&path);
                 self.authorize_file(caller, &path, true)?;
                 let directory = self.file_path(&path, true)?;
                 let mut files = Vec::new();
@@ -2339,6 +2362,8 @@ impl BossService {
                 Ok(BossResult::Files { files })
             }
             BossOperation::ReadFile { path } => {
+                validate_relative(&path, false)?;
+                let path = remap_plan_path(&path);
                 self.authorize_file(caller, &path, false)?;
                 let file = self.file_path(&path, false)?;
                 if fs::metadata(&file)?.len() > MAX_FILE_BYTES as u64 {
@@ -2351,6 +2376,8 @@ impl BossService {
             }
             BossOperation::WriteFile { path, content } => {
                 self.require_owner(caller)?;
+                validate_relative(&path, false)?;
+                let path = remap_plan_path(&path);
                 if content.len() > MAX_FILE_BYTES {
                     bail!("Boss file is too large");
                 }
@@ -2370,6 +2397,8 @@ impl BossService {
             }
             BossOperation::CreateFolder { path } => {
                 self.require_owner(caller)?;
+                validate_relative(&path, false)?;
+                let path = remap_plan_path(&path);
                 fs::create_dir_all(self.file_path(&path, false)?)?;
                 self.update(|_| Ok(()))?;
                 Ok(BossResult::Saved)
@@ -2632,9 +2661,45 @@ fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Collapse separators in a validated Boss path so `"memory//plans/x.md"`
-/// and `"memory/plans/x.md"` compare equal — the freeze check cannot be
-/// dodged by spelling the same file another way.
+/// Move every entry `to` lacks out of `from` — the files merge for the
+/// plan-document migration, recursing into directories that exist in both
+/// and leaving name conflicts behind in `from`.
+fn move_missing_entries(from: &Path, to: &Path) {
+    let Ok(entries) = fs::read_dir(from) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let target = to.join(entry.file_name());
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() && target.is_dir() {
+            move_missing_entries(&entry.path(), &target);
+            let _ = fs::remove_dir(entry.path());
+        } else if !target.exists() {
+            let _ = fs::rename(entry.path(), &target);
+        }
+    }
+}
+
+/// A legacy `memory/plans/` spelling resolves to the document's `plans/`
+/// home — plan files moved out of memory wholesale, and a caller still
+/// spelling the old path lands on the document rather than forking it
+/// back into memory.
+fn remap_plan_path(path: &str) -> String {
+    let normalized = normalize_plan_path(path);
+    if normalized == "memory/plans" {
+        return "plans".to_owned();
+    }
+    normalized
+        .strip_prefix("memory/plans/")
+        .map(|rest| format!("plans/{rest}"))
+        .unwrap_or(normalized)
+}
+
+/// Collapse separators in a validated Boss path so `"plans//x.md"` and
+/// `"plans/x.md"` compare equal — the freeze check cannot be dodged by
+/// spelling the same file another way.
 fn normalize_plan_path(path: &str) -> String {
     Path::new(path)
         .components()
@@ -2646,19 +2711,22 @@ fn normalize_plan_path(path: &str) -> String {
         .join("/")
 }
 
-/// Canonical `plans/<name>.md` beneath the memory root, from whatever the
-/// caller sent — `auth.md`, `plans/auth.md`, and `memory/plans/auth.md`
-/// all name the same document. Nested subdirectories beneath `plans/`
-/// stay nested; traversal, absolute paths, and non-Markdown names fail.
-/// Validation runs before normalization so a `..` fails loudly instead of
-/// collapsing into an unrelated plan name; the normalized-then-stripped
-/// order matches `plan_file_frozen`, so every spelling of one document
-/// freezes together.
+/// Canonical `plans/<name>.md` beneath the files root, from whatever the
+/// caller sent — `auth.md`, `plans/auth.md`, `workspace/plans/auth.md`,
+/// and the legacy `memory/plans/auth.md` all name the same document.
+/// Nested subdirectories beneath `plans/` stay nested; traversal, absolute
+/// paths, and non-Markdown names fail. Validation runs before
+/// normalization so a `..` fails loudly instead of collapsing into an
+/// unrelated plan name; the normalized-then-stripped order matches
+/// `plan_file_frozen`, so every spelling of one document freezes together.
 pub fn normalize_plan_file(raw: &str) -> anyhow::Result<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     validate_relative(trimmed, false)?;
     let cleaned = normalize_plan_path(trimmed);
-    let rest = cleaned.strip_prefix("memory/").unwrap_or(&cleaned);
+    let rest = cleaned
+        .strip_prefix("memory/")
+        .or_else(|| cleaned.strip_prefix("workspace/"))
+        .unwrap_or(&cleaned);
     let rest = rest.strip_prefix("plans/").unwrap_or(rest);
     if rest.is_empty() || !rest.ends_with(".md") {
         bail!("plan files are named like `auth.md` under plans/");
@@ -5351,6 +5419,7 @@ mod memory_op_tests {
         for spelling in [
             "auth.md",
             "plans/auth.md",
+            "workspace/plans/auth.md",
             "memory/plans/auth.md",
             "memory//plans/auth.md",
             "  plans/auth.md  ",
@@ -5436,7 +5505,7 @@ mod memory_op_tests {
             .handle(
                 None,
                 BossOperation::WriteFile {
-                    path: "memory/plans/auth.md".into(),
+                    path: "plans/auth.md".into(),
                     content: "draft".into(),
                 },
             )
@@ -5451,7 +5520,7 @@ mod memory_op_tests {
                 .finalized_at,
             Some(100)
         );
-        for spelling in ["memory/plans/auth.md", "memory//plans/auth.md"] {
+        for spelling in ["plans/auth.md", "plans//auth.md", "memory/plans/auth.md"] {
             assert!(
                 service
                     .handle(
@@ -5469,13 +5538,26 @@ mod memory_op_tests {
             .handle(
                 None,
                 BossOperation::ReadFile {
-                    path: "memory/plans/auth.md".into(),
+                    path: "plans/auth.md".into(),
                 },
             )
             .unwrap()
         else {
             panic!("the frozen document still reads")
         };
+        // The legacy `memory/` spelling reads the same document.
+        let BossResult::File { content: legacy, .. } = service
+            .handle(
+                None,
+                BossOperation::ReadFile {
+                    path: "memory/plans/auth.md".into(),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("the legacy spelling still resolves")
+        };
+        assert_eq!(legacy, "draft");
         assert_eq!(content, "draft");
         service
             .handle(
@@ -5486,6 +5568,49 @@ mod memory_op_tests {
                 },
             )
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A `memory/plans/` written before plans moved to the files root
+    /// lands at `plans/` on open; a `plans/` that already exists keeps its
+    /// entries while the legacy tree's missing names move over.
+    #[test]
+    fn legacy_memory_plans_migrate_to_the_files_root() {
+        let root = std::env::temp_dir().join(format!("boss-plan-migrate-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("files/memory/plans/deep")).unwrap();
+        fs::write(root.join("files/memory/plans/auth.md"), "auth").unwrap();
+        fs::write(root.join("files/memory/plans/deep/notes.md"), "deep").unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("files/plans/auth.md")).unwrap(),
+            "auth"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("files/plans/deep/notes.md")).unwrap(),
+            "deep"
+        );
+        assert!(!root.join("files/memory/plans").exists());
+        drop(service);
+        fs::remove_dir_all(root).unwrap();
+
+        // Both trees present: the existing `plans/` wins conflicts while
+        // the legacy tree's missing names still move.
+        let root = std::env::temp_dir().join(format!("boss-plan-merge-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("files/memory/plans")).unwrap();
+        fs::create_dir_all(root.join("files/plans")).unwrap();
+        fs::write(root.join("files/memory/plans/auth.md"), "old auth").unwrap();
+        fs::write(root.join("files/memory/plans/billing.md"), "billing").unwrap();
+        fs::write(root.join("files/plans/auth.md"), "new auth").unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("files/plans/auth.md")).unwrap(),
+            "new auth"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("files/plans/billing.md")).unwrap(),
+            "billing"
+        );
+        drop(service);
         fs::remove_dir_all(root).unwrap();
     }
 
