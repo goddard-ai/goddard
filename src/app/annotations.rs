@@ -1,15 +1,16 @@
-//! Transcript annotations: commented highlights over agent messages and
-//! right-panel file editors.
+//! Transcript annotations: commented highlights over agent messages,
+//! right-panel file editors, and planning sessions' plan documents.
 //!
 //! Selecting text inside a single assistant message — or inside a file
-//! editor — offers an "Add to chat" pill; accepting it pins a highlight on
-//! the passage and opens a floating comment editor. Confirmed annotations
-//! stay highlighted — hover previews the comment, a click reopens the editor
-//! — and the composer shows an "N annotations" chip until the next
-//! submission, which carries the comments to the provider as a quoted header
-//! above the typed prompt and echoes the quoted passages in the sent bubble.
-//! A file annotation quotes as `@path` plus a `[Selected lines N-M]` marker
-//! and a fenced block instead of a plain passage.
+//! editor, file preview, or plan document — offers an "Add to chat" pill;
+//! accepting it pins a highlight on the passage and opens a floating comment
+//! editor. Confirmed annotations stay highlighted — hover previews the
+//! comment, a click reopens the editor — and the composer shows an
+//! "N annotations" chip until the next submission, which carries the
+//! comments to the provider as a quoted header above the typed prompt and
+//! echoes the quoted passages in the sent bubble. A file or plan annotation
+//! quotes as `@path` plus a `[Selected lines N-M]` marker and a fenced block
+//! instead of a plain passage.
 //!
 //! Annotations are session-scoped and persist inside the composer draft, so
 //! they survive restarts and sync like the draft's text. The transcript's
@@ -17,8 +18,12 @@
 //! from paint closures; each file editor carries its own list on
 //! [`RightPanelFileEditor`], painted inside the field and parked with the
 //! session's panel state; a file annotation whose editor does not exist waits
-//! in `pending_file_annotations`. Session switches park and restore both (see
-//! `reset_visible_state`), and sending drains them into the prompt.
+//! in `pending_file_annotations`. A plan document's set lives in
+//! `plan_annotations` keyed by its owning session — the plan belongs to the
+//! session, not to a file the panel can reopen — and only the composer
+//! session's set ever drains into a submission. Session switches park and
+//! restore the transcript and file sets (see `reset_visible_state`), and
+//! sending drains them into the prompt.
 //!
 //! A submission's drained set also parks under its user message
 //! (`sent_annotations`): the prompt header teaches the agent to cite it as
@@ -66,11 +71,13 @@ const ANNOTATION_HOVER_DELAY: Duration = Duration::from_millis(400);
 
 /// Which live set an annotation belongs to — the transcript's painted store,
 /// a right-panel file editor's own list, keyed by its workspace-relative
-/// path, or a side chat lane's store, keyed by its session.
+/// path, a planning session's plan document keyed by the session, or a side
+/// chat lane's store, keyed by its session.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum AnnotationTarget {
     Transcript,
     File(String),
+    Plan(Uuid),
     SideChat(Uuid),
 }
 
@@ -308,8 +315,9 @@ impl Waku {
     }
 
     /// The live annotation set for `target` — the transcript's painted store,
-    /// one file editor's own list, or a side chat lane's. `None` once the
-    /// file's editor or the lane is gone.
+    /// one file editor's own list, a plan document's, or a side chat lane's.
+    /// `None` once the file's editor, the session's plan store, or the lane
+    /// is gone.
     fn annotation_store(&self, target: &AnnotationTarget) -> Option<Rc<RefCell<Annotations>>> {
         match target {
             AnnotationTarget::Transcript => Some(self.transcript_selection.annotations.clone()),
@@ -317,6 +325,7 @@ impl Waku {
                 .right_panel_file_editors
                 .get(path)
                 .map(|editor| editor.annotations.clone()),
+            AnnotationTarget::Plan(session_id) => self.plan_annotations.get(session_id).cloned(),
             AnnotationTarget::SideChat(session_id) => self
                 .side_chat_views
                 .get(session_id)
@@ -582,6 +591,21 @@ impl Waku {
                 }
             } else if self.file_editor_selection_focused(&path, window, cx) {
                 self.annotate_file_selection(&path, window, cx);
+                return;
+            }
+        }
+        // A plan tab's settled selection annotates to its planning session's
+        // composer — the chord reaches it through the pane's FileEditorPane
+        // key context, the same binding the file preview uses.
+        if let Some(session_id) = match self.active_right_panel_surface() {
+            Some(RightPanelSurface::Plan { session_id, .. }) => Some(*session_id),
+            _ => None,
+        } {
+            let plan_focused = self
+                .transcript_control_focus("plan-preview", cx)
+                .is_focused(window);
+            if plan_focused && self.annotatable_plan_selection(session_id).is_some() {
+                self.annotate_plan_selection(session_id, window, cx);
                 return;
             }
         }
@@ -983,6 +1007,7 @@ impl Waku {
                     start_line,
                     end_line,
                     source: None,
+                    plan_session: None,
                 }),
             });
             annotations.hovered = None;
@@ -1128,6 +1153,7 @@ impl Waku {
                     start_line,
                     end_line,
                     source,
+                    plan_session: None,
                 }),
             });
             annotations.hovered = None;
@@ -1147,6 +1173,194 @@ impl Waku {
         if let Some(editor) = self.annotation_editor.as_mut() {
             editor.previous_focus = Some(preview_focus);
         }
+    }
+
+    /// The plan document's settled selection when it can be annotated:
+    /// non-empty, not mid-drag, and every span keyed to `session_id`'s own
+    /// rendered rows. `plan_preview_selection` is shared across surfaces, so
+    /// spans left over from another document do not count.
+    fn annotatable_plan_selection(&self, session_id: Uuid) -> Option<Vec<Span>> {
+        let selection = self.plan_preview_selection.selection.borrow();
+        if selection.is_dragging() || selection.is_empty() {
+            return None;
+        }
+        let row = format!("plan-preview-{session_id}");
+        let spans = selection.spans();
+        spans
+            .iter()
+            .all(|span| span.key.row.as_ref() == row)
+            .then(|| spans.to_vec())
+    }
+
+    /// The plan document's byte range the selection pins — the plan
+    /// preview's counterpart of [`Self::preview_annotation_source_range`],
+    /// reading the `plan_markdown` cache and the fetched document rather
+    /// than a file editor's text.
+    fn plan_annotation_source_range(
+        &self,
+        session_id: Uuid,
+        spans: &[Span],
+        content: &str,
+    ) -> Option<Range<usize>> {
+        let cache = self.plan_markdown.borrow();
+        let (cached, view) = cache.as_ref()?;
+        if *cached != session_id {
+            return None;
+        }
+        let start = preview_span_source_range(view, content, spans.first()?)?;
+        let end = preview_span_source_range(view, content, spans.last()?)?;
+        Some(start.start..end.end)
+    }
+
+    /// The document range covering the selection's first through last
+    /// top-level blocks — the line marker's fallback when the precise pin
+    /// fails.
+    fn plan_annotation_block_range(
+        &self,
+        session_id: Uuid,
+        spans: &[Span],
+    ) -> Option<Range<usize>> {
+        let cache = self.plan_markdown.borrow();
+        let (cached, view) = cache.as_ref()?;
+        if *cached != session_id {
+            return None;
+        }
+        let start =
+            view.block_source_range(md::render::block_index_of_ordinal(spans.first()?.key.index))?;
+        let end =
+            view.block_source_range(md::render::block_index_of_ordinal(spans.last()?.key.index))?;
+        Some(start.start..end.end)
+    }
+
+    /// The plan preview's counterpart of
+    /// [`Self::annotate_preview_selection`]: the spans pin on the session's
+    /// plan store in rendered coordinates — what the preview's wash and
+    /// hit-tests read — while `file` carries the `plans/<name>.md` marker
+    /// and line span for the prompt, plus `plan_session` so restores route
+    /// the annotation back here rather than to a workspace file editor. The
+    /// document itself is never edited — the annotation is a comment *on*
+    /// it, delivered with the next submission.
+    fn annotate_plan_selection(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(spans) = self.annotatable_plan_selection(session_id) else {
+            return;
+        };
+        let plan_focus = self.transcript_control_focus("plan-preview", cx);
+        let Some(content) = self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.content.as_ref())
+            .and_then(|content| content.as_ref().ok())
+            .cloned()
+        else {
+            return;
+        };
+        let Some(plan_file) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.planning.as_ref())
+            .map(|planning| planning.plan_file.clone())
+        else {
+            return;
+        };
+        let store = self.plan_annotations.entry(session_id).or_default().clone();
+        let range = self.plan_annotation_source_range(session_id, &spans, &content);
+        let Some(line_range) = range
+            .clone()
+            .or_else(|| self.plan_annotation_block_range(session_id, &spans))
+        else {
+            return;
+        };
+        let start_line = 1 + content
+            .get(..line_range.start)
+            .unwrap_or_default()
+            .matches('\n')
+            .count();
+        let end_line = start_line
+            + content
+                .get(line_range)
+                .unwrap_or_default()
+                .matches('\n')
+                .count();
+        let source = range
+            .clone()
+            .and_then(|range| content.get(range).map(|slice| Rc::from(slice)));
+        let id = self.annotation_next_id;
+        self.annotation_next_id = self.annotation_next_id.wrapping_add(1);
+        {
+            let mut annotations = store.borrow_mut();
+            annotations.items.push(TranscriptAnnotation {
+                id,
+                message_id: Uuid::nil(),
+                spans,
+                comment: String::new(),
+                file: Some(FileAnnotation {
+                    path: plan_file,
+                    range: range.unwrap_or_default(),
+                    start_line,
+                    end_line,
+                    source,
+                    plan_session: Some(session_id),
+                }),
+            });
+            annotations.hovered = None;
+        }
+        self.plan_preview_selection.selection.borrow_mut().clear();
+        self.annotation_hover = None;
+        self.schedule_composer_draft_save(cx);
+        self.open_annotation_editor(id, true, AnnotationTarget::Plan(session_id), window, cx);
+        // The pill is gone by the time the editor closes — hand focus back
+        // to the document the selection came from.
+        if let Some(editor) = self.annotation_editor.as_mut() {
+            editor.previous_focus = Some(plan_focus);
+        }
+    }
+
+    /// First on-screen glyph rect of an annotation's rendered spans in the
+    /// plan document — the anchor for its hover tooltip. `None` when the
+    /// passage scrolled out of the preview viewport or the document changed
+    /// under it.
+    fn plan_annotation_anchor(
+        &self,
+        session_id: Uuid,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let annotations = self.plan_annotations.get(&session_id)?.borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let viewport = self.plan_preview_scroll_handle.bounds();
+        self.spans_anchor_in(&self.plan_preview_selection, viewport, &annotation.spans)
+    }
+
+    /// Bounding box of every on-screen glyph rect of an annotation's spans in
+    /// the plan document — the anchor for its comment editor there.
+    fn plan_annotation_editor_anchor(
+        &self,
+        session_id: Uuid,
+        annotation_id: u64,
+    ) -> Option<Bounds<Pixels>> {
+        let annotations = self.plan_annotations.get(&session_id)?.borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let viewport = self.plan_preview_scroll_handle.bounds();
+        self.spans_anchor_union_in(&self.plan_preview_selection, viewport, &annotation.spans)
+    }
+
+    /// The session's plan annotation store — for counting and draining.
+    /// Created on demand: a plan's annotations exist only after the user
+    /// pins one.
+    fn plan_annotation_store(&self, session_id: Uuid) -> Option<Rc<RefCell<Annotations>>> {
+        self.plan_annotations.get(&session_id).cloned()
     }
 
     /// Open the comment editor over `id`'s highlight. `is_new` controls what
@@ -1303,6 +1517,17 @@ impl Waku {
             annotations.editing = None;
         }
         self.pending_file_annotations.clear();
+        // Plan annotations belong to the session they comment on — the chip
+        // clears only what it counted.
+        if let Some(store) = self
+            .composer_session_id()
+            .and_then(|id| self.plan_annotations.get(&id))
+        {
+            let mut annotations = store.borrow_mut();
+            annotations.items.clear();
+            annotations.hovered = None;
+            annotations.editing = None;
+        }
         self.schedule_composer_draft_save(cx);
         cx.notify();
     }
@@ -1315,9 +1540,18 @@ impl Waku {
         let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
     }
 
+    /// The composer session's plan annotation store — the only plan set the
+    /// main composer may count, drain, or clear; annotations staged on
+    /// another session's plan stay parked under their own id.
+    fn composer_plan_annotations(&self) -> Option<Rc<RefCell<Annotations>>> {
+        self.composer_session_id()
+            .and_then(|id| self.plan_annotations.get(&id).cloned())
+    }
+
     /// The composer chip count and the "is there anything to send" check:
-    /// transcript annotations, every file editor's, and restored file
-    /// annotations still waiting on their editor.
+    /// transcript annotations, every file editor's, restored file
+    /// annotations still waiting on their editor, and the composer
+    /// session's plan pins.
     pub(super) fn annotation_count(&self) -> usize {
         self.transcript_selection.annotations.borrow().items.len()
             + self
@@ -1330,6 +1564,9 @@ impl Waku {
                 .values()
                 .map(Vec::len)
                 .sum::<usize>()
+            + self
+                .composer_plan_annotations()
+                .map_or(0, |store| store.borrow().items.len())
     }
 
     pub(super) fn has_annotations(&self) -> bool {
@@ -1347,6 +1584,9 @@ impl Waku {
                 .pending_file_annotations
                 .values()
                 .any(|items| !items.is_empty())
+            || self
+                .composer_plan_annotations()
+                .is_some_and(|store| !store.borrow().items.is_empty())
     }
 
     /// Drain the live sets for a submission — transcript annotations plus
@@ -1374,6 +1614,17 @@ impl Waku {
                 .into_values()
                 .flatten(),
         );
+        // Only the composer session's plan ships with its message — another
+        // session's staged plan annotations stay parked under their own id.
+        let composer_plan = self.composer_session_id();
+        for (session_id, store) in &self.plan_annotations {
+            let mut annotations = store.borrow_mut();
+            annotations.editing = None;
+            annotations.hovered = None;
+            if composer_plan == Some(*session_id) {
+                items.extend(annotations.items.drain(..));
+            }
+        }
         items.sort_by_key(|annotation| annotation.id);
         items
     }
@@ -2042,6 +2293,89 @@ impl Waku {
         Some(self.annotation_tooltip_card(anchor, comment, cx))
     }
 
+    /// The floating "Add to chat" pill over a settled plan-document
+    /// selection — the same control the file preview offers, anchored to the
+    /// document's painted spans.
+    pub(super) fn render_plan_annotation_offer(
+        &self,
+        session_id: Uuid,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let spans = self.annotatable_plan_selection(session_id)?;
+        let viewport = self.plan_preview_scroll_handle.bounds();
+        let anchor = self.spans_anchor_in(&self.plan_preview_selection, viewport, &spans)?;
+        // Resolve the chord as if the document were focused — the same
+        // FileEditorPane binding the file preview's pill shows.
+        let preview_focus = self.transcript_control_focus("plan-preview", cx);
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &preview_focus).resolve(window, cx);
+        let button = self.add_to_chat_button(
+            "plan-annotation-add-to-chat",
+            "plan-annotation-add-to-chat",
+            shortcut_label,
+            cx,
+            move |this, window, cx| this.annotate_plan_selection(session_id, window, cx),
+        );
+        Some(
+            deferred(FloatingSurface::new(
+                motion::surface_enter("annotate-plan-selection-enter", button).into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// The same floating comment editor over a plan annotation, anchored
+    /// below its visible extent in the rendered document.
+    pub(super) fn render_plan_annotation_editor(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let editor = self.annotation_editor.as_ref()?;
+        if editor.target != AnnotationTarget::Plan(session_id) {
+            return None;
+        }
+        let anchor = self.plan_annotation_editor_anchor(session_id, editor.annotation_id)?;
+        Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
+    }
+
+    /// The same comment tooltip over a plan annotation's highlight.
+    pub(super) fn render_plan_annotation_tooltip(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self.annotation_hover.as_ref().filter(|hover| {
+            hover.visible && hover.target == AnnotationTarget::Plan(session_id)
+        })?;
+        if self
+            .annotation_editor
+            .as_ref()
+            .is_some_and(|editor| editor.annotation_id == hover.id)
+        {
+            return None;
+        }
+        let comment = self.plan_annotation_store(session_id).and_then(|store| {
+            store
+                .borrow()
+                .items
+                .iter()
+                .find(|annotation| annotation.id == hover.id)
+                .map(|annotation| annotation.comment.clone())
+        })?;
+        if comment.trim().is_empty() {
+            return None;
+        }
+        let anchor = self.plan_annotation_anchor(session_id, hover.id)?;
+        Some(self.annotation_tooltip_card(anchor, comment, cx))
+    }
+
     /// The citation tooltip, surfaced after the hover delay over an
     /// `Annotation N` mention: the annotated passage dimmed above the user's
     /// comment, so the label resolves to what was actually said. Like the
@@ -2507,24 +2841,24 @@ impl Waku {
         });
     }
 
-    /// The markdown preview's annotation mouse listeners — the
+    /// The rendered-document annotation mouse listeners — the
     /// registry-based counterpart of [`Self::install_file_annotation_input`],
     /// hit-testing the frame's painted highlight spans instead of the
-    /// field's byte ranges. `selection` is the preview's state with the
-    /// file's annotation store swapped in, so hover and presses read the same
-    /// set the editor view does; the `File` target matches too — only one of
-    /// the two views is ever on screen.
-    fn install_preview_annotation_input(
+    /// field's byte ranges. `selection` is the surface's state with the
+    /// annotation store swapped in — the file preview's or the plan
+    /// document's — so hover and presses read the same set the surface does;
+    /// `target` names that store for press/hover/editor bookkeeping.
+    fn install_rendered_annotation_input(
         region: HitboxId,
         window: &mut Window,
         _cx: &mut App,
         selection: &TranscriptSelection,
-        relative_path: &str,
+        target: AnnotationTarget,
         waku: &WeakEntity<Waku>,
     ) {
         window.on_mouse_event({
             let selection = selection.clone();
-            let path = relative_path.to_owned();
+            let target = target.clone();
             let waku = waku.clone();
             move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble
@@ -2538,7 +2872,7 @@ impl Waku {
                         this.annotation_press = Some(AnnotationPress {
                             id,
                             position: event.position,
-                            target: AnnotationTarget::File(path.clone()),
+                            target: target.clone(),
                         });
                     });
                 }
@@ -2547,7 +2881,7 @@ impl Waku {
 
         window.on_mouse_event({
             let selection = selection.clone();
-            let path = relative_path.to_owned();
+            let target = target.clone();
             let waku = waku.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.dragging() || !region.is_hovered(window)
@@ -2567,7 +2901,7 @@ impl Waku {
                 if changed {
                     let _ = waku.update(cx, |this, cx| {
                         this.annotation_hover_changed(
-                            hit.map(|id| (id, AnnotationTarget::File(path.clone()))),
+                            hit.map(|id| (id, target.clone())),
                             cx,
                         );
                     });
@@ -2578,7 +2912,6 @@ impl Waku {
 
         window.on_mouse_event({
             let selection = selection.clone();
-            let path = relative_path.to_owned();
             let waku = waku.clone();
             move |event: &MouseUpEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
@@ -2587,7 +2920,7 @@ impl Waku {
                 let press = waku
                     .update(cx, |this, _| {
                         this.annotation_press
-                            .take_if(|press| press.target == AnnotationTarget::File(path.clone()))
+                            .take_if(|press| press.target == target)
                     })
                     .ok()
                     .flatten();
@@ -2619,7 +2952,7 @@ impl Waku {
                     this.open_annotation_editor(
                         press.id,
                         false,
-                        AnnotationTarget::File(path.clone()),
+                        target.clone(),
                         window,
                         cx,
                     )
@@ -2755,7 +3088,46 @@ impl Waku {
         canvas(
             |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
             move |_, region, window, cx| {
-                Self::install_preview_annotation_input(region, window, cx, &selection, &path, &waku)
+                Self::install_rendered_annotation_input(
+                    region,
+                    window,
+                    cx,
+                    &selection,
+                    AnnotationTarget::File(path.clone()),
+                    &waku,
+                )
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// The plan document's listener canvas — see
+    /// [`Self::install_rendered_annotation_input`]. `selection` is the plan
+    /// preview's state carrying the session's plan annotation store;
+    /// rendered inside the document's scroll container so the region only
+    /// covers the document.
+    pub(super) fn plan_annotation_input(
+        &self,
+        selection: &TranscriptSelection,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selection = selection.clone();
+        let waku = cx.entity().downgrade();
+        canvas(
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, cx| {
+                Self::install_rendered_annotation_input(
+                    region,
+                    window,
+                    cx,
+                    &selection,
+                    AnnotationTarget::Plan(session_id),
+                    &waku,
+                )
             },
         )
         .absolute()
@@ -3004,6 +3376,7 @@ mod tests {
                 start_line,
                 end_line,
                 source: None,
+                plan_session: None,
             }),
         }
     }
@@ -3129,6 +3502,25 @@ mod tests {
                 "> let x = 1;\n",
                 "> ```\n",
                 "\nComment: \n\n",
+                "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+            )
+        );
+    }
+
+    #[test]
+    fn prompt_prefix_quotes_a_plan_annotation_by_its_plan_path() {
+        let mut pinned = file_annotation(1, "plans/demo.md", "ship it", 10..17, 4, 4, "scope this");
+        pinned.file.as_mut().expect("file").plan_session = Some(Uuid::from_u128(7));
+        assert_eq!(
+            annotation_prompt_prefix(&[pinned]),
+            concat!(
+                "Annotation 1:\n",
+                "> @plans/demo.md\n",
+                "> [Selected line 4]\n",
+                "> ```\n",
+                "> ship it\n",
+                "> ```\n",
+                "\nComment: scope this\n\n",
                 "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
             )
         );

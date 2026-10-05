@@ -521,6 +521,12 @@ fn clamp_boundary(text: &str, offset: usize) -> usize {
 /// for editor selections, whose span text already is the source slice, and
 /// for a preview pin that could not be mapped back (an empty `range` then
 /// never validates — the highlight lives on the preview alone).
+///
+/// `plan_session` marks a pin made on a planning session's plan document —
+/// a boss-memory file no workspace editor can open. `path` then holds the
+/// daemon's `plans/<name>.md` for the `@path` marker only; restores route
+/// the annotation back to the session's plan store instead of
+/// `pending_file_annotations`.
 #[derive(Clone, Debug)]
 pub struct FileAnnotation {
     pub path: String,
@@ -528,6 +534,7 @@ pub struct FileAnnotation {
     pub start_line: usize,
     pub end_line: usize,
     pub source: Option<Rc<str>>,
+    pub plan_session: Option<uuid::Uuid>,
 }
 
 /// A highlighted passage of transcript text carrying a user comment.

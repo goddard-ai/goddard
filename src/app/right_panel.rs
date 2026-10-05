@@ -3251,6 +3251,7 @@ impl Waku {
             }
         }
         self.plan_docs.remove(&session_id);
+        self.plan_annotations.remove(&session_id);
         self.right_panel_pr_states
             .retain(|(owner, _), _| *owner != session_id);
     }
@@ -4088,7 +4089,7 @@ impl Waku {
                 session_id,
                 plan_file,
             }) => self
-                .render_plan_preview(session_id, &plan_file, cx)
+                .render_plan_preview(session_id, &plan_file, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Goals) => self.render_boss_goals_panel(cx).into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
@@ -7844,12 +7845,18 @@ impl Waku {
 
     /// The scrollable read-only document behind a plan tab and the Boss
     /// page's plan detail — the transcript's markdown engine over the
-    /// daemon-fetched text, with drag selection but no annotation layer:
-    /// pinned highlights belong to files, not to a boss-owned document.
+    /// daemon-fetched text, with drag selection and, on the session's own
+    /// plan tab (`annotatable`), the comment layer the file preview uses:
+    /// pins live in `plan_annotations` keyed by the owning session and ship
+    /// as quoted passages with that session's next submission. The Boss
+    /// page's detail view passes `None` for `window` and stays read-only —
+    /// an annotation staged there would have no composer in sight.
     pub(super) fn plan_document_view(
         &mut self,
         session_id: Uuid,
         text: &str,
+        annotatable: bool,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -7861,7 +7868,11 @@ impl Waku {
         }
         let (_, view) = cache.as_mut().expect("entry ensured above");
         view.set_text(text, false);
-        let preview_selection = self.plan_preview_selection.clone();
+        let mut preview_selection = self.plan_preview_selection.clone();
+        // The session's pins paint here exactly as a file's do on its
+        // markdown preview — the same store the hover and editor read.
+        preview_selection.annotations =
+            self.plan_annotations.entry(session_id).or_default().clone();
         let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
         let reader_selection = preview_selection.clone();
         let reader_source = text.to_owned();
@@ -7905,10 +7916,15 @@ impl Waku {
             canvas(
                 |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
                 move |_, region, window, _| {
-                    // The transcript's drag-select gesture, minus its
-                    // ⌥-click annotate action — a boss document pins no
-                    // highlights.
-                    md::render::install_selection_input(region, window, &selection, None)
+                    // ⌥-click arms the pressed line as the release fallback
+                    // and fires ⌘L on mouse-up — the transcript's "select and
+                    // annotate" gesture, here pinning on the rendered plan.
+                    md::render::install_selection_input(
+                        region,
+                        window,
+                        &selection,
+                        annotatable.then(|| Box::new(AddToChat) as Box<dyn gpui::Action>),
+                    )
                 },
             )
             .absolute()
@@ -7916,8 +7932,24 @@ impl Waku {
             .left_0()
             .size_full()
         };
+        let annotation_offer = window
+            .as_deref()
+            .filter(|_| annotatable)
+            .and_then(|window| self.render_plan_annotation_offer(session_id, window, cx));
+        let annotation_editor = annotatable
+            .then(|| self.render_plan_annotation_editor(session_id, cx))
+            .flatten();
+        let annotation_tooltip = annotatable
+            .then(|| self.render_plan_annotation_tooltip(session_id, cx))
+            .flatten();
 
         div()
+            .when(annotatable, |element| {
+                // The document pane carries the file pane's context so ⌘L's
+                // "Add to chat" binding reaches `add_to_chat` here the way it
+                // does in a file editor or its preview.
+                element.key_context("FileEditorPane")
+            })
             .flex_1()
             .min_h_0()
             .flex()
@@ -7969,10 +8001,22 @@ impl Waku {
                             ),
                     )
                     .child(selection_input)
+                    // After the selection canvas so its hit-tests see this
+                    // frame's registry — the file preview's ordering.
+                    .when(annotatable, |element| {
+                        element.child(self.plan_annotation_input(
+                            &preview_selection,
+                            session_id,
+                            cx,
+                        ))
+                    })
                     .child(scrollbar::vertical(
                         &self.plan_preview_scroll_handle,
                         &self.plan_preview_scrollbar,
-                    )),
+                    ))
+                    .children(annotation_offer)
+                    .children(annotation_editor)
+                    .children(annotation_tooltip),
             )
     }
 
@@ -7983,6 +8027,7 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         plan_file: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let key = self.daemons.session_owner(session_id);
@@ -7991,7 +8036,7 @@ impl Waku {
         match doc.and_then(|doc| doc.content.as_ref()) {
             Some(Ok(text)) => {
                 let text = text.clone();
-                self.plan_document_view(session_id, &text, cx)
+                self.plan_document_view(session_id, &text, true, Some(window), cx)
             }
             Some(Err(error)) => self.render_right_panel_empty_message(
                 tr!("boss.plan_unavailable"),

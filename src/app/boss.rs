@@ -3116,7 +3116,7 @@ impl Waku {
         {
             Some(Ok(text)) => {
                 let text = text.clone();
-                self.plan_document_view(session_id, &text, cx)
+                self.plan_document_view(session_id, &text, false, None, cx)
                     .into_any_element()
             }
             Some(Err(error)) => empty(format!("{}\n{error}", tr!("boss.plan_unavailable"))),

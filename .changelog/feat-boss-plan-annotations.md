@@ -1,0 +1,1 @@
+- Planning-session plan documents now take annotations: select text in the plan tab, choose "Add to chat" (or press ⌘L), and the comment ships with your next message as a quoted `@plans/<name>.md` passage with its line range — the same annotation format chat selections already use.

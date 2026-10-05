@@ -58,6 +58,11 @@ pub struct ComposerDraftFileAnnotation {
     pub end_line: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Set when the pin was made on a planning session's plan document:
+    /// routes restores to that session's plan store rather than a workspace
+    /// file editor's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_session: Option<Uuid>,
 }
 
 /// A commented highlight staged with the draft — a passage of an assistant
@@ -513,5 +518,40 @@ mod tests {
         assert!(parse_session_message_search("status:idle").is_blank() == false);
         assert!(parse_session_message_search("  ").is_blank());
         assert!(parse_session_message_search("").is_blank());
+    }
+
+    #[test]
+    fn draft_file_annotation_plan_session_round_trips() {
+        let annotation = ComposerDraftFileAnnotation {
+            path: "plans/demo.md".to_owned(),
+            start: 10,
+            end: 20,
+            start_line: 2,
+            end_line: 3,
+            source: None,
+            plan_session: Some(Uuid::from_u128(42)),
+        };
+        let json = serde_json::to_string(&annotation).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ComposerDraftFileAnnotation>(&json).unwrap(),
+            annotation
+        );
+        // Drafts written before the field existed deserialize to `None`.
+        let legacy = serde_json::json!({
+            "path": "src/main.rs",
+            "start": 0,
+            "end": 4,
+            "start_line": 1,
+            "end_line": 1,
+        });
+        let parsed =
+            serde_json::from_value::<ComposerDraftFileAnnotation>(legacy).unwrap();
+        assert_eq!(parsed.plan_session, None);
+        // `None` never serializes — the format stays identical for files.
+        let plain = ComposerDraftFileAnnotation {
+            plan_session: None,
+            ..annotation.clone()
+        };
+        assert!(!serde_json::to_string(&plain).unwrap().contains("plan_session"));
     }
 }

@@ -4055,6 +4055,11 @@ pub struct Waku {
     /// submissions. The draft is their durable home — this is only the
     /// materialization for the session on screen.
     pending_file_annotations: HashMap<String, Vec<TranscriptAnnotation>>,
+    /// Annotations pinned on planning sessions' plan documents, keyed by the
+    /// session the plan belongs to. A store lives as long as its session —
+    /// `remove_right_panel_session_state` drops it — and only the composer
+    /// session's store ever counts, drains, or saves into a draft.
+    plan_annotations: HashMap<Uuid, Rc<RefCell<Annotations>>>,
     /// `Annotation N` citation under the pointer; `visible` once the hover
     /// delay elapsed.
     annotation_ref_hover: Option<annotations::AnnotationRefHover>,
@@ -5620,23 +5625,33 @@ impl Waku {
             .collect();
         // The saved draft's annotations reopen with the selected session:
         // transcript highlights go straight into the selection's painted
-        // store, file ones wait for their editor to exist.
+        // store, file ones wait for their editor to exist, plan ones return
+        // to their session's plan store.
         let transcript_selection = TranscriptSelection::default();
         let mut pending_file_annotations: HashMap<String, Vec<TranscriptAnnotation>> =
             HashMap::new();
+        let mut plan_annotations: HashMap<Uuid, Rc<RefCell<Annotations>>> = HashMap::new();
         let mut annotation_next_id = 1u64;
         {
             let mut items = Vec::new();
             for annotation in initial_composer_annotations {
                 let annotation = TranscriptAnnotation::from(annotation);
                 annotation_next_id = annotation_next_id.max(annotation.id.saturating_add(1));
-                if let Some(file) = &annotation.file {
-                    pending_file_annotations
+                match &annotation.file {
+                    Some(file) if file.plan_session.is_some() => {
+                        let session_id = file.plan_session.expect("matched above");
+                        plan_annotations
+                            .entry(session_id)
+                            .or_default()
+                            .borrow_mut()
+                            .items
+                            .push(annotation);
+                    }
+                    Some(file) => pending_file_annotations
                         .entry(file.path.clone())
                         .or_default()
-                        .push(annotation);
-                } else {
-                    items.push(annotation);
+                        .push(annotation),
+                    None => items.push(annotation),
                 }
             }
             transcript_selection.annotations.borrow_mut().items = items;
@@ -7114,6 +7129,7 @@ impl Waku {
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
                 plan_docs: HashMap::new(),
+                plan_annotations,
                 plan_markdown: RefCell::new(None),
                 plan_preview_selection: TranscriptSelection::default(),
                 plan_preview_scroll_handle: ScrollHandle::new(),

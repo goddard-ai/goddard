@@ -41,6 +41,7 @@ impl From<&FileAnnotation> for ComposerDraftFileAnnotation {
             start_line: file.start_line,
             end_line: file.end_line,
             source: file.source.as_deref().map(str::to_owned),
+            plan_session: file.plan_session,
         }
     }
 }
@@ -53,6 +54,7 @@ impl From<ComposerDraftFileAnnotation> for FileAnnotation {
             start_line: file.start_line,
             end_line: file.end_line,
             source: file.source.map(Rc::from),
+            plan_session: file.plan_session,
         }
     }
 }
@@ -171,14 +173,23 @@ impl Waku {
     }
 
     /// The session's annotations in draft form: the live transcript set,
-    /// every file editor's pins, and restored file annotations still waiting
-    /// on their editor — merged in creation order like `drain_annotations`.
+    /// every file editor's pins, restored file annotations still waiting on
+    /// their editor, and the selected session's plan pins — merged in
+    /// creation order like `drain_annotations`. Plan annotations staged on
+    /// another session's document stay under that session's own draft key.
     fn composer_draft_annotations(&self) -> Vec<ComposerDraftAnnotation> {
         let mut annotations = self.transcript_selection.annotations.borrow().items.clone();
         for editor in self.right_panel_file_editors.values() {
             annotations.extend(editor.annotations.borrow().items.iter().cloned());
         }
         annotations.extend(self.pending_file_annotations.values().flatten().cloned());
+        if let Some(store) = self
+            .state
+            .selected_session
+            .and_then(|id| self.plan_annotations.get(&id))
+        {
+            annotations.extend(store.borrow().items.iter().cloned());
+        }
         annotations.sort_by_key(|annotation| annotation.id);
         annotations.iter().map(Into::into).collect()
     }
@@ -579,20 +590,27 @@ impl Waku {
     /// `reset_visible_state` performs the same swap, so a later reset is a
     /// no-op round trip. File annotations whose editor is already on screen
     /// seed its store; the rest wait in `pending_file_annotations` for the
-    /// file to open.
+    /// file to open. Plan annotations return to their own session's store —
+    /// restored there rather than parked, since no file editor can claim
+    /// them.
     fn restore_draft_annotations(&mut self, draft_annotations: Vec<ComposerDraftAnnotation>) {
         let mut items = Vec::new();
         let mut pending: HashMap<String, Vec<TranscriptAnnotation>> = HashMap::new();
+        let mut plan: HashMap<Uuid, Vec<TranscriptAnnotation>> = HashMap::new();
         for annotation in draft_annotations {
             self.annotation_next_id = self.annotation_next_id.max(annotation.id.saturating_add(1));
             let annotation = TranscriptAnnotation::from(annotation);
-            if let Some(file) = &annotation.file {
-                pending
+            match &annotation.file {
+                Some(file) if file.plan_session.is_some() => {
+                    plan.entry(file.plan_session.expect("matched above"))
+                        .or_default()
+                        .push(annotation);
+                }
+                Some(file) => pending
                     .entry(file.path.clone())
                     .or_default()
-                    .push(annotation);
-            } else {
-                items.push(annotation);
+                    .push(annotation),
+                None => items.push(annotation),
             }
         }
         {
@@ -615,6 +633,16 @@ impl Waku {
             if let Some(annotations) = pending.remove(path) {
                 editor.annotations.borrow_mut().items = annotations;
             }
+        }
+        // The draft replaces the plan's live set too — the same wholesale
+        // swap the transcript and file stores get, so a restore never
+        // duplicates pins already staged in the store.
+        for (session_id, annotations) in plan {
+            let store = self.plan_annotations.entry(session_id).or_default();
+            let mut store = store.borrow_mut();
+            store.items = annotations;
+            store.hovered = None;
+            store.editing = None;
         }
         self.pending_file_annotations = pending;
     }

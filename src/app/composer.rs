@@ -4393,9 +4393,10 @@ impl Waku {
         if !submission.annotations.is_empty() {
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
-            // return to their editors, the rest to the transcript store. A
-            // file whose editor is gone parks in `pending_file_annotations`
-            // until it opens again.
+            // return to their editors, plan annotations to their session's
+            // plan store, the rest to the transcript store. A file whose
+            // editor is gone parks in `pending_file_annotations` until it
+            // opens again.
             let (file_annotations, transcript_annotations): (Vec<_>, Vec<_>) = submission
                 .annotations
                 .into_iter()
@@ -4409,6 +4410,15 @@ impl Waku {
                 let Some(file) = &annotation.file else {
                     continue;
                 };
+                if let Some(plan_session) = file.plan_session {
+                    self.plan_annotations
+                        .entry(plan_session)
+                        .or_default()
+                        .borrow_mut()
+                        .items
+                        .push(annotation);
+                    continue;
+                }
                 match self.right_panel_file_editors.get_mut(&file.path) {
                     Some(editor) => editor.annotations.borrow_mut().items.push(annotation),
                     None => self
@@ -5720,10 +5730,7 @@ impl Waku {
         // Atoms and staged annotations count as draft on either surface —
         // attachments stay main-only.
         let (atom_count, annotation_count) = match surface {
-            ComposerCard::Main => (
-                self.composer_inline_atoms.len(),
-                self.transcript_selection.annotations.borrow().items.len(),
-            ),
+            ComposerCard::Main => (self.composer_inline_atoms.len(), self.annotation_count()),
             ComposerCard::SideChat { session_id, .. } => (
                 self.side_chat_composers
                     .get(session_id)
