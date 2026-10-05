@@ -377,6 +377,10 @@ const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 /// How long a published deliverable keeps its row in the Recent deliverables group —
 /// measured from its last publish, so a re-published deliverable jumps back in.
 const SIDEBAR_DELIVERABLE_RECENT_SECS: u64 = 12 * 60 * 60;
+/// Live deliverables shown before the rest fold behind "Show more" — a
+/// tighter cap than a project group's since the section is a jump rail, not
+/// a list to browse. Pinned rows lead and count toward the cap.
+const SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE: usize = 5;
 const SIDEBAR_GROUP_HEADER_INSET: f32 = 8.0;
 const SIDEBAR_GROUP_ICON_WIDTH: f32 = 14.0;
 const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
@@ -674,25 +678,25 @@ fn sidebar_project_order_entry_is_starred(
     }
 }
 
-/// A project group's fold keeps two tails: live sessions past the default
-/// cap reveal through "Show more", and once every live session is shown a
-/// "Show dormant" row takes its place and reveals the dormant tail — a
-/// single click never mixes the two.
-fn visible_project_sessions(
-    live: &[Uuid],
-    dormant: &[Uuid],
-    revealed_extra_sessions: usize,
-    revealed_dormant_sessions: usize,
-) -> (Vec<Uuid>, Option<SidebarFold>) {
-    let live_limit = SIDEBAR_PROJECT_DEFAULT_VISIBLE.saturating_add(revealed_extra_sessions);
-    let mut visible = Vec::with_capacity(
-        live_limit.min(live.len()) + dormant.len().min(revealed_dormant_sessions),
-    );
+/// A sidebar group's fold keeps two tails: live rows past the default cap
+/// reveal through "Show more", and once every live row is shown a "Show
+/// dormant" row takes its place and reveals the dormant tail — a single
+/// click never mixes the two.
+fn visible_group_rows<Row: Copy>(
+    live: &[Row],
+    dormant: &[Row],
+    default_visible: usize,
+    revealed_extra_rows: usize,
+    revealed_dormant_rows: usize,
+) -> (Vec<Row>, Option<SidebarFold>) {
+    let live_limit = default_visible.saturating_add(revealed_extra_rows);
+    let mut visible =
+        Vec::with_capacity(live_limit.min(live.len()) + dormant.len().min(revealed_dormant_rows));
     visible.extend(live.iter().take(live_limit).copied());
-    visible.extend(dormant.iter().take(revealed_dormant_sessions).copied());
+    visible.extend(dormant.iter().take(revealed_dormant_rows).copied());
     let fold = if live.len() > live_limit {
         Some(SidebarFold::More)
-    } else if dormant.len() > revealed_dormant_sessions {
+    } else if dormant.len() > revealed_dormant_rows {
         Some(SidebarFold::Dormant)
     } else {
         None
@@ -3780,8 +3784,15 @@ impl Waku {
             })
             .count() as u64;
         fingerprint = mix(fingerprint, recent_deliverables);
-        // The dormant fold's reveal count drives row membership too — the
+        // Both folds' reveal counts drive row membership too — the
         // project-grouping map fold above only runs under project grouping.
+        fingerprint = mix(
+            fingerprint,
+            self.sidebar_project_reveal_counts
+                .get(&SidebarGroup::Deliverables)
+                .copied()
+                .unwrap_or_default() as u64,
+        );
         fingerprint = mix(
             fingerprint,
             self.sidebar_project_dormant_reveals
@@ -3954,29 +3965,40 @@ impl Waku {
                 .sidebar_collapsed_groups
                 .contains(&SidebarGroup::Deliverables)
             {
-                rows.extend(
-                    recent_deliverables
-                        .iter()
-                        .copied()
-                        .map(|(key, id)| SidebarRow::Deliverable(key, id)),
-                );
-                // A swept deliverable keeps a fold row rather than vanishing —
-                // the same "Show dormant" reveal a project group's dormant
-                // tail uses.
-                let revealed = self
+                // The group folds like a project section: live rows cap at
+                // SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE behind "Show more",
+                // then a swept deliverable keeps a "Show dormant" fold row
+                // rather than vanishing.
+                let revealed_live = self
+                    .sidebar_project_reveal_counts
+                    .get(&SidebarGroup::Deliverables)
+                    .copied()
+                    .unwrap_or_default();
+                let revealed_dormant = self
                     .sidebar_project_dormant_reveals
                     .get(&SidebarGroup::Deliverables)
                     .copied()
                     .unwrap_or_default();
+                let (visible, fold) = visible_group_rows(
+                    &recent_deliverables,
+                    &dormant_deliverables,
+                    SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+                    revealed_live,
+                    revealed_dormant,
+                );
                 rows.extend(
-                    dormant_deliverables
-                        .iter()
-                        .take(revealed)
-                        .copied()
+                    visible
+                        .into_iter()
                         .map(|(key, id)| SidebarRow::Deliverable(key, id)),
                 );
-                if dormant_deliverables.len() > revealed {
-                    rows.push(SidebarRow::ShowDormant(SidebarGroup::Deliverables));
+                match fold {
+                    Some(SidebarFold::More) => {
+                        rows.push(SidebarRow::ShowMore(SidebarGroup::Deliverables))
+                    }
+                    Some(SidebarFold::Dormant) => {
+                        rows.push(SidebarRow::ShowDormant(SidebarGroup::Deliverables))
+                    }
+                    None => {}
                 }
             }
             rows.push(SidebarRow::GroupSpacer);
@@ -4083,9 +4105,10 @@ impl Waku {
                         .get(&group)
                         .copied()
                         .unwrap_or_default();
-                    let (visible_sessions, fold) = visible_project_sessions(
+                    let (visible_sessions, fold) = visible_group_rows(
                         &live,
                         &dormant,
+                        SIDEBAR_PROJECT_DEFAULT_VISIBLE,
                         revealed_extra_sessions,
                         revealed_dormant_sessions,
                     );
@@ -7622,20 +7645,31 @@ mod tests {
     fn project_sessions_reveal_history_beyond_the_default_cap() {
         let sessions = (1..=50).map(Uuid::from_u128).collect::<Vec<_>>();
 
-        let (initial, fold) = visible_project_sessions(&sessions, &[], 0, 0);
+        let (initial, fold) =
+            visible_group_rows(&sessions, &[], SIDEBAR_PROJECT_DEFAULT_VISIBLE, 0, 0);
         assert_eq!(initial, sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);
         assert_eq!(fold, Some(SidebarFold::More));
 
-        let (first_batch, fold) =
-            visible_project_sessions(&sessions, &[], SIDEBAR_PROJECT_REVEAL_BATCH, 0);
+        let (first_batch, fold) = visible_group_rows(
+            &sessions,
+            &[],
+            SIDEBAR_PROJECT_DEFAULT_VISIBLE,
+            SIDEBAR_PROJECT_REVEAL_BATCH,
+            0,
+        );
         assert_eq!(
             first_batch,
             sessions[..SIDEBAR_PROJECT_DEFAULT_VISIBLE + SIDEBAR_PROJECT_REVEAL_BATCH]
         );
         assert_eq!(fold, Some(SidebarFold::More));
 
-        let (all_sessions, fold) =
-            visible_project_sessions(&sessions, &[], SIDEBAR_PROJECT_REVEAL_BATCH * 2, 0);
+        let (all_sessions, fold) = visible_group_rows(
+            &sessions,
+            &[],
+            SIDEBAR_PROJECT_DEFAULT_VISIBLE,
+            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
+            0,
+        );
         assert_eq!(all_sessions, sessions);
         assert_eq!(fold, None);
     }
@@ -7647,18 +7681,25 @@ mod tests {
 
         // Dormant rows never occupy the default slice — the fold row flips
         // to ShowDormant only once every live session is revealed.
-        let (initial, fold) = visible_project_sessions(&live, &dormant, 0, 0);
+        let (initial, fold) =
+            visible_group_rows(&live, &dormant, SIDEBAR_PROJECT_DEFAULT_VISIBLE, 0, 0);
         assert_eq!(initial, live[..SIDEBAR_PROJECT_DEFAULT_VISIBLE]);
         assert_eq!(fold, Some(SidebarFold::More));
 
-        let (all_live, fold) =
-            visible_project_sessions(&live, &dormant, SIDEBAR_PROJECT_REVEAL_BATCH * 2, 0);
+        let (all_live, fold) = visible_group_rows(
+            &live,
+            &dormant,
+            SIDEBAR_PROJECT_DEFAULT_VISIBLE,
+            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
+            0,
+        );
         assert_eq!(all_live, live);
         assert_eq!(fold, Some(SidebarFold::Dormant));
 
-        let (with_dormant, fold) = visible_project_sessions(
+        let (with_dormant, fold) = visible_group_rows(
             &live,
             &dormant,
+            SIDEBAR_PROJECT_DEFAULT_VISIBLE,
             SIDEBAR_PROJECT_REVEAL_BATCH * 2,
             SIDEBAR_PROJECT_REVEAL_BATCH,
         );
@@ -7667,9 +7708,76 @@ mod tests {
 
         // A project holding only dormant sessions shows nothing live — just
         // the dormant fold row.
-        let (empty_live, fold) = visible_project_sessions(&[], &dormant, 0, 0);
+        let (empty_live, fold) =
+            visible_group_rows(&[], &dormant, SIDEBAR_PROJECT_DEFAULT_VISIBLE, 0, 0);
         assert!(empty_live.is_empty());
         assert_eq!(fold, Some(SidebarFold::Dormant));
+    }
+
+    #[test]
+    fn deliverables_fold_live_rows_beyond_the_default_cap() {
+        let now = 1_000_000_000;
+        let deliverable = |age_hours: u64| BossDeliverable {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: String::new(),
+            directory: false,
+            created_at: now - age_hours * 3600,
+            updated_at: now - age_hours * 3600,
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: None,
+            viewed_at: None,
+        };
+        // Six live deliverables — the oldest pinned — plus one swept.
+        let mut pinned = deliverable(6);
+        pinned.pinned_at = Some(now);
+        let mut swept = deliverable(1);
+        swept.id = Uuid::new_v4();
+        swept.dormant_at = Some(now);
+        let mut deliverables = (1..=5).map(deliverable).collect::<Vec<_>>();
+        deliverables.push(pinned.clone());
+        deliverables.push(swept.clone());
+        let mut states = HashMap::new();
+        states.insert(
+            waku_client::DaemonKey::Local,
+            boss_state_with_deliverables(deliverables),
+        );
+
+        let (live, dormant) = sidebar_recent_deliverables(&states, now);
+        let (visible, fold) = visible_group_rows(
+            &live,
+            &dormant,
+            SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+            0,
+            0,
+        );
+        // The pin leads the list and eats a visible slot — the sixth live
+        // row folds behind "Show more" ahead of the swept tail.
+        assert_eq!(visible, live[..SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE]);
+        assert_eq!(visible[0], (waku_client::DaemonKey::Local, pinned.id));
+        assert_eq!(fold, Some(SidebarFold::More));
+
+        // Once every live row shows, the fold flips to the swept tail.
+        let (all_live, fold) = visible_group_rows(
+            &live,
+            &dormant,
+            SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+            SIDEBAR_PROJECT_REVEAL_BATCH,
+            0,
+        );
+        assert_eq!(all_live, live);
+        assert_eq!(fold, Some(SidebarFold::Dormant));
+
+        let (all_rows, fold) = visible_group_rows(
+            &live,
+            &dormant,
+            SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+            SIDEBAR_PROJECT_REVEAL_BATCH,
+            SIDEBAR_PROJECT_REVEAL_BATCH,
+        );
+        assert_eq!(all_rows, [live.as_slice(), dormant.as_slice()].concat());
+        assert_eq!(fold, None);
     }
 
     #[test]

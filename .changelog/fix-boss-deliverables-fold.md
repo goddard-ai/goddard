@@ -1,0 +1,1 @@
+- The sidebar's Recent deliverables section now shows the five newest entries and folds the rest behind a Show more row, the same fold project groups use — pinned deliverables still lead the list.
