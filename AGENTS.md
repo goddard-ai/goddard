@@ -35,6 +35,12 @@ compiled artifacts across checkouts and worktrees into
   `cargo clean` in a watch loop.
 - `check`/`clippy` get their own `target/check/` lane and can run beside a
   `cargo build` watcher without waiting on its lock.
+- Scope verification to the crates you touched: `mbx check -p <crate>` and
+  `mbx test -p <crate> --lib <filter>` beat a workspace-wide sweep, which is
+  minutes-long even warm and serializes against other worktrees through the
+  shared cache. The full `mbx check` runs at release cut; `dev` is the
+  velocity branch — focused checks at author time, not perfection at every
+  commit.
 - Restored artifacts can carry another checkout's absolute paths in debug
   info. For path-sensitive debugging:
   `CARGO_TARGET_DIR=target/dbg MBX_DISABLE=1 cargo build`.
