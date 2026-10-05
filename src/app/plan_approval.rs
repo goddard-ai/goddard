@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::ActivationExt;
+use crate::ui::shortcut::ShortcutHint;
 
 /// The canned-prompt id the approval chip sends — a CANNED_PROMPTS entry,
 /// so the text is localizable, user-editable under Settings' suggested
@@ -51,12 +52,46 @@ impl Waku {
 
     /// The gate behind the approval chip: an unfinalized planning session
     /// with no approval prompt sent yet.
-    fn plan_approval_pending(&self, session: &AgentSession) -> bool {
+    pub(super) fn plan_approval_pending(&self, session: &AgentSession) -> bool {
         session
             .planning
             .as_ref()
             .is_some_and(|planning| planning.finalized_at.is_none())
             && !self.plan_approval_sent(session)
+    }
+
+    /// Send the human's `finalizePlan` for a still-pending planning
+    /// session — the approval chip's activation and the empty-composer
+    /// ⌘⏎ share this dispatch. The pending gate is re-checked here so a
+    /// call arriving after finalization or approval is a no-op.
+    pub(super) fn request_plan_finalization(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if !self.plan_approval_pending(session) {
+            return;
+        }
+        let Some(plan_file) = session
+            .planning
+            .as_ref()
+            .map(|planning| planning.plan_file.clone())
+        else {
+            return;
+        };
+        let key = self.daemons.session_owner(session_id);
+        self.boss_request(
+            key,
+            waku_client::boss::BossOperation::FinalizePlan {
+                plan_file: Some(plan_file),
+            },
+            super::boss::BossReply::Finalize,
+            cx,
+        );
     }
 
     /// The "Finalize plan" approval chip — suggestion-chip shell, same as
@@ -69,6 +104,7 @@ impl Waku {
     /// card.
     pub(super) fn plan_approval_chip(
         &self,
+        window: &Window,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
@@ -77,8 +113,17 @@ impl Waku {
             return None;
         }
         let session_id = session.id;
-        let plan_file = session.planning.as_ref()?.plan_file.clone();
-        let key = self.daemons.session_owner(session_id);
+        // ⌘⏎ fires the chip while the composer is empty — advertise the
+        // chord exactly when it is bound, resolved as if the field were
+        // focused (the binding lives on the TextInput context). Big
+        // Picture's empty-draft chord does not reach the suggestion lane,
+        // so the chip stays silent there.
+        let shortcut_label = if !self.big_picture.is_open() && self.composer_is_empty(cx) {
+            ShortcutHint::action_in(&crate::input::SubmitSteer, &self.composer_focus(cx))
+                .resolve(window, cx)
+        } else {
+            None
+        };
         let (icon_path, label) = self.suggestion_parts(PLAN_APPROVAL_ACTION)?;
         Some(
             div()
@@ -98,16 +143,20 @@ impl Waku {
                 .hover(|element| element.bg(theme.overlay_strong))
                 .child(icon(icon_path, 11.0, theme.text_secondary))
                 .child(label)
+                .when_some(shortcut_label, |chip, label| {
+                    chip.child(
+                        div()
+                            .flex_none()
+                            .relative()
+                            .top(px(2.0))
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(label),
+                    )
+                })
                 .tooltip(Tooltip::text(tr_cow!("boss.plan_approve_hint")))
                 .on_activation(cx, move |this, _, cx| {
-                    this.boss_request(
-                        key,
-                        waku_client::boss::BossOperation::FinalizePlan {
-                            plan_file: Some(plan_file.clone()),
-                        },
-                        super::boss::BossReply::Finalize,
-                        cx,
-                    );
+                    this.request_plan_finalization(session_id, cx);
                 }),
         )
     }
@@ -119,13 +168,14 @@ impl Waku {
     /// float always stands alone there.
     pub(super) fn render_composer_float_chips(
         &self,
+        window: &Window,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         if self.action_suggestion_row_visible() && !self.big_picture.is_open() {
             return None;
         }
-        let approval = self.plan_approval_chip(theme, cx);
+        let approval = self.plan_approval_chip(window, theme, cx);
         let playback = self.voice_briefing_playback_chip(theme, cx);
         if approval.is_none() && playback.is_none() {
             return None;

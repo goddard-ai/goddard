@@ -628,6 +628,14 @@ fn action_prediction_questions(
     ])
 }
 
+/// Whether a session's composer surface takes predicted actions at all.
+/// A planning session's meaningful move is the plan flow's Finalize
+/// chip — generic next-action picks have no slot there, so neither the
+/// settle-triggered nor the inbox-triggered eval ever runs for one.
+fn action_predictions_apply(session: &AgentSession) -> bool {
+    !session.is_planning()
+}
+
 impl Waku {
     /// Route a settled turn into prediction: score it now when its session
     /// is on screen, queue it behind the session otherwise — the next open
@@ -643,6 +651,15 @@ impl Waku {
             return;
         };
         if !self.state.action_predictions_enabled {
+            return;
+        }
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| !action_predictions_apply(session))
+        {
             return;
         }
         if self.state.selected_session == Some(session_id) {
@@ -816,6 +833,15 @@ impl Waku {
         };
         // Incognito sessions leave no trace — no eval, no journal.
         if self.session_incognito(session_id) {
+            return;
+        }
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| !action_predictions_apply(session))
+        {
             return;
         }
         if self.state.selected_session == Some(session_id) {
@@ -1503,7 +1529,7 @@ impl Waku {
         // ⌘⏎ fires the chip while the composer is empty — advertise the
         // chord exactly when it is bound, resolved as if the field were
         // focused (the binding lives on the TextInput context).
-        let shortcut_label = if self.composer_is_empty(cx) {
+        let shortcut_label = if self.composer_is_empty(cx) && !self.plan_approval_pending(session) {
             ShortcutHint::action_in(&crate::input::SubmitSteer, &self.composer_focus(cx))
                 .resolve(window, cx)
         } else {
@@ -1586,7 +1612,7 @@ impl Waku {
                             // A pending plan approval and a voicing
                             // briefing's pause/resume trail the row —
                             // same slot, same chip shell.
-                            .children(self.plan_approval_chip(&theme, cx))
+                            .children(self.plan_approval_chip(window, &theme, cx))
                             .children(self.voice_briefing_playback_chip(&theme, cx)),
                     ),
             ),
@@ -1675,11 +1701,14 @@ impl Waku {
     }
 
     /// ⌘⏎ on an empty composer fires whatever the suggestion lane is
-    /// showing, with the same layering `render_action_suggestion` draws:
-    /// a deterministic Git follow-up wins first; otherwise a settled turn's
-    /// status row claims the slot and its leftmost chip is the one the chord
-    /// hits, and a predicted action appears only when no status row does.
-    /// Returns whether a suggestion fired —
+    /// showing, with the same layering `render_action_suggestion` draws —
+    /// with one precedence: a pending plan approval owns the chord
+    /// outright, since a planning session's meaningful action is the plan
+    /// flow's Finalize chip whatever else the lane is showing. Otherwise a
+    /// deterministic Git follow-up wins first; a settled turn's status row
+    /// claims the slot after that and its leftmost chip is the one the
+    /// chord hits, and a predicted action appears only when no status row
+    /// does. Returns whether a suggestion fired —
     /// `false` means the keystroke falls through to its usual empty-draft
     /// meaning.
     ///
@@ -1688,13 +1717,20 @@ impl Waku {
     /// `&mut Window` besides — both resolve once the notification returns.
     pub(super) fn accept_displayed_suggestion(&mut self, cx: &mut Context<Self>) -> bool {
         enum Displayed {
+            PlanApproval(Uuid),
             Status(Uuid, StatusSuggestedAction),
             Action,
         }
+        let approval_session = self
+            .composer_session()
+            .filter(|session| self.plan_approval_pending(session))
+            .map(|session| session.id);
         let has_follow_up = self
             .composer_session()
             .is_some_and(|session| self.has_preemptive_suggestion(session.id));
-        let displayed = if has_follow_up {
+        let displayed = if let Some(session_id) = approval_session {
+            Some(Displayed::PlanApproval(session_id))
+        } else if has_follow_up {
             Some(Displayed::Action)
         } else {
             let displayed = self
@@ -1739,6 +1775,9 @@ impl Waku {
         cx.defer(move |cx| {
             let _ = window_handle.update(cx, move |_, window, cx| {
                 let _ = waku.update(cx, |this, cx| match &displayed {
+                    Displayed::PlanApproval(session_id) => {
+                        this.request_plan_finalization(*session_id, cx);
+                    }
                     Displayed::Status(turn_id, action) => {
                         this.accept_status_suggestion(*turn_id, action, cx);
                     }
@@ -1754,7 +1793,7 @@ impl Waku {
 mod tests {
     use waku_protocol::model::{
         ActivityItem, ActivityKind, AgentTurn, Checkpoint, CheckpointFile, CheckpointStatus,
-        ProviderKind, TranscriptBlock, TurnStatus,
+        ProviderKind, SessionPlanning, TranscriptBlock, TurnStatus,
     };
 
     use super::*;
@@ -1852,6 +1891,19 @@ mod tests {
         }
         // No tracked phase — the plan approval prompt stays out.
         assert!(!ids.contains(&"implement-plan"));
+    }
+
+    #[test]
+    fn planning_sessions_take_no_action_predictions() {
+        let (mut session, _) = session_with_turn(None);
+        assert!(action_predictions_apply(&session));
+        session.planning = Some(SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_client::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        assert!(!action_predictions_apply(&session));
     }
 
     #[test]

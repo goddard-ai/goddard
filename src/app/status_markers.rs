@@ -980,8 +980,9 @@ impl Waku {
         // ⌘⏎ fires the leftmost chip while the composer is empty — the
         // chord is advertised there exactly when it is bound, resolved as
         // if the field were focused (the binding lives on the TextInput
-        // context).
-        let shortcut_label = if self.composer_is_empty(cx) {
+        // context). A pending plan approval owns the chord instead, so the
+        // row stays silent while the Finalize chip is up.
+        let shortcut_label = if self.composer_is_empty(cx) && !self.plan_approval_pending(session) {
             ShortcutHint::action_in(&crate::input::SubmitSteer, &self.composer_focus(cx))
                 .resolve(window, cx)
         } else {
@@ -1140,7 +1141,7 @@ impl Waku {
                             // A pending plan approval and a voicing
                             // briefing's pause/resume trail the row —
                             // same slot, same chip shell.
-                            .children(self.plan_approval_chip(&theme, cx))
+                            .children(self.plan_approval_chip(window, &theme, cx))
                             .children(self.voice_briefing_playback_chip(&theme, cx)),
                     ),
             ),

@@ -5869,7 +5869,7 @@ impl Waku {
             // above the card like suggestion chips — they ride the
             // suggestion row instead while that slot is claimed.
             .when(interactive, |card| {
-                card.children(self.render_composer_float_chips(&theme, cx))
+                card.children(self.render_composer_float_chips(window, &theme, cx))
             })
             .child(div().pt(px(2.0)).child(composer))
             // The paste chip's floating editor, anchored below the
