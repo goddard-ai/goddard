@@ -51,6 +51,35 @@ pub(super) fn positive_number(value: &str) -> bool {
         && value.parse::<usize>().is_ok_and(|value| value > 0)
 }
 
+/// The host whose Boss document lists `session_id`'s plan owns its reads —
+/// the caller's key when it lists the plan, else whichever connected host
+/// does, else the caller. `daemons.session_owner` resolves an unclaimed
+/// remote session to `Local`, where `memory/plans/<name>.md` does not
+/// exist, so callers resolving keys independently would otherwise
+/// re-arm — and blank — a healthy read under the wrong host.
+pub(super) fn plan_doc_host(
+    states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    caller: waku_client::DaemonKey,
+    session_id: Uuid,
+) -> waku_client::DaemonKey {
+    let lists_plan = |key: waku_client::DaemonKey| {
+        states.get(&key).is_some_and(|state| {
+            state
+                .planning
+                .iter()
+                .any(|plan| plan.session_id == session_id)
+        })
+    };
+    if lists_plan(caller) {
+        return caller;
+    }
+    states
+        .keys()
+        .find(|key| lists_plan(**key))
+        .copied()
+        .unwrap_or(caller)
+}
+
 fn line_fragment(fragment: &str) -> bool {
     let Some(location) = fragment.strip_prefix('L') else {
         return false;
@@ -3063,7 +3092,7 @@ impl Waku {
                 self.mount_plan_tab(session_id, plan_file);
             } else {
                 let key = self.daemons.session_owner(session_id);
-                self.ensure_plan_doc(key, session_id, &plan_file, cx);
+                self.ensure_plan_doc(key, session_id, &plan_file, true, cx);
             }
         }
         // A Git panel that parked with the strip comes back whole — refresh
@@ -3191,17 +3220,18 @@ impl Waku {
     /// time opens on the plan; one already holding tabs gains the tab without
     /// moving the selection. A no-op unless the session owns the live strip
     /// and the tab is not already mounted — callers gate the mount on the
-    /// fetched document holding real contents.
-    fn mount_plan_tab(&mut self, session_id: Uuid, plan_file: String) {
+    /// fetched document holding real contents. Returns whether the strip
+    /// changed so a landing read can skip repainting an identical doc.
+    fn mount_plan_tab(&mut self, session_id: Uuid, plan_file: String) -> bool {
         if self.right_panel_live_owner != RightPanelOwner::Session(session_id) {
-            return;
+            return false;
         }
         let surface = RightPanelSurface::Plan {
             session_id,
             plan_file,
         };
         if self.right_panel_surfaces.contains(&surface) {
-            return;
+            return false;
         }
         let first_visit = self.right_panel_surfaces.is_empty();
         self.right_panel_surfaces.insert(0, surface);
@@ -3213,6 +3243,7 @@ impl Waku {
         if first_visit {
             self.right_panel_visible = true;
         }
+        true
     }
 
     pub(super) fn remove_right_panel_session_state(
@@ -7750,25 +7781,32 @@ impl Waku {
     /// resolves the `memory/` prefix. The read re-arms whenever the boss
     /// document's revision moves — `drain_boss_events` calls in on each
     /// received state — so agent writes stream into the preview one sync
-    /// later.
+    /// later. A re-arm keeps the fetched text on screen until its
+    /// replacement lands and an identical landing never repaints: the
+    /// preview flickers only when the plan itself does. `retry_failed`
+    /// callers — state events, not render paths — may re-issue a read that
+    /// already answered with an error; render callers leave a failure up
+    /// rather than fetching again on every frame.
     pub(super) fn ensure_plan_doc(
         &mut self,
         key: waku_client::DaemonKey,
         session_id: Uuid,
         plan_file: &str,
+        retry_failed: bool,
         cx: &mut Context<Self>,
     ) {
+        let key = plan_doc_host(&self.boss_ui.states, key, session_id);
         let revision = self
             .boss_ui
             .states
             .get(&key)
             .map(|state| state.revision)
             .unwrap_or(0);
-        let fresh = self.plan_docs.get(&session_id).is_some_and(|doc| {
-            doc.revision == revision
-                && (doc.requested || matches!(doc.content, Some(Ok(_))))
-        });
-        if fresh {
+        if self
+            .plan_docs
+            .get(&session_id)
+            .is_some_and(|doc| doc.settled(key, revision, retry_failed))
+        {
             return;
         }
         let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
@@ -7784,13 +7822,19 @@ impl Waku {
             );
             return;
         };
+        // The last fetched text stays up while its replacement is read —
+        // blanking to loading on every revision bump is the flash.
+        let content = self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.content.clone());
         self.plan_docs.insert(
             session_id,
             PlanDoc {
                 key,
                 revision,
                 requested: true,
-                content: None,
+                content,
             },
         );
         let path = format!("memory/{plan_file}");
@@ -7817,27 +7861,30 @@ impl Waku {
                     return;
                 }
                 doc.requested = false;
-                doc.content = Some(match result {
+                let next = match result {
                     Ok(waku_client::ResponsePayload::Boss {
                         result: waku_client::boss::BossResult::File { content, .. },
                     }) => Ok(content),
                     Ok(_) => Err(tr!("boss.unexpected_response")),
                     Err(error) => Err(error.to_string()),
-                });
+                };
+                // An identical landing leaves nothing to repaint.
+                let changed = doc.content.as_ref() != Some(&next);
+                doc.content = Some(next);
                 // The document's first real contents mount the plan tab —
                 // until this read the strip stayed without it.
-                if doc.has_content()
-                    && let Some(plan_file) = waku
+                let mounted = doc.has_content()
+                    && waku
                         .state
                         .sessions
                         .iter()
                         .find(|session| session.id == session_id)
                         .and_then(|session| session.planning.as_ref())
                         .map(|planning| planning.plan_file.clone())
-                {
-                    waku.mount_plan_tab(session_id, plan_file);
+                        .is_some_and(|plan_file| waku.mount_plan_tab(session_id, plan_file));
+                if changed || mounted {
+                    cx.notify();
                 }
-                cx.notify();
             });
         })
         .detach();
@@ -8031,7 +8078,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let key = self.daemons.session_owner(session_id);
-        self.ensure_plan_doc(key, session_id, plan_file, cx);
+        self.ensure_plan_doc(key, session_id, plan_file, false, cx);
         let doc = self.plan_docs.get(&session_id);
         match doc.and_then(|doc| doc.content.as_ref()) {
             Some(Ok(text)) => {

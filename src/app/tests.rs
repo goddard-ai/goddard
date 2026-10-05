@@ -5506,6 +5506,68 @@ fn plan_doc_content_gate_waits_for_real_text() {
 }
 
 #[test]
+fn plan_doc_settles_per_state_and_retries_failures_on_events_not_frames() {
+    // One read per (host, revision): issued or answered, the doc is
+    // settled for that state. A landed failure stays settled for render
+    // callers — re-arming on every frame was the plan preview's flicker —
+    // while event callers get one bounded retry per received state.
+    let doc = |revision: u64, requested: bool, content: Option<Result<String, String>>| {
+        super::PlanDoc {
+            key: waku_client::DaemonKey::Local,
+            revision,
+            requested,
+            content,
+        }
+    };
+    let local = waku_client::DaemonKey::Local;
+    assert!(doc(3, true, None).settled(local, 3, true));
+    assert!(doc(3, true, None).settled(local, 3, false));
+    assert!(doc(3, false, Some(Ok("# Plan".into()))).settled(local, 3, true));
+    assert!(doc(3, false, Some(Err("gone".into()))).settled(local, 3, false));
+    assert!(!doc(3, false, Some(Err("gone".into()))).settled(local, 3, true));
+    // A newer Boss state — or a different host's — re-arms the read.
+    assert!(!doc(3, false, Some(Ok("# Plan".into()))).settled(local, 4, false));
+    assert!(
+        !doc(3, false, Some(Ok("# Plan".into())))
+            .settled(waku_client::DaemonKey::Remote(Uuid::new_v4()), 3, false)
+    );
+}
+
+#[test]
+fn plan_doc_host_follows_the_state_listing_the_plan() {
+    // `session_owner` resolves an unclaimed remote session to Local —
+    // reads must follow the Boss document that actually lists the plan,
+    // or two callers ping-pong the doc between hosts' revisions.
+    use super::right_panel::plan_doc_host;
+    let session_id = Uuid::new_v4();
+    let remote = waku_client::DaemonKey::Remote(Uuid::new_v4());
+    let plan = waku_client::boss::BossPlan {
+        session_id,
+        plan_file: "plans/auth.md".into(),
+        idea: "Auth".into(),
+        finalized_at: None,
+    };
+    let mut remote_state = boss_state(None, Vec::new());
+    remote_state.planning.push(plan.clone());
+    let states = HashMap::from([
+        (waku_client::DaemonKey::Local, boss_state(None, Vec::new())),
+        (remote, remote_state),
+    ]);
+    // A caller guessing Local is redirected to the host listing the plan.
+    assert_eq!(
+        plan_doc_host(&states, waku_client::DaemonKey::Local, session_id),
+        remote
+    );
+    assert_eq!(plan_doc_host(&states, remote, session_id), remote);
+    // No state lists the plan yet — the caller's own key stands.
+    let states = HashMap::from([(waku_client::DaemonKey::Local, boss_state(None, Vec::new()))]);
+    assert_eq!(
+        plan_doc_host(&states, waku_client::DaemonKey::Local, session_id),
+        waku_client::DaemonKey::Local
+    );
+}
+
+#[test]
 fn archive_gate_admits_planning_sessions() {
     // A planning session is an ordinary started task to the archive path:
     // the row menu and ⌘⇧A share this gate, and they set the same

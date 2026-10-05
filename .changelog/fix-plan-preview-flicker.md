@@ -1,0 +1,1 @@
+- The plan preview no longer flashes a loading screen on every boss update — the document now stays on screen while it refreshes and only repaints when the plan actually changes.

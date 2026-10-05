@@ -421,7 +421,7 @@ impl Waku {
             let planning = state.planning.clone();
             self.boss_ui.states.insert(key, state);
             for plan in planning {
-                self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, cx);
+                self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, true, cx);
             }
             changed = true;
         }
@@ -3120,7 +3120,7 @@ impl Waku {
         else {
             return empty(tr!("boss.plan_select"));
         };
-        self.ensure_plan_doc(key, session_id, &plan.plan_file, cx);
+        self.ensure_plan_doc(key, session_id, &plan.plan_file, false, cx);
         match self
             .plan_docs
             .get(&session_id)

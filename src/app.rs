@@ -878,10 +878,14 @@ enum RightPanelSurface {
 /// document revision the read answered — a newer state re-arms the fetch.
 struct PlanDoc {
     key: waku_client::DaemonKey,
+    /// The Boss document revision this read was issued against — the doc
+    /// stays fresh until that host's state moves again.
     revision: u64,
-    /// A read is in flight — the render path must not issue another.
+    /// A read is in flight — a second ensure for the same state must not
+    /// issue another.
     requested: bool,
-    /// The fetched markdown, or the failure text the preview shows.
+    /// The fetched markdown, or the failure text the preview shows. Kept
+    /// across re-arms so a refresh never blanks the preview to loading.
     content: Option<Result<String, String>>,
 }
 
@@ -890,6 +894,19 @@ impl PlanDoc {
     /// or still-blank plan file does not mount the session's plan tab.
     fn has_content(&self) -> bool {
         matches!(&self.content, Some(Ok(text)) if !text.trim().is_empty())
+    }
+
+    /// Whether this doc's read for `key`'s Boss state at `revision` is
+    /// settled — issued or answered. A landed failure is settled for
+    /// render callers, which would otherwise re-arm on every frame;
+    /// `retry_failed` callers treat it as stale so each new state is one
+    /// bounded retry.
+    fn settled(&self, key: waku_client::DaemonKey, revision: u64, retry_failed: bool) -> bool {
+        self.key == key
+            && self.revision == revision
+            && (self.requested
+                || matches!(self.content, Some(Ok(_)))
+                || (!retry_failed && self.content.is_some()))
     }
 }
 
