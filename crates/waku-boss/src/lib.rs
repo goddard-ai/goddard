@@ -21,5 +21,9 @@ pub type RecoverEmployee = Arc<dyn Fn(uuid::Uuid) -> anyhow::Result<()> + Send +
 /// Read-only task state supplied by the daemon host.
 pub type SessionActive = Arc<dyn Fn(uuid::Uuid) -> bool + Send + Sync>;
 
+/// Read-only turn-liveness probe supplied by the daemon host — `true`
+/// while the session has an open provider turn (running or parked).
+pub type SessionBusy = Arc<dyn Fn(uuid::Uuid) -> bool + Send + Sync>;
+
 /// Daemon-owned session archival used by finalized-plan expiry.
 pub type ArchiveSessions = Arc<dyn Fn(&[uuid::Uuid]) -> anyhow::Result<bool> + Send + Sync>;

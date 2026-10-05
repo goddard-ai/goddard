@@ -86,6 +86,7 @@ pub struct BossService {
     finish_employee: Mutex<Option<crate::FinishEmployee>>,
     recover_employee: Mutex<Option<crate::RecoverEmployee>>,
     session_active: Mutex<Option<crate::SessionActive>>,
+    session_busy: Mutex<Option<crate::SessionBusy>>,
     archive_sessions: Mutex<Option<crate::ArchiveSessions>>,
     interrupted: Mutex<Vec<Uuid>>,
     projects: Mutex<std::collections::HashMap<Uuid, PathBuf>>,
@@ -107,6 +108,7 @@ impl BossService {
             finish_employee: Mutex::new(None),
             recover_employee: Mutex::new(None),
             session_active: Mutex::new(None),
+            session_busy: Mutex::new(None),
             archive_sessions: Mutex::new(None),
             interrupted: Mutex::new(Vec::new()),
             projects: Mutex::new(std::collections::HashMap::new()),
@@ -227,6 +229,7 @@ impl BossService {
             finish_employee: Mutex::new(None),
             recover_employee: Mutex::new(None),
             session_active: Mutex::new(None),
+            session_busy: Mutex::new(None),
             archive_sessions: Mutex::new(None),
             projects: Mutex::new(std::collections::HashMap::new()),
             injected: Mutex::new(std::collections::HashSet::new()),
@@ -419,6 +422,10 @@ impl BossService {
 
     pub fn set_session_active(&self, is_active: crate::SessionActive) {
         *self.session_active.lock() = Some(is_active);
+    }
+
+    pub fn set_session_busy(&self, is_busy: crate::SessionBusy) {
+        *self.session_busy.lock() = Some(is_busy);
     }
 
     pub fn set_archive_sessions(&self, archive: crate::ArchiveSessions) {
@@ -1111,7 +1118,7 @@ impl BossService {
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
-        let employee = self.begin_finishing(session, false)?;
+        let employee = self.begin_finishing(session, false, true)?;
         if employee.is_some() {
             self.complete_expiry(session)?;
         }
@@ -1146,12 +1153,22 @@ impl BossService {
     /// through the tail or recovery — so the wave member's outcome lands
     /// in the same durable write, and an all-terminal wave pushes its
     /// completion notice into the outbox here.
+    ///
+    /// `drain` marks a settle-triggered finish: while the session's
+    /// provider turn is still open — a prompt that landed between the
+    /// settle event and this pass, or a parked turn waiting on detached
+    /// work — the transition yields and that turn's own settle re-drives
+    /// the finish, so expiry never cuts an in-flight tool call. Forced
+    /// finishes (a supervisor stop, restart recovery, a failed launch)
+    /// pass `false` and tear down immediately.
     pub fn begin_finishing(
         &self,
         session: Uuid,
         failed: bool,
+        drain: bool,
     ) -> anyhow::Result<Option<BossEmployee>> {
         let now = waku_protocol::model::unix_time();
+        let session_busy = self.session_busy.lock().clone();
         let mut employee = None;
         self.update(|state| {
             if let Some(entry) = state.employees.iter_mut().find(|entry| {
@@ -1164,6 +1181,16 @@ impl BossService {
                     )
             }) {
                 let lifecycle = entry.lifecycle();
+                // A queued ticket never owns an open turn, so the probe is
+                // false for it anyway; a ticket-less `queued` record is a
+                // plain working employee and drains like one.
+                if drain
+                    && session_busy
+                        .as_ref()
+                        .is_some_and(|is_busy| is_busy(session))
+                {
+                    return Ok(());
+                }
                 entry.set_lifecycle(
                     if lifecycle == EmployeeLifecycle::Queued {
                         EmployeeLifecycle::Expired
@@ -5533,13 +5560,13 @@ mod memory_op_tests {
         assert_eq!(wave.members.len(), 2);
         assert!(wave.resolved_at.is_none());
 
-        service.begin_finishing(first.session_id, false).unwrap();
+        service.begin_finishing(first.session_id, false, false).unwrap();
         service.complete_expiry(first.session_id).unwrap();
         assert!(
             service.document().wave_outbox.is_empty(),
             "one member still in flight — no notice yet"
         );
-        service.begin_finishing(second.session_id, false).unwrap();
+        service.begin_finishing(second.session_id, false, false).unwrap();
         service.complete_expiry(second.session_id).unwrap();
         let document = service.document();
         let wave = &document.waves[0];
@@ -5564,7 +5591,7 @@ mod memory_op_tests {
                 .outcome
                 .is_none()
         );
-        service.begin_finishing(first.session_id, false).unwrap();
+        service.begin_finishing(first.session_id, false, false).unwrap();
         let document = service.document();
         assert!(document.waves[0].resolved_at.is_some());
         assert_eq!(
@@ -5688,7 +5715,7 @@ mod memory_op_tests {
         service
             .request_resource_update(session, ticket(), builds(1), parked)
             .unwrap();
-        service.begin_finishing(session, false).unwrap();
+        service.begin_finishing(session, false, false).unwrap();
         let released = service.complete_expiry(session).unwrap();
         assert!(released.contains(&held_two));
         assert!(released.contains(&parked));
@@ -5741,6 +5768,72 @@ mod memory_op_tests {
         assert!(document.waves[0].resolved_at.is_some());
         assert_eq!(document.wave_outbox.len(), 1);
         assert_eq!(document.wave_outbox[0].finished, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The settle path drains rather than cutting a live turn: while the
+    /// session's provider turn is still open — a prompt that landed
+    /// between the settle event and the finish pass — `expire` leaves the
+    /// record working, and the open turn's own settle re-drives the
+    /// finish. A forced finish (a supervisor stop) still cuts through.
+    #[test]
+    fn a_draining_expiry_defers_to_an_open_turn() {
+        let root = std::env::temp_dir().join(format!("boss-drain-expiry-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let hire = |title: &str| {
+            let mut employee = service
+                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
+                .unwrap();
+            employee.set_lifecycle(EmployeeLifecycle::Working, 1);
+            let session_id = employee.session_id;
+            service
+                .update(|state| {
+                    state.employees.push(employee);
+                    Ok(())
+                })
+                .unwrap();
+            session_id
+        };
+        let busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let probe = busy.clone();
+        service.set_session_busy(std::sync::Arc::new(move |_| {
+            probe.load(std::sync::atomic::Ordering::SeqCst)
+        }));
+
+        let draining = hire("Drain");
+        assert!(service.expire(draining).unwrap().is_none());
+        assert_eq!(
+            service.employee_lifecycle(draining),
+            Some(EmployeeLifecycle::Working),
+            "an in-flight turn holds the ticket at working"
+        );
+
+        let forced = hire("Force");
+        assert!(
+            service
+                .begin_finishing(forced, false, false)
+                .unwrap()
+                .is_some(),
+            "a forced finish ignores the open turn"
+        );
+        assert_eq!(
+            service.employee_lifecycle(forced),
+            Some(EmployeeLifecycle::Finishing)
+        );
+
+        // The deferred employee's turn settles: the next finish pass
+        // completes the expiry.
+        busy.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(service.expire(draining).unwrap().is_some());
+        assert!(service.employee(draining).unwrap().expired);
         fs::remove_dir_all(root).unwrap();
     }
 }
