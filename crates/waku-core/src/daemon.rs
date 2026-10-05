@@ -3514,6 +3514,7 @@ impl Backend for WakuBackend {
             Command::AgentProposeArchive { task_ids, reason } => {
                 self.agent_propose_archive(agent, task_ids, reason, &events)
             }
+            Command::AgentMergeSubmit => self.agent_merge_submit(agent),
             Command::AgentReadSession {
                 task_id,
                 thread_id,
@@ -4034,6 +4035,44 @@ enum ReviewMove {
 }
 
 impl WakuBackend {
+    fn agent_merge_submit(&self, owner: Option<Uuid>) -> anyhow::Result<ResponsePayload> {
+        let owner = owner.context("merge submit requires an employee task credential")?;
+        let (worktree, project, base_branch) = {
+            let mut state = self.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == owner)
+                .ok_or_else(|| anyhow!("employee task is missing"))?;
+            self.task_store.hydrate(&mut state.sessions[index])?;
+            let session = &state.sessions[index];
+            let SessionWorkspace::Worktree {
+                path,
+                base_branch,
+                adopted_by: None,
+                ..
+            } = &session.workspace
+            else {
+                bail!("merge submit requires this employee's daemon-managed worktree");
+            };
+            let project = state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map(|project| project.path.clone())
+                .ok_or_else(|| anyhow!("employee project is missing"))?;
+            (path.clone(), project, base_branch.clone())
+        };
+        if !crate::worktree::is_worktree_of(&project, &worktree) {
+            bail!("employee worktree is no longer linked to its recorded project");
+        }
+
+        let settings = self.settings.get();
+        let branch = crate::review::qa_branch_name(&settings.qa_branch);
+        let sha = crate::agent_merge::submit(&project, &worktree, base_branch.as_deref(), &branch)?;
+        Ok(ResponsePayload::AgentMergeSubmitted { sha })
+    }
+
     /// Refresh a friend's name on their delivered sessions — called when
     /// a nickname changes so the sidebar row keeps showing the name the
     /// user knows them by. Deliveries do the same inline.
@@ -10372,6 +10411,7 @@ fn handle_driver_command(
         | Command::AgentPrompt { .. }
         | Command::AgentRenameSelf { .. }
         | Command::AgentProposeArchive { .. }
+        | Command::AgentMergeSubmit
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
         | Command::AgentProjectMap { .. }

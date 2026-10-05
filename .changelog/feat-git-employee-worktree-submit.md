@@ -1,0 +1,1 @@
+- Employees working in daemon-managed Git worktrees can submit their completed commits to the configured QA branch with `goddard-agent merge submit`; submissions wait for serialized access, rebase onto the latest tip, run verification, and report the landed SHA.

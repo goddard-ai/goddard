@@ -2301,6 +2301,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentPrompt { .. }
             | Command::AgentRenameSelf { .. }
             | Command::AgentProposeArchive { .. }
+            | Command::AgentMergeSubmit
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
             | Command::AgentProjectMap { .. }
@@ -2368,6 +2369,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentPrompt { .. }
             | Command::AgentAsk { .. }
             | Command::AgentResources { .. }
+            | Command::AgentMergeSubmit
             | Command::AgentProjectMap { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
@@ -2690,6 +2692,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentPrompt { .. } => "agentPrompt",
         Command::AgentRenameSelf { .. } => "agentRenameSelf",
         Command::AgentProposeArchive { .. } => "agentProposeArchive",
+        Command::AgentMergeSubmit => "agentMergeSubmit",
         Command::CancelQueuedPrompt { .. } => "cancelQueuedPrompt",
         Command::GetFriends => "getFriends",
         Command::SendFriendRequest { .. } => "sendFriendRequest",

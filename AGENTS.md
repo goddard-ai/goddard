@@ -62,6 +62,8 @@ Read the doc before working in its area:
   or GPUI decisions: when and how to consult T3 Code and Zed source
 - [.agents/docs/changelog.md](.agents/docs/changelog.md) — fragment naming,
   groups, the mobile split
+- [.agents/docs/worktree-submission.md](.agents/docs/worktree-submission.md) —
+  employee-owned submit, rebase, verification, and failure handling
 - [.agents/docs/jev.md](.agents/docs/jev.md) — the eval model's plumbing,
   call sites, thresholds, and the spend-gating rules
 

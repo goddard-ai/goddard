@@ -54,6 +54,7 @@ macro_rules! localized {
 
 pub mod acp_session;
 pub mod agent;
+mod agent_merge;
 pub mod amp_session;
 pub mod attachments;
 pub mod auto_prompts;

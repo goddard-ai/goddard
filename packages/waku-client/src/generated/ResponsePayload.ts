@@ -37,7 +37,7 @@ import type { UsageHistory } from "./UsageHistory";
 import type { WorkspaceResult } from "./WorkspaceResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ResponsePayload = { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
+export type ResponsePayload = { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
 /**
  * The transport can settle a user-input request without structured
  * answers — clarify and dismiss are both offered on this bit.

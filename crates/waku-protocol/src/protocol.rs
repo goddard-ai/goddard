@@ -653,6 +653,9 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// Submit the calling employee's daemon-managed worktree onto the
+    /// configured QA branch after serialized rebase and verification.
+    AgentMergeSubmit,
     /// Cancel a daemon-owned queued agent prompt before it delivers. The
     /// session id rides the request envelope; `queued_message_id` names the
     /// mirrored [`crate::model::QueuedMessage`] entry. User-queued follow-ups
@@ -1320,6 +1323,9 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    AgentMergeSubmitted {
+        sha: String,
+    },
     AgentResources {
         status: crate::resources::ResourceStatus,
     },
@@ -1819,6 +1825,21 @@ mod tests {
         assert_eq!(by_thread["threadId"], "thread-9");
         assert_eq!(by_thread["provider"], "claude");
         assert!(by_thread.get("turn").is_none());
+    }
+
+    #[test]
+    fn employee_merge_submit_has_a_stable_wire_contract() {
+        let command = serde_json::to_value(Command::AgentMergeSubmit).unwrap();
+        assert_eq!(command["type"], "agentMergeSubmit");
+        serde_json::from_value::<Command>(command).unwrap();
+
+        let response = ResponsePayload::AgentMergeSubmitted {
+            sha: "0123456789abcdef".into(),
+        };
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["type"], "agentMergeSubmitted");
+        assert_eq!(value["sha"], "0123456789abcdef");
+        serde_json::from_value::<ResponsePayload>(value).unwrap();
     }
 
     #[test]

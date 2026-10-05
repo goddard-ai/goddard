@@ -1,0 +1,29 @@
+# Employee worktree submission
+
+Employees assigned to daemon-managed Git worktrees land their own completed
+unit with:
+
+```sh
+goddard-agent merge submit
+```
+
+The daemon queues submissions in arrival order, checks that the employee's
+recorded worktree is clean, rebases it onto the configured QA branch (normally
+`dev`), skips patch-equivalent commits, and squashes the submitted changes
+into one reviewable commit per employee unit. It runs `git diff --check` and
+any repository-local `agent-merge.verify` commands, then fast-forwards the
+already checked-out QA worktree. The unit commit carries the original messages
+and every `Test-Plan:` trailer. A successful command prints the landed SHA.
+
+Do not edit the worktree while submission is running. If the rebase conflicts,
+the command leaves the rebase in progress and leaves the QA branch unchanged;
+resolve the conflict in the employee worktree, continue the rebase, rerun the
+required verification, commit any repair, and submit again. Verification or
+checkout failures also leave the QA branch unchanged. Report conflicts and
+failures to the boss with `goddard-agent boss` using `reportBlocker`, or include
+the outcome in the task finish. Never claim a unit landed until the command
+returns its SHA.
+
+Bosses should include “agent-merge per rules” in assignments that use a
+daemon-managed worktree. The assigned employee commits, submits, and reports
+the SHA; a separate Worktree Integrator employee is not needed.
