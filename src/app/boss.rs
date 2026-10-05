@@ -285,6 +285,25 @@ fn sort_boss_employees(
     });
 }
 
+/// The icon an employee's rows show: the summon-set icon first, then its
+/// persona's — restricted to the employee icon set either way.
+fn employee_icon(
+    employee: &waku_protocol::boss::BossEmployee,
+    state: &BossState,
+) -> Option<CustomCommandIcon> {
+    employee
+        .icon
+        .filter(|icon| icon.is_employee_icon())
+        .or_else(|| {
+            state
+                .personas
+                .iter()
+                .find(|persona| persona.id == employee.persona_id)
+                .and_then(|persona| persona.icon)
+                .filter(|icon| icon.is_employee_icon())
+        })
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -390,20 +409,9 @@ impl Waku {
                     self.boss_ui
                         .job_titles
                         .insert(employee.session_id, employee.job_title.clone());
-                    self.boss_ui.employee_icons.insert(
-                        employee.session_id,
-                        employee
-                            .icon
-                            .filter(|icon| icon.is_employee_icon())
-                            .or_else(|| {
-                                state
-                                    .personas
-                                    .iter()
-                                    .find(|persona| persona.id == employee.persona_id)
-                                    .and_then(|persona| persona.icon)
-                                    .filter(|icon| icon.is_employee_icon())
-                            }),
-                    );
+                    self.boss_ui
+                        .employee_icons
+                        .insert(employee.session_id, employee_icon(employee, state));
                     self.boss_ui.managed.insert(employee.session_id);
                     if employee.expired {
                         self.boss_ui.expired.insert(employee.session_id);
@@ -423,6 +431,27 @@ impl Waku {
                     self.boss_ui
                         .identities
                         .insert(employee.session_id, employee.identity.clone());
+                }
+                // Retired employees leave the visible roster but keep
+                // their document record — transcript cards and mention
+                // chips are historical content that still resolves them.
+                // They stay boss-managed and read as finished, never
+                // queued or working; the roster owns any overlap.
+                for employee in &state.retired_employees {
+                    self.boss_ui
+                        .job_titles
+                        .entry(employee.session_id)
+                        .or_insert_with(|| employee.job_title.clone());
+                    self.boss_ui
+                        .employee_icons
+                        .entry(employee.session_id)
+                        .or_insert_with(|| employee_icon(employee, state));
+                    self.boss_ui.managed.insert(employee.session_id);
+                    self.boss_ui.expired.insert(employee.session_id);
+                    self.boss_ui
+                        .identities
+                        .entry(employee.session_id)
+                        .or_insert_with(|| employee.identity.clone());
                 }
             }
             self.boss_ui.revision = self.boss_ui.revision.wrapping_add(1);

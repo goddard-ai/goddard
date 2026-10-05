@@ -8259,6 +8259,30 @@ impl WakuBackend {
         employee.request_fingerprint = request_id.map(|_| fingerprint);
         let employee_name = employee.identity.name.clone();
         let employee_title = employee.job_title.clone();
+        // The summon marker freezes the identity the card shows — name,
+        // avatar seed, job title, and the icon the roster would resolve —
+        // so the transcript keeps rendering it after the roster record
+        // retires or the employee's task archives.
+        let summon_card = {
+            let document = self.boss.document();
+            waku_protocol::model::BossSummonCard {
+                session_id: employee.session_id,
+                name: employee_name.clone(),
+                avatar_seed: employee.identity.avatar_seed.clone(),
+                job_title: employee_title.clone(),
+                icon: employee
+                    .icon
+                    .filter(|icon| icon.is_employee_icon())
+                    .or_else(|| {
+                        document
+                            .personas
+                            .iter()
+                            .find(|persona| persona.id == employee.persona_id)
+                            .and_then(|persona| persona.icon)
+                            .filter(|icon| icon.is_employee_icon())
+                    }),
+            }
+        };
         // The task shell lands before the roster does — a client that
         // opens the new employee immediately finds the assignment's
         // session, still unstarted: no worktree, no runtime, no claims.
@@ -8269,8 +8293,8 @@ impl WakuBackend {
             return Err(error);
         }
         // The summon marker lands in the supervisor's transcript now —
-        // the card reads the roster record and shows its queued state
-        // until the ticket dispatches.
+        // the card reads the roster for live status and shows its queued
+        // state until the ticket dispatches.
         let mut marker = crate::model::ActivityItem::new(
             None,
             crate::model::ActivityKind::Tool,
@@ -8279,7 +8303,7 @@ impl WakuBackend {
             true,
         )
         .with_tool_name(Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME));
-        marker.arguments = Some(session_id.to_string());
+        marker.arguments = Some(serde_json::to_string(&summon_card)?);
         let event = DriverEvent::RichActivity(marker);
         record_boss_event(&self.task_state, &self.task_store, supervisor, &event)?;
         let _ = events.send(event_to_wire(event)?);
@@ -15293,6 +15317,96 @@ mod tests {
         assert!(backend.boss.is_employee(session.id));
         assert!(session.boss_managed);
         drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The summon marker freezes the card's identity — name, avatar seed,
+    /// job title, and the resolved icon — so the transcript still resolves
+    /// it after the roster record retires or the task archives. The missing
+    /// provider binary fails the launch after the marker persists, so the
+    /// assertions read the supervisor's stored transcript.
+    #[test]
+    fn boss_summon_marker_freezes_the_card_identity() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-summon-card-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (backend, boss) = surface_test_backend(&root);
+        backend
+            .boss.set_session_id(boss).unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+
+        let persona = backend.boss.document().personas[1].id;
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            BossOperation::Summon {
+                persona_id: persona,
+                job_title: "Release checks".into(),
+                prompt: "Summarize the diff".into(),
+                project: project.display().to_string(),
+                provider: Some(ProviderKind::Codex),
+                model: None,
+                reasoning_effort: None,
+                workspace: None,
+                base_branch: None,
+                permissions: None,
+                work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+                icon: Some(waku_protocol::custom_commands::CustomCommandIcon::Beaker),
+                resources: None,
+                allow_burst: false,
+                group_id: None,
+                priority: None,
+                goal_id: None,
+                request_id: None,
+            },
+            &EventSink::detached(),
+        );
+        assert!(result.is_err());
+        let employee = backend
+            .boss
+            .document()
+            .employees
+            .iter()
+            .find(|entry| entry.supervisor_id == boss)
+            .expect("the summon persisted a roster record")
+            .clone();
+        let marker = {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == boss)
+                .expect("the supervisor session persisted");
+            backend.task_store.hydrate(session).unwrap();
+            session
+                .transcript_blocks
+                .iter()
+                .flat_map(|block| block.activities.iter())
+                .find(|activity| {
+                    activity.tool_name.as_deref()
+                        == Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
+                })
+                .cloned()
+                .expect("the summon marker landed in the transcript")
+        };
+        let card = waku_protocol::model::BossSummonCard::parse(
+            marker.arguments.as_deref().expect("the marker carries arguments"),
+        )
+        .expect("the marker arguments parse as a summon card");
+        assert_eq!(card.session_id, employee.session_id);
+        assert_eq!(card.name, employee.identity.name);
+        assert_eq!(card.avatar_seed, employee.identity.avatar_seed);
+        assert_eq!(card.job_title, employee.job_title);
+        assert_eq!(
+            card.icon,
+            Some(waku_protocol::custom_commands::CustomCommandIcon::Beaker)
+        );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

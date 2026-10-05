@@ -3329,10 +3329,47 @@ pub const MESSAGE_ATOM_OPEN: char = '\u{FFF9}';
 pub const MESSAGE_ATOM_END: char = '\u{FFFA}';
 
 /// The `tool_name` the daemon stamps on the transcript activity it records
-/// into a supervisor's session when a `BossOperation::Summon` succeeds. The
-/// employee's session id rides in `arguments`; the desktop renders that
-/// activity as the live summon card instead of a tool row.
+/// into a supervisor's session when a `BossOperation::Summon` succeeds.
+/// `arguments` carries the employee's [`BossSummonCard`] as JSON — markers
+/// written before it hold the bare session id — and the desktop renders
+/// that activity as the live summon card instead of a tool row.
 pub const BOSS_SUMMON_TOOL_NAME: &str = "boss_summon";
+
+/// The summon-time identity a `boss_summon` transcript marker's `arguments`
+/// carries, so the card — historical transcript content — still renders the
+/// employee's name, avatar, job title, and icon after the roster record
+/// retires or the task archives. The roster stays authoritative while the
+/// employee is on it; this is the fallback once the record is gone.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossSummonCard {
+    pub session_id: Uuid,
+    pub name: String,
+    pub avatar_seed: String,
+    #[serde(default)]
+    pub job_title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<crate::custom_commands::CustomCommandIcon>,
+}
+
+impl BossSummonCard {
+    /// Reads a `boss_summon` marker's `arguments`: the JSON card newer
+    /// daemons write, or a bare session id from older markers — whose only
+    /// certain identity is the id itself, which also seeded the avatar at
+    /// summon.
+    pub fn parse(arguments: &str) -> Option<Self> {
+        if let Ok(session_id) = Uuid::parse_str(arguments) {
+            return Some(Self {
+                session_id,
+                name: String::new(),
+                avatar_seed: session_id.to_string(),
+                job_title: String::new(),
+                icon: None,
+            });
+        }
+        serde_json::from_str(arguments).ok()
+    }
+}
 
 /// The character range carrying a session id inside an atom span: one
 /// variation selector per hex nibble, in byte order — 32 chars for the 16
@@ -6078,6 +6115,28 @@ mod tests {
                 "model {model}"
             );
         }
+    }
+
+    #[test]
+    fn summon_card_arguments_parse_both_payload_shapes() {
+        let session_id = Uuid::new_v4();
+        let card = BossSummonCard {
+            session_id,
+            name: "Alden".into(),
+            avatar_seed: "seed-1".into(),
+            job_title: "Release checks".into(),
+            icon: Some(crate::custom_commands::CustomCommandIcon::Beaker),
+        };
+        assert_eq!(
+            BossSummonCard::parse(&serde_json::to_string(&card).unwrap()),
+            Some(card)
+        );
+        // Older markers carried the bare session id, which also seeded the
+        // summon-time avatar.
+        let legacy = BossSummonCard::parse(&session_id.to_string()).unwrap();
+        assert_eq!(legacy.session_id, session_id);
+        assert_eq!(legacy.avatar_seed, session_id.to_string());
+        assert!(BossSummonCard::parse("not a marker payload").is_none());
     }
 
     #[test]

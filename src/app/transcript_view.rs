@@ -3339,9 +3339,9 @@ impl Waku {
         // A `boss_summon` marker lands in the supervisor's transcript when
         // the daemon completes a summon — it renders as the live employee
         // card and is lifted out of the activity fold entirely.
-        let summons: Vec<Uuid> = activities
+        let summons: Vec<waku_protocol::model::BossSummonCard> = activities
             .iter()
-            .filter_map(boss_summon_session_id)
+            .filter_map(boss_summon_card)
             .collect();
         if !summons.is_empty()
             && activities
@@ -3354,8 +3354,8 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .children(summons.iter().map(|&employee_id| {
-                    self.render_summon_card(session_id, employee_id, theme, cx)
+                .children(summons.iter().map(|card| {
+                    self.render_summon_card(session_id, card, theme, cx)
                 }))
                 .into_any_element();
         }
@@ -3470,8 +3470,8 @@ impl Waku {
             );
         if !expanded {
             return cluster
-                .children(summons.iter().map(|&employee_id| {
-                    self.render_summon_card(session_id, employee_id, theme, cx)
+                .children(summons.iter().map(|card| {
+                    self.render_summon_card(session_id, card, theme, cx)
                 }))
                 .into_any_element();
         }
@@ -4033,8 +4033,8 @@ impl Waku {
         }
         cluster
             .child(items)
-            .children(summons.iter().map(|&employee_id| {
-                self.render_summon_card(session_id, employee_id, theme, cx)
+            .children(summons.iter().map(|card| {
+                self.render_summon_card(session_id, card, theme, cx)
             }))
             .into_any_element()
     }
@@ -4043,22 +4043,37 @@ impl Waku {
     /// name, job title, current status, and the employee's freshest
     /// assistant commentary clamped to two lines. The whole card opens the
     /// employee's chat — the same route the mention chips take.
+    ///
+    /// Status and commentary read live state; identity reads the roster
+    /// while the employee is on it — tracking renames and avatar re-rolls —
+    /// and falls back to the marker's frozen summon-time payload once the
+    /// record retires or the task archives.
     pub(super) fn render_summon_card(
         &self,
         owner_session: Uuid,
-        employee_id: Uuid,
+        card: &waku_protocol::model::BossSummonCard,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let employee_id = card.session_id;
         let employee = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == employee_id);
-        let identity = self.boss_session_identity(employee_id);
+        let identity = self.boss_session_identity(employee_id).or_else(|| {
+            (!card.name.is_empty() || !card.avatar_seed.is_empty()).then(|| {
+                waku_protocol::boss::BossIdentity {
+                    id: employee_id,
+                    name: card.name.clone(),
+                    avatar_seed: card.avatar_seed.clone(),
+                }
+            })
+        });
         let name = identity
             .as_ref()
             .map(|identity| identity.name.clone())
+            .filter(|name| !name.is_empty())
             .or_else(|| employee.map(|session| session.title.clone()))
             .unwrap_or_else(|| employee_id.to_string());
         let job_title = self
@@ -4066,7 +4081,7 @@ impl Waku {
             .job_titles
             .get(&employee_id)
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_else(|| card.job_title.clone());
         // Freshest assistant message, tail-first: while the employee streams
         // its newest message lands here chunk by chunk.
         let commentary = employee
@@ -4188,7 +4203,7 @@ impl Waku {
                                             .employee_icons
                                             .get(&employee_id)
                                             .copied()
-                                            .flatten()
+                                            .unwrap_or(card.icon)
                                             .map(crate::custom_commands::icon_path)
                                             .unwrap_or_else(|| {
                                                 boss::job_title_icon(&job_title)
@@ -4733,16 +4748,24 @@ fn summon_card_preview(commentary: &str, theme: &Theme, cx: &App) -> AnyElement 
         .into_any_element()
 }
 
-/// The employee session id a `boss_summon` marker activity carries in
+/// The summon-time identity a `boss_summon` marker activity carries in
 /// `arguments` — `None` for every ordinary activity item.
-pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
+pub(super) fn boss_summon_card(
+    activity: &ActivityItem,
+) -> Option<waku_protocol::model::BossSummonCard> {
     if activity.tool_name.as_deref() != Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME) {
         return None;
     }
     activity
         .arguments
         .as_deref()
-        .and_then(|arguments| Uuid::parse_str(arguments).ok())
+        .and_then(waku_protocol::model::BossSummonCard::parse)
+}
+
+/// The employee session id a `boss_summon` marker activity carries —
+/// `None` for every ordinary activity item.
+pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
+    boss_summon_card(activity).map(|card| card.session_id)
 }
 
 fn decode_activity_image(image_url: &str) -> Option<std::sync::Arc<gpui::Image>> {
