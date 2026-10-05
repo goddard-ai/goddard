@@ -1520,6 +1520,13 @@ function targetForChange(
   directory: string,
   filename: string | Buffer | null,
 ): BuildTarget {
+  // Locale data compiles into waku-localization, which both binaries embed —
+  // like the wire protocol, the running daemon must be replaced before the
+  // rebuilt app launches or its embedded catalog disagrees with the app's.
+  if (directory === "locales") {
+    protocolDirty = true;
+    return "app";
+  }
   if (directory !== "crates" || filename === null) return "app";
   const relativePath = filename.toString().replaceAll("\\", "/");
   if (
@@ -1534,6 +1541,7 @@ function targetForChange(
   // The wire protocol is shared by both sides, so the running daemon must be
   // replaced before the rebuilt app launches or the handshake mismatches.
   if (relativePath.startsWith("waku-protocol/")) protocolDirty = true;
+  if (relativePath.startsWith("waku-localization/")) protocolDirty = true;
   return "app";
 }
 

@@ -6,14 +6,23 @@
 //! the transport-neutral contract in `waku-protocol`. Client applications
 //! intentionally depend on `waku-client` instead of this crate.
 
-rust_i18n::i18n!("../../locales", fallback = "en");
-
+// The catalog is embedded once by `waku-localization` and registered into
+// `waku-protocol` when linked; `crate::i18n` re-exports it.
 macro_rules! tr {
     ($key:expr) => {
-        crate::i18n::translate($key)
+        waku_localization::translate($key)
     };
-    ($key:expr, $($args:tt)*) => {
-        rust_i18n::t!($key, $($args)*).into_owned()
+    ($key:expr, $($name:ident => $value:expr),+ $(,)?) => {
+        waku_localization::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
+        waku_localization::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
     };
 }
 

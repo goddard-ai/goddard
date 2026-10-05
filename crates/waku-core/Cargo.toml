@@ -22,7 +22,6 @@ futures = "0.3"
 github-copilot-sdk = { version = "1.0.14", default-features = false }
 nucleo-matcher = "0.3"
 parking_lot = "0.12"
-rust-i18n = "4"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
@@ -36,6 +35,7 @@ trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+waku-localization = { path = "../waku-localization" }
 waku-memory-engine = { path = "../waku-memory-engine" }
 waku-protocol = { path = "../waku-protocol" }
 waku-repo-map = { path = "../waku-repo-map" }

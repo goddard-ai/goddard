@@ -10,7 +10,7 @@ name = "goddard"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map"]
+members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map", "crates/waku-localization"]
 default-members = [
   ".",
   "crates/waku-client",
@@ -58,6 +58,7 @@ unicode-script = "0.5"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-client = { path = "crates/waku-client" }
+waku-localization = { path = "crates/waku-localization" }
 waku-protocol = { path = "crates/waku-protocol" }
 pulldown-cmark = "0.13"
 # QR for the daemon connect link; default features pull renderers we paint
@@ -70,7 +71,6 @@ ratex-types = "=0.1.14"
 ratex-svg = { version = "=0.1.14", features = ["embed-fonts"] }
 regex = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
-rust-i18n = "4"
 posthog-rs = { version = "0.27.0", default-features = false, features = ["async-client"] }
 smol = "2"
 ropey = "=2.0.0-beta.1"

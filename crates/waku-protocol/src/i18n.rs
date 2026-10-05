@@ -74,8 +74,51 @@ pub fn set_language(language: AppLanguage) {
     rust_i18n::set_locale(language.locale());
 }
 
+/// The translation catalog a process embeds, installed by `waku-localization`
+/// (or a test double) at load. Keeping the lookup behind this trait means the
+/// wire contract carries no catalog data: locale edits never rebuild
+/// `waku-protocol` or its downstream consumers.
+pub trait TranslationCatalog: Sync + Send {
+    /// Locale chain and shipped-locale fallback applied; `None` is a miss.
+    fn try_translate(&self, locale: &str, key: &str) -> Option<String>;
+}
+
+static CATALOG: std::sync::OnceLock<&'static dyn TranslationCatalog> =
+    std::sync::OnceLock::new();
+
+/// Install the process's catalog. The first install wins; later calls are
+/// ignored so the registration is idempotent across entry points.
+pub fn install_catalog(catalog: &'static dyn TranslationCatalog) {
+    let _ = CATALOG.set(catalog);
+}
+
+/// Translate `key` in the process's current locale. A lookup miss — including
+/// a process that never installed a catalog — returns the key itself,
+/// matching `rust_i18n::t!` semantics.
 pub fn translate(key: &str) -> String {
-    rust_i18n::t!(key).into_owned()
+    translate_in(&rust_i18n::locale(), key)
+}
+
+/// Translate `key` in `locale` through the installed catalog. A lookup miss
+/// returns the key itself.
+pub fn translate_in(locale: &str, key: &str) -> String {
+    CATALOG
+        .get()
+        .and_then(|catalog| catalog.try_translate(locale, key))
+        .unwrap_or_else(|| key.to_owned())
+}
+
+/// Translate `key`, then substitute each `%{name}` placeholder in the
+/// translated template (or the key itself on a miss) with the paired value.
+pub fn translate_args(key: &str, args: &[(&'static str, String)]) -> String {
+    let text = translate(key);
+    let mut names = Vec::with_capacity(args.len());
+    let mut values = Vec::with_capacity(args.len());
+    for (name, value) in args {
+        names.push(*name);
+        values.push(value.clone());
+    }
+    rust_i18n::replace_patterns(&text, &names, &values)
 }
 
 pub fn uses_east_asian_date_format() -> bool {
@@ -111,18 +154,6 @@ fn system_locale() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn language_locale_ids_are_supported() {
-        assert_eq!(AppLanguage::English.locale(), "en");
-        assert_eq!(AppLanguage::SimplifiedChinese.locale(), "zh-CN");
-        assert_eq!(AppLanguage::Japanese.locale(), "ja");
-        let locales = rust_i18n::available_locales!();
-        assert_eq!(locales.len(), 3);
-        assert!(locales.iter().any(|locale| locale.as_ref() == "en"));
-        assert!(locales.iter().any(|locale| locale.as_ref() == "zh-CN"));
-        assert!(locales.iter().any(|locale| locale.as_ref() == "ja"));
-    }
 
     #[test]
     fn language_names_are_autonyms() {
@@ -173,50 +204,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn translations_are_complete_and_interpolate_naturally() {
-        assert_eq!(&*rust_i18n::t!("settings.daemon", locale = "en"), "Daemon");
-        assert_eq!(
-            &*rust_i18n::t!("daemon.expose_title", locale = "en"),
-            "Expose managed daemon"
-        );
-        assert_eq!(
-            &*rust_i18n::t!("settings.general", locale = "zh-CN"),
-            "通用"
-        );
-        assert_eq!(
-            &*rust_i18n::t!(
-                "computer_use.allow_control",
-                locale = "zh-CN",
-                app = "Finder"
-            ),
-            "允许 Goddard 控制“Finder”吗？"
-        );
-        assert_eq!(
-            &*rust_i18n::t!("session.rewound", locale = "zh-CN", turn = 3),
-            "已回退到第 3 轮任务之前"
-        );
-        assert_eq!(&*rust_i18n::t!("settings.general", locale = "ja"), "一般");
-        assert_eq!(
-            &*rust_i18n::t!("computer_use.allow_control", locale = "ja", app = "Finder"),
-            "Goddard に「Finder」の操作を許可しますか？"
-        );
-        assert_eq!(
-            &*rust_i18n::t!("session.rewound", locale = "ja", turn = 3),
-            "タスクをターン 3 の前まで巻き戻しました"
-        );
-    }
-
-    #[test]
-    fn task_creation_copy_uses_task_terminology() {
-        assert_eq!(&*rust_i18n::t!("menu.new_task", locale = "en"), "New Task");
-        assert_eq!(
-            &*rust_i18n::t!("command_palette.new_task", locale = "en"),
-            "New task"
-        );
-        assert_eq!(
-            &*rust_i18n::t!("providers.disabled_for_new_tasks", locale = "en"),
-            "Disabled for new tasks"
-        );
-    }
 }

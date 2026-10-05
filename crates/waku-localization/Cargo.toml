@@ -1,0 +1,11 @@
+[package]
+name = "waku-localization"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded locale catalog and translation registry for Goddard's native crates"
+license = "GPL-3.0-only"
+
+[dependencies]
+ctor = "1"
+rust-i18n = "4"
+waku-protocol = { path = "../waku-protocol" }

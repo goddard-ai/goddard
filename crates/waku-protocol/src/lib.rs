@@ -10,23 +10,24 @@
 //! conventions (artifact names, link policy) must be shared by every build
 //! that can launch, and no daemon owns the app's home directory.
 
-rust_i18n::i18n!("../../locales", fallback = "en");
-
-// `i18n!` reads these files in a proc macro. Explicit includes make them
-// visible to Cargo's dependency tracker, so locale-only edits rebuild this
-// shared translation registry under the development watcher.
-const _LOCALE_SOURCES: [&str; 3] = [
-    include_str!("../../../locales/app.yml"),
-    include_str!("../../../locales/zh-CN.yml"),
-    include_str!("../../../locales/ja.yml"),
-];
-
+// Catalog data lives in `waku-localization`, which installs a translator into
+// `crate::i18n` when linked. Keeping the DTOs catalog-free means locale edits
+// no longer rebuild every wire consumer.
 macro_rules! tr {
     ($key:expr) => {
         crate::i18n::translate($key)
     };
-    ($key:expr, $($args:tt)*) => {
-        rust_i18n::t!($key, $($args)*).into_owned()
+    ($key:expr, $($name:ident => $value:expr),+ $(,)?) => {
+        crate::i18n::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
+        crate::i18n::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
     };
 }
 

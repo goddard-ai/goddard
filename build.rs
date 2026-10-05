@@ -65,7 +65,7 @@ fn export_commit_sha() {
     // The package's own inputs are watched too: once any rerun-if-changed is
     // emitted, Cargo drops its everything-changes default, and without these
     // a rebuild caused by a plain source edit would reuse a stale flag.
-    for directory in ["src", "locales", "assets"] {
+    for directory in ["src", "assets"] {
         println!("cargo:rerun-if-changed={directory}");
     }
     let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) else {

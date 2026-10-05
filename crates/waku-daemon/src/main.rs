@@ -11,6 +11,9 @@ use waku_protocol::{
 };
 
 fn main() -> anyhow::Result<()> {
+    // Register the embedded locale catalog with waku-protocol before any wire
+    // type renders text in this process.
+    waku_core::i18n::install();
     waku_core::command_env::raise_open_file_limit();
     let mut migration = waku_protocol::migration::migrate_home_directory();
     migration.extend(waku_core::migration::migrate_data_directory());

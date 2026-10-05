@@ -1,22 +1,22 @@
 #![recursion_limit = "256"]
 
-rust_i18n::i18n!("locales", fallback = "en");
-
-// rust-i18n expands locale data in a proc macro, which Cargo does not always
-// discover as an input when only a YAML file changes. Keep explicit source
-// dependencies so the watcher rebuilds the translation registry itself.
-const _LOCALE_SOURCES: [&str; 3] = [
-    include_str!("../locales/app.yml"),
-    include_str!("../locales/zh-CN.yml"),
-    include_str!("../locales/ja.yml"),
-];
-
+// The catalog is embedded once by `waku-localization` and registered into
+// `waku-protocol` when linked; `crate::i18n` resolves through `waku-client`.
 macro_rules! tr {
     ($key:expr) => {
-        crate::i18n::translate($key)
+        waku_localization::translate($key)
     };
-    ($key:expr, $($args:tt)*) => {
-        rust_i18n::t!($key, $($args)*).into_owned()
+    ($key:expr, $($name:ident => $value:expr),+ $(,)?) => {
+        waku_localization::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
+        waku_localization::translate_args(
+            $key,
+            &[$( (stringify!($name), $value.to_string()) ),+],
+        )
     };
 }
 
@@ -24,7 +24,7 @@ macro_rules! tr {
 /// because formatted messages necessarily allocate.
 macro_rules! tr_cow {
     ($key:literal) => {
-        rust_i18n::t!($key)
+        waku_localization::translate_cow($key)
     };
 }
 
@@ -349,6 +349,9 @@ impl WakuApplicationExt for Application {
 }
 
 pub fn run() {
+    // Register the embedded locale catalog with waku-protocol before any wire
+    // type renders text in this process.
+    waku_localization::install();
     // Adopt pre-Goddard state under ~/.goddard before anything reads the new
     // location — small files copy, workspaces and worktrees link over. The
     // daemon migrates the data directory it owns. Failures are non-fatal: the

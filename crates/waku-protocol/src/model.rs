@@ -5022,7 +5022,7 @@ fn title_in_any_locale(title: &str, keys: &[&str]) -> bool {
     keys.iter().any(|key| {
         SHIPPED_LOCALES
             .iter()
-            .any(|locale| title == rust_i18n::t!(*key, locale = *locale))
+            .any(|locale| title == crate::i18n::translate_in(*locale, key))
     })
 }
 

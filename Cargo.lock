@@ -11167,7 +11167,6 @@ dependencies = [
  "ropey",
  "rquickjs",
  "rusqlite",
- "rust-i18n",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -11180,6 +11179,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-client",
+ "waku-localization",
  "waku-protocol",
  "webview2-com",
  "windows 0.61.3",
@@ -11256,7 +11256,6 @@ dependencies = [
  "parking_lot",
  "rhai",
  "rusqlite",
- "rust-i18n",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -11270,6 +11269,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-client",
+ "waku-localization",
  "waku-memory-engine",
  "waku-protocol",
  "waku-repo-map",
@@ -11285,6 +11285,15 @@ dependencies = [
  "anyhow",
  "serde_json",
  "waku-core",
+ "waku-protocol",
+]
+
+[[package]]
+name = "waku-localization"
+version = "0.1.0"
+dependencies = [
+ "ctor",
+ "rust-i18n",
  "waku-protocol",
 ]
 
