@@ -1230,10 +1230,13 @@ impl Waku {
         if self.big_picture.is_open() {
             return;
         }
-        let placeholder = if self.composer_boss_command().is_some() {
-            tr!("boss.command_placeholder")
-        } else {
-            tr!("input.do_anything")
+        let placeholder = match self.composer_boss_command().map(|command| command.context) {
+            Some(BossCommandContext::Employee(..)) => tr!("boss.command_placeholder_employee"),
+            Some(BossCommandContext::Deliverable { .. }) => {
+                tr!("boss.command_placeholder_deliverable")
+            }
+            Some(BossCommandContext::MemoryCorrection { .. }) => tr!("boss.command_placeholder"),
+            None => tr!("input.do_anything"),
         };
         self.composer
             .update(cx, |composer, cx| composer.set_placeholder(placeholder, cx));

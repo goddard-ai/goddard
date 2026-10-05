@@ -6148,6 +6148,10 @@ boss.trigger_unavailable:
   en: Employee transcript unavailable
 boss.command_placeholder:
   en: Command the boss...
+boss.command_placeholder_employee:
+  en: Use the boss to control this employee...
+boss.command_placeholder_deliverable:
+  en: Use the boss to edit this deliverable...
 boss.command_hint:
   en: Messages go to %{name}
 boss.save_first:
