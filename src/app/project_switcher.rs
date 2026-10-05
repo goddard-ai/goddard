@@ -324,6 +324,16 @@ impl Waku {
             }
             return;
         }
+        // ⌘N from a deliverable's preview page lands on the boss chat it
+        // borrows — the page isn't a session of its own, so "new chat"
+        // from it means the chat underneath, not the project picker over it.
+        if self.live_deliverable_page().is_some()
+            && let Some(key) = self.boss_chat_key()
+        {
+            self.settings_page = None;
+            self.chat_with_boss(key, cx);
+            return;
+        }
         // ⌘N lands wherever the user worked most recently: a boss chat
         // messaged since the last New Task start wins over the page. On
         // the boss chat itself the chord asks "which project" — the

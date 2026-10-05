@@ -4070,7 +4070,7 @@ impl Waku {
                     .into_any_element()
                 }),
             Some(RightPanelSurface::File(path)) => self
-                .render_right_panel_file(path, width, true, false, window, cx)
+                .render_right_panel_file(path, width, true, None, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::FileAtRef { path, git_ref }) => self
                 .render_right_panel_ref_file(&path, &git_ref, width, window, cx)
@@ -6017,7 +6017,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         if let Some(relative_path) = self.right_panel_files_selected_path.clone() {
-            self.render_right_panel_file(relative_path, panel_width, true, false, window, cx)
+            self.render_right_panel_file(relative_path, panel_width, true, None, window, cx)
         } else {
             self.render_right_panel_working_tree(None, cx)
         }
@@ -6414,7 +6414,7 @@ impl Waku {
             self.boss_ui.deliverable_page = None;
             return None;
         };
-        let relative_path = self
+        let deliverable = self
             .boss_ui
             .states
             .get(&key)
@@ -6423,14 +6423,13 @@ impl Waku {
                     .deliverables
                     .iter()
                     .find(|deliverable| deliverable.id == deliverable_id && !deliverable.directory)
-            })
-            .and_then(|deliverable| {
-                std::path::Path::new(&deliverable.path)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(str::to_owned)
             });
-        let Some(relative_path) = relative_path else {
+        let Some((deliverable_title, relative_path)) = deliverable.and_then(|deliverable| {
+            std::path::Path::new(&deliverable.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|file_name| (deliverable.name.clone(), file_name.to_owned()))
+        }) else {
             self.boss_ui.deliverable_page = None;
             return None;
         };
@@ -6439,7 +6438,7 @@ impl Waku {
                 relative_path,
                 self.chat_viewport_width(window),
                 false,
-                true,
+                Some(deliverable_title),
                 window,
                 cx,
             )
@@ -6450,19 +6449,21 @@ impl Waku {
     /// `show_tree` mounts the working-tree column beside the editor — the
     /// strip's own browsing surface. A deliverable's preview page leaves it
     /// out: the page previews one published file, not its directory.
-    /// `deliverable_page` lays the surface out as a page — the markdown preview
-    /// centers its column like the maximized panel and a bottom fade marks
-    /// content scrolling under the composer, as the transcript's does.
+    /// `deliverable_title` lays the surface out as a page — the markdown preview
+    /// centers its column like the maximized panel, a bottom fade marks
+    /// content scrolling under the composer as the transcript's does, and the
+    /// header carries the deliverable's name like a top bar title.
     fn render_right_panel_file(
         &mut self,
         relative_path: String,
         panel_width: f32,
         show_tree: bool,
-        deliverable_page: bool,
+        deliverable_title: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
+        let deliverable_page = deliverable_title.is_some();
         let fullscreen = self.panel_fullscreen_active();
         let file_tree_width = if !show_tree || fullscreen {
             0.0
@@ -6650,12 +6651,48 @@ impl Waku {
                 div()
                     .h(px(42.0))
                     .flex_none()
-                    .px(px(16.0))
+                    // A deliverable's page owns the chat column, so its top
+                    // bar is the surface under the window's left edge — it
+                    // keeps the same traffic-light clearance the chat header
+                    // does while the sidebar is too narrow to host them.
+                    .pl(px(if deliverable_page {
+                        if self.sidebar_visible {
+                            16.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0)
+                        } else {
+                            TRAFFIC_LIGHT_CLEARANCE
+                        }
+                    } else {
+                        16.0
+                    }))
+                    .pr(px(16.0))
                     .flex()
                     .items_center()
                     .gap(px(8.0))
                     .border_b(hairline())
                     .border_color(theme.separator)
+                    .children(
+                        (deliverable_page && !self.sidebar_visible)
+                            .then(|| {
+                                self.render_client_window_controls(
+                                    super::window_chrome::WindowControlSide::Left,
+                                    window,
+                                    cx,
+                                )
+                            })
+                            .flatten(),
+                    )
+                    .when_some(deliverable_title, |header, title| {
+                        header.child(
+                            div()
+                                .min_w_0()
+                                .flex_shrink(1.0)
+                                .truncate()
+                                .text_size(sp(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(title),
+                        )
+                    })
                     .child(file_icon(file_icon_for_path(&relative_path), 13.0))
                     .child(file_link(
                         div()
