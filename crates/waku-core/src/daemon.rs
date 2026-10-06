@@ -6743,52 +6743,103 @@ impl WakuBackend {
                     bail!("only the human can open the boss");
                 }
                 self.boss.with_operation_lock(|| {
-                    let boss = self.boss.document();
-                    let mut state = self.task_state.lock();
+                    let (identity, boss_session_id) = self.boss.identity_and_session();
                     let mut project = Project::from_path(self.boss.owned_workspace()?);
-                    project.id = boss.identity.id;
+                    project.id = identity.id;
                     project.name = "Boss".into();
-                    if let Some(existing) = state
-                        .projects
-                        .iter_mut()
-                        .find(|entry| entry.id == project.id)
-                    {
-                        *existing = project.clone();
-                    } else {
-                        state.projects.push(project.clone());
+                    enum Step {
+                        /// The row already names the boss project and its local
+                        /// workspace — nothing to persist, so the reply ships
+                        /// the list projection and the client keeps the detail
+                        /// it holds or hydrates it through the ordinary path.
+                        Ready(AgentSession),
+                        /// The row's project or workspace drifted; repair it so
+                        /// a stored detail blob cannot resurrect the stale
+                        /// values on the next hydrate.
+                        Repair(Uuid),
+                        /// No boss chat yet — create it.
+                        Create,
                     }
-                    if let Some(id) = boss.session_id {
-                        if let Some(session) =
-                            state.sessions.iter_mut().find(|session| session.id == id)
+                    let step = {
+                        let mut state = self.task_state.lock();
+                        if let Some(existing) = state
+                            .projects
+                            .iter_mut()
+                            .find(|entry| entry.id == project.id)
                         {
-                            self.task_store.hydrate(session)?;
-                            session.project_id = project.id;
-                            session.workspace = SessionWorkspace::default();
-                            let session = session.clone();
+                            *existing = project.clone();
+                        } else {
+                            state.projects.push(project.clone());
+                        }
+                        match boss_session_id.and_then(|id| {
+                            state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == id)
+                                .map(|session| (id, session))
+                        }) {
+                            Some((_, session))
+                                if session.project_id == project.id
+                                    && session.workspace == SessionWorkspace::default() =>
+                            {
+                                Step::Ready(session.list_projection())
+                            }
+                            Some((id, _)) => Step::Repair(id),
+                            None => Step::Create,
+                        }
+                    };
+                    match step {
+                        Step::Ready(session) => Ok(BossResult::Session {
+                            session: Box::new(session),
+                            project: Box::new(project),
+                        }),
+                        Step::Repair(id) => {
+                            // Drift is the rare path — hydrate on the store's
+                            // own connection off the state lock, then merge
+                            // and persist under it.
+                            let mut session = {
+                                let state = self.task_state.lock();
+                                state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == id)
+                                    .cloned()
+                            };
+                            if let Some(session) = session.as_mut() {
+                                self.task_store.hydrate(session)?;
+                            }
+                            let mut state = self.task_state.lock();
+                            let Some(existing) = state
+                                .sessions
+                                .iter_mut()
+                                .find(|session| session.id == id)
+                            else {
+                                // The row vanished mid-open — create the chat.
+                                drop(state);
+                                return self.create_boss_chat_session(
+                                    project, identity.name, provider, model, mode,
+                                );
+                            };
+                            if let Some(session) = session
+                                && !existing.detail_loaded
+                                && session.detail_loaded
+                            {
+                                crate::persistence::apply_session_detail(existing, session);
+                            }
+                            existing.project_id = project.id;
+                            existing.workspace = SessionWorkspace::default();
+                            let session = existing.list_projection();
                             state.mark_session_dirty(id);
                             self.task_store.save(&mut state)?;
-                            return Ok(BossResult::Session {
+                            Ok(BossResult::Session {
                                 session: Box::new(session),
                                 project: Box::new(project),
-                            });
+                            })
                         }
+                        Step::Create => self.create_boss_chat_session(
+                            project, identity.name, provider, model, mode,
+                        ),
                     }
-                    let project_id = project.id;
-                    let mut session = AgentSession::new(project_id, provider);
-                    session.model = model;
-                    session.runtime_mode = mode;
-                    session.title = boss.identity.name;
-                    session.agent_rename_allowed = false;
-                    session.boss_managed = true;
-                    let id = session.id;
-                    state.push_session(session.clone());
-                    self.task_store.save(&mut state)?;
-                    drop(state);
-                    self.boss.set_session_id(id)?;
-                    Ok(BossResult::Session {
-                        session: Box::new(session),
-                        project: Box::new(project),
-                    })
                 })
             },
             BossOperation::CreatePlan {
@@ -7355,6 +7406,38 @@ impl WakuBackend {
                 Ok(result)
             }
         }
+    }
+
+    /// Creates the boss's chat session and records it on the boss document.
+    /// `BossOperation::Open` reaches this when the document names no session
+    /// or the row it names is gone. The fresh session is returned whole —
+    /// it is detail-complete the moment it exists.
+    fn create_boss_chat_session(
+        &self,
+        project: Project,
+        title: String,
+        provider: ProviderKind,
+        model: Option<String>,
+        mode: crate::model::RuntimeMode,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::BossResult;
+        let mut session = AgentSession::new(project.id, provider);
+        session.model = model;
+        session.runtime_mode = mode;
+        session.title = title;
+        session.agent_rename_allowed = false;
+        session.boss_managed = true;
+        let id = session.id;
+        {
+            let mut state = self.task_state.lock();
+            state.push_session(session.clone());
+            self.task_store.save(&mut state)?;
+        }
+        self.boss.set_session_id(id)?;
+        Ok(BossResult::Session {
+            session: Box::new(session),
+            project: Box::new(project),
+        })
     }
 
     /// `drain` yields while the session's provider turn is still open —
@@ -9445,13 +9528,36 @@ impl WakuBackend {
         {
             self.require_agent_tools()?;
         }
-        let mut state = self.task_state.lock();
-        let session = state
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == target)
-            .ok_or_else(|| anyhow!("task {target} is unknown to the daemon"))?;
-        self.task_store.hydrate(session)?;
+        // The detail read runs on the store's own connection off the state
+        // lock — as `HydrateSession` does — then merges back so the resident
+        // row keeps the transcript it just paid for.
+        let mut session = {
+            let state = self.task_state.lock();
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == target)
+                .cloned()
+                .ok_or_else(|| anyhow!("task {target} is unknown to the daemon"))?
+        };
+        self.task_store.hydrate(&mut session)?;
+        let session = {
+            let mut state = self.task_state.lock();
+            match state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == target)
+            {
+                Some(existing) => {
+                    if !existing.detail_loaded && session.detail_loaded {
+                        crate::persistence::apply_session_detail(existing, session);
+                    }
+                    existing.clone()
+                }
+                // Removed while the read ran — answer from what was stored.
+                None => session,
+            }
+        };
         if let Some(turn) = turn {
             if !session.turns.iter().any(|entry| entry.turn_count == turn) {
                 bail!("task {target} has no turn {turn}");
@@ -10077,13 +10183,42 @@ impl WakuBackend {
                 if thread_id.is_empty() {
                     bail!("the thread id must not be empty");
                 }
+                // The resume cursor lives in the session detail blob, so
+                // skeletons need hydrating before they can answer. The reads
+                // run on the store's own connection off the state lock — as
+                // `HydrateSession` does — then merge back under it.
+                let skeleton_ids: HashSet<Uuid> = {
+                    let state = self.task_state.lock();
+                    state
+                        .sessions
+                        .iter()
+                        .filter(|session| !session.detail_loaded)
+                        .map(|session| session.id)
+                        .collect()
+                };
+                let mut details = HashMap::with_capacity(skeleton_ids.len());
+                for &id in &skeleton_ids {
+                    if let Some(stored) = self.task_store.load_session_detail(id)? {
+                        details.insert(id, stored);
+                    }
+                }
                 let mut state = self.task_state.lock();
                 let mut matches = Vec::new();
-                for index in 0..state.sessions.len() {
-                    // The resume cursor lives in the session detail blob, so
-                    // skeletons need hydrating before they can answer.
-                    self.task_store.hydrate(&mut state.sessions[index])?;
-                    let session = &state.sessions[index];
+                for session in state.sessions.iter_mut() {
+                    if !session.detail_loaded {
+                        match details.remove(&session.id) {
+                            Some(stored) => {
+                                crate::persistence::apply_session_detail(session, stored)
+                            }
+                            // A probed session with no stored row is already
+                            // whole; one added between the lock phases keeps
+                            // its flag — its stored row was never read.
+                            None if skeleton_ids.contains(&session.id) => {
+                                session.detail_loaded = true;
+                            }
+                            None => {}
+                        }
+                    }
                     let Some(cursor) = &session.provider_cursor else {
                         continue;
                     };
@@ -13996,6 +14131,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn resolve_agent_target_reads_cursors_off_the_state_lock() {
+        let root = std::env::temp_dir().join(format!("waku-resolve-{}", Uuid::new_v4()));
+        let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(session_id).unwrap();
+            // The cursor is detail, so it must land while the session is
+            // loaded — a skeleton save would write list columns only.
+            backend.task_store.hydrate(session).unwrap();
+            session.provider_cursor =
+                Some(crate::model::ProviderResumeCursor::Codex {
+                    thread_id: "thread-1".to_owned(),
+                });
+            backend.task_store.save(&mut state).unwrap();
+        }
+        // Evict the resident detail so the resolver has to read the cursor
+        // back from the store — the read used to run under the global lock.
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(session_id).unwrap();
+            *session = session.list_projection();
+            assert!(!session.detail_loaded);
+        }
+        let resolved = backend
+            .resolve_agent_target(
+                None,
+                Some("thread-1".to_owned()),
+                Some(crate::model::ProviderKind::Codex),
+            )
+            .unwrap();
+        assert_eq!(resolved, session_id);
+        {
+            let state = backend.task_state.lock();
+            let session = state.sessions.iter().find(|s| s.id == session_id).unwrap();
+            assert!(session.detail_loaded);
+        }
+        assert!(
+            backend
+                .resolve_agent_target(None, Some("no-such-thread".to_owned()), None)
+                .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn surface_test_backend(root: &Path) -> (WakuBackend, Uuid) {
         let repo = root.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
@@ -14990,8 +15170,44 @@ mod tests {
             panic!("expected boss session")
         };
         assert_eq!(reopened.id, id);
-        assert_eq!(reopened.messages.len(), 2);
+        // The reply is the list projection — the transcript stays resident on
+        // the daemon and the client hydrates it through the ordinary path.
+        assert!(!reopened.detail_loaded);
+        assert!(reopened.messages.is_empty());
+        assert_eq!(reopened.project_id, project.id);
         assert_eq!(reopened_project.id, project.id);
+        {
+            let state = backend.task_state.lock();
+            let resident = state.sessions.iter().find(|session| session.id == id).unwrap();
+            assert!(resident.detail_loaded);
+            assert_eq!(resident.messages.len(), 2);
+        }
+        // A row whose project drifted is repaired and re-saved on open; the
+        // wire reply stays a projection either way.
+        {
+            let mut state = backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == id)
+                .unwrap()
+                .project_id = Uuid::new_v4();
+        }
+        let BossResult::Session {
+            session: repaired, ..
+        } = open()
+        else {
+            panic!("expected boss session")
+        };
+        assert_eq!(repaired.id, id);
+        assert!(!repaired.detail_loaded);
+        assert_eq!(repaired.project_id, project.id);
+        {
+            let state = backend.task_state.lock();
+            let resident = state.sessions.iter().find(|session| session.id == id).unwrap();
+            assert_eq!(resident.project_id, project.id);
+            assert_eq!(resident.messages.len(), 2);
+        }
         let response = backend
             .handle(
                 Request {

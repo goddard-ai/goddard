@@ -1,0 +1,1 @@
+- Opening the Boss chat stays fast no matter how long it has been used — switching to it no longer resaves and reships the whole transcript on every visit.

@@ -505,6 +505,13 @@ impl BossService {
         self.state.lock().clone()
     }
 
+    /// The pair `BossOperation::Open` needs — identity plus chat session id —
+    /// without cloning the whole document.
+    pub fn identity_and_session(&self) -> (BossIdentity, Option<Uuid>) {
+        let state = self.state.lock();
+        (state.identity.clone(), state.session_id)
+    }
+
     pub fn set_session_id(&self, session_id: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
             state.session_id = Some(session_id);

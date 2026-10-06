@@ -2429,16 +2429,215 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
     })
 }
 
-/// Serializes a session for the `data` column, omitting `messages`.
-///
-/// They are rows in `messages` instead, so there is no copy in `data` that
-/// could go stale.
-fn session_data(session: &AgentSession) -> io::Result<String> {
-    let mut value = serde_json::to_value(session).map_err(to_io_error)?;
-    if let Some(object) = value.as_object_mut() {
-        object.remove("messages");
+/// `serde` offers no per-call field skip, so this adapter forwards every
+/// `Serializer` method unchanged except `serialize_struct`, whose field sink
+/// drops the named field before its value is ever serialized. Only the
+/// outermost struct is filtered: nested values serialize through `inner`
+/// untouched.
+struct SkipField<S> {
+    inner: S,
+    field: &'static str,
+}
+
+struct SkipStructField<S> {
+    inner: S,
+    field: &'static str,
+}
+
+impl<S: serde::ser::SerializeStruct> serde::ser::SerializeStruct for SkipStructField<S> {
+    type Ok = S::Ok;
+    type Error = S::Error;
+
+    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), S::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        if key == self.field {
+            self.inner.skip_field(key)
+        } else {
+            self.inner.serialize_field(key, value)
+        }
     }
-    serde_json::to_string(&value).map_err(to_io_error)
+
+    fn end(self) -> Result<S::Ok, S::Error> {
+        self.inner.end()
+    }
+}
+
+impl<S: serde::Serializer> serde::Serializer for SkipField<S> {
+    type Ok = S::Ok;
+    type Error = S::Error;
+    type SerializeSeq = S::SerializeSeq;
+    type SerializeTuple = S::SerializeTuple;
+    type SerializeTupleStruct = S::SerializeTupleStruct;
+    type SerializeTupleVariant = S::SerializeTupleVariant;
+    type SerializeMap = S::SerializeMap;
+    type SerializeStruct = SkipStructField<S::SerializeStruct>;
+    type SerializeStructVariant = S::SerializeStructVariant;
+
+    fn serialize_bool(self, v: bool) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_bool(v)
+    }
+    fn serialize_i8(self, v: i8) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_i8(v)
+    }
+    fn serialize_i16(self, v: i16) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_i16(v)
+    }
+    fn serialize_i32(self, v: i32) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_i32(v)
+    }
+    fn serialize_i64(self, v: i64) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_i64(v)
+    }
+    fn serialize_i128(self, v: i128) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_i128(v)
+    }
+    fn serialize_u8(self, v: u8) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_u8(v)
+    }
+    fn serialize_u16(self, v: u16) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_u16(v)
+    }
+    fn serialize_u32(self, v: u32) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_u32(v)
+    }
+    fn serialize_u64(self, v: u64) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_u64(v)
+    }
+    fn serialize_u128(self, v: u128) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_u128(v)
+    }
+    fn serialize_f32(self, v: f32) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_f32(v)
+    }
+    fn serialize_f64(self, v: f64) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_f64(v)
+    }
+    fn serialize_char(self, v: char) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_char(v)
+    }
+    fn serialize_str(self, v: &str) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_str(v)
+    }
+    fn serialize_bytes(self, v: &[u8]) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_bytes(v)
+    }
+    fn serialize_none(self) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_none()
+    }
+    fn serialize_some<T>(self, value: &T) -> Result<S::Ok, S::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        self.inner.serialize_some(value)
+    }
+    fn serialize_unit(self) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_unit()
+    }
+    fn serialize_unit_struct(self, name: &'static str) -> Result<S::Ok, S::Error> {
+        self.inner.serialize_unit_struct(name)
+    }
+    fn serialize_unit_variant(
+        self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+    ) -> Result<S::Ok, S::Error> {
+        self.inner
+            .serialize_unit_variant(name, variant_index, variant)
+    }
+    fn serialize_newtype_struct<T>(self, name: &'static str, value: &T) -> Result<S::Ok, S::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        self.inner.serialize_newtype_struct(name, value)
+    }
+    fn serialize_newtype_variant<T>(
+        self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        value: &T,
+    ) -> Result<S::Ok, S::Error>
+    where
+        T: ?Sized + Serialize,
+    {
+        self.inner
+            .serialize_newtype_variant(name, variant_index, variant, value)
+    }
+    fn serialize_seq(self, len: Option<usize>) -> Result<S::SerializeSeq, S::Error> {
+        self.inner.serialize_seq(len)
+    }
+    fn serialize_tuple(self, len: usize) -> Result<S::SerializeTuple, S::Error> {
+        self.inner.serialize_tuple(len)
+    }
+    fn serialize_tuple_struct(
+        self,
+        name: &'static str,
+        len: usize,
+    ) -> Result<S::SerializeTupleStruct, S::Error> {
+        self.inner.serialize_tuple_struct(name, len)
+    }
+    fn serialize_tuple_variant(
+        self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<S::SerializeTupleVariant, S::Error> {
+        self.inner
+            .serialize_tuple_variant(name, variant_index, variant, len)
+    }
+    fn serialize_map(self, len: Option<usize>) -> Result<S::SerializeMap, S::Error> {
+        self.inner.serialize_map(len)
+    }
+    fn serialize_struct(
+        self,
+        name: &'static str,
+        len: usize,
+    ) -> Result<SkipStructField<S::SerializeStruct>, S::Error> {
+        Ok(SkipStructField {
+            inner: self.inner.serialize_struct(name, len)?,
+            field: self.field,
+        })
+    }
+    fn serialize_struct_variant(
+        self,
+        name: &'static str,
+        variant_index: u32,
+        variant: &'static str,
+        len: usize,
+    ) -> Result<S::SerializeStructVariant, S::Error> {
+        self.inner
+            .serialize_struct_variant(name, variant_index, variant, len)
+    }
+    fn collect_str<T>(self, value: &T) -> Result<S::Ok, S::Error>
+    where
+        T: ?Sized + std::fmt::Display,
+    {
+        self.inner.collect_str(value)
+    }
+    fn is_human_readable(&self) -> bool {
+        self.inner.is_human_readable()
+    }
+}
+
+/// The `session_details.data` DOM for a session, with `messages` never
+/// materialized — they are rows in `messages` instead, so `data` holds no
+/// copy that could go stale, and nothing builds one just to discard it.
+fn session_detail_value(session: &AgentSession) -> io::Result<serde_json::Value> {
+    session
+        .serialize(SkipField {
+            inner: serde_json::value::Serializer,
+            field: "messages",
+        })
+        .map_err(to_io_error)
+}
+
+/// Serializes a session for the `data` column, omitting `messages`.
+fn session_data(session: &AgentSession) -> io::Result<String> {
+    serde_json::to_string(&session_detail_value(session)?).map_err(to_io_error)
 }
 
 /// Only checkpoints on turns still present in the session are retained, so a
@@ -2470,7 +2669,7 @@ fn session_data_with_checkpoints(
     session: &AgentSession,
     checkpoints: &HashMap<usize, Checkpoint>,
 ) -> io::Result<String> {
-    let mut value = serde_json::to_value(session).map_err(to_io_error)?;
+    let mut value = session_detail_value(session)?;
     let Some(turns) = value
         .get_mut("turns")
         .and_then(serde_json::Value::as_array_mut)
@@ -2486,9 +2685,6 @@ fn session_data_with_checkpoints(
         };
         let checkpoint = serde_json::to_value(checkpoint).map_err(to_io_error)?;
         serialized_turn["checkpoint"] = checkpoint;
-    }
-    if let Some(object) = value.as_object_mut() {
-        object.remove("messages");
     }
     serde_json::to_string(&value).map_err(to_io_error)
 }
