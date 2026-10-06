@@ -39,7 +39,7 @@ const RESPONSE_INPUT_CHARS: usize = 24_000;
 /// and the result is trimmed to it as a backstop.
 const TRANSCRIPT_WORD_CAP: usize = 110;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const CHAT_COMPLETIONS_URL: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
+pub(super) const CHAT_COMPLETIONS_URL: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const SPEECH_URL: &str = "https://ai-gateway.vercel.sh/v4/ai/speech-model";
 const OPENROUTER_CHAT_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_SPEECH_URL: &str = "https://openrouter.ai/api/v1/audio/speech";
@@ -915,7 +915,7 @@ async fn post(
 
 /// The JSON half of `post` — every endpoint but OpenRouter speech answers a
 /// JSON envelope.
-async fn post_json(
+pub(super) async fn post_json(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
     url: &str,

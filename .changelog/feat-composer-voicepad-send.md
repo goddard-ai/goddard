@@ -1,0 +1,1 @@
+- The composer's send button now sends the voice scratchpad's transcript, lighting up as soon as the scratchpad holds speech just as it does for a typed draft — previously only Enter could send it.

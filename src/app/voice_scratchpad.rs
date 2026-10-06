@@ -115,6 +115,12 @@ const VP_PILL_RADIUS: f32 = 11.5;
 const BULLET_SIZE: f32 = 6.0;
 const RECORDING_RED: u32 = 0xF0344E;
 const RECORDING_GLOW: u32 = 0xFF85B6;
+/// The text model that scrubs finished dictation — reached through the
+/// same Vercel AI Gateway credential the transcription socket uses.
+const CLEANUP_MODEL_ID: &str = "alibaba/qwen3.8-27b";
+/// The cleanup call's whole brief: fix dictation artifacts without
+/// rewriting. The span it sees is raw speech-to-text, never a draft.
+const CLEANUP_INSTRUCTIONS: &str = "Clean up raw dictated speech-to-text. Remove filler words (um, uh, ah), false starts, and stuttered repetitions; fix obvious transcription errors; add light punctuation and capitalization. Keep the speaker's words and meaning exactly — rewrite as little as possible, never summarize, reorder, or answer. Reply with only the cleaned text — no quotes or commentary.";
 
 /// One tap block of mono-mixed PCM plus its sample rate.
 struct AudioChunk {
@@ -153,6 +159,31 @@ pub(super) enum ScratchpadEvent {
     /// `SILENCE_AUTO_STOP`. The worker closed its socket and exited on
     /// its own; the session lands muted, and unmuting reconnects it.
     Stopped,
+    /// The cleanup model's rewrite of a dictated span — carried with the
+    /// raw text it answered for so a late answer verifies before it lands.
+    Cleaned {
+        target: CleanTarget,
+        start: usize,
+        raw: String,
+        cleaned: String,
+    },
+}
+
+/// The buffer a cleanup answer writes into: a committed transcript node,
+/// or the open annotation box's text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CleanTarget {
+    Node(ScratchpadNode),
+    Annotation,
+}
+
+/// A completed dictated span queued for the cleanup model — the byte
+/// offset it occupied when it closed plus its raw text; both verify again
+/// when the answer lands, so a shifted or edited span is left alone.
+pub(super) struct CleanupRequest {
+    pub target: CleanTarget,
+    pub start: usize,
+    pub raw: String,
 }
 
 /// Where the capture side of a session stands. `Connecting` also covers
@@ -275,6 +306,9 @@ impl VoiceScratchpad {
 struct ScratchpadParagraph {
     text: String,
     bullets: Vec<String>,
+    /// A manual edit touched this paragraph — the cleanup model leaves
+    /// its spans alone rather than overwrite the user's words.
+    edited: bool,
 }
 
 /// Where an open annotation box writes: a paragraph's bullet list as a
@@ -293,8 +327,8 @@ enum AnnotationTarget {
 
 /// A transcript buffer a caret or edit addresses — a paragraph's body or
 /// one of its bullets. Painted element keys map back onto these.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ScratchpadNode {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScratchpadNode {
     Paragraph(usize),
     Bullet(usize, usize),
 }
@@ -344,6 +378,15 @@ pub(super) struct ScratchpadTranscript {
     /// punctuation run is the same emission spilling over, so it strips
     /// before anything lands.
     stray_punct: bool,
+    /// The current paragraph's byte offset where uncleaned dictation
+    /// begins — finished sentences queue from here once the next one
+    /// opens, so the live tail is never rewritten mid-flight.
+    main_clean_from: usize,
+    /// The same boundary inside the open annotation box's text.
+    annotation_clean_from: usize,
+    /// Finished spans waiting for the cleanup model — drained by the
+    /// event pump into background gateway calls.
+    cleanup_requests: Vec<CleanupRequest>,
 }
 
 impl ScratchpadTranscript {
@@ -390,7 +433,7 @@ impl ScratchpadTranscript {
             match split_next_command(rest) {
                 None => {
                     self.push_text(rest);
-                    return;
+                    break;
                 }
                 Some((before, after)) => {
                     self.push_text(before);
@@ -398,6 +441,78 @@ impl ScratchpadTranscript {
                     rest = after;
                 }
             }
+        }
+        self.flush_completed_sentences();
+    }
+
+    /// Queue the append point's finished sentences for cleanup once a
+    /// following sentence has started — the trailing open sentence stays
+    /// raw so the live text is never rewritten under the user.
+    fn flush_completed_sentences(&mut self) {
+        let (from, target) = if self.annotation_target.is_some() {
+            (self.annotation_clean_from, CleanTarget::Annotation)
+        } else {
+            let Some(index) = self.paragraphs.len().checked_sub(1) else {
+                return;
+            };
+            (
+                self.main_clean_from,
+                CleanTarget::Node(ScratchpadNode::Paragraph(index)),
+            )
+        };
+        let text = self.append_point_text();
+        let from = from.min(text.len());
+        let Some(end) = completed_sentence_end(&text[from..]).map(|end| from + end) else {
+            return;
+        };
+        if let Some((start, raw)) = clean_span(text, from, end) {
+            self.cleanup_requests
+                .push(CleanupRequest { target, start, raw });
+        }
+        if self.annotation_target.is_some() {
+            self.annotation_clean_from = end;
+        } else {
+            self.main_clean_from = end;
+        }
+    }
+
+    /// Queue whatever the closing append point still holds — the whole
+    /// pending tail is finished dictation once speech moves on. Paragraph
+    /// commits call this before pushing the fresh paragraph; annotation
+    /// commits take the box's text directly into their bullet request.
+    fn flush_open_tail(&mut self) {
+        if self.annotation_target.is_some() {
+            let from = self.annotation_clean_from.min(self.annotation_text.len());
+            self.annotation_clean_from = self.annotation_text.len();
+            let request = clean_span(&self.annotation_text, from, self.annotation_text.len()).map(
+                |(start, raw)| CleanupRequest {
+                    target: CleanTarget::Annotation,
+                    start,
+                    raw,
+                },
+            );
+            if let Some(request) = request {
+                self.cleanup_requests.push(request);
+            }
+            return;
+        }
+        let Some(index) = self.paragraphs.len().checked_sub(1) else {
+            return;
+        };
+        let from = self.main_clean_from.min(self.paragraphs[index].text.len());
+        self.main_clean_from = self.paragraphs[index].text.len();
+        let request = clean_span(
+            &self.paragraphs[index].text,
+            from,
+            self.paragraphs[index].text.len(),
+        )
+        .map(|(start, raw)| CleanupRequest {
+            target: CleanTarget::Node(ScratchpadNode::Paragraph(index)),
+            start,
+            raw,
+        });
+        if let Some(request) = request {
+            self.cleanup_requests.push(request);
         }
     }
 
@@ -558,6 +673,10 @@ impl ScratchpadTranscript {
             self.fold_span(&interim);
         }
         self.push_text(&interim);
+        // Committed interim is finished dictation too — any sentence it
+        // closed queues for cleanup the same way a finalized delivery's
+        // does. The still-open tail stays raw.
+        self.flush_completed_sentences();
     }
 
     /// Drop `text`'s leading words the finalized stream already owns.
@@ -699,10 +818,21 @@ impl ScratchpadTranscript {
         match self.annotation_target {
             Some(AnnotationTarget::Paragraph(target)) => {
                 let bullet = std::mem::take(&mut self.annotation_text).trim().to_owned();
+                self.annotation_clean_from = 0;
                 if !bullet.is_empty()
                     && let Some(paragraph) = self.paragraphs.get_mut(target)
                 {
-                    paragraph.bullets.push(bullet);
+                    paragraph.bullets.push(bullet.clone());
+                    // The box's whole text just became a bullet — clean it
+                    // where it landed, not in the emptied box.
+                    self.cleanup_requests.push(CleanupRequest {
+                        target: CleanTarget::Node(ScratchpadNode::Bullet(
+                            target,
+                            paragraph.bullets.len() - 1,
+                        )),
+                        start: 0,
+                        raw: bullet,
+                    });
                 }
             }
             Some(AnnotationTarget::Bullet {
@@ -711,11 +841,17 @@ impl ScratchpadTranscript {
                 insert,
             }) => {
                 let text = std::mem::take(&mut self.annotation_text).trim().to_owned();
+                self.annotation_clean_from = 0;
                 if !text.is_empty()
                     && let Some(target) = self.paragraphs.get_mut(paragraph)
                 {
                     let at = insert.min(target.bullets.len());
-                    target.bullets.insert(at, text);
+                    target.bullets.insert(at, text.clone());
+                    self.cleanup_requests.push(CleanupRequest {
+                        target: CleanTarget::Node(ScratchpadNode::Bullet(paragraph, at)),
+                        start: 0,
+                        raw: text,
+                    });
                     self.annotation_target = Some(AnnotationTarget::Bullet {
                         paragraph,
                         bullet,
@@ -724,10 +860,14 @@ impl ScratchpadTranscript {
                 }
             }
             None => {
+                // Speech is moving to a fresh paragraph — the closing
+                // one's tail is finished dictation, so it cleans now.
+                self.flush_open_tail();
                 let current = self.current();
                 if !current.text.is_empty() || !current.bullets.is_empty() {
                     self.paragraphs.push(ScratchpadParagraph::default());
                 }
+                self.main_clean_from = 0;
             }
         }
     }
@@ -737,6 +877,9 @@ impl ScratchpadTranscript {
     /// behind would pin stale dimmed text on the last row.
     fn annotate(&mut self, index: usize) {
         if index < self.paragraphs.len() {
+            // Speech retargets into the box — the closing append point's
+            // tail is finished dictation, so it cleans now.
+            self.flush_open_tail();
             self.annotation_target = Some(AnnotationTarget::Paragraph(index));
             self.annotation_interim = std::mem::take(&mut self.interim);
             self.caret = None;
@@ -754,6 +897,7 @@ impl ScratchpadTranscript {
             .get(paragraph)
             .is_some_and(|target| bullet < target.bullets.len())
         {
+            self.flush_open_tail();
             self.annotation_target = Some(AnnotationTarget::Bullet {
                 paragraph,
                 bullet,
@@ -787,20 +931,37 @@ impl ScratchpadTranscript {
             .to_owned();
         self.fold_span(&interim);
         append_word_text(&mut text, &interim);
+        self.annotation_clean_from = 0;
         if text.is_empty() {
             return;
         }
         match target {
             AnnotationTarget::Paragraph(index) => {
                 if let Some(paragraph) = self.paragraphs.get_mut(index) {
-                    paragraph.bullets.push(text);
+                    paragraph.bullets.push(text.clone());
+                    // Click-out commits the same bullet "okay next" would —
+                    // clean it where it landed.
+                    self.cleanup_requests.push(CleanupRequest {
+                        target: CleanTarget::Node(ScratchpadNode::Bullet(
+                            index,
+                            paragraph.bullets.len() - 1,
+                        )),
+                        start: 0,
+                        raw: text,
+                    });
                 }
             }
             AnnotationTarget::Bullet {
                 paragraph, insert, ..
             } => {
-                if let Some(paragraph) = self.paragraphs.get_mut(paragraph) {
-                    paragraph.bullets.insert(insert.min(paragraph.bullets.len()), text);
+                if let Some(target_paragraph) = self.paragraphs.get_mut(paragraph) {
+                    let at = insert.min(target_paragraph.bullets.len());
+                    target_paragraph.bullets.insert(at, text.clone());
+                    self.cleanup_requests.push(CleanupRequest {
+                        target: CleanTarget::Node(ScratchpadNode::Bullet(paragraph, at)),
+                        start: 0,
+                        raw: text,
+                    });
                 }
             }
         }
@@ -957,12 +1118,30 @@ impl ScratchpadTranscript {
             .unwrap_or(caret)
     }
 
+    /// A typed or pasted change touched `node` — flag its paragraph so
+    /// the cleanup model never rewrites over the user's words, and drop
+    /// the pending cleanup boundary when the live paragraph is the one
+    /// that changed.
+    fn note_user_edit(&mut self, node: ScratchpadNode) {
+        let index = match node {
+            ScratchpadNode::Paragraph(index) | ScratchpadNode::Bullet(index, _) => index,
+        };
+        let is_last = index + 1 == self.paragraphs.len();
+        if let Some(paragraph) = self.paragraphs.get_mut(index) {
+            paragraph.edited = true;
+            if is_last {
+                self.main_clean_from = paragraph.text.len();
+            }
+        }
+    }
+
     /// Splice `text` in at the caret, leaving it just past what landed.
     fn insert_at(&mut self, caret: &mut CaretPos, text: &str) {
         if let Some(buffer) = self.node_text_mut(caret.node) {
             caret.offset = caret.offset.min(buffer.len());
             buffer.insert_str(caret.offset, text);
             caret.offset += text.len();
+            self.note_user_edit(caret.node);
         }
     }
 
@@ -1043,14 +1222,26 @@ impl ScratchpadTranscript {
                     .next_back()
                     .map_or(0, |(index, _)| index)
             };
-            (node, start..len, CaretPos { node, offset: start })
+            (
+                node,
+                start..len,
+                CaretPos {
+                    node,
+                    offset: start,
+                },
+            )
         };
         let len = self.node_text(node).len();
         let range = range.start.min(len)..range.end.min(len);
+        let mut edited = false;
         if !range.is_empty()
             && let Some(text) = self.node_text_mut(node)
         {
             text.replace_range(range, "");
+            edited = true;
+        }
+        if edited {
+            self.note_user_edit(node);
         }
         *caret = landing;
         self.collapse_emptied(caret);
@@ -1091,6 +1282,7 @@ impl ScratchpadTranscript {
         self.interim.clear();
         self.annotation_interim.clear();
         let mut caret = None;
+        let mut edited_nodes = Vec::new();
         for span in spans {
             let Some(node) = self.node_for_key(&span.key) else {
                 continue;
@@ -1107,6 +1299,7 @@ impl ScratchpadTranscript {
                 && let Some(text) = self.node_text_mut(node)
             {
                 text.replace_range(range, "");
+                edited_nodes.push(node);
             }
         }
         // A grab of nothing but interim still earns its caret at the point
@@ -1118,6 +1311,10 @@ impl ScratchpadTranscript {
             caret.offset = caret.offset.min(text.len());
             text.insert_str(caret.offset, insert);
             caret.offset += insert.len();
+            edited_nodes.push(caret.node);
+        }
+        for node in edited_nodes {
+            self.note_user_edit(node);
         }
         self.collapse_emptied(&mut caret);
         Some(caret)
@@ -1228,6 +1425,103 @@ impl ScratchpadTranscript {
         out
     }
 
+    /// The cleanup model's answer for one flushed span: replace it only
+    /// when the buffer still holds the exact raw text — at the recorded
+    /// offset, or uniquely elsewhere once later replacements shifted
+    /// things. An edited paragraph or a missing match keeps the raw text.
+    fn apply_cleanup(
+        &mut self,
+        target: CleanTarget,
+        start: usize,
+        raw: &str,
+        cleaned: &str,
+    ) -> bool {
+        let edited = match target {
+            CleanTarget::Annotation => false,
+            CleanTarget::Node(ScratchpadNode::Paragraph(index)) => self
+                .paragraphs
+                .get(index)
+                .is_none_or(|paragraph| paragraph.edited),
+            CleanTarget::Node(ScratchpadNode::Bullet(index, bullet)) => self
+                .paragraphs
+                .get(index)
+                .is_none_or(|paragraph| paragraph.edited || bullet >= paragraph.bullets.len()),
+        };
+        if edited {
+            return false;
+        }
+        let text = match target {
+            CleanTarget::Annotation => self.annotation_text.as_str(),
+            CleanTarget::Node(node) => self.node_text(node),
+        };
+        let span = start
+            .checked_add(raw.len())
+            .filter(|&end| text.get(start..end) == Some(raw))
+            .map(|end| start..end)
+            .or_else(|| {
+                // Earlier answers already rewrote neighbors — the span
+                // still applies when the raw text survives exactly once.
+                let mut hits = text.match_indices(raw);
+                match (hits.next(), hits.next()) {
+                    (Some((at, _)), None) => Some(at..at + raw.len()),
+                    _ => None,
+                }
+            });
+        let Some(span) = span else {
+            return false;
+        };
+        let buffer = match target {
+            CleanTarget::Annotation => Some(&mut self.annotation_text),
+            CleanTarget::Node(node) => self.node_text_mut(node),
+        };
+        let Some(buffer) = buffer else {
+            return false;
+        };
+        buffer.replace_range(span.clone(), cleaned);
+        let delta = cleaned.len() as i64 - raw.len() as i64;
+        if delta == 0 {
+            return true;
+        }
+        let adjust = |from: &mut usize| {
+            if *from > span.start {
+                *from = (*from as i64 + delta).max(0) as usize;
+            }
+        };
+        match target {
+            CleanTarget::Annotation => adjust(&mut self.annotation_clean_from),
+            CleanTarget::Node(ScratchpadNode::Paragraph(index))
+                if index + 1 == self.paragraphs.len() =>
+            {
+                adjust(&mut self.main_clean_from)
+            }
+            _ => {}
+        }
+        if let CleanTarget::Node(node) = target
+            && let Some(mut caret) = self.caret
+            && caret.node == node
+            && caret.offset > span.start
+        {
+            caret.offset = (caret.offset as i64 + delta).max(span.start as i64) as usize;
+            self.caret = Some(caret);
+        }
+        true
+    }
+
+    /// Whether the transcript holds anything Enter would send — the
+    /// send affordance's draft check, without building the message.
+    pub(super) fn has_content(&self) -> bool {
+        !self.interim.trim().is_empty()
+            || !self.annotation_interim.trim().is_empty()
+            || !self.annotation_text.trim().is_empty()
+            || self.paragraphs.iter().any(|paragraph| {
+                !paragraph.text.trim().is_empty()
+                    || paragraph
+                        .bullets
+                        .iter()
+                        .any(|bullet| !bullet.trim().is_empty())
+            })
+    }
+
     /// Whether Cancel must ask first: a real second paragraph, or a
     /// transcript substantial enough to lose.
     fn substantial(&self) -> bool {
@@ -1319,6 +1613,49 @@ fn is_stray_punct_char(c: char) -> bool {
 /// stray emission belongs to the pause, not the phrase opening here.
 fn strip_leading_punct(text: &str) -> &str {
     text.trim_start_matches(is_stray_punct_char)
+}
+
+/// A finished span's raw payload — trimmed off its edges so the cleaned
+/// answer replaces only the words and the spacing around it survives.
+/// Returns the trim-adjusted start and the raw text, or `None` when the
+/// span holds no words.
+fn clean_span(text: &str, from: usize, to: usize) -> Option<(usize, String)> {
+    let slice = text.get(from..to)?;
+    let raw = slice.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some((
+        from + slice.len() - slice.trim_start().len(),
+        raw.to_owned(),
+    ))
+}
+
+/// The end of `text`'s last closed sentence — a `.`/`!`/`?`/`…` that a
+/// following word has already opened. The trailing open sentence stays
+/// out of the span so cleanup never rewrites the live tail.
+fn completed_sentence_end(text: &str) -> Option<usize> {
+    let mut end = None;
+    for (index, c) in text.char_indices() {
+        if !matches!(c, '.' | '!' | '?' | '…') {
+            continue;
+        }
+        let after = index + c.len_utf8();
+        if text[after..].trim_start().is_empty() {
+            continue;
+        }
+        end = Some(after);
+    }
+    end
+}
+
+/// The gray interim tail's text without sentence terminators — partial
+/// speech keeps its words but waits for finalized text to wear periods.
+fn strip_interim_terminators(text: &str) -> String {
+    text.trim()
+        .chars()
+        .filter(|c| !matches!(c, '.' | '!' | '?' | '…'))
+        .collect()
 }
 
 /// `text`'s words as byte spans — maximal alphanumeric runs, the
@@ -2141,6 +2478,9 @@ impl Waku {
         } else if !muted && scratchpad.status != ScratchpadStatus::MicDenied {
             self.ensure_voice_capture(session_id, cx);
         }
+        // A muted stream goes quiet — spans the solidify just closed
+        // can't wait on the next event to reach the model.
+        self.drain_cleanup_requests(cx);
         cx.notify();
     }
 
@@ -2505,6 +2845,115 @@ impl Waku {
         self.maybe_stop_voice_listener();
     }
 
+    /// The visible chat's scratchpad holding text Enter would send — the
+    /// composer's send button mirrors its enabled state on this.
+    pub(super) fn voice_scratchpad_sendable(&self) -> bool {
+        self.voice_scratchpad_visible()
+            && self
+                .selected_voice_scratchpad()
+                .is_some_and(|scratchpad| scratchpad.transcript.has_content())
+    }
+
+    /// Post every queued cleanup span to the text model — one background
+    /// task each, its answer landing back as a `Cleaned` event.
+    fn drain_cleanup_requests(&mut self, cx: &mut Context<Self>) {
+        let requests: Vec<(Uuid, CleanupRequest)> = self
+            .voice_scratchpads
+            .iter_mut()
+            .flat_map(|(session_id, scratchpad)| {
+                std::mem::take(&mut scratchpad.transcript.cleanup_requests)
+                    .into_iter()
+                    .map(move |request| (*session_id, request))
+            })
+            .collect();
+        for (session_id, request) in requests {
+            self.spawn_dictation_cleanup(session_id, request, cx);
+        }
+    }
+
+    /// One cleanup call: fetch the gateway key from the daemon like the
+    /// transcription worker does, post the finished span, and send the
+    /// answer through the event channel. Every failure — no credential,
+    /// a timeout, an empty or unchanged answer — keeps the raw text.
+    fn spawn_dictation_cleanup(
+        &mut self,
+        session_id: Uuid,
+        request: CleanupRequest,
+        cx: &mut Context<Self>,
+    ) {
+        let daemon = self.daemon.client();
+        let http = cx.http_client();
+        let executor = cx.background_executor().clone();
+        let events = self.voice_scratchpad_tx.clone();
+        let wake = self.event_wake_tx.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let key = daemon
+                    .request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::GetInferenceCredential {
+                            provider: InferenceProvider::VercelGateway,
+                        },
+                    )
+                    .ok()
+                    .and_then(|payload| match payload {
+                        waku_client::ResponsePayload::InferenceCredential { credential } => {
+                            credential
+                        }
+                        _ => None,
+                    })
+                    .filter(|key| !key.trim().is_empty());
+                let Some(key) = key else {
+                    return;
+                };
+                let body = serde_json::json!({
+                    "model": CLEANUP_MODEL_ID,
+                    "messages": [
+                        {"role": "system", "content": CLEANUP_INSTRUCTIONS},
+                        {"role": "user", "content": request.raw},
+                    ],
+                });
+                let parsed = super::voice_briefing::post_json(
+                    &http,
+                    &executor,
+                    super::voice_briefing::CHAT_COMPLETIONS_URL,
+                    &key,
+                    InferenceProvider::VercelGateway,
+                    None,
+                    &body,
+                )
+                .await;
+                let cleaned = match parsed {
+                    Ok(parsed) => parsed
+                        .pointer("/choices/0/message/content")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty() && *text != request.raw.trim())
+                        .map(str::to_owned),
+                    Err(error) => {
+                        eprintln!("Goddard: voice scratchpad cleanup failed: {error:#}");
+                        return;
+                    }
+                };
+                let Some(cleaned) = cleaned else {
+                    return;
+                };
+                let _ = events.send((
+                    session_id,
+                    0,
+                    ScratchpadEvent::Cleaned {
+                        target: request.target,
+                        start: request.start,
+                        raw: request.raw,
+                        cleaned,
+                    },
+                ));
+                signal_event_pump(&wake);
+            })
+            .detach();
+    }
+
     /// Drain worker and permission answers into the transcript model —
     /// events stamped with a retired generation are a dead worker's mail.
     pub(super) fn drain_voice_scratchpad_events(&mut self, cx: &mut Context<Self>) -> bool {
@@ -2523,6 +2972,23 @@ impl Waku {
                     scratchpad.status = ScratchpadStatus::MicDenied;
                 } else if self.state.selected_session == Some(session_id) {
                     self.begin_voice_capture(session_id, cx);
+                }
+                continue;
+            }
+            // A cleanup answer belongs to no worker generation — it
+            // verifies against the transcript itself, so a reconnect's
+            // generation bump must not drop it.
+            if let ScratchpadEvent::Cleaned {
+                target,
+                start,
+                raw,
+                cleaned,
+            } = event
+            {
+                if let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) {
+                    changed |= scratchpad
+                        .transcript
+                        .apply_cleanup(target, start, &raw, &cleaned);
                 }
                 continue;
             }
@@ -2546,7 +3012,7 @@ impl Waku {
                 scratchpad.status = ScratchpadStatus::Live;
             }
             match event {
-                ScratchpadEvent::MicAccess(_) => {}
+                ScratchpadEvent::MicAccess(_) | ScratchpadEvent::Cleaned { .. } => {}
                 ScratchpadEvent::Connected => {
                     if matches!(
                         scratchpad.status,
@@ -2606,6 +3072,7 @@ impl Waku {
         if detach_sink {
             self.detach_voice_sink();
         }
+        self.drain_cleanup_requests(cx);
         changed
     }
 
@@ -3092,6 +3559,7 @@ impl Waku {
                     {
                         scratchpad.transcript.annotate(index);
                     }
+                    this.drain_cleanup_requests(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }))
@@ -3102,6 +3570,7 @@ impl Waku {
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                             scratchpad.transcript.annotate(index);
                         }
+                        this.drain_cleanup_requests(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }
@@ -3176,6 +3645,7 @@ impl Waku {
                         {
                             scratchpad.transcript.annotate_bullet(index, bullet_index);
                         }
+                        this.drain_cleanup_requests(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }))
@@ -3186,6 +3656,7 @@ impl Waku {
                             if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                 scratchpad.transcript.annotate_bullet(index, bullet_index);
                             }
+                            this.drain_cleanup_requests(cx);
                             cx.stop_propagation();
                             cx.notify();
                         }
@@ -3257,6 +3728,7 @@ impl Waku {
                         cx.notify();
                     }
                 }
+                this.drain_cleanup_requests(cx);
             }))
             .into_any_element()
     }
@@ -3395,7 +3867,7 @@ impl Waku {
             return div().into_any_element();
         };
         let mut text = scratchpad.transcript.annotation_text.clone();
-        let interim = scratchpad.transcript.annotation_interim.trim().to_owned();
+        let interim = strip_interim_terminators(&scratchpad.transcript.annotation_interim);
         append_word_text(&mut text, &interim);
         if text.is_empty() {
             text = tr!("voice_scratchpad.annotation_hint");
@@ -3635,7 +4107,7 @@ fn scratchpad_paragraph_text(
     let mut text = paragraph.text.clone();
     let split = text.len();
     if with_interim {
-        append_word_text(&mut text, interim.trim());
+        append_word_text(&mut text, &strip_interim_terminators(interim));
     }
     let mut runs = Vec::new();
     if split > 0 {
@@ -4257,10 +4729,167 @@ mod tests {
         let (events, terminal) = dispatched_parts(r#"{"type":"finish","text":"done"}"#);
         assert!(terminal);
         assert!(events.is_empty());
-        let (events, terminal) = dispatched_parts(
-            r#"{"type":"error","error":{"name":"Error","message":"upstream"}}"#,
-        );
+        let (events, terminal) =
+            dispatched_parts(r#"{"type":"error","error":{"name":"Error","message":"upstream"}}"#);
         assert!(terminal);
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn completed_sentence_end_defers_the_open_tail() {
+        // Only a closed sentence — terminator followed by fresh words —
+        // counts; the trailing open sentence stays out.
+        assert_eq!(completed_sentence_end("one. two"), Some(4));
+        assert_eq!(completed_sentence_end("one. two. three"), Some(9));
+        assert_eq!(completed_sentence_end("one."), None);
+        assert_eq!(completed_sentence_end("one. "), None);
+        assert_eq!(completed_sentence_end("one"), None);
+        assert_eq!(completed_sentence_end("wait! really? and"), Some(13));
+    }
+
+    #[test]
+    fn finished_sentences_queue_for_cleanup_behind_the_live_one() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("Um first uh thought. And the");
+        assert_eq!(transcript.cleanup_requests.len(), 1);
+        let request = &transcript.cleanup_requests[0];
+        assert_eq!(
+            request.target,
+            CleanTarget::Node(ScratchpadNode::Paragraph(0))
+        );
+        assert_eq!(request.raw, "Um first uh thought.");
+        assert_eq!(
+            transcript.paragraphs[0].text,
+            "Um first uh thought. And the"
+        );
+        // The second chunk's own closed sentence queues next — the still
+        // open tail stays deferred.
+        transcript.append_finalized("second one lands. More");
+        assert_eq!(transcript.cleanup_requests.len(), 2);
+        assert_eq!(
+            transcript.cleanup_requests[1].raw,
+            "And the second one lands."
+        );
+    }
+
+    #[test]
+    fn next_command_queues_the_closing_paragraphs_tail() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("first point okay");
+        transcript.append_finalized("next second point");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.cleanup_requests.len(), 1);
+        assert_eq!(transcript.cleanup_requests[0].raw, "first point");
+        assert_eq!(
+            transcript.cleanup_requests[0].target,
+            CleanTarget::Node(ScratchpadNode::Paragraph(0))
+        );
+        // The new paragraph's boundary starts clean.
+        transcript.append_finalized("with more. Another");
+        assert_eq!(transcript.cleanup_requests.len(), 2);
+        assert_eq!(
+            transcript.cleanup_requests[1].target,
+            CleanTarget::Node(ScratchpadNode::Paragraph(1))
+        );
+    }
+
+    #[test]
+    fn annotation_commit_queues_the_bullet_it_landed_in() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("fix the login okay");
+        transcript.append_finalized("next keep going");
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["fix the login"]);
+        // Opening the box flushed the paragraph's tail; the commit's
+        // request names the bullet, not the emptied box.
+        let bullet_request = transcript
+            .cleanup_requests
+            .iter()
+            .find(|request| request.raw == "fix the login")
+            .expect("the commit queues its bullet for cleanup");
+        assert_eq!(
+            bullet_request.target,
+            CleanTarget::Node(ScratchpadNode::Bullet(0, 0))
+        );
+        assert_eq!(bullet_request.start, 0);
+    }
+
+    #[test]
+    fn cleanup_answer_replaces_its_span_in_place() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("Um first uh thought. And second.");
+        let request = &transcript.cleanup_requests[0];
+        let (target, start, raw) = (request.target, request.start, request.raw.clone());
+        assert!(transcript.apply_cleanup(target, start, &raw, "First thought."));
+        assert_eq!(transcript.paragraphs[0].text, "First thought. And second.");
+        // A missing match leaves the raw text alone.
+        assert!(!transcript.apply_cleanup(
+            CleanTarget::Node(ScratchpadNode::Paragraph(0)),
+            0,
+            "not in the transcript",
+            "whatever"
+        ));
+    }
+
+    #[test]
+    fn cleanup_answer_finds_a_shifted_span_but_not_an_ambiguous_one() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("um filler. And the rest");
+        transcript.append_finalized("goes on. Live");
+        assert_eq!(transcript.cleanup_requests.len(), 2);
+        let first = transcript.cleanup_requests.remove(0);
+        let second = transcript.cleanup_requests.remove(0);
+        // The first answer rewrites shorter, shifting the second span's
+        // recorded offset — the unique match still finds it.
+        assert!(transcript.apply_cleanup(first.target, first.start, &first.raw, "Filler."));
+        assert!(transcript.apply_cleanup(
+            second.target,
+            second.start,
+            &second.raw,
+            "Everything else continues."
+        ));
+        assert_eq!(
+            transcript.paragraphs[0].text,
+            "Filler. Everything else continues. Live"
+        );
+        // Raw text that appears twice can't be placed once the recorded
+        // offset misses — it stays raw.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("note same. and same. Tail");
+        assert!(!transcript.apply_cleanup(
+            CleanTarget::Node(ScratchpadNode::Paragraph(0)),
+            usize::MAX,
+            "same.",
+            "Different."
+        ));
+        assert_eq!(transcript.paragraphs[0].text, "note same. and same. Tail");
+    }
+
+    #[test]
+    fn cleanup_never_rewrites_a_user_edited_paragraph() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("Um dictated words. More");
+        let request = &transcript.cleanup_requests[0];
+        let (target, start, raw) = (request.target, request.start, request.raw.clone());
+        let mut caret = CaretPos {
+            node: ScratchpadNode::Paragraph(0),
+            offset: 0,
+        };
+        transcript.insert_at(&mut caret, "typed ");
+        assert!(!transcript.apply_cleanup(target, start, &raw, "Dictated words."));
+        assert_eq!(
+            transcript.paragraphs[0].text,
+            "typed Um dictated words. More"
+        );
+    }
+
+    #[test]
+    fn interim_display_drops_sentence_terminators() {
+        assert_eq!(strip_interim_terminators("wait. really?"), "wait really");
+        assert_eq!(strip_interim_terminators("e.g. something"), "eg something");
+        assert_eq!(strip_interim_terminators("done…"), "done");
+        assert_eq!(strip_interim_terminators("comma, stays"), "comma, stays");
+        assert_eq!(strip_interim_terminators("   "), "");
     }
 }

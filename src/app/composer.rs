@@ -5824,7 +5824,10 @@ impl Waku {
         let has_draft = !composer.read(cx).content(cx).trim().is_empty()
             || atom_count != 0
             || annotation_count != 0
-            || (interactive && !self.composer_attachments.is_empty());
+            || (interactive && !self.composer_attachments.is_empty())
+            // A scratchpad holding speech counts as draft — its send is
+            // the same one Enter performs while the panel is up.
+            || (interactive && self.voice_scratchpad_sendable());
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
         let submit_action = self.composer_submit_action_for(session, preparing, has_draft);
@@ -6306,6 +6309,12 @@ impl Waku {
     fn submit_composer_card_draft(&mut self, surface: &ComposerCard, cx: &mut Context<Self>) {
         match surface {
             ComposerCard::Main => {
+                if self.voice_scratchpad_sendable() {
+                    // The scratchpad owns send while it's up — the same
+                    // path Enter takes; a typed draft stays underneath.
+                    self.submit_voice_scratchpad(cx);
+                    return;
+                }
                 let prompt = self.composer.read(cx).content(cx).to_owned();
                 if let Some(submission) = self.submission_with_attachments(&prompt, cx) {
                     self.composer.update(cx, |input, cx| input.clear(cx));
