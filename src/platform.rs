@@ -1448,6 +1448,24 @@ pub fn pause_briefing_audio() -> Option<std::time::Duration> {
     None
 }
 
+/// Restart the current clip, including a paused clip, from its beginning.
+#[cfg(target_os = "macos")]
+pub fn restart_briefing_audio() -> Option<std::time::Duration> {
+    PLAYING_BRIEFING.with_borrow(|slot| {
+        let player = slot.as_ref()?;
+        unsafe { player.setCurrentTime(0.0) };
+        if !unsafe { player.play() } {
+            return None;
+        }
+        briefing_audio_status().map(|(_, remaining)| remaining)
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn restart_briefing_audio() -> Option<std::time::Duration> {
+    None
+}
+
 #[cfg(target_os = "macos")]
 pub fn resume_briefing_audio() -> Option<std::time::Duration> {
     PLAYING_BRIEFING.with_borrow(|slot| {

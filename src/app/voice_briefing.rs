@@ -512,58 +512,86 @@ impl Waku {
         cx.notify();
     }
 
-    /// The pause/resume control, styled as a suggestion chip. It rides the
-    /// composer suggestion rows when one claims the slot; otherwise
-    /// `render_composer_float_chips` hangs it off the composer card's top
-    /// edge in the same slot.
-    pub(super) fn voice_briefing_playback_chip(
+    /// Compact playback controls beside the context gauge.
+    pub(super) fn voice_briefing_playback_controls(
         &self,
         theme: &Theme,
         cx: &mut Context<Self>,
-    ) -> Option<Stateful<Div>> {
+    ) -> Option<Div> {
         let playback = self.voice_briefing_playback_status()?;
-        let (icon_path, label) = if playback.playing {
-            ("icons/pause.svg", tr!("automations.pause"))
-        } else {
-            ("icons/play.svg", tr!("automations.resume"))
-        };
         let seconds = playback.remaining.as_secs();
-        let time_remaining = format!("{:02}:{:02}", seconds / 60, seconds % 60);
-        Some(
+        let button = |id, path, label| {
             div()
-                .id("voice-briefing-playback-toggle")
+                .id(id)
                 .tab_index(0)
+                .size(px(24.0))
+                .rounded(px(8.0))
                 .flex()
                 .items_center()
-                .gap(px(5.0))
-                .h(px(24.0))
-                .px(px(9.0))
-                .rounded(px(8.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
+                .justify_center()
                 .bg(theme.raised)
                 .cursor_default()
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                // The wash composites over `raised` — painting the
-                // translucent token alone would let the transcript ghost
-                // through.
-                .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
-                .child(icon(icon_path, 11.0, theme.text_secondary))
-                .child(label)
+                .hover(|style| style.bg(theme.raised.blend(theme.overlay_strong)))
+                .tooltip(Tooltip::text(label))
+                .child(icon(path, 12.0, theme.text_secondary))
+        };
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                .child(
+                    button(
+                        "voice-briefing-restart",
+                        "icons/rotate-ccw.svg",
+                        "Restart briefing",
+                    )
+                    .on_activation(cx, |this, _, cx| {
+                        if let Some(remaining) = crate::platform::restart_briefing_audio() {
+                            let message_id =
+                                this.voice_briefing_playback.and_then(|p| p.message_id);
+                            this.track_voice_briefing_playback(remaining, message_id, cx);
+                        }
+                    }),
+                )
+                .child(
+                    button(
+                        "voice-briefing-toggle",
+                        if playback.playing {
+                            "icons/pause.svg"
+                        } else {
+                            "icons/play.svg"
+                        },
+                        if playback.playing { "Pause" } else { "Resume" },
+                    )
+                    .on_activation(cx, |this, _, cx| this.toggle_voice_briefing_playback(cx)),
+                )
+                .child(
+                    button(
+                        "voice-briefing-skip",
+                        "icons/fast-forward.svg",
+                        "Skip briefing",
+                    )
+                    .on_activation(cx, |this, _, cx| this.skip_voice_briefing(cx)),
+                )
                 .child(
                     div()
-                        .flex_none()
+                        .px(px(5.0))
                         .text_size(sp(11.0))
                         .text_color(theme.text_tertiary)
-                        .child(tr!(
-                            "experiments.voice_briefing_time_remaining",
-                            time = time_remaining
-                        )),
-                )
-                .on_activation(cx, |this, _, cx| {
-                    this.toggle_voice_briefing_playback(cx);
-                }),
+                        .child(format!("{:02}:{:02}", seconds / 60, seconds % 60)),
+                ),
         )
+    }
+
+    fn skip_voice_briefing(&mut self, cx: &mut Context<Self>) {
+        crate::platform::stop_briefing_audio();
+        self.voice_briefing_playback = None;
+        self.voice_briefing_playback_generation =
+            self.voice_briefing_playback_generation.wrapping_add(1);
+        self.pump_speech_queue(cx);
+        cx.notify();
     }
 
     fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {

@@ -1,1 +1,1 @@
-- While a voice briefing clip plays, its pause/resume control now floats above the composer as a suggestion-styled chip instead of taking a row inside it, and the reply being spoken keeps the same control pinned in its footer — visible without hovering the response.
+- Voice briefing controls sit beside the context gauge, with restart, pause/resume, skip, and a ticking duration.
