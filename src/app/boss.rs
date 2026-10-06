@@ -289,6 +289,12 @@ pub(super) struct BossUi {
     generation: u64,
     pending: bool,
     pending_reply: Option<BossReply>,
+    /// Planning sessions whose `finalizePlan` dispatch went out and did
+    /// not come back failed — the approval chip hides and the composer
+    /// seals for the in-flight window. Success leaves the entry until
+    /// `finalized_at` lands on the session so neither flickers back; a
+    /// failed reply removes it so both restore for a retry.
+    pub(super) plan_finalizing: HashSet<Uuid>,
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
@@ -371,6 +377,7 @@ impl Default for BossUi {
             generation: 0,
             pending: false,
             pending_reply: None,
+            plan_finalizing: HashSet::new(),
             list: ListState::new(0, ListAlignment::Top, px(640.0)),
             scrollbar: ScrollbarState::new(),
             rows: Vec::new(),
@@ -570,7 +577,10 @@ pub(super) enum BossReply {
     /// A bucket's overview records for the Records view.
     Records,
     Saved,
-    Finalize,
+    /// A `finalizePlan` dispatch for the planning session it names — the
+    /// id marks the press's in-flight window so the chip hides and the
+    /// composer seals until the reply lands.
+    Finalize(Uuid),
 }
 
 /// Sidebar employee order: newest summon first. `created_at` is the
@@ -1381,6 +1391,9 @@ impl Waku {
         let generation = self.boss_ui.generation;
         self.boss_ui.pending = true;
         self.boss_ui.pending_reply = Some(reply);
+        if let BossReply::Finalize(session_id) = reply {
+            self.boss_ui.plan_finalizing.insert(session_id);
+        }
         if let Some(path) = list_path.as_ref() {
             self.boss_ui.memory_error = None;
             self.boss_ui.memory_loading_folder = Some((key, path.clone()));
@@ -1449,6 +1462,9 @@ impl Waku {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.boss_ui.generation != generation {
+                    if let BossReply::Finalize(session_id) = reply {
+                        this.boss_ui.plan_finalizing.remove(&session_id);
+                    }
                     return;
                 }
                 this.boss_ui.pending = false;
@@ -1466,6 +1482,18 @@ impl Waku {
                 }
                 if reply == BossReply::Records {
                     this.boss_ui.memory_records_loading = None;
+                }
+                // A failed or unexpected Finalize reply restores the
+                // session's chip and composer so the user can retry.
+                if let BossReply::Finalize(session_id) = reply
+                    && !matches!(
+                        &result,
+                        Ok(waku_client::ResponsePayload::Boss {
+                            result: BossResult::PlanFinalized { .. },
+                        })
+                    )
+                {
+                    this.boss_ui.plan_finalizing.remove(&session_id);
                 }
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
@@ -1514,7 +1542,7 @@ impl Waku {
                                 );
                             }
                             BossResult::PlanFinalized { .. }
-                                if matches!(reply, BossReply::Finalize) =>
+                                if matches!(reply, BossReply::Finalize(_)) =>
                             {
                                 this.boss_request(key, BossOperation::View, BossReply::List, cx);
                             }

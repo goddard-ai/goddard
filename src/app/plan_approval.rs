@@ -40,23 +40,28 @@ impl Waku {
     }
 
     /// Whether the composer gives way to the sealed card: the plan is
-    /// frozen, or the approval prompt already went out and the session's
-    /// boss owns the transcript from there — a finalized planning session
-    /// is read-only for the human.
+    /// frozen, a finalize dispatch is still in flight, or the approval
+    /// prompt already went out and the session's boss owns the transcript
+    /// from there — a finalized planning session is read-only for the
+    /// human.
     pub(super) fn plan_execution_locked(&self, session: &AgentSession) -> bool {
         let Some(planning) = session.planning.as_ref() else {
             return false;
         };
-        planning.finalized_at.is_some() || self.plan_approval_sent(session)
+        self.boss_ui.plan_finalizing.contains(&session.id)
+            || planning.finalized_at.is_some()
+            || self.plan_approval_sent(session)
     }
 
     /// The gate behind the approval chip: an unfinalized planning session
-    /// with no approval prompt sent yet.
+    /// with no approval prompt sent yet and no finalize dispatch in
+    /// flight — a press lifts the chip until the reply lands.
     pub(super) fn plan_approval_pending(&self, session: &AgentSession) -> bool {
         session
             .planning
             .as_ref()
             .is_some_and(|planning| planning.finalized_at.is_none())
+            && !self.boss_ui.plan_finalizing.contains(&session.id)
             && !self.plan_approval_sent(session)
     }
 
@@ -89,7 +94,7 @@ impl Waku {
             waku_client::boss::BossOperation::FinalizePlan {
                 plan_file: Some(plan_file),
             },
-            super::boss::BossReply::Finalize,
+            super::boss::BossReply::Finalize(session_id),
             cx,
         );
     }
