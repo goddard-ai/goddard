@@ -11501,7 +11501,6 @@ dependencies = [
  "dunce",
  "libc",
  "mdns-sd",
- "nucleo-matcher",
  "objc2-foundation 0.3.2",
  "parking_lot",
  "rusqlite",
@@ -11512,7 +11511,6 @@ dependencies = [
  "smol",
  "subtle",
  "tokio",
- "trash",
  "tungstenite 0.30.0",
  "uuid",
  "waku-base",
@@ -11528,6 +11526,7 @@ dependencies = [
  "waku-share",
  "waku-store",
  "waku-vcs",
+ "waku-workspace",
  "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
@@ -11748,6 +11747,25 @@ dependencies = [
  "waku-protocol",
  "waku-sessions",
  "waku-share",
+]
+
+[[package]]
+name = "waku-workspace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 6.0.0",
+ "dunce",
+ "nucleo-matcher",
+ "serde_json",
+ "trash",
+ "uuid",
+ "waku-base",
+ "waku-drivers",
+ "waku-exec",
+ "waku-git",
+ "waku-protocol",
+ "waku-vcs",
 ]
 
 [[package]]

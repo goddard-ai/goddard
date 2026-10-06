@@ -10,10 +10,10 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use crate::model::{ProviderKind, ReportedCommand};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 pub use waku_protocol::composer::{CommandScope, FileEntry, SlashCommand};
+use waku_protocol::model::{ProviderKind, ReportedCommand};
 
 /// How many rows a filter pass returns. The popup shows a screenful and the
 /// keyboard walks the rest; past this the tail is noise, not choice.

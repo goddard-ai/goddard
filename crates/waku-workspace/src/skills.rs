@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::model::ProviderKind;
+use waku_protocol::model::ProviderKind;
 
 pub use waku_protocol::skills::{
     DISABLED_SKILL_FILE, SKILL_FILE, SkillEntry, SkillInstall, SkillLocation, SkillScope,
