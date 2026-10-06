@@ -5219,10 +5219,12 @@ impl WakuBackend {
             };
             let sender = caller.or(boss.session_id);
             let plan = waku_protocol::boss::BossPlan {
+                id: Uuid::new_v4(),
                 session_id: Uuid::new_v4(),
                 plan_file: plan_file.clone(),
                 idea: title.clone(),
                 finalized_at: None,
+                items: Vec::new(),
             };
             let (opener, _) = localized!("boss.plan_seed_opener", path = plan_file.clone());
             let seed = format!("{}\n\n{}", prompt.trim(), opener);
@@ -5283,6 +5285,7 @@ impl WakuBackend {
         &self,
         caller: Option<Uuid>,
         plan_file: Option<String>,
+        items: Option<Vec<String>>,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::BossResult;
@@ -5384,7 +5387,7 @@ impl WakuBackend {
         }
         let finalized = self
             .boss
-            .finalize_plan(&plan.plan_file, crate::model::unix_time())?;
+            .finalize_plan(&plan.plan_file, items, crate::model::unix_time())?;
         {
             let mut state = self.task_state.lock();
             if let Some(session) = state
@@ -6938,8 +6941,8 @@ impl WakuBackend {
                 }
                 Ok(BossResult::TerminalRequested { title, cwd })
             }
-            BossOperation::FinalizePlan { plan_file } => {
-                self.finalize_plan(caller, plan_file, events)
+            BossOperation::FinalizePlan { plan_file, items } => {
+                self.finalize_plan(caller, plan_file, items, events)
             }
             BossOperation::Summon {
                 persona_id,
@@ -19100,6 +19103,7 @@ mod tests {
                 None,
                 BossOperation::FinalizePlan {
                     plan_file: Some("memory/plans/auth.md".into()),
+                    items: None,
                 },
                 &events,
             )
@@ -19180,6 +19184,7 @@ mod tests {
                     None,
                     BossOperation::FinalizePlan {
                         plan_file: Some("auth.md".into()),
+                        items: None,
                     },
                     &events,
                 )
@@ -19283,6 +19288,7 @@ mod tests {
                     Some(boss),
                     BossOperation::FinalizePlan {
                         plan_file: Some(plan_file.into()),
+                        items: None,
                     },
                     &events,
                 )

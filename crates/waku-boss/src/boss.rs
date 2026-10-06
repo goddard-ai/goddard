@@ -15,8 +15,8 @@ use waku_protocol::boss::{
     BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
     DispatchNotification, EmployeeExpiry, EmployeeGoal, EmployeeLifecycle, EmployeeSettle,
     ExpiryCause, INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate,
-    MemoryMigrationReport,
-    ModelLimit, PermissionOverrides, PersonaPermissions, SummonTicket, WaveMember,
+    MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, PlanActor,
+    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, SummonTicket, WaveMember,
     WaveMemberOutcome, WaveNotification,
 };
 use waku_protocol::model::ProviderKind;
@@ -582,7 +582,7 @@ impl BossService {
                 .iter_mut()
                 .find(|plan| plan.session_id == session_id)
             {
-                plan.finalized_at = Some(at);
+                apply_plan_approval(plan, None, at)?;
             }
             Ok(())
         })
@@ -749,8 +749,16 @@ impl BossService {
     }
 
     /// Freeze the named plan at `now`. Callers validate the record exists
-    /// and is not already frozen; the stamp is monotonic.
-    pub fn finalize_plan(&self, plan_file: &str, now: u64) -> anyhow::Result<BossPlan> {
+    /// and is not already frozen; the stamp is monotonic. `items` seeds
+    /// the work breakdown from the approved document's course of work —
+    /// the declared list replaces whatever a session declared early, and
+    /// the approval lands on the audit trail as the user's act.
+    pub fn finalize_plan(
+        &self,
+        plan_file: &str,
+        items: Option<Vec<String>>,
+        now: u64,
+    ) -> anyhow::Result<BossPlan> {
         let mut finalized = None;
         self.update(|state| {
             let plan = state
@@ -759,12 +767,79 @@ impl BossService {
                 .find(|plan| plan.plan_file == plan_file)
                 .ok_or_else(|| anyhow!("unknown plan {plan_file}"))?;
             if plan.finalized_at.is_none() {
-                plan.finalized_at = Some(now);
+                apply_plan_approval(plan, items, now)?;
             }
             finalized = Some(plan.clone());
             Ok(())
         })?;
         Ok(finalized.unwrap())
+    }
+
+    /// `updatePlanItems` — replace a plan's ordered work breakdown. An
+    /// entry naming an existing item id renames and repositions it; an
+    /// entry without one appends a new `toDo` item; an item the list
+    /// omits is marked dropped — struck, audited, reopenable — rather
+    /// than deleted, keeping "the plan said X, where did X go" answerable.
+    pub fn update_plan_items(
+        &self,
+        caller: Option<Uuid>,
+        reference: &str,
+        items: Vec<PlanItemInput>,
+    ) -> anyhow::Result<BossPlan> {
+        self.require_owner(caller)?;
+        let actor = self.plan_actor(caller);
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let plan = plan_mut(state, reference)?;
+            let old = std::mem::take(&mut plan.items);
+            let mut next = Vec::with_capacity(items.len());
+            for input in &items {
+                let title = input.title.trim();
+                anyhow::ensure!(!title.is_empty(), "work item titles cannot be empty");
+                match input.id {
+                    Some(id) => {
+                        let existing = old
+                            .iter()
+                            .find(|item| item.id == id)
+                            .ok_or_else(|| anyhow!("unknown work item {id}"))?;
+                        anyhow::ensure!(
+                            !next.iter().any(|item: &PlanItem| item.id == id),
+                            "work item {id} is listed twice"
+                        );
+                        next.push(PlanItem {
+                            title: title.to_owned(),
+                            ..existing.clone()
+                        });
+                    }
+                    None => next.push(PlanItem {
+                        id: Uuid::new_v4(),
+                        title: title.to_owned(),
+                        state: PlanItemState::ToDo,
+                        history: Vec::new(),
+                    }),
+                }
+            }
+            let kept: std::collections::HashSet<Uuid> = next.iter().map(|item| item.id).collect();
+            for mut item in old {
+                if kept.contains(&item.id) {
+                    continue;
+                }
+                if item.state != PlanItemState::Dropped {
+                    item.state = PlanItemState::Dropped;
+                    item.history.push(PlanItemTransition {
+                        state: PlanItemState::Dropped,
+                        at: now,
+                        actor,
+                    });
+                }
+                next.push(item);
+            }
+            plan.items = next;
+            updated = Some(plan.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
     }
 
     /// Whether `path` — a files-root-relative Boss path — names a finalized
@@ -2247,6 +2322,16 @@ impl BossService {
         Ok(())
     }
 
+    /// The audit-trail actor for an owner-gated caller — the boss and its
+    /// planning sessions record as the boss, a client call as the user.
+    /// Call after `require_owner`: employees never reach the channel.
+    fn plan_actor(&self, caller: Option<Uuid>) -> PlanActor {
+        match caller {
+            Some(_) => PlanActor::Boss,
+            None => PlanActor::User,
+        }
+    }
+
     /// A deliverable is the caller's work product, not Boss-owned state, so
     /// the owner gate relaxes for employees: the boss and human publish any
     /// existing path, while an employee publishes only inside its assigned
@@ -2352,6 +2437,12 @@ impl BossService {
             | BossOperation::SetResourcePolicy { .. }
             | BossOperation::Eval { .. } => {
                 bail!("runtime operation requires daemon dispatch")
+            }
+            BossOperation::UpdatePlanItems { plan, items } => {
+                self.update_plan_items(caller, &plan, items)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
             }
             BossOperation::View => {
                 let mut state = self.document();
@@ -3148,6 +3239,69 @@ fn normalize_plan_path(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Resolve a plan reference — a `BossPlan::id` or planning-session id in
+/// UUID form, or any accepted `plans/<file>.md` spelling — to the record.
+fn find_plan<'a>(planning: &'a [BossPlan], reference: &str) -> Option<&'a BossPlan> {
+    let reference = reference.trim();
+    if let Ok(id) = Uuid::parse_str(reference) {
+        return planning
+            .iter()
+            .find(|plan| plan.id == id || plan.session_id == id);
+    }
+    let plan_file = normalize_plan_file(reference).ok()?;
+    planning.iter().find(|plan| plan.plan_file == plan_file)
+}
+
+/// The mutable half of [`find_plan`] for bookkeeping operations.
+fn plan_mut<'a>(state: &'a mut BossState, reference: &str) -> anyhow::Result<&'a mut BossPlan> {
+    let index = state
+        .planning
+        .iter()
+        .position(|plan| find_plan(std::slice::from_ref(plan), reference).is_some())
+        .ok_or_else(|| anyhow!("unknown plan {reference}"))?;
+    Ok(&mut state.planning[index])
+}
+
+/// Stamp an approved plan: freeze time and, when the caller declared
+/// one, seed the work breakdown from the document's course of work.
+fn apply_plan_approval(
+    plan: &mut BossPlan,
+    items: Option<Vec<String>>,
+    now: u64,
+) -> anyhow::Result<()> {
+    plan.finalized_at = Some(now);
+    if let Some(items) = items {
+        for title in &items {
+            anyhow::ensure!(!title.trim().is_empty(), "work item titles cannot be empty");
+        }
+        // The doc is the source at approval — earlier drafts of the
+        // breakdown drop to the struck tail rather than linger as
+        // declared work the user never signed off on.
+        let mut next: Vec<PlanItem> = items
+            .into_iter()
+            .map(|title| PlanItem {
+                id: Uuid::new_v4(),
+                title: title.trim().to_owned(),
+                state: PlanItemState::ToDo,
+                history: Vec::new(),
+            })
+            .collect();
+        for mut item in std::mem::take(&mut plan.items) {
+            if item.state != PlanItemState::Dropped {
+                item.state = PlanItemState::Dropped;
+                item.history.push(PlanItemTransition {
+                    state: PlanItemState::Dropped,
+                    at: now,
+                    actor: PlanActor::User,
+                });
+            }
+            next.push(item);
+        }
+        plan.items = next;
+    }
+    Ok(())
 }
 
 /// Canonical `plans/<name>.md` beneath the files root, from whatever the
@@ -6104,10 +6258,12 @@ mod memory_op_tests {
             .update(|state| {
                 state.session_id = Some(boss);
                 state.planning.push(BossPlan {
+                    id: Uuid::new_v4(),
                     session_id: planning,
                     plan_file: "plans/auth.md".into(),
                     idea: "Auth".into(),
                     finalized_at: None,
+                    items: Vec::new(),
                 });
                 Ok(())
             })
@@ -6149,12 +6305,12 @@ mod memory_op_tests {
                 },
             )
             .unwrap();
-        let stamped = service.finalize_plan("plans/auth.md", 100).unwrap();
+        let stamped = service.finalize_plan("plans/auth.md", None, 100).unwrap();
         assert_eq!(stamped.finalized_at, Some(100));
         // The stamp is monotonic: re-finalizing cannot re-time it.
         assert_eq!(
             service
-                .finalize_plan("plans/auth.md", 200)
+                .finalize_plan("plans/auth.md", None, 200)
                 .unwrap()
                 .finalized_at,
             Some(100)
@@ -6269,10 +6425,12 @@ mod memory_op_tests {
             .update(|state| {
                 state.session_id = Some(boss);
                 state.planning.push(BossPlan {
+                    id: Uuid::new_v4(),
                     session_id: planning,
                     plan_file: "plans/auth.md".into(),
                     idea: "Auth".into(),
                     finalized_at: None,
+                    items: Vec::new(),
                 });
                 Ok(())
             })
@@ -6764,4 +6922,133 @@ mod memory_op_tests {
         assert_eq!(record.ticket.as_ref().unwrap().interruptions.len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
+
+    /// A draft plan record for the tests below — `session_id` doubles as
+    /// the planning session's identity.
+    fn test_plan(plan_file: &str) -> BossPlan {
+        BossPlan {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            plan_file: plan_file.into(),
+            idea: "Plan".into(),
+            finalized_at: None,
+            items: Vec::new(),
+        }
+    }
+
+    fn add_plan(service: &BossService, plan: BossPlan) -> Uuid {
+        let id = plan.id;
+        service
+            .update(|state| {
+                state.planning.push(plan);
+                Ok(())
+            })
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn plan_items_declare_reshape_and_drop_by_omission() {
+        let root = std::env::temp_dir().join(format!("boss-plan-items-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        add_plan(&service, test_plan("plans/auth.md"));
+        // Employees never reach the bookkeeping channel.
+        let employee = Uuid::new_v4();
+        assert!(
+            service
+                .update_plan_items(Some(employee), "plans/auth.md", Vec::new())
+                .is_err()
+        );
+        // A draft plan declares its course before approval.
+        let plan = service
+            .update_plan_items(
+                Some(boss),
+                "auth.md",
+                vec![
+                    PlanItemInput {
+                        id: None,
+                        title: "Probe".into(),
+                    },
+                    PlanItemInput {
+                        id: None,
+                        title: "Build".into(),
+                    },
+                    PlanItemInput {
+                        id: None,
+                        title: "Verify".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        let titles: Vec<&str> = plan.items.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["Probe", "Build", "Verify"]);
+        assert!(
+            plan.items
+                .iter()
+                .all(|item| item.state == PlanItemState::ToDo && item.history.is_empty())
+        );
+        let probe = plan.items[0].id;
+        let verify = plan.items[2].id;
+        // Reorder, rename, add, and omit — the omission drops, struck but
+        // kept, with the boss recorded on its audit entry.
+        let plan = service
+            .update_plan_items(
+                Some(boss),
+                &plan.id.to_string(),
+                vec![
+                    PlanItemInput {
+                        id: Some(verify),
+                        title: "Verify all".into(),
+                    },
+                    PlanItemInput {
+                        id: None,
+                        title: "Polish".into(),
+                    },
+                    PlanItemInput {
+                        id: Some(probe),
+                        title: "Probe".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        let titles: Vec<(&str, PlanItemState)> = plan
+            .items
+            .iter()
+            .map(|item| (item.title.as_str(), item.state))
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                ("Verify all", PlanItemState::ToDo),
+                ("Polish", PlanItemState::ToDo),
+                ("Probe", PlanItemState::ToDo),
+                ("Build", PlanItemState::Dropped),
+            ]
+        );
+        let build = &plan.items[3];
+        assert_eq!(
+            build.history.as_slice(),
+            [PlanItemTransition {
+                state: PlanItemState::Dropped,
+                at: build.history[0].at,
+                actor: PlanActor::Boss,
+            }]
+        );
+        // The breakdown survives a daemon restart.
+        drop(service);
+        let reopened = BossService::open(root.clone()).unwrap();
+        let plan = reopened.plan_for_file("plans/auth.md").unwrap();
+        assert_eq!(plan.items.len(), 4);
+        assert_eq!(plan.items[3].state, PlanItemState::Dropped);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+
 }

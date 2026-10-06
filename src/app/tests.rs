@@ -5646,10 +5646,12 @@ fn plan_doc_host_follows_the_state_listing_the_plan() {
     let session_id = Uuid::new_v4();
     let remote = waku_client::DaemonKey::Remote(Uuid::new_v4());
     let plan = waku_client::boss::BossPlan {
+        id: Uuid::new_v4(),
         session_id,
         plan_file: "plans/auth.md".into(),
         idea: "Auth".into(),
         finalized_at: None,
+        items: Vec::new(),
     };
     let mut remote_state = boss_state(None, Vec::new());
     remote_state.planning.push(plan.clone());

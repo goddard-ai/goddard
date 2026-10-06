@@ -771,6 +771,81 @@ pub struct BossDeliverable {
     pub viewed_at: Option<u64>,
 }
 
+/// Who moved a plan or one of its work items — the audit trail's actor.
+/// Employee callers never reach the bookkeeping channel, so every caller
+/// resolves to the boss or the user.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanActor {
+    Boss,
+    User,
+}
+
+/// The stored state of a work-breakdown item — everything except
+/// in-progress, which the panel derives from linked live employees and
+/// the record never carries. `toDo` is also the reopen target: a done or
+/// dropped item returns to it.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanItemState {
+    /// Declared, no linked live work.
+    #[default]
+    ToDo,
+    /// Checked off — a claim that the item's intent was satisfied.
+    Done,
+    /// Removed from the course but kept visible as struck.
+    Dropped,
+}
+
+impl PlanItemState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            PlanItemState::ToDo => "to do",
+            PlanItemState::Done => "done",
+            PlanItemState::Dropped => "dropped",
+        }
+    }
+}
+
+/// An audited item state change — a check-off, a drop, or a reopen back
+/// to `toDo` — with actor and time.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanItemTransition {
+    pub state: PlanItemState,
+    pub at: u64,
+    pub actor: PlanActor,
+}
+
+/// One step in a plan's ordered work breakdown, declared at dispatch
+/// granularity — roughly one employee-job each. `id` is the stable
+/// identity summon item tags and `setPlanItemState` target; the entry's
+/// position in `BossPlan::items` is the declared course, never computed.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanItem {
+    pub id: Uuid,
+    pub title: String,
+    #[serde(default)]
+    pub state: PlanItemState,
+    /// Every explicit state change in order. Adds, renames, and reorders
+    /// are not lifecycle events and leave no entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<PlanItemTransition>,
+}
+
+/// One entry of an `updatePlanItems` payload — an entry naming an
+/// existing item `id` renames and repositions it; an entry without one
+/// creates a fresh `toDo` item.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlanItemInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id: Option<Uuid>,
+    pub title: String,
+}
+
 /// A planning session the boss opened with `createPlan`: the managed task
 /// it drafts in and the plan document that task owns. `plan_file` is
 /// relative to the Boss files root — always `plans/<name>.md`.
@@ -779,6 +854,12 @@ pub struct BossDeliverable {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossPlan {
+    /// The record's stable identity — employee `planId` links and plan
+    /// references resolve to it. It survives plan-file renames and the
+    /// planning session's archive; records predating the field mint one
+    /// on load.
+    #[serde(default = "new_plan_id")]
+    pub id: Uuid,
     pub session_id: Uuid,
     pub plan_file: String,
     /// What the session is planning — the session's title carries the same
@@ -786,6 +867,16 @@ pub struct BossPlan {
     pub idea: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finalized_at: Option<u64>,
+    /// The ordered work breakdown — the plan's intended course of work,
+    /// seeded from the approved design at finalization and reshaped by the
+    /// boss thereafter as execution diverges. The frozen document stays
+    /// the baseline; this list is the live execution map.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<PlanItem>,
+}
+
+fn new_plan_id() -> Uuid {
+    Uuid::new_v4()
 }
 
 impl BossPlan {
@@ -925,10 +1016,16 @@ pub enum BossOperation {
     /// finalizes its own plan (`plan_file` omitted); the boss chat or a
     /// human names the file. Approval lands on a daemon-owned request card;
     /// the approved design is handed to the boss chat for implementation,
-    /// and the session archives once the grace period elapses.
+    /// and the session archives once the grace period elapses. `items`
+    /// seeds the work breakdown from the approved document's course of
+    /// work — what the user signed off on is what the list starts as;
+    /// omit it to leave an already-declared breakdown unchanged.
     FinalizePlan {
         #[serde(default)]
         plan_file: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        items: Option<Vec<String>>,
     },
     /// Manage the user's daemon-owned scheduled automations. Boss-only.
     Automation {
@@ -1032,6 +1129,20 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         host: Option<crate::resources::ResourcePolicy>,
+    },
+    /// Reshape a plan's ordered work breakdown in one call: an entry
+    /// naming an existing item `id` renames and repositions it, an entry
+    /// without one appends a new `toDo` item, and an item the list omits
+    /// is marked `dropped` — the declared list is the whole course, and
+    /// omissions drop (audited, struck, reopenable) rather than delete.
+    /// Usable before approval — a planning session declares its course
+    /// early — and after; a closed plan refuses until reopened.
+    /// Boss/human only.
+    UpdatePlanItems {
+        /// The `BossPlan::id`, its planning-session id, or its
+        /// `plans/<file>.md` path.
+        plan: String,
+        items: Vec<PlanItemInput>,
     },
     Control {
         session_id: Uuid,
@@ -1423,6 +1534,7 @@ pub enum EmployeeControl {
 #[cfg(test)]
 mod tests {
     use super::EmployeeControl;
+    use uuid::Uuid;
 
     #[test]
     fn set_model_control_decodes_provider_model_and_effort() {
@@ -1603,7 +1715,23 @@ mod tests {
         .unwrap();
         assert!(matches!(
             finalize,
-            super::BossOperation::FinalizePlan { plan_file: None }
+            super::BossOperation::FinalizePlan {
+                plan_file: None,
+                items: None
+            }
+        ));
+        let seeded: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "finalizePlan",
+            "planFile": "plans/auth.md",
+            "items": ["Probe", "Verify"]
+        }))
+        .unwrap();
+        assert!(matches!(
+            seeded,
+            super::BossOperation::FinalizePlan {
+                plan_file: Some(file),
+                items: Some(items)
+            } if file == "plans/auth.md" && items == ["Probe", "Verify"]
         ));
         let result: super::BossResult = serde_json::from_value(serde_json::json!({
             "type": "planFinalized",
@@ -1642,6 +1770,37 @@ mod tests {
         assert!(
             matches!(result, super::BossResult::Browse { url, title: None, .. } if url == "https://example.com/docs")
         );
+    }
+
+    #[test]
+    fn work_breakdown_operations_decode_camel_case_payloads() {
+        let items: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "updatePlanItems",
+            "plan": "plans/auth.md",
+            "items": [{"title": "Probe"}, {"id": "00000000-0000-0000-0000-000000000002", "title": "Verify"}]
+        }))
+        .unwrap();
+        assert!(matches!(
+            items,
+            super::BossOperation::UpdatePlanItems { plan, items }
+                if plan == "plans/auth.md"
+                    && items.len() == 2
+                    && items[0].id.is_none()
+                    && items[1].id == Some(Uuid::from_u128(2))
+        ));
+    }
+
+    #[test]
+    fn a_plan_record_predating_the_work_fields_still_decodes() {
+        let plan: super::BossPlan = serde_json::from_value(serde_json::json!({
+            "sessionId": "00000000-0000-0000-0000-000000000001",
+            "planFile": "plans/auth.md",
+            "idea": "Auth",
+            "finalizedAt": 1_700_000_000
+        }))
+        .unwrap();
+        assert!(!plan.id.is_nil());
+        assert!(plan.items.is_empty());
     }
 
     #[test]

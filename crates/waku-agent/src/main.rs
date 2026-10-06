@@ -418,9 +418,14 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss plan create --title 'Session redesign' --plan-file session.md --file brief.md".to_owned(),
         ),
         "boss plan finalize" => (
-            json!({"PLAN_FILE":{"positional":true,"optional":true,"type":"relative plan path; omitted selects the active plan"}}),
+            json!({"PLAN_FILE":{"positional":true,"optional":true,"type":"relative plan path; omitted selects the active plan"},"--items":{"type":"JSON string array","optional":true,"notes":"the approved doc's ordered course of work — seeds the plan's work breakdown"}}),
             json!({"json":{"type":"planFinalized","sessionId":"planning session UUID","planFile":"frozen path under memory/","finalizedAt":"Unix timestamp"}}),
-            "goddard-agent boss plan finalize plans/session.md".to_owned(),
+            "goddard-agent boss plan finalize plans/session.md --items '[\"Probe\",\"Verify\"]'".to_owned(),
+        ),
+        "boss plan items" => (
+            json!({"PLAN":{"positional":true,"required":true,"type":"plan id, planning-session id, or plans/<file>.md"},"--json|--json-file":{"required":true,"exactlyOne":true,"type":"ordered item list; entries {\"id\": UUID, \"title\": string} rename/reorder, {\"title\": string} appends, omitted items are dropped"}}),
+            json!({"json":{"type":"state","state":"updated BossState"}}),
+            "goddard-agent boss plan items plans/session.md --json-file items.json".to_owned(),
         ),
         "boss deliverable publish" => (
             json!({"PATH":{"positional":true,"required":true,"type":"absolute file or directory path"},"--name":{"type":"optional display name"}}),
@@ -762,6 +767,7 @@ fn schema() -> serde_json::Value {
         "boss memory migrate",
         "boss plan create",
         "boss plan finalize",
+        "boss plan items",
         "boss deliverable publish",
         "boss deliverable dismiss",
         "boss speak",
@@ -1527,12 +1533,33 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             print_boss(boss_request(Op::Memory { operation })?)
         }
         ("plan", "finalize") => {
-            let (pos, _) = flags(args, &[], true)?;
+            let (pos, opts) = flags(args, &["items"], true)?;
             if pos.len() > 1 {
-                bail!("usage: boss plan finalize [PLAN_FILE]");
+                bail!("usage: boss plan finalize [PLAN_FILE] [--items JSON]");
             }
+            let items = opts
+                .get("items")
+                .map(|raw| {
+                    serde_json::from_str::<Vec<String>>(raw)
+                        .context("--items takes a JSON string array")
+                })
+                .transpose()?;
             print_boss(boss_request(Op::FinalizePlan {
                 plan_file: pos.first().cloned(),
+                items,
+            })?)
+        }
+        ("plan", "items") => {
+            let (pos, opts) = flags(args, &["json", "json-file"], true)?;
+            if pos.len() != 1 {
+                bail!("usage: boss plan items PLAN --json-file ITEMS.json");
+            }
+            let items: Vec<waku_protocol::boss::PlanItemInput> =
+                serde_json::from_str(&json_input(&opts)?)
+                    .context("invalid work item list")?;
+            print_boss(boss_request(Op::UpdatePlanItems {
+                plan: pos[0].clone(),
+                items,
             })?)
         }
         ("plan", "create") => {

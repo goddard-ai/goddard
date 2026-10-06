@@ -8,12 +8,13 @@ import type { EmployeeGoal } from "./EmployeeGoal";
 import type { MemoryOperation } from "./MemoryOperation";
 import type { ModelLimit } from "./ModelLimit";
 import type { PermissionOverrides } from "./PermissionOverrides";
+import type { PlanItemInput } from "./PlanItemInput";
 import type { ProviderKind } from "./ProviderKind";
 import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
+export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
 /**
  * Optional effort pin for the employee's session, validated
  * against the resolved model's catalog — an unsupported id fails
@@ -98,4 +99,9 @@ requestId?: string, } | { "type": "setResourcePolicy", expectedRevision: number,
  * Optional host section — updates the resource broker's policy
  * file under its authority lock in the same accepted update.
  */
-host?: ResourcePolicy, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };
+host?: ResourcePolicy, } | { "type": "updatePlanItems",
+/**
+ * The `BossPlan::id`, its planning-session id, or its
+ * `plans/<file>.md` path.
+ */
+plan: string, items: Array<PlanItemInput>, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };

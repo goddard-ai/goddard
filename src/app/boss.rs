@@ -7801,10 +7801,12 @@ mod tests {
         let planning = Uuid::new_v4();
         state.session_id = Some(chat);
         state.planning = vec![waku_protocol::boss::BossPlan {
+            id: Uuid::new_v4(),
             session_id: planning,
             plan_file: "plans/auth.md".into(),
             idea: "Auth".into(),
             finalized_at: None,
+            items: Vec::new(),
         }];
         let states = HashMap::from([(DaemonKey::Local, state)]);
 
