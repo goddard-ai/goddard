@@ -1,1 +1,1 @@
-- Voice briefing controls sit beside the context gauge, with restart, pause/resume, skip, and a ticking duration.
+- Voice briefing controls sit beside the context gauge, with restart, pause/resume, skip, and a ticking duration. Automatic briefings follow the visible idle chat with one waiting clip, and message headphones replay any completed reply and mark the reply being spoken.

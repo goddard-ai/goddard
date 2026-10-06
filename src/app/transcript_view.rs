@@ -500,8 +500,7 @@ impl Waku {
                     )
             })?;
         let ticket = employee.ticket.as_ref()?;
-        let queued =
-            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
+        let queued = employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
         let detail = if queued {
             self.boss_ui
                 .queued
@@ -548,9 +547,15 @@ impl Waku {
                 parts.push(tr!("boss.resource_desktop"));
             }
             if ticket.reservation.is_some() {
-                tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
+                tr!(
+                    "boss.assignment_resources_reserved",
+                    detail = parts.join(" · ")
+                )
             } else {
-                tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
+                tr!(
+                    "boss.assignment_resources_requested",
+                    detail = parts.join(" · ")
+                )
             }
         });
         Some(
@@ -1818,6 +1823,59 @@ impl Waku {
         handle
     }
 
+    /// Align transcript gutter markers with the message's first rendered line.
+    fn message_marker_geometry(&self, message: &Message) -> (f32, f32) {
+        let geometry = (|| {
+            let content = message.visible_content();
+            if matches!(
+                message.notice.as_ref(),
+                Some(TranscriptNotice::Status { .. })
+            ) {
+                Some((8.0, 16.0)) // notice row padding + centered text line
+            } else if message.role == MessageRole::Assistant {
+                let heading_level = content
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .and_then(|line| {
+                        let hashes = line.chars().take_while(|ch| *ch == '#').count();
+                        (1..=6)
+                            .contains(&hashes)
+                            .then(|| line[hashes..].starts_with(' ').then_some(hashes as u8))
+                            .flatten()
+                    });
+                heading_level.map_or_else(
+                    || {
+                        Some((
+                            4.0,
+                            self.scaled_markdown_metrics(MarkdownMetrics::BODY)
+                                .line_height,
+                        ))
+                    },
+                    |level| {
+                        let metrics = self.scaled_markdown_metrics(MarkdownMetrics::BODY);
+                        let scale = match level {
+                            1 => 1.45,
+                            2 => 1.28,
+                            3 => 1.14,
+                            4 => 1.05,
+                            _ => 1.0,
+                        };
+                        let size = (metrics.text_size * scale).round();
+                        let line_height = (size * 1.42).round();
+                        Some((4.0 + if level <= 2 { 4.0 } else { 0.0 }, line_height))
+                    },
+                )
+            } else {
+                None
+            }
+        })();
+        geometry.unwrap_or((
+            4.0,
+            self.scaled_markdown_metrics(MarkdownMetrics::BODY)
+                .line_height,
+        ))
+    }
+
     pub(super) fn transcript_row(
         &mut self,
         index: usize,
@@ -2145,6 +2203,27 @@ impl Waku {
                 self.render_boss_trigger_row(anchor, &theme, cx)
             }
         };
+        let briefing_marker = self
+            .voice_briefing_playback
+            .filter(|playback| playback.playing)
+            .and_then(|playback| playback.message_id)
+            .and_then(|message_id| {
+                let TranscriptRowKind::Message(message_index) = kind else {
+                    return None;
+                };
+                let message = self.selected_session()?.messages.get(message_index)?;
+                if message.id != message_id || !navigation_rail_fits {
+                    return None;
+                }
+                let (top_inset, line_height) = self.message_marker_geometry(message);
+                Some(
+                    div()
+                        .absolute()
+                        .left(px(-(NEW_CONTENT_DOT_GAP + 14.0)))
+                        .top(px(top_inset + (line_height - 14.0) / 2.0))
+                        .child(icon("icons/headphones.svg", 14.0, theme.text_secondary)),
+                )
+            });
         let new_content_dot = self
             .transcript_new_content_dot
             .filter(|dot| {
@@ -2170,63 +2249,17 @@ impl Waku {
                 let (top_inset, line_height) = self
                     .selected_session()
                     .and_then(|session| {
-                        let message = session
+                        session
                             .messages
                             .iter()
-                            .find(|message| message.id == dot.message_id)?;
-                        let content = message.visible_content();
-                        if matches!(
-                            message.notice.as_ref(),
-                            Some(TranscriptNotice::Status { .. })
-                        ) {
-                            Some((8.0, 16.0)) // notice row padding + centered text line
-                        } else if message.role == MessageRole::Assistant {
-                            let heading_level = content
-                                .lines()
-                                .find(|line| !line.trim().is_empty())
-                                .and_then(|line| {
-                                    let hashes = line.chars().take_while(|ch| *ch == '#').count();
-                                    (1..=6)
-                                        .contains(&hashes)
-                                        .then(|| {
-                                            line[hashes..].starts_with(' ').then_some(hashes as u8)
-                                        })
-                                        .flatten()
-                                });
-                            heading_level.map_or_else(
-                                || {
-                                    Some((
-                                        4.0,
-                                        self.scaled_markdown_metrics(MarkdownMetrics::BODY)
-                                            .line_height,
-                                    ))
-                                },
-                                |level| {
-                                    let metrics =
-                                        self.scaled_markdown_metrics(MarkdownMetrics::BODY);
-                                    let scale = match level {
-                                        1 => 1.45,
-                                        2 => 1.28,
-                                        3 => 1.14,
-                                        4 => 1.05,
-                                        _ => 1.0,
-                                    };
-                                    let size = (metrics.text_size * scale).round();
-                                    let line_height = (size * 1.42).round();
-                                    Some((4.0 + if level <= 2 { 4.0 } else { 0.0 }, line_height))
-                                },
-                            )
-                        } else {
-                            None
-                        }
+                            .find(|message| message.id == dot.message_id)
                     })
-                    .unwrap_or_else(|| {
-                        (
-                            4.0,
-                            self.scaled_markdown_metrics(MarkdownMetrics::BODY)
-                                .line_height,
-                        )
-                    });
+                    .map(|message| self.message_marker_geometry(message))
+                    .unwrap_or((
+                        4.0,
+                        self.scaled_markdown_metrics(MarkdownMetrics::BODY)
+                            .line_height,
+                    ));
                 let element = div()
                     .absolute()
                     .left(px(-(NEW_CONTENT_DOT_GAP + NEW_CONTENT_DOT_SIZE)))
@@ -2305,7 +2338,13 @@ impl Waku {
                     .w_full()
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .min_w_0()
-                    .when_some(new_content_dot, |column, dot| column.relative().child(dot))
+                    .when_some(
+                        new_content_dot.filter(|_| briefing_marker.is_none()),
+                        |column, dot| column.relative().child(dot),
+                    )
+                    .when_some(briefing_marker, |column, marker| {
+                        column.relative().child(marker)
+                    })
                     .child(inner)
                     .when_some(match_flash_overlay, |column, overlay| {
                         column.relative().child(overlay)
