@@ -7003,9 +7003,15 @@ impl WakuBackend {
                             // in-flight grant; everything else retries against
                             // a settled state.
                             return match action {
-                                EmployeeControl::Prompt { prompt } => {
+                                EmployeeControl::Prompt { prompt, delivery } => {
                                     if prompt.trim().is_empty() {
                                         bail!("employee prompts cannot be empty");
+                                    }
+                                    if matches!(
+                                        delivery.unwrap_or_default(),
+                                        AgentPromptDelivery::Steer
+                                    ) {
+                                        bail!("employee is dispatching — retry once it is working");
                                     }
                                     self.queue_agent_prompt(session_id, prompt, caller, events)?;
                                     Ok(BossResult::Saved)
@@ -7204,7 +7210,7 @@ impl WakuBackend {
                             .any(|e| e.session_id == session_id);
                     if was_expired {
                         return match &action {
-                            EmployeeControl::Prompt { prompt }
+                            EmployeeControl::Prompt { prompt, .. }
                             | EmployeeControl::Steer { prompt, .. } => {
                                 if prompt.trim().is_empty() {
                                     bail!("employee prompts cannot be empty");
@@ -7243,22 +7249,38 @@ impl WakuBackend {
                     }
                     self.boss.require_active(session_id)?;
                     match action {
-                        EmployeeControl::Prompt { prompt } => {
-                            self.queue_agent_prompt(session_id, prompt, caller, events)?;
+                        EmployeeControl::Prompt { prompt, delivery } => {
+                            if prompt.trim().is_empty() {
+                                bail!("employee prompts cannot be empty");
+                            }
+                            let driver = self.steerable_driver(session_id);
+                            match delivery.unwrap_or_default() {
+                                AgentPromptDelivery::Interrupt => match driver {
+                                    Some(driver) => {
+                                        self.send_agent_steer(&driver, session_id, prompt, caller)
+                                    }
+                                    None => self.queue_agent_prompt(
+                                        session_id, prompt, caller, events,
+                                    )?,
+                                },
+                                AgentPromptDelivery::Queue => {
+                                    self.queue_agent_prompt(session_id, prompt, caller, events)?
+                                }
+                                AgentPromptDelivery::Steer => {
+                                    let Some(driver) = driver else {
+                                        bail!("employee has no steerable running turn");
+                                    };
+                                    self.send_agent_steer(&driver, session_id, prompt, caller);
+                                }
+                            }
                         }
                         EmployeeControl::Steer { prompt, job_title } => {
                             if prompt.trim().is_empty() {
                                 bail!("employee prompts cannot be empty");
                             }
-                            let driver = self
-                                .sessions
-                                .lock()
-                                .get(&session_id)
-                                .map(|entry| entry.driver.clone())
-                                .ok_or_else(|| anyhow!("employee has no running runtime"))?;
-                            if !driver.supports_steer() || !self.agent.has_open_turn(session_id) {
+                            let Some(driver) = self.steerable_driver(session_id) else {
                                 bail!("employee has no steerable running turn");
-                            }
+                            };
                             // A redirecting steer may retitle the job —
                             // bookkeeping on the roster record, applied only
                             // once the steer is deliverable; it is neither a
@@ -7267,21 +7289,7 @@ impl WakuBackend {
                                 self.boss
                                     .set_employee_job_title(session_id, job_title)?;
                             }
-                            let transport =
-                                agent_prompt_envelope(&self.task_state, session_id, caller, &prompt);
-                            self.agent.record_pending_steer(
-                                session_id,
-                                crate::agent::AgentPrompt {
-                                    prompt: prompt.clone(),
-                                    transport: transport.clone(),
-                                    sender: caller,
-                                    queued_id: None,
-                                    context: None,
-                                    hidden: false,
-                                    report_trigger: None,
-                                },
-                            );
-                            driver.steer(transport.unwrap_or(prompt));
+                            self.send_agent_steer(&driver, session_id, prompt, caller);
                         }
                         EmployeeControl::Stop => {
                             record_boss_event(
@@ -8979,9 +8987,15 @@ impl WakuBackend {
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{BossResult, EmployeeControl};
         match action {
-            EmployeeControl::Prompt { prompt } => {
+            EmployeeControl::Prompt { prompt, delivery } => {
                 if prompt.trim().is_empty() {
                     bail!("employee prompts cannot be empty");
+                }
+                if matches!(
+                    delivery.unwrap_or_default(),
+                    AgentPromptDelivery::Steer
+                ) {
+                    bail!("employee is queued, not running — steer needs a live turn");
                 }
                 if !self.boss.append_queued_prompt(session_id, prompt)? {
                     bail!("employee is no longer queued");
@@ -9357,10 +9371,48 @@ impl WakuBackend {
         )
     }
 
+    /// The session's driver when it can take a steer into an open turn —
+    /// interrupt delivery and the strict steer op share this gate.
+    fn steerable_driver(&self, session_id: Uuid) -> Option<DriverHandle> {
+        let driver = self
+            .sessions
+            .lock()
+            .get(&session_id)
+            .map(|entry| entry.driver.clone())?;
+        (driver.supports_steer() && self.agent.has_open_turn(session_id)).then_some(driver)
+    }
+
+    /// Record and send a steer into `driver`'s open turn — callers gate
+    /// on `steerable_driver` (or their own error wording) first.
+    fn send_agent_steer(
+        &self,
+        driver: &DriverHandle,
+        session_id: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+    ) {
+        let transport = agent_prompt_envelope(&self.task_state, session_id, sender, &prompt);
+        self.agent.record_pending_steer(
+            session_id,
+            crate::agent::AgentPrompt {
+                prompt: prompt.clone(),
+                transport: transport.clone(),
+                sender,
+                // A direct steer never parks — no chip to mirror.
+                queued_id: None,
+                context: None,
+                hidden: false,
+                report_trigger: None,
+            },
+        );
+        driver.steer(transport.unwrap_or(prompt));
+    }
+
     /// `agent prompt`: deliver a message to an existing task, by Waku task
     /// id or provider-native thread id. Queue mode holds the prompt in a
     /// daemon-side per-session queue until the target is idle; steer mode
-    /// injects it into the running turn.
+    /// injects it into the running turn; interrupt mode steers when a turn
+    /// is open and queues otherwise.
     fn agent_prompt(
         &self,
         sender: Option<Uuid>,
@@ -9426,6 +9478,13 @@ impl WakuBackend {
             bail!("received files are quarantined until trusted");
         }
         match delivery {
+            AgentPromptDelivery::Interrupt => {
+                match self.steerable_driver(target) {
+                    Some(driver) => self.send_agent_steer(&driver, target, prompt, sender),
+                    None => self.queue_agent_prompt(target, prompt, sender, &events)?,
+                }
+                Ok(ResponsePayload::Ack)
+            }
             AgentPromptDelivery::Steer => {
                 let driver = self
                     .sessions
@@ -9439,21 +9498,7 @@ impl WakuBackend {
                 if !driver.supports_steer() {
                     bail!("the task's provider does not support steering");
                 }
-                let transport = agent_prompt_envelope(&self.task_state, target, sender, &prompt);
-                self.agent.record_pending_steer(
-                    target,
-                    crate::agent::AgentPrompt {
-                        prompt: prompt.clone(),
-                        transport: transport.clone(),
-                        sender,
-                        // A direct steer never parks — no chip to mirror.
-                        queued_id: None,
-                        context: None,
-                        hidden: false,
-                        report_trigger: None,
-                    },
-                );
-                driver.steer(transport.unwrap_or(prompt));
+                self.send_agent_steer(&driver, target, prompt, sender);
                 Ok(ResponsePayload::Ack)
             }
             AgentPromptDelivery::Queue => {
@@ -16512,6 +16557,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "One more check".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -17102,6 +17148,7 @@ mod tests {
                 session_id: dead_id,
                 action: EmployeeControl::Prompt {
                     prompt: "keep going".into(),
+                    delivery: Some(AgentPromptDelivery::Interrupt),
                 },
             },
             &EventSink::detached(),
@@ -18211,6 +18258,7 @@ mod tests {
         };
         control(EmployeeControl::Prompt {
             prompt: "also check the migrations".into(),
+            delivery: Some(AgentPromptDelivery::Interrupt),
         })
         .unwrap();
         let employee = backend.boss.employee(session_id).unwrap();
@@ -18412,6 +18460,7 @@ mod tests {
                     session_id,
                     action: EmployeeControl::Prompt {
                         prompt: "try again".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -18634,6 +18683,7 @@ mod tests {
                     session_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued follow-up".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -19687,7 +19737,10 @@ mod tests {
                     Some(supervisor),
                     BossOperation::Control {
                         session_id: employee_id,
-                        action: EmployeeControl::Prompt { prompt: text.into() },
+                        action: EmployeeControl::Prompt {
+                            prompt: text.into(),
+                            delivery: Some(AgentPromptDelivery::Interrupt),
+                        },
                     },
                     &EventSink::detached(),
                 )
@@ -19711,6 +19764,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A supervisor's plain prompt interrupts the running turn — the
+    /// default delivery steers in like an explicit steer, and only an
+    /// explicit `queue` parks behind the open turn.
+    #[test]
+    fn a_supervisor_prompt_steers_the_running_turn() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-steer-default-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        let prompt = |delivery| {
+            backend.handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "redirect".into(),
+                        delivery: Some(delivery),
+                    },
+                },
+                &EventSink::detached(),
+            )
+        };
+        prompt(AgentPromptDelivery::Interrupt).unwrap();
+        let steers = child.steers.lock().clone();
+        assert_eq!(steers.len(), 1);
+        assert!(steers[0].contains("redirect"));
+        drop(steers);
+        assert!(child.prompts.lock().is_empty());
+        assert!(!backend.agent.has_queued(employee_id));
+        // An explicit queue still parks behind the open turn.
+        prompt(AgentPromptDelivery::Queue).unwrap();
+        assert!(backend.agent.has_queued(employee_id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// A prompt parked behind the employee's last turn outlives the expiry
     /// the finish applies: its mirrored queue entry is the revive path's
     /// backlog, so the next control prompt drains it first.
@@ -19729,6 +19819,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
+                        delivery: Some(AgentPromptDelivery::Queue),
                     },
                 },
                 &EventSink::detached(),
@@ -19769,6 +19860,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "revive prompt".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -19822,6 +19914,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "revive prompt".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),

@@ -956,9 +956,13 @@ pub enum AgentWorkspace {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentPromptDelivery {
+    /// Deliver as soon as possible: steer into the target's open turn
+    /// when its runtime can take one, otherwise wait in the per-session
+    /// queue behind it.
+    #[default]
+    Interrupt,
     /// Wait in a daemon-side per-session queue until the target is idle,
     /// then start a fresh turn. Submission order is preserved.
-    #[default]
     Queue,
     /// Inject the prompt into the target's running turn through the
     /// provider's steer path. An error when no turn is running or the

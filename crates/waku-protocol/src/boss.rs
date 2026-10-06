@@ -1573,6 +1573,15 @@ pub enum BossResult {
 pub enum EmployeeControl {
     Prompt {
         prompt: String,
+        /// How the prompt reaches a working employee: `interrupt`
+        /// (default) steers into an open turn and parks behind one when
+        /// there is none, `queue` always waits for the current work to
+        /// settle, and `steer` requires a live turn. A queued or
+        /// dispatching employee takes the prompt into its launch
+        /// envelope either way — there is no turn to interrupt yet.
+        #[serde(default)]
+        #[ts(optional)]
+        delivery: Option<crate::protocol::AgentPromptDelivery>,
     },
     Steer {
         prompt: String,

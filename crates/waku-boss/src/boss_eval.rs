@@ -70,7 +70,12 @@ exist only during this script invocation; use named memory buckets for durable s
                                             setResources takes a resource map like
                                             summon — a waiting ticket re-admits on
                                             the new set, a running employee swaps
-                                            once capacity frees; steer takes an
+                                            once capacity frees; prompt takes an
+                                            optional delivery — \"interrupt\" (the
+                                            default) steers into an open turn and
+                                            queues otherwise, \"queue\" parks behind
+                                            the current work, \"steer\" requires a
+                                            live turn; steer takes an
                                             optional jobTitle that retitles the
                                             job when the steer redirects the
                                             assignment — label only, no prompt
