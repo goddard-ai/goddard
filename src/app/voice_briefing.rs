@@ -86,6 +86,27 @@ pub(super) fn effective_voice_briefing_summary_instructions(
     instructions
 }
 
+/// Identity prevents a cancelled async result from consuming a later request
+/// for the same message. Manual activation can claim an existing pipeline.
+pub(super) struct PendingBriefing {
+    generation: u64,
+    play: bool,
+    manual: bool,
+}
+
+impl PendingBriefing {
+    fn take_current(
+        pending: &mut HashMap<Uuid, Self>,
+        message_id: Uuid,
+        generation: u64,
+    ) -> Option<Self> {
+        if pending.get(&message_id)?.generation != generation {
+            return None;
+        }
+        pending.remove(&message_id)
+    }
+}
+
 /// Ready automatic clips have one waiting slot. Older async completions
 /// cannot displace a newer clip, even after that clip has started playing.
 #[derive(Default)]
@@ -124,37 +145,6 @@ fn automatic_briefing_allowed(
 }
 
 impl Waku {
-    fn viewed_briefing_session(&self) -> Option<Uuid> {
-        if self.settings_page.is_some() || self.selected_terminal.is_some() {
-            return None;
-        }
-        match self.navigation_location() {
-            Some(NavigationLocation::Task(id)) => Some(id),
-            _ => None,
-        }
-    }
-
-    pub(super) fn sync_voice_briefing_navigation(&mut self) {
-        let viewed = self.viewed_briefing_session();
-        if viewed == self.briefing_viewed_session {
-            return;
-        }
-        self.briefing_viewed_session = viewed;
-        // Pausing is terminal for the chrome. A manual replay remains possible.
-        if self
-            .voice_briefing_playback
-            .is_some_and(|p| p.message_id.is_some())
-        {
-            crate::platform::pause_briefing_audio();
-            self.voice_briefing_playback = None;
-            self.voice_briefing_playback_generation =
-                self.voice_briefing_playback_generation.wrapping_add(1);
-        }
-        self.briefing_queue.waiting = None;
-        self.briefing_pending.clear();
-        self.briefing_gate_pending.clear();
-    }
-
     /// The settle-side half: a reply that finishes off screen gets its
     /// clip built now, so landing on the task plays instantly. Runs only
     /// under automatic playback — manual mode leaves generation to the
@@ -216,7 +206,7 @@ impl Waku {
         {
             // A pipeline for this reply is already running — flag it to
             // play the moment it lands rather than starting a second.
-            *play = true;
+            play.play = true;
             return;
         }
         if let Some(clip) = self.briefing_clips.get(&message_id) {
@@ -361,7 +351,14 @@ impl Waku {
                     criteria: None,
                 },
             )]);
-            self.briefing_gate_pending.insert(message_id, play);
+            self.briefing_gate_pending.insert(
+                message_id,
+                PendingBriefing {
+                    generation: sequence,
+                    play,
+                    manual: false,
+                },
+            );
             cx.notify();
             let work = cx.background_executor().spawn(async move {
                 daemon
@@ -394,7 +391,11 @@ impl Waku {
                 let _ = this.update(cx, |this, cx| {
                     // A cancel that landed mid-eval drops the entry — the
                     // answer, whatever it was, goes nowhere.
-                    let Some(play) = this.briefing_gate_pending.remove(&message_id) else {
+                    let Some(PendingBriefing { play, .. }) = PendingBriefing::take_current(
+                        &mut this.briefing_gate_pending,
+                        message_id,
+                        sequence,
+                    ) else {
                         return;
                     };
                     if this.viewed_briefing_session() != Some(session_id) {
@@ -445,12 +446,11 @@ impl Waku {
             return;
         }
         self.sync_voice_briefing_navigation();
-        // Manual replay claims playback and removes any automatic waiting clip.
-        self.briefing_queue.waiting = None;
         // A gate eval in flight loses to the click — generate directly.
         self.briefing_gate_pending.remove(&message_id);
         if let Some(play) = self.briefing_pending.get_mut(&message_id) {
-            *play = true;
+            play.play = true;
+            play.manual = true;
             return;
         }
         if self.briefing_clips.contains_key(&message_id) {
@@ -607,6 +607,7 @@ impl Waku {
         };
         Some(
             div()
+                .flex_none()
                 .flex()
                 .items_center()
                 .gap(px(2.0))
@@ -682,6 +683,9 @@ impl Waku {
             return false;
         };
         self.speech_playback_key = None;
+        if self.briefing_queue.waiting == Some(message_id) {
+            self.briefing_queue.waiting = None;
+        }
         self.mark_briefed(message_id);
         self.track_voice_briefing_playback(duration, Some(message_id), cx);
         true
@@ -767,11 +771,19 @@ impl Waku {
         sequence: Option<u64>,
         cx: &mut Context<Self>,
     ) {
-        if self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
+        if sequence.is_some() && self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
             return;
         }
         let viewed_session = self.viewed_briefing_session();
-        self.briefing_pending.insert(message_id, play);
+        let request_id = self.briefing_queue.issue();
+        self.briefing_pending.insert(
+            message_id,
+            PendingBriefing {
+                generation: request_id,
+                play,
+                manual: sequence.is_none(),
+            },
+        );
         cx.notify();
         let voice_key = self.voice_briefing_voice_key();
         let provider = self.state.voice_briefing_provider;
@@ -827,13 +839,15 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                if this.viewed_briefing_session() != viewed_session
-                    || viewed_session.is_none()
-                {
-                    this.briefing_pending.remove(&message_id);
-                    return;
-                }
-                this.finish_voice_briefing(message_id, voice_key, result, sequence, cx);
+                this.finish_voice_briefing(
+                    message_id,
+                    request_id,
+                    voice_key,
+                    result,
+                    sequence,
+                    viewed_session,
+                    cx,
+                );
             });
         })
         .detach();
@@ -854,7 +868,16 @@ impl Waku {
         // The revoiced clip is a fresh utterance — let it sound on landing
         // even though an earlier voice already briefed this reply.
         self.briefed_messages.remove(&message_id);
-        self.briefing_pending.insert(message_id, true);
+        let viewed_session = self.viewed_briefing_session();
+        let request_id = self.briefing_queue.issue();
+        self.briefing_pending.insert(
+            message_id,
+            PendingBriefing {
+                generation: request_id,
+                play: true,
+                manual: true,
+            },
+        );
         cx.notify();
         let voice_key = self.voice_briefing_voice_key();
         let provider = self.state.voice_briefing_provider;
@@ -892,7 +915,15 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_voice_briefing(message_id, voice_key, result, None, cx);
+                this.finish_voice_briefing(
+                    message_id,
+                    request_id,
+                    voice_key,
+                    result,
+                    None,
+                    viewed_session,
+                    cx,
+                );
             });
         })
         .detach();
@@ -904,18 +935,34 @@ impl Waku {
     fn finish_voice_briefing(
         &mut self,
         message_id: Uuid,
+        request_id: u64,
         voice_key: String,
         result: anyhow::Result<(String, Vec<u8>)>,
         sequence: Option<u64>,
+        viewed_session: Option<Uuid>,
         cx: &mut Context<Self>,
     ) {
         // A cancel that landed mid-pipeline already dropped the entry —
         // discard the clip rather than caching it.
-        let Some(play) = self.briefing_pending.remove(&message_id) else {
+        let Some(PendingBriefing { play, manual, .. }) = PendingBriefing::take_current(
+            &mut self.briefing_pending,
+            message_id,
+            request_id,
+        ) else {
             return;
         };
+        let sequence = if manual { None } else { sequence };
+        if self.viewed_briefing_session() != viewed_session || viewed_session.is_none() {
+            return;
+        }
         match result {
             Ok((transcript, bytes)) => {
+                // An older async completion can't displace a newer clip,
+                // even after that clip started playing.
+                if sequence.is_some_and(|sequence| sequence <= self.briefing_queue.accepted) {
+                    cx.notify();
+                    return;
+                }
                 // A revoice replaces the stale entry in place — keep its
                 // queue slot so a voice swap can't shuffle recency.
                 if !self.briefing_clips.contains_key(&message_id) {
@@ -931,7 +978,11 @@ impl Waku {
                 );
                 while self.briefing_clip_order.len() > BRIEFING_CLIPS_CAP {
                     if let Some(oldest) = self.briefing_clip_order.pop_front() {
-                        self.briefing_clips.remove(&oldest);
+                        if self.briefing_queue.waiting == Some(oldest) {
+                            self.briefing_clip_order.push_back(oldest);
+                        } else {
+                            self.briefing_clips.remove(&oldest);
+                        }
                     }
                 }
                 if play && (sequence.is_none() || !self.briefed_messages.contains(&message_id))
@@ -1191,6 +1242,34 @@ pub(super) async fn post_json(
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    #[test]
+    fn stale_result_preserves_the_replacement_request_for_manual_replay() {
+        let id = Uuid::new_v4();
+        let mut pending = HashMap::new();
+        pending.insert(
+            id,
+            PendingBriefing {
+                generation: 1,
+                play: true,
+                manual: false,
+            },
+        );
+        pending.clear(); // leaving the chat cancels the old generation
+        pending.insert(
+            id,
+            PendingBriefing {
+                generation: 2,
+                play: true,
+                manual: true,
+            },
+        );
+        assert!(PendingBriefing::take_current(&mut pending, id, 1).is_none());
+        let replacement =
+            PendingBriefing::take_current(&mut pending, id, 2).expect("replacement preserved");
+        assert!(replacement.manual && replacement.play);
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn automatic_briefing_requires_the_visible_idle_chat() {

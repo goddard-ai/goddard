@@ -21,12 +21,7 @@ pub(super) fn session_plan_approval_sent(session: &AgentSession, prompt: &str) -
         || session.messages.iter().any(|message| {
             message.role == MessageRole::User
                 && !message.hidden
-                && sent(
-                    message
-                        .display_content
-                        .as_deref()
-                        .unwrap_or(&message.content),
-                )
+                && sent(message.display_content.as_deref().unwrap_or(&message.content))
         })
 }
 
@@ -239,42 +234,45 @@ impl Waku {
                 tr!("boss.plan_sent_hint"),
             )
         };
-        div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
-            div()
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                .mx_auto()
-                .rounded(px(18.0))
-                .border(hairline())
-                .border_color(theme.border)
-                .bg(theme.composer)
-                .py(px(10.0))
-                .px(px(14.0))
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .child(icon("icons/compass.svg", 14.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .whitespace_normal()
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .text_size(sp(11.5))
-                                .text_color(theme.text_tertiary)
-                                .child(hint),
-                        ),
-                ),
-        )
+        div()
+            .flex_none()
+            .px(px(20.0 - COMPOSER_OVERHANG))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                    .mx_auto()
+                    .rounded(px(18.0))
+                    .border(hairline())
+                    .border_color(theme.border)
+                    .bg(theme.composer)
+                    .py(px(10.0))
+                    .px(px(14.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon("icons/compass.svg", 14.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .whitespace_normal()
+                            .child(
+                                div()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(hint),
+                            ),
+                    ),
+            )
     }
 }

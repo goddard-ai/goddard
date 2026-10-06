@@ -280,11 +280,9 @@ pub(super) fn render_message_footer(
                 this.show_message_copied(message_id, cx);
             });
         });
-    // The in-flight indicator is always visible — it carries state the
-    // footer otherwise only reveals on hover.
+    // Briefing actions remain visible and keyboard reachable.
     let force_visible = force_visible || voice_briefing.is_some();
-    // The hover gate wraps only this strip — a voicing clip's pause/resume
-    // button sits beside it and stays on without hover.
+
     let mut strip = div()
         .h(px(27.0))
         .min_w_0()
@@ -462,7 +460,7 @@ pub(super) fn render_message_footer(
         );
     }
 
-    let mut footer = div()
+    let footer = div()
         .w_full()
         .h(px(27.0))
         .flex()
@@ -470,12 +468,7 @@ pub(super) fn render_message_footer(
         .gap(px(1.0))
         .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
-    if align_right {
-        footer = footer.child(strip);
-    } else {
-        footer = footer.child(strip);
-    }
-    footer.into_any_element()
+    footer.child(strip).into_any_element()
 }
 
 /// Everything one transcript message row needs to render itself. Bundled
@@ -710,7 +703,12 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
-                .child(div().min_w_0().truncate().child(attachment.name.clone()))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(attachment.name.clone()),
+                )
                 .on_click(move |_, _, cx| {
                     let _ = navigate_waku.update(cx, |this, cx| {
                         this.select_session(session_id, cx);
@@ -867,7 +865,12 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon(icon_path, 11.0, theme.text_tertiary))
-                .child(div().min_w_0().truncate().child(attachment.name.clone()))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(attachment.name.clone()),
+                )
                 .on_click(move |_, _, cx| {
                     let _ = click_waku.update(cx, |this, cx| {
                         this.open_path_in_default_app(&click_path, cx);

@@ -2589,14 +2589,13 @@ pub struct Waku {
     /// worker thread — drained with the rest of the pump's traffic.
     voice_scratchpad_tx: Sender<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
     voice_scratchpad_events: Receiver<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
-    /// Pipelines in flight per reply message; the bool marks an activation
-    /// waiting on the clip, which plays the moment it lands.
     briefing_viewed_session: Option<Uuid>,
     briefing_queue: voice_briefing::BriefingQueue,
-    briefing_pending: HashMap<Uuid, bool>,
+    /// Pipelines in flight per reply, with request identity and playback intent.
+    briefing_pending: HashMap<Uuid, voice_briefing::PendingBriefing>,
     /// Replies whose Jev gate eval is still deciding — same play flag.
     /// Cancel removes the entry so the answer lands on nothing.
-    briefing_gate_pending: HashMap<Uuid, bool>,
+    briefing_gate_pending: HashMap<Uuid, voice_briefing::PendingBriefing>,
     /// The Jev page's "Test connection" probe — `Some` once a run answers,
     /// `Ok` carrying the answering model id and round-trip latency.
     /// Runtime-only; re-run after edits rather than cleared per keystroke.

@@ -5066,9 +5066,7 @@ impl Waku {
                 .flex_none()
                 .relative()
                 .px(px(20.0 - COMPOSER_OVERHANG))
-                .child(super::autocomplete::composer_card_bounds_probe(
-                    queue_bounds,
-                ))
+                .child(super::autocomplete::composer_card_bounds_probe(queue_bounds))
                 .child(
                     div()
                         .w_full()
@@ -8902,7 +8900,9 @@ fn inline_atom_paints(
                 _ => atom.icon(),
             };
             let avatar = match &atom.kind {
-                ComposerAtomKind::SessionRef { session_id, .. } => avatars.get(session_id).cloned(),
+                ComposerAtomKind::SessionRef { session_id, .. } => {
+                    avatars.get(session_id).cloned()
+                }
                 _ => None,
             };
             crate::input::InlineAtom {

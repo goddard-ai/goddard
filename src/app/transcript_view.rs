@@ -500,7 +500,8 @@ impl Waku {
                     )
             })?;
         let ticket = employee.ticket.as_ref()?;
-        let queued = employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
+        let queued =
+            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
         let detail = if queued {
             self.boss_ui
                 .queued
@@ -547,15 +548,9 @@ impl Waku {
                 parts.push(tr!("boss.resource_desktop"));
             }
             if ticket.reservation.is_some() {
-                tr!(
-                    "boss.assignment_resources_reserved",
-                    detail = parts.join(" · ")
-                )
+                tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
             } else {
-                tr!(
-                    "boss.assignment_resources_requested",
-                    detail = parts.join(" · ")
-                )
+                tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
             }
         });
         Some(
