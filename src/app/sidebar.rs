@@ -3613,17 +3613,16 @@ impl Waku {
         )
     }
 
-    /// One daemon's live planning sessions, ordered the way its
+    /// One daemon's draft planning sessions, ordered the way its
     /// `BossState.planning` records them — creation order. A session whose
     /// planning marker reached the catalog ahead of the boss document
     /// (the two arrive on different sync channels) still rows under its
     /// boss, appended after the recorded order.
     fn sidebar_planning_session_ids(&self, key: waku_client::DaemonKey) -> Vec<Uuid> {
+        let state = self.boss_ui.states.get(&key);
         let live = |session_id: Uuid| {
             self.state.sessions.iter().any(|session| {
-                session.id == session_id
-                    && session.planning.is_some()
-                    && session.archived_at.is_none()
+                session.id == session_id && sidebar_planning_session_visible(session, state)
             })
         };
         let mut ids: Vec<Uuid> = self
@@ -3639,8 +3638,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session.planning.is_some()
-                    && session.archived_at.is_none()
+                sidebar_planning_session_visible(session, state)
                     && !ids.contains(&session.id)
                     && self.daemons.session_owner(session.id) == key
             })
@@ -3869,6 +3867,10 @@ impl Waku {
                     && session.archived_at.is_none()
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
+                    && session
+                        .planning
+                        .as_ref()
+                        .is_none_or(|planning| planning.finalized_at.is_none())
                     && (!self.state.boss_experiment_enabled
                         || !self.session_is_boss_managed(session))
             })
@@ -7339,6 +7341,25 @@ fn render_new_task_project_rows(
         .into_any_element()
 }
 
+/// Boss state and the session catalog arrive independently. Either channel's
+/// finalization stamp removes the row immediately, before grace-period archival.
+fn sidebar_planning_session_visible(
+    session: &AgentSession,
+    state: Option<&waku_client::boss::BossState>,
+) -> bool {
+    session.archived_at.is_none()
+        && session
+            .planning
+            .as_ref()
+            .is_some_and(|planning| planning.finalized_at.is_none())
+        && !state.is_some_and(|state| {
+            state
+                .planning
+                .iter()
+                .any(|plan| plan.session_id == session.id && plan.finalized_at.is_some())
+        })
+}
+
 fn localized_session_title(session: &AgentSession) -> String {
     let title = session.display_title();
     if title == AgentSession::DEFAULT_TITLE {
@@ -7375,6 +7396,37 @@ pub(super) fn sidebar_session_selected(
 mod tests {
     use super::*;
     use waku_client::boss::{BossDeliverable, BossIdentity, BossResourcePolicy, BossState};
+
+    #[test]
+    fn planning_sidebar_hides_finalized_plans_from_either_sync_channel() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        assert!(!sidebar_planning_session_visible(&session, None));
+        session.planning = Some(crate::model::SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_client::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        // A new draft may reach the catalog before the boss state.
+        assert!(sidebar_planning_session_visible(&session, None));
+        let mut state = boss_state_with_deliverables(Vec::new());
+        state.planning.push(waku_client::boss::BossPlan {
+            session_id: session.id,
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            finalized_at: None,
+        });
+        assert!(sidebar_planning_session_visible(&session, Some(&state)));
+        state.planning[0].finalized_at = Some(100);
+        assert!(!sidebar_planning_session_visible(&session, Some(&state)));
+        state.planning[0].finalized_at = None;
+        session.planning.as_mut().unwrap().finalized_at = Some(100);
+        assert!(!sidebar_planning_session_visible(&session, Some(&state)));
+        assert!(!sidebar_planning_session_visible(&session, None));
+        session.planning.as_mut().unwrap().finalized_at = None;
+        session.archived_at = Some(100);
+        assert!(!sidebar_planning_session_visible(&session, Some(&state)));
+    }
 
     fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
