@@ -3424,6 +3424,7 @@ impl Waku {
                                         .flex()
                                         .items_center()
                                         .justify_center()
+                                        .group_hover(group_name.clone(), |style| style.invisible())
                                         .child(
                                             div()
                                                 .size(px(7.0))
