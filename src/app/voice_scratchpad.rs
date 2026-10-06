@@ -52,6 +52,20 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Steady-state socket poll — short enough that queued audio and inbound
 /// transcript frames both flow without a dedicated writer thread.
 const READ_POLL: Duration = Duration::from_millis(25);
+/// A reported pause gets this long to produce a resume marker or fresh
+/// transcript while audio streams before the worker calls the stream
+/// wedged — the gateway envelope defines no resume frame, so reconnecting
+/// is the only recovery a stuck pause leaves.
+const PAUSE_WATCHDOG: Duration = Duration::from_secs(15);
+/// Between reconnect attempts — short enough to feel continuous
+/// mid-dictation, long enough not to hammer a down gateway.
+const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+/// Consecutive sessions that die before producing any stream output before
+/// the worker stops reconnecting and drops the session to Retry.
+const MAX_DEAD_SESSIONS: u32 = 5;
+/// A session that stayed up this long counts as healthy however it ended —
+/// its death never counts toward the dead-session budget.
+const HEALTHY_SESSION: Duration = Duration::from_secs(30);
 /// Cancel asks first once the transcript is worth keeping.
 const CANCEL_CONFIRM_PARAGRAPHS: usize = 2;
 const CANCEL_CONFIRM_CHARS: usize = 280;
@@ -116,9 +130,17 @@ pub(super) enum ScratchpadEvent {
     /// runs the same command scan, so "okay next" breaks on the partial
     /// rather than waiting for the segment to finalize.
     Partial(String),
-    /// The stream failed or ended on its own — the transcript stays and
-    /// the panel offers Retry.
+    /// The stream failed or ended and reconnects ran out — the transcript
+    /// stays and the panel offers Retry.
     Failed,
+    /// The stream dropped mid-session and the worker is already
+    /// reconnecting — surfaces as `Connecting`, transcript intact.
+    Reconnecting,
+    /// The model reported a pause — a state marker, not speech. Audio
+    /// keeps streaming; a resume marker or fresh transcript text lifts it.
+    Paused,
+    /// The model resumed after a pause.
+    Resumed,
 }
 
 /// Where the capture side of a session stands. `Connecting` also covers
@@ -130,8 +152,13 @@ enum ScratchpadStatus {
     /// The mic permission was refused — the panel opens in an error state
     /// with Retry / Open Settings instead of a dead surface.
     MicDenied,
-    /// The stream dropped or errored. The transcript is kept; Retry
-    /// reconnects and audio resumes live — nothing is queued for later.
+    /// The model reported a transcription pause while the stream stays
+    /// open — audio still flows and fresh speech or a reconnect lifts it.
+    /// Distinct from `ConnectionLost`: the worker is alive.
+    Paused,
+    /// The stream dropped or errored and the worker gave up reconnecting.
+    /// The transcript is kept; Retry reconnects and audio resumes live —
+    /// nothing is queued for later.
     ConnectionLost,
 }
 
@@ -1423,13 +1450,43 @@ fn connect_transcription_socket(key: &str) -> anyhow::Result<WebSocket<MaybeTlsS
     Ok(socket)
 }
 
+/// Whether a transcript part's whole payload is a pause/resume state
+/// marker — the model reports transcription state as transcript-channel
+/// text rather than a dedicated stream part. Whole-payload match only, so
+/// the same words inside real dictation still transcribe.
+fn transcription_marker(text: &str) -> Option<ScratchpadEvent> {
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("transcription paused") {
+        Some(ScratchpadEvent::Paused)
+    } else if text.eq_ignore_ascii_case("transcription resumed") {
+        Some(ScratchpadEvent::Resumed)
+    } else {
+        None
+    }
+}
+
 /// One transcript event out of a server frame — `true` when the part is
-/// terminal and the worker winds down after reporting it.
+/// terminal and the worker decides between reconnecting and giving up.
 fn dispatch_stream_part(text: &str, send: &mut impl FnMut(ScratchpadEvent)) -> bool {
     let Ok(part) = serde_json::from_str::<Value>(text) else {
         return false;
     };
-    match part.get("type").and_then(Value::as_str) {
+    let part_type = part.get("type").and_then(Value::as_str);
+    // Pause and resume markers ride the transcript channel — intercept them
+    // before they land as dictation.
+    if matches!(
+        part_type,
+        Some("transcript-delta") | Some("transcript-partial") | Some("transcript-final")
+    ) && let Some(marker) = part
+        .get("delta")
+        .or_else(|| part.get("text"))
+        .and_then(Value::as_str)
+        .and_then(transcription_marker)
+    {
+        send(marker);
+        return false;
+    }
+    match part_type {
         Some("transcript-delta") => {
             if let Some(delta) = part.get("delta").and_then(Value::as_str)
                 && !delta.is_empty()
@@ -1447,20 +1504,50 @@ fn dispatch_stream_part(text: &str, send: &mut impl FnMut(ScratchpadEvent)) -> b
                 send(ScratchpadEvent::FinalSegment(text.to_owned()));
             }
         }
-        // `finish` is the stream's normal end — the session may still be
-        // open from the user's side, so it lands as a reconnectable pause.
-        Some("finish") | Some("error") => {
-            send(ScratchpadEvent::Failed);
+        // Pause and resume as dedicated parts — the spellings the gateway
+        // could pick if it reports the state outside the transcript
+        // channel. The envelope's forward-compatibility rule ignores
+        // unknown types, so these arms only grow the covered set.
+        Some("transcription-paused" | "transcription.paused" | "transcript-paused") => {
+            send(ScratchpadEvent::Paused);
+        }
+        Some("transcription-resumed" | "transcription.resumed" | "transcript-resumed") => {
+            send(ScratchpadEvent::Resumed);
+        }
+        // `finish` is the stream's normal end and `error` its failure —
+        // both terminal here; the session may still be open from the
+        // user's side, so the worker treats either as reconnectable.
+        Some("finish") => return true,
+        Some("error") => {
+            let detail = part.get("error").unwrap_or(&part);
+            eprintln!("Goddard: voice scratchpad stream error part: {detail}");
             return true;
         }
-        _ => {}
+        // Envelope parts with nothing to surface on this UI.
+        Some("stream-start" | "response-metadata" | "raw") => {}
+        // Drift lands here — name the type so a new part is visible
+        // instead of silently dropped.
+        Some(other) => {
+            eprintln!("Goddard: voice scratchpad ignored stream part type {other:?}");
+        }
+        None => {}
     }
     false
+}
+
+/// How a socket's service ended — `Stop` unwinds the worker, `Ended`
+/// earns a reconnect.
+enum StreamEnd {
+    Stop,
+    Ended,
 }
 
 /// The per-session worker: owns the socket, streams PCM frames from the
 /// audio channel, and forwards parsed transcript events to the pump. Runs
 /// on its own thread — a blocking socket is fine when it owns nothing else.
+/// A session outlives its socket: a dropped or wedged stream reconnects in
+/// place while the audio channel buffers across the gap, and only a streak
+/// of dead-on-arrival sessions drops the panel to Retry.
 fn run_transcription_worker(
     session_id: Uuid,
     generation: u64,
@@ -1470,90 +1557,164 @@ fn run_transcription_worker(
     wake: smol::channel::Sender<()>,
     stop: Arc<AtomicBool>,
 ) {
+    // The pause clock and the session's output flag ride the one event
+    // channel — `send` sees every dispatch, and the poll loop reads them
+    // back for the watchdog and the dead-session count.
+    let paused_since = Cell::new(None::<Instant>);
+    let produced_output = Cell::new(false);
     let mut send = |event: ScratchpadEvent| {
+        match event {
+            ScratchpadEvent::Paused => paused_since.set(Some(Instant::now())),
+            ScratchpadEvent::Final(_)
+            | ScratchpadEvent::FinalSegment(_)
+            | ScratchpadEvent::Partial(_)
+            | ScratchpadEvent::Resumed
+            | ScratchpadEvent::Connected => paused_since.set(None),
+            _ => {}
+        }
+        // Events dispatched off the wire — transcript text or a state
+        // marker — prove the session produced output; worker-made events
+        // (`Connected`, `Reconnecting`, `Failed`) don't.
+        if matches!(
+            event,
+            ScratchpadEvent::Final(_)
+                | ScratchpadEvent::FinalSegment(_)
+                | ScratchpadEvent::Partial(_)
+                | ScratchpadEvent::Paused
+                | ScratchpadEvent::Resumed
+        ) {
+            produced_output.set(true);
+        }
         let _ = events.send((session_id, generation, event));
         signal_event_pump(&wake);
     };
-    let mut socket = match connect_transcription_socket(&key) {
-        Ok(socket) => socket,
-        Err(error) => {
-            eprintln!("Goddard: voice scratchpad connection failed: {error:#}");
-            send(ScratchpadEvent::Failed);
-            return;
-        }
-    };
-    send(ScratchpadEvent::Connected);
-    let start = serde_json::json!({
-        "type": "transcription-stream.start",
-        "inputAudioFormat": { "type": "audio/pcm", "rate": TRANSCRIPTION_SAMPLE_RATE },
-    });
-    if socket
-        .send(Message::Text(start.to_string().into()))
-        .is_err()
-    {
-        send(ScratchpadEvent::Failed);
-        return;
-    }
-    let mut resampler = PcmResampler::new(TRANSCRIPTION_SAMPLE_RATE);
-    let mut pcm = Vec::new();
+    let mut dead_sessions = 0u32;
     loop {
         if stop.load(Ordering::Relaxed) {
-            let _ = socket.send(Message::Text(
-                "{\"type\":\"transcription-stream.audio-done\"}".into(),
-            ));
-            let _ = socket.close(None);
             return;
         }
-        match audio.recv_timeout(READ_POLL) {
-            Ok(chunk) => {
-                // Drain whatever else landed this tick before writing, so a
-                // burst ships as few frames as it can.
-                resampler.push(&chunk.samples, chunk.rate, &mut pcm);
-                while let Ok(chunk) = audio.try_recv() {
-                    resampler.push(&chunk.samples, chunk.rate, &mut pcm);
-                }
-                for frame in pcm.chunks(MAX_AUDIO_FRAME_BYTES) {
-                    if socket.send(Message::Binary(frame.to_vec().into())).is_err() {
-                        send(ScratchpadEvent::Failed);
-                        return;
-                    }
-                }
-                pcm.clear();
-            }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-            // The sink detaches when the session ends.
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                let _ = socket.close(None);
-                return;
-            }
-        }
-        match socket.read() {
-            Ok(Message::Text(text)) => {
-                if dispatch_stream_part(&text, &mut send) {
-                    let _ = socket.close(None);
+        let mut socket = match connect_transcription_socket(&key) {
+            Ok(socket) => socket,
+            Err(error) => {
+                eprintln!("Goddard: voice scratchpad connection failed: {error:#}");
+                dead_sessions += 1;
+                if dead_sessions >= MAX_DEAD_SESSIONS {
+                    send(ScratchpadEvent::Failed);
                     return;
                 }
+                send(ScratchpadEvent::Reconnecting);
+                thread::sleep(RECONNECT_DELAY);
+                continue;
             }
-            Ok(Message::Close(_)) => {
-                send(ScratchpadEvent::Failed);
-                return;
+        };
+        send(ScratchpadEvent::Connected);
+        produced_output.set(false);
+        let connected_at = Instant::now();
+        let start = serde_json::json!({
+            "type": "transcription-stream.start",
+            "inputAudioFormat": { "type": "audio/pcm", "rate": TRANSCRIPTION_SAMPLE_RATE },
+        });
+        let end = if socket
+            .send(Message::Text(start.to_string().into()))
+            .is_err()
+        {
+            StreamEnd::Ended
+        } else {
+            let mut resampler = PcmResampler::new(TRANSCRIPTION_SAMPLE_RATE);
+            let mut pcm = Vec::new();
+            // Audio the model heard nothing about while paused — a pause
+            // that outlives its grace while speech still streams is a wedge.
+            let mut sent_since_pause = false;
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    let _ = socket.send(Message::Text(
+                        "{\"type\":\"transcription-stream.audio-done\"}".into(),
+                    ));
+                    let _ = socket.close(None);
+                    break StreamEnd::Stop;
+                }
+                match audio.recv_timeout(READ_POLL) {
+                    Ok(chunk) => {
+                        // Drain whatever else landed this tick before
+                        // writing, so a burst ships as few frames as it can.
+                        resampler.push(&chunk.samples, chunk.rate, &mut pcm);
+                        while let Ok(chunk) = audio.try_recv() {
+                            resampler.push(&chunk.samples, chunk.rate, &mut pcm);
+                        }
+                        let mut failed = false;
+                        for frame in pcm.chunks(MAX_AUDIO_FRAME_BYTES) {
+                            if socket.send(Message::Binary(frame.to_vec().into())).is_err() {
+                                failed = true;
+                                break;
+                            }
+                        }
+                        pcm.clear();
+                        if failed {
+                            break StreamEnd::Ended;
+                        }
+                        sent_since_pause |= paused_since.get().is_some();
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    // The sink detaches when the session ends.
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        let _ = socket.close(None);
+                        break StreamEnd::Stop;
+                    }
+                }
+                match socket.read() {
+                    Ok(Message::Text(text)) => {
+                        if dispatch_stream_part(&text, &mut send) {
+                            let _ = socket.close(None);
+                            break StreamEnd::Ended;
+                        }
+                    }
+                    Ok(Message::Close(_)) => break StreamEnd::Ended,
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(error))
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        // The read poll expired — fall through and loop.
+                    }
+                    Err(error) => {
+                        eprintln!("Goddard: voice scratchpad stream failed: {error}");
+                        break StreamEnd::Ended;
+                    }
+                }
+                if paused_since.get().is_some_and(|since| since.elapsed() > PAUSE_WATCHDOG)
+                    && sent_since_pause
+                {
+                    eprintln!(
+                        "Goddard: voice scratchpad pause outlived its resume window — reconnecting"
+                    );
+                    let _ = socket.close(None);
+                    break StreamEnd::Ended;
+                }
+                let _ = socket.flush();
             }
-            Ok(_) => {}
-            Err(tungstenite::Error::Io(error))
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) =>
-            {
-                // The read poll expired — fall through and loop.
-            }
-            Err(error) => {
-                eprintln!("Goddard: voice scratchpad stream failed: {error}");
-                send(ScratchpadEvent::Failed);
-                return;
+        };
+        match end {
+            StreamEnd::Stop => return,
+            StreamEnd::Ended => {
+                paused_since.set(None);
+                // A session that produced speech or outlived its warmup
+                // died healthy — reconnect. A dead-on-arrival session
+                // counts against the budget.
+                if produced_output.get() || connected_at.elapsed() >= HEALTHY_SESSION {
+                    dead_sessions = 0;
+                } else {
+                    dead_sessions += 1;
+                }
+                if dead_sessions >= MAX_DEAD_SESSIONS {
+                    send(ScratchpadEvent::Failed);
+                    return;
+                }
+                send(ScratchpadEvent::Reconnecting);
+                thread::sleep(RECONNECT_DELAY);
             }
         }
-        let _ = socket.flush();
     }
 }
 
@@ -2264,10 +2425,25 @@ impl Waku {
                 continue;
             }
             changed = true;
+            // Fresh transcript text lifts a pause even without a resume
+            // marker.
+            if scratchpad.status == ScratchpadStatus::Paused
+                && matches!(
+                    event,
+                    ScratchpadEvent::Final(_)
+                        | ScratchpadEvent::FinalSegment(_)
+                        | ScratchpadEvent::Partial(_)
+                )
+            {
+                scratchpad.status = ScratchpadStatus::Live;
+            }
             match event {
                 ScratchpadEvent::MicAccess(_) => {}
                 ScratchpadEvent::Connected => {
-                    if scratchpad.status == ScratchpadStatus::Connecting {
+                    if matches!(
+                        scratchpad.status,
+                        ScratchpadStatus::Connecting | ScratchpadStatus::Paused
+                    ) {
                         scratchpad.status = ScratchpadStatus::Live;
                     }
                 }
@@ -2279,6 +2455,23 @@ impl Waku {
                 }
                 ScratchpadEvent::Partial(text) => {
                     scratchpad.transcript.set_interim(text);
+                }
+                ScratchpadEvent::Paused => {
+                    if scratchpad.status == ScratchpadStatus::Live {
+                        scratchpad.status = ScratchpadStatus::Paused;
+                    }
+                }
+                ScratchpadEvent::Resumed => {
+                    if scratchpad.status == ScratchpadStatus::Paused {
+                        scratchpad.status = ScratchpadStatus::Live;
+                    }
+                }
+                ScratchpadEvent::Reconnecting => {
+                    scratchpad.status = ScratchpadStatus::Connecting;
+                    // Same bookkeeping as `Failed`: the stream that owed
+                    // the folded words a delivery is dead — a reconnect's
+                    // finals must not strip against it.
+                    scratchpad.transcript.interim_folded.clear();
                 }
                 ScratchpadEvent::Failed => {
                     scratchpad.status = ScratchpadStatus::ConnectionLost;
@@ -2928,15 +3121,20 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The failure row at the top of the content — mic denial or a dropped
-    /// stream — with its remedies beside it. `Connecting` earns no chrome;
-    /// the dot's presence already reads as waiting.
+    /// The failure row at the top of the content — mic denial, a dropped
+    /// stream, or a reported pause — with its remedies beside it.
+    /// `Connecting` earns no chrome; the dot's presence already reads as
+    /// waiting. `Paused` shows no Retry — the worker is still live, and a
+    /// second spawn would split the shared audio queue.
     fn render_scratchpad_status(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         let scratchpad = self.selected_voice_scratchpad()?;
-        let (message, system_settings) = match scratchpad.status {
+        let (message, can_retry, system_settings) = match scratchpad.status {
             ScratchpadStatus::Connecting | ScratchpadStatus::Live => return None,
-            ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true),
-            ScratchpadStatus::ConnectionLost => (tr!("voice_scratchpad.connection_lost"), false),
+            ScratchpadStatus::Paused => (tr!("voice_scratchpad.paused"), false, false),
+            ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true, true),
+            ScratchpadStatus::ConnectionLost => {
+                (tr!("voice_scratchpad.connection_lost"), true, false)
+            }
         };
         Some(
             div()
@@ -2959,63 +3157,65 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(message),
                 )
-                .child(
-                    div()
-                        .id("vs-status-retry")
-                        .h(px(24.0))
-                        .px(px(10.0))
-                        .rounded(px(6.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .cursor_default()
-                        .hover(|row| row.bg(theme.overlay))
-                        .child(tr!("voice_scratchpad.retry"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let session_id = this.state.selected_session;
-                            let denied = this
-                                .selected_voice_scratchpad()
-                                .is_some_and(|scratchpad| {
-                                    scratchpad.status == ScratchpadStatus::MicDenied
-                                });
-                            let Some(session_id) = session_id else {
-                                return;
-                            };
-                            if denied {
-                                // Re-ask TCC — the prompt replays only when the
-                                // user removed access, otherwise the answer
-                                // lands immediately.
-                                match crate::platform::microphone_access() {
-                                    crate::platform::CaptureAccess::Granted => {
-                                        this.begin_voice_capture(session_id, cx)
+                .when(can_retry, |row| {
+                    row.child(
+                        div()
+                            .id("vs-status-retry")
+                            .h(px(24.0))
+                            .px(px(10.0))
+                            .rounded(px(6.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .cursor_default()
+                            .hover(|row| row.bg(theme.overlay))
+                            .child(tr!("voice_scratchpad.retry"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let session_id = this.state.selected_session;
+                                let denied = this
+                                    .selected_voice_scratchpad()
+                                    .is_some_and(|scratchpad| {
+                                        scratchpad.status == ScratchpadStatus::MicDenied
+                                    });
+                                let Some(session_id) = session_id else {
+                                    return;
+                                };
+                                if denied {
+                                    // Re-ask TCC — the prompt replays only when the
+                                    // user removed access, otherwise the answer
+                                    // lands immediately.
+                                    match crate::platform::microphone_access() {
+                                        crate::platform::CaptureAccess::Granted => {
+                                            this.begin_voice_capture(session_id, cx)
+                                        }
+                                        crate::platform::CaptureAccess::Undetermined => {
+                                            let tx = this.voice_scratchpad_tx.clone();
+                                            let wake = this.event_wake_tx.clone();
+                                            crate::platform::request_microphone_access(Box::new(
+                                                move |granted| {
+                                                    let _ = tx.try_send((
+                                                        session_id,
+                                                        0,
+                                                        ScratchpadEvent::MicAccess(granted),
+                                                    ));
+                                                    signal_event_pump(&wake);
+                                                },
+                                            ));
+                                        }
+                                        crate::platform::CaptureAccess::Denied => {}
                                     }
-                                    crate::platform::CaptureAccess::Undetermined => {
-                                        let tx = this.voice_scratchpad_tx.clone();
-                                        let wake = this.event_wake_tx.clone();
-                                        crate::platform::request_microphone_access(Box::new(
-                                            move |granted| {
-                                                let _ = tx.try_send((
-                                                    session_id,
-                                                    0,
-                                                    ScratchpadEvent::MicAccess(granted),
-                                                ));
-                                                signal_event_pump(&wake);
-                                            },
-                                        ));
-                                    }
-                                    crate::platform::CaptureAccess::Denied => {}
+                                } else {
+                                    // Reattach the tap too — a session paused
+                                    // by a chat switch needs it back before the
+                                    // respawned worker has anything to stream.
+                                    this.begin_voice_capture(session_id, cx);
                                 }
-                            } else {
-                                // Reattach the tap too — a session paused
-                                // by a chat switch needs it back before the
-                                // respawned worker has anything to stream.
-                                this.begin_voice_capture(session_id, cx);
-                            }
-                        })),
-                )
+                            })),
+                    )
+                })
                 .when(system_settings, |row| {
                     row.child(
                         div()
@@ -3777,5 +3977,68 @@ mod tests {
         resampler.push(&[2.0; 48], 48_000.0, &mut out);
         let peak = i16::from_le_bytes([out[out.len() - 2], out[out.len() - 1]]);
         assert_eq!(peak, 32767);
+    }
+
+    fn dispatched_parts(text: &str) -> (Vec<ScratchpadEvent>, bool) {
+        let mut events = Vec::new();
+        let terminal = dispatch_stream_part(text, &mut |event| events.push(event));
+        (events, terminal)
+    }
+
+    #[test]
+    fn stream_part_pause_marker_is_state_not_text() {
+        for frame in [
+            r#"{"type":"transcript-partial","text":"Transcription Paused"}"#,
+            r#"{"type":"transcript-delta","delta":"transcription paused"}"#,
+            r#"{"type":"transcript-final","text":"  Transcription Paused  "}"#,
+        ] {
+            let (events, terminal) = dispatched_parts(frame);
+            assert!(!terminal, "{frame}");
+            assert!(
+                matches!(events.as_slice(), [ScratchpadEvent::Paused]),
+                "{frame}"
+            );
+        }
+        let (events, terminal) =
+            dispatched_parts(r#"{"type":"transcript-partial","text":"Transcription Resumed"}"#);
+        assert!(!terminal);
+        assert!(matches!(events.as_slice(), [ScratchpadEvent::Resumed]));
+        // The words still dictate inside a longer span — only a
+        // whole-payload marker is state.
+        let (events, _) = dispatched_parts(
+            r#"{"type":"transcript-partial","text":"note the transcription paused state"}"#,
+        );
+        assert!(matches!(events.as_slice(), [ScratchpadEvent::Partial(_)]));
+    }
+
+    #[test]
+    fn stream_part_dedicated_pause_types() {
+        for ty in ["transcription-paused", "transcription.paused", "transcript-paused"] {
+            let (events, terminal) = dispatched_parts(&format!(r#"{{"type":"{ty}"}}"#));
+            assert!(!terminal, "{ty}");
+            assert!(matches!(events.as_slice(), [ScratchpadEvent::Paused]), "{ty}");
+        }
+        for ty in ["transcription-resumed", "transcription.resumed", "transcript-resumed"] {
+            let (events, terminal) = dispatched_parts(&format!(r#"{{"type":"{ty}"}}"#));
+            assert!(!terminal, "{ty}");
+            assert!(
+                matches!(events.as_slice(), [ScratchpadEvent::Resumed]),
+                "{ty}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_part_terminal_parts_end_the_socket() {
+        // `finish` and `error` end the socket without pre-empting the
+        // worker's reconnect verdict — no `Failed` event leaves dispatch.
+        let (events, terminal) = dispatched_parts(r#"{"type":"finish","text":"done"}"#);
+        assert!(terminal);
+        assert!(events.is_empty());
+        let (events, terminal) = dispatched_parts(
+            r#"{"type":"error","error":{"name":"Error","message":"upstream"}}"#,
+        );
+        assert!(terminal);
+        assert!(events.is_empty());
     }
 }

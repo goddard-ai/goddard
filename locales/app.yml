@@ -6480,3 +6480,5 @@ voice_scratchpad.connecting:
   en: Connecting…
 voice_scratchpad.connection_lost:
   en: Transcription paused — connection lost
+voice_scratchpad.paused:
+  en: Transcription paused by the service — still listening
