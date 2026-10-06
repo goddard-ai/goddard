@@ -996,7 +996,7 @@ impl Waku {
         };
         submission.attachments.push(attachment);
         self.boss_ui.command_deliverable = None;
-        self.boss_ui.deliverable_page = None;
+        self.unmount_deliverable_page(cx);
         self.note_user_message_target(command.session_id);
         self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
         // Activation only syncs the hint when the session actually changed;
@@ -1371,10 +1371,13 @@ impl Waku {
         // Re-opening the boss chat hands the deliverable preview page back to
         // the chat transcript it covers, even when it was already selected —
         // the armed composer context and any parked landing die with it.
-        self.boss_ui.deliverable_page = None;
         self.boss_ui.command_deliverable = None;
         self.boss_ui.pending_deliverable = None;
-        self.sync_composer_placeholder(cx);
+        // The page's draft goes home before the chat's slot reclaims the
+        // composer; without one the hint still needs the re-read.
+        if !self.unmount_deliverable_page(cx) {
+            self.sync_composer_placeholder(cx);
+        }
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -2471,6 +2474,26 @@ impl Waku {
         .then_some(page)
     }
 
+    /// Drop the deliverable preview page's hold on the composer's draft
+    /// slot: file the visible text under the deliverable's own key, then
+    /// hand the lane back to whatever draft the surface underneath owns.
+    /// Returns whether a page was mounted — callers that conditionally
+    /// re-point the composer skip the restore when nothing moved.
+    pub(super) fn unmount_deliverable_page(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some((_, deliverable_id)) = self.boss_ui.deliverable_page.take() else {
+            return false;
+        };
+        let key = crate::persistence::ComposerDraftKey::Deliverable(deliverable_id);
+        if !self.draft_key_incognito(key) {
+            let draft = self.current_composer_draft(Some(key), cx);
+            if self.composer_drafts.set(key, draft) {
+                self.schedule_composer_draft_save(cx);
+            }
+        }
+        self.restore_selected_composer_draft(cx);
+        true
+    }
+
     /// A history hop landing on a deliverable: the same landing
     /// `open_deliverable_task` produces — boss chat underneath, file armed,
     /// preview page mounted — but the stacks already moved, so the parked
@@ -2497,6 +2520,10 @@ impl Waku {
             return;
         };
         self.mark_deliverable_viewed(key, deliverable_id, cx);
+        // Re-arming over a mounted page would orphan its draft slot — the
+        // new arm stales `live_deliverable_page` while the composer still
+        // holds the outgoing page's text.
+        self.unmount_deliverable_page(cx);
         self.boss_ui.command_deliverable = Some((key, deliverable_id));
         self.boss_ui.pending_deliverable = Some((key, deliverable_id, false));
         self.sync_composer_placeholder(cx);
@@ -2579,7 +2606,9 @@ impl Waku {
         // boss chat's column rather than its right panel. The composer
         // keeps the armed deliverable's boss chip, so the page still reads as a
         // command to the boss with the file attached.
+        self.capture_and_save_current_composer_draft(cx);
         self.boss_ui.deliverable_page = Some((key, deliverable_id));
+        self.restore_selected_composer_draft(cx);
         if record_visit {
             // The page mounts over the chat it parked on, so the chat is
             // what back returns to.

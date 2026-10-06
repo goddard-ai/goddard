@@ -6462,7 +6462,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let Some((key, deliverable_id)) = self.live_deliverable_page() else {
-            self.boss_ui.deliverable_page = None;
+            self.unmount_deliverable_page(cx);
             return None;
         };
         let deliverable = self
@@ -6481,7 +6481,7 @@ impl Waku {
                 .and_then(|name| name.to_str())
                 .map(|file_name| (deliverable.name.clone(), file_name.to_owned()))
         }) else {
-            self.boss_ui.deliverable_page = None;
+            self.unmount_deliverable_page(cx);
             return None;
         };
         Some(

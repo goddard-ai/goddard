@@ -107,6 +107,11 @@ impl Waku {
         self.composer_draft_key()
             .and_then(|key| match key {
                 ComposerDraftKey::NewSession(project_id) => Some(project_id),
+                // A deliverable page covers its boss chat, so the selected
+                // session's project is the slot's own.
+                ComposerDraftKey::Deliverable(_) => {
+                    self.selected_session().map(|session| session.project_id)
+                }
                 ComposerDraftKey::Session(session_id) => self
                     .state
                     .sessions
@@ -500,6 +505,19 @@ impl Waku {
                 .or_else(project_name)
                 // An orphan can only be a "No project" draft — an ordinary
                 // project's drafts die with their row.
+                .unwrap_or_else(|| tr!("project.no_project_name")),
+            ComposerDraftTarget::Deliverable { deliverable_id } => self
+                .boss_ui
+                .states
+                .values()
+                .find_map(|state| {
+                    state
+                        .deliverables
+                        .iter()
+                        .find(|deliverable| deliverable.id == deliverable_id)
+                })
+                .map(|deliverable| deliverable.name.clone())
+                .or_else(project_name)
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             ComposerDraftTarget::NewSession { .. } => {
                 let name = project_name().unwrap_or_else(|| tr!("project.no_project_name"));

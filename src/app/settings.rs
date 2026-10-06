@@ -7272,9 +7272,9 @@ impl Waku {
         self.state.boss_experiment_enabled = enabled;
         if !enabled {
             self.boss_ui.page = None;
-            self.boss_ui.deliverable_page = None;
             self.boss_ui.command_deliverable = None;
             self.boss_ui.pending_deliverable = None;
+            self.unmount_deliverable_page(cx);
         }
         self.save();
         if enabled {

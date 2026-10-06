@@ -892,11 +892,15 @@ impl Waku {
         // The preview page and its armed boss command belong to the
         // activation that carried them in — a landing that is not re-arming
         // one drops both even on the same session: a history hop back to
-        // the chat re-shows the transcript.
-        self.boss_ui.deliverable_page = None;
+        // the chat re-shows the transcript. The arm dies first so the
+        // page's own unmount files its text under the deliverable's draft
+        // key and hands the composer back to the unarmed surface.
         self.boss_ui.command_deliverable = None;
+        let deliverable_page_dropped = self.unmount_deliverable_page(cx);
         if session_changed {
-            self.restore_selected_composer_draft(cx);
+            if !deliverable_page_dropped {
+                self.restore_selected_composer_draft(cx);
+            }
             self.sync_user_input_answer(cx);
             self.restore_missing_worktree(session_id, cx);
             // An open Git panel follows the newly selected session's checkout.

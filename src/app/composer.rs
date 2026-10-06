@@ -3318,7 +3318,7 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, |waku, cx| match stored {
                 Ok((path, reference)) => {
-                    if waku.selected_composer_draft_key() != draft_owner {
+                    if waku.composer_draft_key() != draft_owner {
                         return;
                     }
                     if waku.stage_daemon_attachment(

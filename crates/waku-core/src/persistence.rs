@@ -3173,6 +3173,38 @@ mod tests {
     }
 
     #[test]
+    fn composer_draft_changes_route_deliverable_targets_to_their_own_map() {
+        let directory = temporary_directory();
+        let store = ComposerDraftStore::for_state_path(&directory.join("app.db"));
+        let session_id = Uuid::new_v4();
+        let deliverable_id = Uuid::new_v4();
+        let mut initial = ComposerDrafts::default();
+        initial.set(
+            ComposerDraftKey::Session(session_id),
+            text_draft("boss chat draft"),
+        );
+        store.save(initial, 1).unwrap();
+
+        store
+            .apply_changes(vec![ComposerDraftChange {
+                target: ComposerDraftTarget::Deliverable { deliverable_id },
+                draft: Some(text_draft("deliverable page draft")),
+            }])
+            .unwrap();
+
+        let restored = store.load().unwrap();
+        assert_eq!(
+            restored.get(ComposerDraftKey::Session(session_id)),
+            Some(&text_draft("boss chat draft"))
+        );
+        assert_eq!(
+            restored.get(ComposerDraftKey::Deliverable(deliverable_id)),
+            Some(&text_draft("deliverable page draft"))
+        );
+        assert!(restored.sessions.get(&deliverable_id).is_none());
+    }
+
+    #[test]
     fn empty_and_older_composer_drafts_cannot_resurface() {
         let directory = temporary_directory();
         let store = ComposerDraftStore::for_state_path(&directory.join("app.db"));

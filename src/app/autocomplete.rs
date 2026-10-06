@@ -695,6 +695,11 @@ impl Waku {
     fn composer_project_id(&self) -> Option<Uuid> {
         match self.composer_draft_key()? {
             crate::persistence::ComposerDraftKey::NewSession(project_id) => Some(project_id),
+            // The deliverable page's slot belongs to the boss chat it
+            // covers — the selected session's project scopes the pool.
+            crate::persistence::ComposerDraftKey::Deliverable(_) => {
+                self.selected_session().map(|session| session.project_id)
+            }
             crate::persistence::ComposerDraftKey::Session(session_id) => self
                 .state
                 .sessions

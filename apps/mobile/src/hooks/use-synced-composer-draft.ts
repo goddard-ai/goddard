@@ -245,18 +245,22 @@ function composerDraftTargetKey(
 ): string | null {
   if (!target) return null;
   const owner = profileId ?? 'daemon';
-  return target.type === 'session'
-    ? `${owner}:session:${target.sessionId}`
-    : `${owner}:newSession:${target.projectId}`;
+  if (target.type === 'session') return `${owner}:session:${target.sessionId}`;
+  if (target.type === 'deliverable') {
+    return `${owner}:deliverable:${target.deliverableId}`;
+  }
+  return `${owner}:newSession:${target.projectId}`;
 }
 
 function draftForTarget(
   drafts: ComposerDrafts,
   target: ComposerDraftTarget,
 ): ComposerDraft | undefined {
-  return target.type === 'session'
-    ? drafts.sessions?.[target.sessionId]
-    : drafts.new_sessions?.[target.projectId];
+  if (target.type === 'session') return drafts.sessions?.[target.sessionId];
+  if (target.type === 'deliverable') {
+    return drafts.deliverables?.[target.deliverableId];
+  }
+  return drafts.new_sessions?.[target.projectId];
 }
 
 function normalizeDraft(draft: ComposerDraft | undefined): SynchronizedComposerDraft {

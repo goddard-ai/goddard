@@ -784,6 +784,13 @@ impl ComposerDraftStore {
                 .filter(|(id, _)| self.daemons.project_owner(**id) == key)
                 .map(|(id, draft)| (*id, draft.clone()))
                 .collect(),
+            // Deliverable preview pages mount only on the local daemon, so
+            // deliverable drafts always route local.
+            deliverables: if key == DaemonKey::Local {
+                drafts.deliverables.clone()
+            } else {
+                HashMap::new()
+            },
         }
     }
 
@@ -809,6 +816,9 @@ impl ComposerDraftStore {
                     merged
                         .new_sessions
                         .extend(drafts.new_sessions.iter().map(|(k, v)| (*k, v.clone())));
+                    merged
+                        .deliverables
+                        .extend(drafts.deliverables.iter().map(|(k, v)| (*k, v.clone())));
                     loaded.insert(key, drafts);
                 }
                 Ok(_) => {
@@ -824,7 +834,11 @@ impl ComposerDraftStore {
         match first_error {
             // A daemon that is still connecting contributes nothing yet; its
             // drafts diff in on the first save after its snapshot arrives.
-            Some(error) if merged.sessions.is_empty() && merged.new_sessions.is_empty() => {
+            Some(error)
+                if merged.sessions.is_empty()
+                    && merged.new_sessions.is_empty()
+                    && merged.deliverables.is_empty() =>
+            {
                 Err(error)
             }
             _ => Ok(merged),
@@ -900,6 +914,12 @@ fn composer_draft_changes(
         &previous.sessions,
         &next.sessions,
         |session_id| ComposerDraftTarget::Session { session_id },
+        &mut changes,
+    );
+    collect_composer_draft_changes(
+        &previous.deliverables,
+        &next.deliverables,
+        |deliverable_id| ComposerDraftTarget::Deliverable { deliverable_id },
         &mut changes,
     );
     changes

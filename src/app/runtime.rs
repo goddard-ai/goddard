@@ -2543,9 +2543,9 @@ impl Waku {
             }
         } else {
             self.boss_ui.page = None;
-            self.boss_ui.deliverable_page = None;
             self.boss_ui.command_deliverable = None;
             self.boss_ui.pending_deliverable = None;
+            self.unmount_deliverable_page(cx);
         }
         // Inference-provider config rides the same document — the first
         // settings broadcast is the earliest the editor can seed from.
@@ -2905,7 +2905,8 @@ impl Waku {
 
     /// The daemon that should store and serve a composer draft target — the
     /// session's owner for `Session`, the prospective project's owner for
-    /// `NewSession`.
+    /// `NewSession`, the local daemon for `Deliverable` since preview pages
+    /// mount only there.
     pub(super) fn daemon_for_draft_key(
         &self,
         key: crate::persistence::ComposerDraftKey,
@@ -2916,6 +2917,9 @@ impl Waku {
             }
             crate::persistence::ComposerDraftKey::NewSession(project_id) => {
                 self.daemon_for_project(project_id)
+            }
+            crate::persistence::ComposerDraftKey::Deliverable(_) => {
+                Some(self.daemons.local())
             }
         }
     }
@@ -3283,6 +3287,9 @@ impl Waku {
                             .into_iter()
                             .filter(|(id, _)| owns(id, false)),
                     );
+                    // Deliverable drafts stay out of a remote merge: preview
+                    // pages mount only for the local daemon, so any
+                    // deliverable rows a remote holds are not this host's.
                 }
             });
         })

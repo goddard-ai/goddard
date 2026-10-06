@@ -1,0 +1,1 @@
+- A deliverable's preview page now keeps its own composer draft — typing on a deliverable page no longer overwrites the boss chat's draft, and each surface restores its own text when you return to it.

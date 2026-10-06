@@ -134,12 +134,15 @@ pub struct ComposerDrafts {
     pub new_sessions: HashMap<Uuid, ComposerDraft>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub sessions: HashMap<Uuid, ComposerDraft>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub deliverables: HashMap<Uuid, ComposerDraft>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComposerDraftKey {
     NewSession(Uuid),
     Session(Uuid),
+    Deliverable(Uuid),
 }
 
 /// Wire-safe identity for one independently persisted composer draft.
@@ -161,6 +164,10 @@ pub enum ComposerDraftTarget {
         #[ts(type = "string")]
         session_id: Uuid,
     },
+    Deliverable {
+        #[ts(type = "string")]
+        deliverable_id: Uuid,
+    },
 }
 
 impl From<ComposerDraftKey> for ComposerDraftTarget {
@@ -168,6 +175,9 @@ impl From<ComposerDraftKey> for ComposerDraftTarget {
         match key {
             ComposerDraftKey::NewSession(project_id) => Self::NewSession { project_id },
             ComposerDraftKey::Session(session_id) => Self::Session { session_id },
+            ComposerDraftKey::Deliverable(deliverable_id) => {
+                Self::Deliverable { deliverable_id }
+            }
         }
     }
 }
@@ -177,6 +187,9 @@ impl From<ComposerDraftTarget> for ComposerDraftKey {
         match target {
             ComposerDraftTarget::NewSession { project_id } => Self::NewSession(project_id),
             ComposerDraftTarget::Session { session_id } => Self::Session(session_id),
+            ComposerDraftTarget::Deliverable { deliverable_id } => {
+                Self::Deliverable(deliverable_id)
+            }
         }
     }
 }
@@ -207,6 +220,9 @@ impl ComposerDrafts {
         match key {
             ComposerDraftKey::NewSession(project_id) => self.new_sessions.get(&project_id),
             ComposerDraftKey::Session(session_id) => self.sessions.get(&session_id),
+            ComposerDraftKey::Deliverable(deliverable_id) => {
+                self.deliverables.get(&deliverable_id)
+            }
         }
     }
 
@@ -214,6 +230,9 @@ impl ComposerDrafts {
         let (drafts, id) = match key {
             ComposerDraftKey::NewSession(project_id) => (&mut self.new_sessions, project_id),
             ComposerDraftKey::Session(session_id) => (&mut self.sessions, session_id),
+            ComposerDraftKey::Deliverable(deliverable_id) => {
+                (&mut self.deliverables, deliverable_id)
+            }
         };
         if draft.is_empty() {
             drafts.remove(&id).is_some()
@@ -231,6 +250,9 @@ impl ComposerDrafts {
                 self.new_sessions.remove(&project_id).is_some()
             }
             ComposerDraftKey::Session(session_id) => self.sessions.remove(&session_id).is_some(),
+            ComposerDraftKey::Deliverable(deliverable_id) => {
+                self.deliverables.remove(&deliverable_id).is_some()
+            }
         }
     }
 

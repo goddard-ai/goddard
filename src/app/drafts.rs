@@ -165,9 +165,17 @@ impl Waku {
     /// a card's session or the standing new-task project — and the overlay
     /// tracks which key it loaded the current text from, because a capture
     /// must file under the outgoing key, not wherever state has moved to.
+    /// A deliverable's preview page owns the slot the same way while it
+    /// covers the boss chat: its draft keys to the deliverable, not the
+    /// chat transcript underneath.
     pub(super) fn composer_draft_key(&self) -> Option<crate::persistence::ComposerDraftKey> {
         if self.big_picture.is_open() {
             return self.big_picture.draft_key;
+        }
+        if let Some((_, deliverable_id)) = self.live_deliverable_page() {
+            return Some(crate::persistence::ComposerDraftKey::Deliverable(
+                deliverable_id,
+            ));
         }
         self.selected_composer_draft_key()
     }
@@ -232,6 +240,9 @@ impl Waku {
     /// past the session's lifetime.
     pub(super) fn draft_key_incognito(&self, key: crate::persistence::ComposerDraftKey) -> bool {
         match key {
+            // Deliverables are daemon-published records; their drafts have
+            // no incognito context to inherit.
+            crate::persistence::ComposerDraftKey::Deliverable(_) => false,
             crate::persistence::ComposerDraftKey::Session(session_id) => {
                 self.session_incognito(session_id)
             }
