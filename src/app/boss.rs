@@ -304,6 +304,8 @@ pub(super) struct BossUi {
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
     avatar_queue: RefCell<VecDeque<(String, u32)>>,
+    // Attempted keys include failed and evicted rasters: both keep their
+    // fallback instead of restarting the render/evict cycle on every frame.
     avatar_requested: RefCell<HashSet<(String, u32)>>,
     avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
@@ -393,6 +395,37 @@ impl Default for BossUi {
             avatar_active: 0,
             focus: None,
         }
+    }
+}
+
+impl BossUi {
+    fn cache_avatar(
+        &mut self,
+        seed: String,
+        bucket: u32,
+        image: Arc<gpui::RenderImage>,
+    ) -> Option<Arc<gpui::RenderImage>> {
+        let cached: usize = self.avatars.values().map(|buckets| buckets.len()).sum();
+        let evicted = if cached >= 256 {
+            let key = self.avatars.iter().find_map(|(seed, buckets)| {
+                buckets.keys().next().map(|bucket| (seed.clone(), *bucket))
+            });
+            key.and_then(|(old_seed, old_bucket)| {
+                let buckets = self.avatars.get_mut(&old_seed)?;
+                let image = buckets.remove(&old_bucket);
+                if buckets.is_empty() {
+                    self.avatars.remove(&old_seed);
+                }
+                // Keep avatar_requested intact. Mention preparation visits every
+                // identity, so retrying an evicted raster would churn the cache
+                // indefinitely once the collection exceeds its capacity.
+                image
+            })
+        } else {
+            None
+        };
+        self.avatars.entry(seed).or_default().insert(bucket, image);
+        evicted
     }
 }
 
@@ -2701,7 +2734,8 @@ impl Waku {
 
     /// The raster cached for `(seed, size bucket)`, queueing a render when
     /// it is missing. Returns `None` while the raster is in flight so
-    /// callers can draw their placeholder.
+    /// callers can draw their placeholder. Failed or evicted rasters keep
+    /// that placeholder until a new seed or size is requested.
     pub(super) fn boss_avatar_image(
         &self,
         seed: &str,
@@ -2769,51 +2803,9 @@ impl Waku {
                 let _ = this.update(cx, |this, cx| {
                     this.boss_ui.avatar_active -= 1;
                     if let Some(image) = image {
-                        let cached: usize = this
-                            .boss_ui
-                            .avatars
-                            .values()
-                            .map(|buckets| buckets.len())
-                            .sum();
-                        if cached >= 256 {
-                            if let Some((old_seed, old_bucket)) = this
-                                .boss_ui
-                                .avatars
-                                .iter()
-                                .find_map(|(seed, buckets)| {
-                                    buckets
-                                        .keys()
-                                        .next()
-                                        .map(|bucket| (seed.clone(), *bucket))
-                                })
-                            {
-                                if let Some(image) = this
-                                    .boss_ui
-                                    .avatars
-                                    .get_mut(&old_seed)
-                                    .and_then(|buckets| buckets.remove(&old_bucket))
-                                {
-                                    cx.drop_image(image, None);
-                                }
-                                if this
-                                    .boss_ui
-                                    .avatars
-                                    .get(&old_seed)
-                                    .is_some_and(|buckets| buckets.is_empty())
-                                {
-                                    this.boss_ui.avatars.remove(&old_seed);
-                                }
-                                this.boss_ui
-                                    .avatar_requested
-                                    .borrow_mut()
-                                    .remove(&(old_seed, old_bucket));
-                            }
+                        if let Some(evicted) = this.boss_ui.cache_avatar(seed, bucket, image) {
+                            cx.drop_image(evicted, None);
                         }
-                        this.boss_ui
-                            .avatars
-                            .entry(seed)
-                            .or_default()
-                            .insert(bucket, image);
                     }
                     signal_event_pump(&this.event_wake_tx); cx.notify();
                 });
@@ -7615,6 +7607,39 @@ mod tests {
         assert_eq!(avatar_bucket(16.0), 16);
         assert_eq!(avatar_bucket(18.0), 24);
         assert_eq!(avatar_bucket(54.0), 56);
+    }
+
+    #[gpui::test]
+    fn evicted_avatars_keep_their_fallback_without_requeueing(cx: &mut gpui::TestAppContext) {
+        let renderer = cx.update(|cx| cx.svg_renderer());
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#ffffff"/></svg>"##;
+        let image = renderer.render_single_frame(svg.as_bytes(), 1.0).unwrap();
+        let mut ui = BossUi::default();
+        // More identities than the raster budget reproduces the mention pool's
+        // pressure without relying on which HashMap entry gets evicted.
+        for id in 0..300 {
+            let seed = id.to_string();
+            ui.avatar_requested.borrow_mut().insert((seed.clone(), 24));
+            let _ = ui.cache_avatar(seed, 24, image.clone());
+        }
+        assert_eq!(ui.avatars.values().map(HashMap::len).sum::<usize>(), 256);
+        assert!((0..300).any(|id| !ui.avatars.contains_key(&id.to_string())));
+        for _ in 0..3 {
+            for id in 0..300 {
+                let seed = id.to_string();
+                if let Some(cached) = ui.avatars.get(&seed).and_then(|buckets| buckets.get(&24)) {
+                    assert!(Arc::ptr_eq(cached, &image));
+                } else {
+                    assert!(!ui.avatar_requested.borrow_mut().insert((seed, 24)));
+                }
+            }
+        }
+        assert!(
+            ui.avatar_requested
+                .borrow_mut()
+                .insert(("new-seed".into(), 24))
+        );
+        assert!(ui.avatar_requested.borrow_mut().insert(("0".into(), 56)));
     }
 
     /// The scale handed to the SVG rasterizer must land each bucket's
