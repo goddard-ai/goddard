@@ -132,6 +132,20 @@ pub fn is_linked_worktree(path: &Path) -> bool {
     resolve(&git_dir) != resolve(&common_dir)
 }
 
+/// The repository's shared Git directory — identical for the primary
+/// checkout and every linked worktree, so two paths in one repository
+/// resolve equal. `None` for non-Git paths.
+pub fn git_common_dir(path: &Path) -> Option<PathBuf> {
+    let common = git_optional_stdout(path, &["rev-parse", "--git-common-dir"]).ok()??;
+    let common = Path::new(&common);
+    let common = if common.is_absolute() {
+        common.to_path_buf()
+    } else {
+        path.join(common)
+    };
+    Some(dunce::canonicalize(&common).unwrap_or(common))
+}
+
 /// Whether `path` is a linked worktree registered to the same repository
 /// `project` belongs to. A linked worktree is registered by definition,
 /// so a common-dir match is the whole check — no name-list comparison.
@@ -140,18 +154,8 @@ pub fn is_worktree_of(project: &Path, path: &Path) -> bool {
     if !is_linked_worktree(path) {
         return false;
     }
-    let common_dir = |dir: &Path| {
-        let common = git_optional_stdout(dir, &["rev-parse", "--git-common-dir"]).ok()??;
-        let common = Path::new(&common);
-        let common = if common.is_absolute() {
-            common.to_path_buf()
-        } else {
-            dir.join(common)
-        };
-        Some(dunce::canonicalize(&common).unwrap_or(common))
-    };
     matches!(
-        (common_dir(project), common_dir(path)),
+        (git_common_dir(project), git_common_dir(path)),
         (Some(project_common), Some(path_common)) if project_common == path_common
     )
 }

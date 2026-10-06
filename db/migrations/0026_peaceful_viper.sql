@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `qa_branch` text;

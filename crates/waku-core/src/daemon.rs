@@ -500,6 +500,10 @@ pub struct WakuBackend {
     inference_secrets: crate::integrations::SecretStore,
     task_store: Arc<StateStore>,
     task_state: Arc<Mutex<PersistedState>>,
+    /// The hub's `task_state_changed` broadcast once `serve` installs it —
+    /// daemon-side catalog mutations (boss project knobs) replay it so
+    /// every attached client re-reads the rows.
+    task_notifier: Mutex<Option<crate::share::TaskNotifier>>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     removed_project_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
@@ -666,6 +670,7 @@ impl WakuBackend {
             inference_secrets,
             task_store,
             task_state,
+            task_notifier: Mutex::new(None),
             removed_session_ids: Mutex::new(HashSet::new()),
             removed_project_ids: Mutex::new(HashSet::new()),
             composer_drafts,
@@ -1825,6 +1830,62 @@ fn friends_project_id(state: &mut PersistedState, share_dir: &Path) -> Uuid {
     }
 }
 
+/// Resolve a boss `project` reference — a registered project's name or id,
+/// or its root path — to its catalog row. Per-project knobs persist on the
+/// registered project, so an unregistered path is an error rather than an
+/// ad hoc project.
+fn registered_project_mut<'a>(
+    state: &'a mut PersistedState,
+    reference: &str,
+) -> anyhow::Result<&'a mut Project> {
+    if let Some(id) =
+        waku_protocol::persistence::resolve_named_search_project(&state.projects, reference)
+    {
+        return state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == id)
+            .ok_or_else(|| anyhow!("project `{reference}` is not registered"));
+    }
+    let reference_path = PathBuf::from(reference);
+    anyhow::ensure!(
+        reference_path.is_absolute(),
+        "project `{reference}` is not a registered project"
+    );
+    let canonical = dunce::canonicalize(&reference_path)
+        .with_context(|| format!("project `{}` does not exist", reference_path.display()))?;
+    state
+        .projects
+        .iter_mut()
+        .find(|project| {
+            dunce::canonicalize(&project.path).unwrap_or_else(|_| project.path.clone()) == canonical
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "project `{}` is not registered with the daemon",
+                reference_path.display()
+            )
+        })
+}
+
+/// The registered project owning `cwd` — a checkout beneath the
+/// registered root, a repo-subdirectory project's own path, or a linked
+/// worktree of the project's repository. `None` for paths the catalog
+/// does not own.
+fn project_for_path<'a>(projects: &'a [Project], cwd: &Path) -> Option<&'a Project> {
+    let cwd = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    if let Some(project) = projects.iter().find(|project| {
+        let root = dunce::canonicalize(&project.path).unwrap_or_else(|_| project.path.clone());
+        cwd.starts_with(&root)
+    }) {
+        return Some(project);
+    }
+    let common = crate::worktree::git_common_dir(&cwd)?;
+    projects.iter().find(|project| {
+        crate::worktree::git_common_dir(&project.path).is_some_and(|dir| dir == common)
+    })
+}
+
 /// Refresh a friend's display name across their delivered sessions —
 /// called on each delivery and when a nickname changes so the row label
 /// follows the name the user knows them by. Returns whether anything
@@ -1913,6 +1974,7 @@ impl Backend for WakuBackend {
     }
 
     fn set_task_state_sink(&self, sink: crate::share::TaskNotifier) {
+        *self.task_notifier.lock() = Some(sink.clone());
         self.share.set_task_notifier(sink.clone());
         self.boss.set_task_notifier(sink.clone());
         self.automations.set_task_notifier(sink);
@@ -3309,7 +3371,18 @@ impl Backend for WakuBackend {
                     }
                     _ => None,
                 };
-                let qa_branch = self.settings.get().qa_branch;
+                // Only the Review* operations read the QA branch — resolve
+                // it against the repository `cwd` belongs to so a project
+                // override retargets its whole review train.
+                let qa_branch = match &operation {
+                    WorkspaceOperation::ReviewQueue { cwd }
+                    | WorkspaceOperation::ReviewApprove { cwd, .. }
+                    | WorkspaceOperation::ReviewReject { cwd, .. }
+                    | WorkspaceOperation::ReviewPromote { cwd } => {
+                        self.project_qa_branch(cwd)
+                    }
+                    _ => self.settings.get().qa_branch,
+                };
                 let result = crate::workspace::execute(operation, &qa_branch)?;
                 if kick {
                     self.share.note_repo_activity();
@@ -4068,6 +4141,27 @@ enum ReviewMove {
 }
 
 impl WakuBackend {
+    /// Replay the hub's task-state broadcast after a daemon-side catalog
+    /// mutation so attached clients re-read the rows. No-op until `serve`
+    /// installs the notifier.
+    fn notify_task_state(&self) {
+        if let Some(notifier) = self.task_notifier.lock().clone() {
+            notifier();
+        }
+    }
+
+    /// The configured QA branch for the repository `cwd` belongs to — the
+    /// owning registered project's override when set, else the
+    /// daemon-global `qa_branch` setting. Returns the raw configured
+    /// string; callers run it through `qa_branch_name`/`qa_branch_checked`.
+    fn project_qa_branch(&self, cwd: &Path) -> String {
+        let state = self.task_state.lock();
+        project_for_path(&state.projects, cwd)
+            .and_then(|project| project.qa_branch.clone())
+            .filter(|branch| !branch.trim().is_empty())
+            .unwrap_or_else(|| self.settings.get().qa_branch)
+    }
+
     fn agent_merge_submit(&self, owner: Option<Uuid>) -> anyhow::Result<ResponsePayload> {
         let owner = owner.context("merge submit requires an employee task credential")?;
         let (worktree, project, base_branch) = {
@@ -4092,17 +4186,27 @@ impl WakuBackend {
                 .projects
                 .iter()
                 .find(|project| project.id == session.project_id)
-                .map(|project| project.path.clone())
+                .cloned()
                 .ok_or_else(|| anyhow!("employee project is missing"))?;
             (path.clone(), project, base_branch.clone())
         };
-        if !crate::worktree::is_worktree_of(&project, &worktree) {
+        anyhow::ensure!(
+            project.submissions_enabled,
+            "submissions not enabled for this project — the boss opts a project in with the setProjectSubmissions operation"
+        );
+        if !crate::worktree::is_worktree_of(&project.path, &worktree) {
             bail!("employee worktree is no longer linked to its recorded project");
         }
 
         let settings = self.settings.get();
-        let branch = crate::review::qa_branch_name(&settings.qa_branch);
-        let sha = crate::agent_merge::submit(&project, &worktree, base_branch.as_deref(), &branch)?;
+        let configured = project
+            .qa_branch
+            .as_deref()
+            .filter(|branch| !branch.trim().is_empty())
+            .unwrap_or(&settings.qa_branch);
+        let branch = crate::review::qa_branch_name(configured);
+        let sha =
+            crate::agent_merge::submit(&project.path, &worktree, base_branch.as_deref(), &branch)?;
         Ok(ResponsePayload::AgentMergeSubmitted { sha })
     }
 
@@ -4155,9 +4259,7 @@ impl WakuBackend {
                 );
                 self.share.notify_push(
                     origin_url.clone(),
-                    vec![crate::review::qa_branch_name(
-                        &self.settings.get().qa_branch,
-                    )],
+                    vec![crate::review::qa_branch_name(&self.project_qa_branch(cwd))],
                 );
             }
             ReviewMove::Promoted => {
@@ -7414,6 +7516,34 @@ impl WakuBackend {
                 self.wake_summon_queue();
                 Ok(BossResult::ResourcePolicySet { policy })
             }),
+            BossOperation::SetProjectSubmissions { project, enabled } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can configure project submissions");
+                }
+                let mut state = self.task_state.lock();
+                registered_project_mut(&mut state, &project)?.submissions_enabled = enabled;
+                self.task_store.save(&mut state)?;
+                drop(state);
+                self.notify_task_state();
+                Ok(BossResult::Saved)
+            }
+            BossOperation::SetProjectQaBranch { project, branch } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can configure a project's QA branch");
+                }
+                let branch = match branch {
+                    Some(branch) if !branch.trim().is_empty() => {
+                        Some(crate::review::qa_branch_checked(&branch)?)
+                    }
+                    _ => None,
+                };
+                let mut state = self.task_state.lock();
+                registered_project_mut(&mut state, &project)?.qa_branch = branch;
+                self.task_store.save(&mut state)?;
+                drop(state);
+                self.notify_task_state();
+                Ok(BossResult::Saved)
+            }
             BossOperation::Eval { script } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can eval boss scripts");
@@ -15937,6 +16067,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -16064,6 +16195,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -18751,6 +18883,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
+                        delivery: Some(AgentPromptDelivery::Interrupt),
                     },
                 },
                 &EventSink::detached(),
@@ -19481,6 +19614,361 @@ mod tests {
         }
         assert_eq!(*second_capture.shutdowns.lock(), 1);
         assert!(!backend.boss.employee(employee_id).unwrap().expired);
+
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `merge submit` is per-project opt-in: a worktree employee whose
+    /// project never enabled submissions is refused outright, an employee
+    /// credential cannot flip the switch itself, and the boss's
+    /// `setProjectSubmissions` lets the same submission land on the QA
+    /// branch. The flag is stored on the project row — it survives a
+    /// reload.
+    #[test]
+    fn merge_submit_requires_per_project_opt_in() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("waku-merge-gate-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let git = |cwd: &Path, args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        git(&project, &["init", "--quiet", "-b", "main"]);
+        git(&project, &["config", "core.autocrlf", "false"]);
+        std::fs::write(project.join("README.md"), "main\n").unwrap();
+        git(&project, &["add", "."]);
+        git(
+            &project,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "initial",
+            ],
+        );
+        git(&project, &["branch", "dev"]);
+        let dev = root.join("dev");
+        git(&project, &["worktree", "add", dev.to_str().unwrap(), "dev"]);
+        let employee_worktree = root.join("employee");
+        git(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                employee_worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        std::fs::write(employee_worktree.join("unit.txt"), "unit\n").unwrap();
+        git(&employee_worktree, &["add", "."]);
+        git(
+            &employee_worktree,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "feat: unit",
+            ],
+        );
+
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend.boss.set_session_id(supervisor).unwrap();
+        let git_project = Project::from_path(dunce::canonicalize(&project).unwrap());
+        assert!(!git_project.submissions_enabled);
+        let employee_id = Uuid::new_v4();
+        let mut child = AgentSession::new(git_project.id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        child.workspace = SessionWorkspace::Worktree {
+            path: employee_worktree.clone(),
+            name: "employee".into(),
+            branch: None,
+            base_branch: Some("main".into()),
+            adopted_by: None,
+        };
+        {
+            let mut state = backend.task_state.lock();
+            state.projects.push(git_project);
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        // Off by default — the refusal fires before Git is touched.
+        let error = backend.agent_merge_submit(Some(employee_id)).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("submissions not enabled for this project"),
+            "{error:#}"
+        );
+
+        // An employee credential cannot opt its own project in, and an
+        // unknown reference fails instead of materializing state.
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(employee_id),
+                    BossOperation::SetProjectSubmissions {
+                        project: "project".into(),
+                        enabled: true,
+                    },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(supervisor),
+                    BossOperation::SetProjectSubmissions {
+                        project: "no-such-project".into(),
+                        enabled: true,
+                    },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
+
+        // The boss opts the project in by name; the same submit lands.
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectSubmissions {
+                    project: "project".into(),
+                    enabled: true,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let ResponsePayload::AgentMergeSubmitted { sha } =
+            backend.agent_merge_submit(Some(employee_id)).unwrap()
+        else {
+            panic!("expected a landed sha")
+        };
+        assert_eq!(
+            git(&dev, &["rev-parse", "--verify", "HEAD"]).trim(),
+            sha,
+            "the QA worktree fast-forwarded to the landed unit"
+        );
+        assert!(dev.join("unit.txt").exists());
+
+        // The flag lives on the project row, not in memory.
+        let restored = backend.task_store.load().unwrap();
+        assert!(
+            restored
+                .projects
+                .iter()
+                .find(|project| project.name == "project")
+                .unwrap()
+                .submissions_enabled
+        );
+
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `setProjectQaBranch` retargets a project's review train: the
+    /// override lands `merge submit` units on it, `project_qa_branch`
+    /// resolves it for the project's checkout and its linked worktrees,
+    /// and clearing the override re-inherits the daemon-global setting.
+    /// An unusable branch name is rejected at the op, not at submit time.
+    #[test]
+    fn merge_submit_honors_a_per_project_qa_branch() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("waku-qa-branch-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let git = |cwd: &Path, args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        git(&project, &["init", "--quiet", "-b", "main"]);
+        git(&project, &["config", "core.autocrlf", "false"]);
+        std::fs::write(project.join("README.md"), "main\n").unwrap();
+        git(&project, &["add", "."]);
+        git(
+            &project,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "initial",
+            ],
+        );
+        git(&project, &["branch", "dev"]);
+        git(&project, &["branch", "release"]);
+        let dev = root.join("dev");
+        let release = root.join("release");
+        git(&project, &["worktree", "add", dev.to_str().unwrap(), "dev"]);
+        git(
+            &project,
+            &["worktree", "add", release.to_str().unwrap(), "release"],
+        );
+        let employee_worktree = root.join("employee");
+        git(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                employee_worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        let commit_unit = |file: &str| {
+            std::fs::write(employee_worktree.join(file), "unit\n").unwrap();
+            git(&employee_worktree, &["add", "."]);
+            git(
+                &employee_worktree,
+                &[
+                    "-c",
+                    "user.name=Goddard Tests",
+                    "-c",
+                    "user.email=waku@example.com",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "feat: unit",
+                ],
+            );
+        };
+        commit_unit("unit-a.txt");
+
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend.boss.set_session_id(supervisor).unwrap();
+        let git_project = Project::from_path(dunce::canonicalize(&project).unwrap());
+        let project_id = git_project.id;
+        let employee_id = Uuid::new_v4();
+        let mut child = AgentSession::new(project_id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        child.workspace = SessionWorkspace::Worktree {
+            path: employee_worktree.clone(),
+            name: "employee".into(),
+            branch: None,
+            base_branch: Some("main".into()),
+            adopted_by: None,
+        };
+        {
+            let mut state = backend.task_state.lock();
+            let mut git_project = git_project;
+            git_project.submissions_enabled = true;
+            state.projects.push(git_project);
+            state.push_session(child);
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        // Without an override the global setting decides: `dev`.
+        let canonical_project = dunce::canonicalize(&project).unwrap();
+        assert_eq!(backend.project_qa_branch(&canonical_project), "dev");
+        assert_eq!(
+            backend.project_qa_branch(&dunce::canonicalize(&employee_worktree).unwrap()),
+            "dev",
+            "a linked worktree resolves to its project's override"
+        );
+
+        // Garbage names fail the op instead of breaking a later submit.
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(supervisor),
+                    BossOperation::SetProjectQaBranch {
+                        project: "project".into(),
+                        branch: Some("-x".into()),
+                    },
+                    &EventSink::detached(),
+                )
+                .is_err()
+        );
+
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectQaBranch {
+                    project: "project".into(),
+                    branch: Some(" release ".into()),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert_eq!(backend.project_qa_branch(&canonical_project), "release");
+        assert_eq!(
+            backend.project_qa_branch(&dunce::canonicalize(&employee_worktree).unwrap()),
+            "release"
+        );
+        // Other repositories keep the global default.
+        assert_eq!(
+            backend.project_qa_branch(Path::new("/tmp")),
+            backend.settings.get().qa_branch
+        );
+
+        let ResponsePayload::AgentMergeSubmitted { sha } =
+            backend.agent_merge_submit(Some(employee_id)).unwrap()
+        else {
+            panic!("expected a landed sha")
+        };
+        assert_eq!(
+            git(&release, &["rev-parse", "--verify", "HEAD"]).trim(),
+            sha,
+            "the submission landed on the per-project QA branch"
+        );
+        assert!(release.join("unit-a.txt").exists());
+        assert!(!dev.join("unit-a.txt").exists(), "dev was not advanced");
+
+        // Clearing the override re-inherits the global setting.
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectQaBranch {
+                    project: "project".into(),
+                    branch: None,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert_eq!(backend.project_qa_branch(&canonical_project), "dev");
+        let restored = backend.task_store.load().unwrap();
+        assert!(
+            restored
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .unwrap()
+                .qa_branch
+                .is_none(),
+            "the cleared override stayed cleared across reload"
+        );
 
         drop(backend);
         let _ = std::fs::remove_dir_all(root);

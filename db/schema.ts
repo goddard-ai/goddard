@@ -28,6 +28,10 @@ export const projects = sqliteTable("projects", {
   temporary: integer("temporary", { mode: "boolean" }).notNull().default(false),
   /** User-marked priority: leads attention navigation and sidebar grouping. */
   starred: integer("starred", { mode: "boolean" }).notNull().default(false),
+  /** Per-project opt-in: employee `merge submit` landings stay rejected while off. */
+  submissionsEnabled: integer("submissions_enabled", { mode: "boolean" }).notNull().default(false),
+  /** Per-project QA branch override; NULL inherits the daemon-global qa_branch setting. */
+  qaBranch: text("qa_branch"),
   /** Legacy peer marker for pre-pooling friend projects. */
   friendPeerId: text("friend_peer_id"),
   /** A non-ordinary project role — "friends" marks the pooled friend-deliveries project. */

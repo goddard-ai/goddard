@@ -1425,6 +1425,25 @@ pub enum BossOperation {
         plan: String,
         outcome: PlanOutcome,
     },
+    /// Toggle `merge submit` landings for a registered project — off by
+    /// default, so the boss opts a project in before its employees can
+    /// submit. `project` is a registered project's name, id, or root path.
+    /// Boss/human only.
+    SetProjectSubmissions {
+        project: String,
+        enabled: bool,
+    },
+    /// Retarget a registered project's QA branch — the branch `merge
+    /// submit` landings rebase onto and the review train reads. `branch`
+    /// must be a usable branch name; omit it or pass null to clear the
+    /// override and re-inherit the daemon-global `qa_branch` setting.
+    /// `project` is a registered project's name, id, or root path.
+    /// Boss/human only.
+    SetProjectQaBranch {
+        project: String,
+        #[serde(default)]
+        branch: Option<String>,
+    },
     Control {
         session_id: Uuid,
         action: EmployeeControl,

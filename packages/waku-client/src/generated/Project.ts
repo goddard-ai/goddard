@@ -26,6 +26,18 @@ temporary: boolean,
  */
 starred: boolean,
 /**
+ * Per-project opt-in for `goddard-agent merge submit`: employee
+ * worktree landings are rejected until the boss enables them here.
+ * `false` for every project persisted before the flag existed.
+ */
+submissions_enabled: boolean,
+/**
+ * Per-project QA-branch override: `merge submit` landings and the
+ * review train for this project's repository use it instead of the
+ * daemon-global `qa_branch` setting. `None` inherits the global.
+ */
+qa_branch?: string | null,
+/**
  * Legacy peer marker for per-friend delivery projects created before
  * friend sessions were pooled. New pooled projects use `kind`.
  */

@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `submissions_enabled` integer DEFAULT false NOT NULL;

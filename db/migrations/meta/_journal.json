@@ -176,6 +176,20 @@
       "when": 1791229766404,
       "tag": "0024_parallel_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791313244964,
+      "tag": "0025_kind_lord_tyger",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791316892305,
+      "tag": "0026_peaceful_viper",
+      "breakpoints": true
     }
   ]
 }

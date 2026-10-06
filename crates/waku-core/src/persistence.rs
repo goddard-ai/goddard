@@ -1427,7 +1427,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred, friend_peer_id, kind FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, bookmark, temporary, starred, friend_peer_id, kind, submissions_enabled, qa_branch FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1441,6 +1441,8 @@ impl StateStore {
                     row.get::<_, bool>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
+                    row.get::<_, bool>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1456,6 +1458,8 @@ impl StateStore {
                     starred,
                     friend_peer_id,
                     kind,
+                    submissions_enabled,
+                    qa_branch,
                 )| {
                     Some(Project {
                         id: Uuid::parse_str(&id).ok()?,
@@ -1465,6 +1469,8 @@ impl StateStore {
                         created_at: created_at as u64,
                         temporary,
                         starred,
+                        submissions_enabled,
+                        qa_branch,
                         friend_peer_id,
                         kind: kind.and_then(|tag| {
                             serde_json::from_value(serde_json::Value::String(tag)).ok()
@@ -2029,6 +2035,8 @@ impl StateStore {
                             project.created_at as i64,
                             project.temporary,
                             project.starred,
+                            project.submissions_enabled,
+                            project.qa_branch,
                             project.friend_peer_id,
                             project.kind.map_or(rusqlite::types::Value::Null, |kind| {
                                 rusqlite::types::Value::Text(tag_of(kind))
@@ -2969,8 +2977,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          friend_peer_name = excluded.friend_peer_name";
 
 const INSERT_PROJECT: &str =
-    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, friend_peer_id, kind)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+    "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
@@ -2979,6 +2987,8 @@ const INSERT_PROJECT: &str =
          created_at = excluded.created_at,
          temporary  = excluded.temporary,
          starred    = excluded.starred,
+         submissions_enabled = excluded.submissions_enabled,
+         qa_branch  = excluded.qa_branch,
          friend_peer_id = excluded.friend_peer_id,
          kind       = excluded.kind";
 
@@ -3450,6 +3460,8 @@ mod tests {
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
         state.projects[0].starred = true;
+        state.projects[0].submissions_enabled = true;
+        state.projects[0].qa_branch = Some("release".to_owned());
         let project = state.projects[0].clone();
         assert!(project.created_at > 0, "a new project is dated");
         store.save(&mut state).unwrap();
@@ -3473,6 +3485,11 @@ mod tests {
         assert_eq!(restored.projects[0].path, project.path);
         assert_eq!(restored.projects[0].created_at, project.created_at);
         assert!(restored.projects[0].starred);
+        assert!(restored.projects[0].submissions_enabled);
+        assert_eq!(
+            restored.projects[0].qa_branch.as_deref(),
+            Some("release")
+        );
 
         fs::remove_dir_all(directory).ok();
     }

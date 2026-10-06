@@ -1091,6 +1091,16 @@ pub struct Project {
     /// unstarred projects in the sidebar's Project grouping.
     #[serde(default)]
     pub starred: bool,
+    /// Per-project opt-in for `goddard-agent merge submit`: employee
+    /// worktree landings are rejected until the boss enables them here.
+    /// `false` for every project persisted before the flag existed.
+    #[serde(default)]
+    pub submissions_enabled: bool,
+    /// Per-project QA-branch override: `merge submit` landings and the
+    /// review train for this project's repository use it instead of the
+    /// daemon-global `qa_branch` setting. `None` inherits the global.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qa_branch: Option<String>,
     /// Legacy peer marker for per-friend delivery projects created before
     /// friend sessions were pooled. New pooled projects use `kind`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1242,6 +1252,8 @@ impl Project {
             created_at: unix_time(),
             temporary: false,
             starred: false,
+            submissions_enabled: false,
+            qa_branch: None,
             friend_peer_id: None,
             kind: None,
             resolved_name: None,

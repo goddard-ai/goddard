@@ -52,7 +52,7 @@ pub(crate) fn qa_branch_name(configured: &str) -> String {
 /// git can't treat as a branch — the value lands inside refspecs and a
 /// bare `git fetch origin <name>` argument, where a leading `-` would be
 /// a flag.
-fn qa_branch_checked(configured: &str) -> anyhow::Result<String> {
+pub(crate) fn qa_branch_checked(configured: &str) -> anyhow::Result<String> {
     let branch = qa_branch_name(configured);
     let valid = !branch.starts_with('-')
         && !branch.contains("..")

@@ -2593,6 +2593,8 @@ impl BossService {
             | BossOperation::Transcript { .. }
             | BossOperation::Speak { .. }
             | BossOperation::SetResourcePolicy { .. }
+            | BossOperation::SetProjectSubmissions { .. }
+            | BossOperation::SetProjectQaBranch { .. }
             | BossOperation::Eval { .. } => {
                 bail!("runtime operation requires daemon dispatch")
             }
@@ -6164,6 +6166,8 @@ mod memory_op_tests {
             created_at: 0,
             temporary: false,
             starred: false,
+            submissions_enabled: false,
+            qa_branch: None,
             friend_peer_id: None,
             kind: None,
             resolved_name: None,

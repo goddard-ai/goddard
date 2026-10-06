@@ -554,6 +554,8 @@ mod tests {
             created_at,
             temporary: false,
             starred: false,
+            submissions_enabled: false,
+            qa_branch: None,
             friend_peer_id: None,
             kind: None,
             resolved_name: None,

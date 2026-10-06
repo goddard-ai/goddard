@@ -7,6 +7,18 @@ unit with:
 goddard-agent merge submit
 ```
 
+Submission is opt-in per project — the flag lives on the registered project
+and survives daemon restarts. Until the boss enables it with
+`goddard-agent boss '{"type":"setProjectSubmissions","project":"<name>","enabled":true}'`,
+`merge submit` fails with "submissions not enabled for this project".
+
+The QA branch defaults to the daemon-global setting (normally `dev`), and the
+boss can retarget a single project with
+`goddard-agent boss '{"type":"setProjectQaBranch","project":"<name>","branch":"<branch>"}'`
+— the override covers both `merge submit` landings and the review train; omit
+`branch` to clear it. The named branch must be checked out somewhere in the
+project's repository for submissions to land on it.
+
 The daemon queues submissions in arrival order, checks that the employee's
 recorded worktree is clean, rebases it onto the configured QA branch (normally
 `dev`), skips patch-equivalent commits, and squashes the submitted changes

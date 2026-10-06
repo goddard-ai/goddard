@@ -1,0 +1,1 @@
+- The boss can retarget a single project's QA branch with the `setProjectQaBranch` operation — employee `merge submit` landings and the review queue for that project use it instead of the daemon-wide setting until the override is cleared.
