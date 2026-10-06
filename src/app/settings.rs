@@ -5424,6 +5424,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "wireframes-experiment-toggle",
+                icon: "icons/panel-left.svg",
+                title_key: "experiments.wireframes_title",
+                description_key: "experiments.wireframes_description",
+                enabled: self.state.wireframes_experiment_enabled,
+                set: Self::set_wireframes_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "composer-drafts-experiment-toggle",
                 icon: "icons/file-text.svg",
                 title_key: "experiments.composer_drafts_title",
@@ -7379,6 +7390,15 @@ impl Waku {
 
     fn set_subagents_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.subagents_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The wireframes opt-in is daemon-owned like the other experiments.
+    /// There is no visible surface to unmount yet — the flag gates the
+    /// emit affordance and preview that arrive with the feature.
+    fn set_wireframes_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.wireframes_experiment_enabled = enabled;
         self.save();
         cx.notify();
     }

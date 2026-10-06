@@ -683,6 +683,8 @@ impl PersistedState {
             // The sandbox experiment postdates the document the same way.
             sandbox_experiment_enabled: cfg!(debug_assertions),
             sandbox_default_enabled: false,
+            // The wireframes experiment postdates it too.
+            wireframes_experiment_enabled: cfg!(debug_assertions),
             // Idle eviction postdates it too; absent means the default.
             runtime_idle_timeout_secs: None,
             // So does the review-train branch name — `qa` is the

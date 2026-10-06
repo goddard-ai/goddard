@@ -137,6 +137,13 @@ sandbox_experiment_enabled: boolean,
  */
 sandbox_default_enabled: boolean,
 /**
+ * Experimental opt-in for planning-session wireframes — the emit
+ * affordance, preview surfaces, and Figma export stay hidden while
+ * this is off, and emitted `.wireframe.json` files persist either
+ * way. Defaults on in development builds, opt-in in release builds.
+ */
+wireframes_experiment_enabled: boolean,
+/**
  * Seconds a settled provider runtime may sit idle before the daemon
  * reclaims it. `None` keeps the built-in default (30 minutes); `0`
  * disables eviction. A reclaimed runtime restarts lazily from the

@@ -122,6 +122,12 @@ pub struct DaemonSettings {
     /// access menu still wins for that task.
     #[serde(default)]
     pub sandbox_default_enabled: bool,
+    /// Experimental opt-in for planning-session wireframes — the emit
+    /// affordance, preview surfaces, and Figma export stay hidden while
+    /// this is off, and emitted `.wireframe.json` files persist either
+    /// way. Defaults on in development builds, opt-in in release builds.
+    #[serde(default = "default_experiment_enabled")]
+    pub wireframes_experiment_enabled: bool,
     /// Seconds a settled provider runtime may sit idle before the daemon
     /// reclaims it. `None` keeps the built-in default (30 minutes); `0`
     /// disables eviction. A reclaimed runtime restarts lazily from the
@@ -184,6 +190,7 @@ impl Default for DaemonSettings {
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
+            wireframes_experiment_enabled: default_experiment_enabled(),
             runtime_idle_timeout_secs: None,
             qa_branch: DEFAULT_QA_BRANCH.to_owned(),
             keep_awake: false,

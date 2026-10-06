@@ -1,0 +1,1 @@
+- **[Experimental]** Turn on Wireframes in Settings → Experiments to let planning sessions emit low-fidelity screen wireframes beside the plan document. The in-app preview and Figma export arrive with the feature; emitted `.wireframe.json` files are kept while the experiment is off. On in development builds, off in release builds unless enabled.

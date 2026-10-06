@@ -2315,6 +2315,11 @@ pub struct PersistedState {
     /// Daemon-owned; mirrored here so new-task seeding can read it.
     #[serde(default)]
     pub sandbox_default_enabled: bool,
+    /// Experimental opt-in for planning-session wireframes. Daemon-owned;
+    /// mirrored here so clients can render the toggle and gate the emit
+    /// and preview surfaces.
+    #[serde(default = "default_experiment_enabled")]
+    pub wireframes_experiment_enabled: bool,
     /// Connected integrations. Daemon-owned; mirrored in memory so a client
     /// `UpdateSettings` round-trips them instead of wiping the list. Writes
     /// go through the integration commands.
@@ -2594,6 +2599,7 @@ impl PersistedState {
             integrations_proxy_token: String::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
+            wireframes_experiment_enabled: default_experiment_enabled(),
             runtime_idle_timeout_secs: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
@@ -2850,6 +2856,7 @@ impl PersistedState {
             integrations_proxy_token: self.integrations_proxy_token.clone(),
             sandbox_experiment_enabled: self.sandbox_experiment_enabled,
             sandbox_default_enabled: self.sandbox_default_enabled,
+            wireframes_experiment_enabled: self.wireframes_experiment_enabled,
             runtime_idle_timeout_secs: self.runtime_idle_timeout_secs,
             extra: self.daemon_settings_extra.clone(),
         }
@@ -2886,6 +2893,7 @@ impl PersistedState {
         self.integrations_proxy_token = settings.integrations_proxy_token;
         self.sandbox_experiment_enabled = settings.sandbox_experiment_enabled;
         self.sandbox_default_enabled = settings.sandbox_default_enabled;
+        self.wireframes_experiment_enabled = settings.wireframes_experiment_enabled;
         self.runtime_idle_timeout_secs = settings.runtime_idle_timeout_secs;
         self.daemon_settings_extra = settings.extra;
     }

@@ -1,0 +1,1576 @@
+{
+  "version": 1,
+  "name": "Boss Brain — pages redesign",
+  "screens": [
+    {
+      "name": "Brain — shell + sections",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "annotations": "Shared header — Boss name and host, Identity menu, Chat action",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay", "label": "" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "annotations": "Fixed sections — quiet text items, not a row of bordered buttons",
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Memory", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "height": "fill",
+            "direction": "column",
+            "justify": "center",
+            "align": "center",
+            "gap": 10,
+            "annotations": "No dashboard of cards — the section's content occupies the page",
+            "children": [
+              { "type": "rect", "width": 44, "height": 44, "cornerRadius": 11, "fill": "inset" },
+              { "type": "text", "text": "Brain", "role": "title" },
+              { "type": "text", "text": "Memory · Personas · Employees · Plans · Deliverables", "role": "body", "tone": "tertiary" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Memory — documents",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Memory", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 8 },
+            "gap": 8,
+            "align": "center",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "row",
+                "fill": "inset",
+                "cornerRadius": 6,
+                "padding": 2,
+                "gap": 2,
+                "width": "hug",
+                "annotations": "Documents/Records view switch — segmented control",
+                "children": [
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "fill": "surface",
+                    "children": [ { "type": "text", "text": "Documents", "role": "label" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "Records", "role": "label", "tone": "secondary" } ]
+                  }
+                ]
+              },
+              {
+                "type": "frame",
+                "direction": "row",
+                "width": 210,
+                "height": 26,
+                "cornerRadius": 6,
+                "stroke": "inset",
+                "gap": 6,
+                "padding": { "x": 8 },
+                "align": "center",
+                "annotations": "File-name search — results flatten the tree with full paths",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Search file names", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": 300,
+                "padding": { "y": 4 },
+                "annotations": "Reuses the Files working tree — disclosure, indentation, selection, resizing",
+                "children": [
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                    "children": [
+                      { "type": "text", "text": "▸", "role": "caption", "tone": "tertiary", "width": "hug" },
+                      { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                      { "type": "text", "text": "people", "role": "body" }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                    "children": [
+                      { "type": "text", "text": "▾", "role": "caption", "tone": "tertiary", "width": "hug" },
+                      { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                      { "type": "text", "text": "projects", "role": "body" }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": { "x": 26 },
+                    "children": [
+                      {
+                        "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center", "fill": "overlay", "cornerRadius": 6,
+                        "children": [
+                          { "type": "frame", "width": 12, "height": 1 },
+                          { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                          { "type": "text", "text": "goddard.md", "role": "body" }
+                        ]
+                      },
+                      {
+                        "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                        "children": [
+                          { "type": "frame", "width": 12, "height": 1 },
+                          { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                          { "type": "text", "text": "dev-env.md", "role": "body" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                    "children": [
+                      { "type": "text", "text": "▸", "role": "caption", "tone": "tertiary", "width": "hug" },
+                      { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                      { "type": "text", "text": "procedures", "role": "body" }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                    "children": [
+                      { "type": "text", "text": "▸", "role": "caption", "tone": "tertiary", "width": "hug" },
+                      { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                      { "type": "text", "text": "self", "role": "body" }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 5 }, "gap": 6, "align": "center",
+                    "children": [
+                      { "type": "frame", "width": 12, "height": 1 },
+                      { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                      { "type": "text", "text": "README.md", "role": "body" }
+                    ]
+                  }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "height": 38,
+                    "padding": { "x": 18 },
+                    "gap": 8,
+                    "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 14, "height": 14, "fill": "overlay" },
+                      { "type": "text", "text": "memory/projects/goddard.md", "role": "body", "tone": "secondary" },
+                      { "type": "frame", "width": "fill", "height": 1 },
+                      {
+                        "type": "rect",
+                        "label": "Ask Boss to correct",
+                        "width": "hug",
+                        "height": "hug",
+                        "cornerRadius": 6,
+                        "stroke": "inset",
+                        "annotations": "Opens Boss chat with this file attached as context — a request, not an edit"
+                      }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": { "x": 28, "y": 20 },
+                    "gap": 10,
+                    "height": "fill",
+                    "annotations": "Rendered Markdown preview — no edit/source toggle, no editor",
+                    "children": [
+                      { "type": "text", "text": "Goddard project memory", "role": "title" },
+                      { "type": "text", "text": "Goddard is a multi-client agent command center. Tasks run in provider", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "sessions; the daemon owns sessions, files, and settings.", "role": "body", "tone": "secondary" },
+                      { "type": "rect", "height": 56, "fill": "inset", "cornerRadius": 6, "label": "code block" },
+                      { "type": "text", "text": "• bun ./scripts/dev.ts owns the debug watcher and app", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "• dev is the QA branch — work lands unreviewed, promotes on approval", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "Last updated 2d ago — shown only when recorded", "role": "caption", "tone": "tertiary" }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Memory — records",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Memory", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 8 },
+            "gap": 8,
+            "align": "center",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "row",
+                "fill": "inset",
+                "cornerRadius": 6,
+                "padding": 2,
+                "gap": 2,
+                "width": "hug",
+                "children": [
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "Documents", "role": "label", "tone": "secondary" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "fill": "surface",
+                    "children": [ { "type": "text", "text": "Records", "role": "label" } ]
+                  }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": 300,
+                "padding": { "y": 4 },
+                "annotations": "Named memory buckets — collections, not a fake filesystem",
+                "children": [
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 7 }, "gap": 8, "align": "center", "fill": "overlay", "cornerRadius": 6,
+                    "children": [
+                      { "type": "rect", "width": 16, "height": 16, "fill": "ink" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "user-preferences", "role": "body" },
+                          { "type": "text", "text": "12 notes · 3 summaries", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 7 }, "gap": 8, "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "project-conventions", "role": "body" },
+                          { "type": "text", "text": "8 notes", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 12, "y": 7 }, "gap": 8, "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "people", "role": "body" },
+                          { "type": "text", "text": "4 notes", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "height": 38,
+                    "padding": { "x": 18 },
+                    "gap": 8,
+                    "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 14, "height": 14, "fill": "overlay" },
+                      { "type": "text", "text": "buckets/user-preferences", "role": "body", "tone": "secondary" },
+                      { "type": "frame", "width": "fill", "height": 1 }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": { "x": 28, "y": 8 },
+                    "height": "fill",
+                    "annotations": "Stated / observed / inferred distinctions are kept when recorded",
+                    "children": [
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "padding": { "y": 8 },
+                        "gap": 4,
+                        "children": [
+                          {
+                            "type": "frame", "direction": "row", "gap": 8, "align": "center",
+                            "children": [
+                              { "type": "text", "text": "#3 · Fact", "role": "caption", "tone": "tertiary" },
+                              { "type": "frame", "width": "fill", "height": 1 },
+                              { "type": "rect", "label": "Ask Boss to correct", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" }
+                            ]
+                          },
+                          { "type": "text", "text": "Alec prefers concise status reports with the SHA up front.", "role": "body" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "padding": { "y": 8 },
+                        "gap": 4,
+                        "children": [
+                          {
+                            "type": "frame", "direction": "row", "gap": 8, "align": "center",
+                            "children": [
+                              { "type": "text", "text": "#7 · Observation", "role": "caption", "tone": "tertiary" },
+                              { "type": "frame", "width": "fill", "height": 1 },
+                              { "type": "rect", "label": "Ask Boss to correct", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" }
+                            ]
+                          },
+                          { "type": "text", "text": "Review rounds go faster when the test plan names exact commands.", "role": "body" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "padding": { "y": 8 },
+                        "gap": 4,
+                        "children": [
+                          {
+                            "type": "frame", "direction": "row", "gap": 8, "align": "center",
+                            "children": [
+                              { "type": "text", "text": "#4–6 · Summary", "role": "caption", "tone": "tertiary" },
+                              { "type": "frame", "width": "fill", "height": 1 },
+                              { "type": "rect", "label": "Ask Boss to correct", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" }
+                            ]
+                          },
+                          { "type": "text", "text": "Interface discussions settle fastest with concrete diffs and payloads.", "role": "body" }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Personas",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Memory", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Personas", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": 300,
+                "children": [
+                  {
+                    "type": "frame",
+                    "padding": { "x": 10, "y": 8 },
+                    "children": [
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "height": 26,
+                        "cornerRadius": 6,
+                        "stroke": "inset",
+                        "gap": 6,
+                        "padding": { "x": 8 },
+                        "align": "center",
+                        "children": [
+                          { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                          { "type": "text", "text": "Search personas", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  { "type": "text", "text": "Boss", "role": "caption", "tone": "tertiary", "width": "fill", "height": "hug", "align": "start", "annotations": "Section label" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 10, "y": 6 }, "gap": 8, "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 28, "height": 28, "cornerRadius": 8, "fill": "inset" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "Amber", "role": "label" },
+                          { "type": "text", "text": "The Boss's own persona", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  { "type": "text", "text": "Roles", "role": "caption", "tone": "tertiary", "width": "fill" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 10, "y": 6 }, "gap": 8, "align": "center", "fill": "overlay", "cornerRadius": 6,
+                    "children": [
+                      { "type": "rect", "width": 28, "height": 28, "cornerRadius": 8, "fill": "inset" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "Thea", "role": "label" },
+                          { "type": "text", "text": "iOS builds and simulators", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 10, "y": 6 }, "gap": 8, "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 28, "height": 28, "cornerRadius": 8, "fill": "inset" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "Georgia", "role": "label" },
+                          { "type": "text", "text": "Audits and source research", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "x": 10, "y": 6 }, "gap": 8, "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 28, "height": 28, "cornerRadius": 8, "fill": "inset" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "Elsie", "role": "label" },
+                          { "type": "text", "text": "Wireframes and schemas", "role": "caption", "tone": "tertiary" }
+                        ]
+                      }
+                    ]
+                  },
+                  { "type": "frame", "height": "fill" },
+                  { "type": "divider" },
+                  {
+                    "type": "frame",
+                    "padding": { "x": 10, "y": 8 },
+                    "children": [
+                      { "type": "rect", "label": "+ New persona", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" }
+                    ]
+                  }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "padding": { "x": 24, "y": 18 },
+                "gap": 12,
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "gap": 12,
+                    "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 38, "height": 38, "cornerRadius": 11, "fill": "inset" },
+                      {
+                        "type": "frame", "direction": "column",
+                        "children": [
+                          { "type": "text", "text": "Thea", "role": "title" },
+                          { "type": "text", "text": "Employee role", "role": "caption", "tone": "tertiary" }
+                        ]
+                      },
+                      { "type": "frame", "width": "fill", "height": 1 },
+                      {
+                        "type": "rect",
+                        "label": "Edit",
+                        "width": "hug",
+                        "height": "hug",
+                        "cornerRadius": 6,
+                        "stroke": "inset",
+                        "annotations": "Editing is a deliberate mode — the detail is read-first"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "annotations": "Quiet label/value metadata — grants, pinned files, integrations, delegation",
+                    "children": [
+                      {
+                        "type": "frame", "direction": "row", "padding": { "y": 6 }, "gap": 8,
+                        "children": [
+                          { "type": "text", "text": "Memory buckets", "role": "caption", "tone": "tertiary", "width": 160 },
+                          { "type": "text", "text": "ios, simulator-notes", "role": "body", "tone": "secondary" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame", "direction": "row", "padding": { "y": 6 }, "gap": 8,
+                        "children": [
+                          { "type": "text", "text": "Pinned files", "role": "caption", "tone": "tertiary", "width": 160 },
+                          { "type": "text", "text": "guides/xcode-cloud.md", "role": "body", "tone": "secondary" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame", "direction": "row", "padding": { "y": 6 }, "gap": 8,
+                        "children": [
+                          { "type": "text", "text": "Integrations", "role": "caption", "tone": "tertiary", "width": 160 },
+                          { "type": "text", "text": "none", "role": "body", "tone": "secondary" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame", "direction": "row", "padding": { "y": 6 }, "gap": 8,
+                        "children": [
+                          { "type": "text", "text": "Can summon employees", "role": "caption", "tone": "tertiary", "width": 160 },
+                          { "type": "text", "text": "No", "role": "body", "tone": "secondary" }
+                        ]
+                      },
+                      { "type": "divider" },
+                      {
+                        "type": "frame", "direction": "row", "padding": { "y": 6 }, "gap": 8,
+                        "children": [
+                          { "type": "text", "text": "Computer Use", "role": "caption", "tone": "tertiary", "width": 160 },
+                          { "type": "text", "text": "Yes", "role": "body", "tone": "secondary" }
+                        ]
+                      }
+                    ]
+                  },
+                  { "type": "divider" },
+                  { "type": "text", "text": "Instructions", "role": "caption", "tone": "tertiary" },
+                  { "type": "text", "text": "You are Thea, the iOS build employee. You own simulator work end to end:", "role": "body" },
+                  { "type": "text", "text": "boot devices, run builds, read logs, and report concrete failure output.", "role": "body" },
+                  { "type": "rect", "height": 48, "fill": "inset", "cornerRadius": 6, "label": "pinned context" },
+                  { "type": "text", "text": "Saved defaults reach employees summoned after the save.", "role": "caption", "tone": "tertiary" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Employees — active",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Memory", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Employees", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 8 },
+            "gap": 8,
+            "align": "center",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "row",
+                "fill": "inset",
+                "cornerRadius": 6,
+                "padding": 2,
+                "gap": 2,
+                "width": "hug",
+                "children": [
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "fill": "surface",
+                    "children": [ { "type": "text", "text": "Active", "role": "label" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "History", "role": "label", "tone": "secondary" } ]
+                  }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              {
+                "type": "rect",
+                "label": "Capacity",
+                "width": "hug",
+                "height": "hug",
+                "cornerRadius": 6,
+                "stroke": "inset",
+                "annotations": "Read-only menu — model limits, host resources, live usage, waiters"
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "column",
+            "padding": { "x": 16, "y": 6 },
+            "height": "fill",
+            "annotations": "Sidebar row density — model and effort readable without holding Option",
+            "children": [
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 28, "height": 28, "cornerRadius": 14, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "Elsie", "role": "label" },
+                      { "type": "text", "text": "wireframes · goddard", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "SWE-2 High", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "Working", "role": "label", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "12m", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 28, "height": 28, "cornerRadius": 14, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "Thea", "role": "label" },
+                      { "type": "text", "text": "ios-sim-fix · goddard", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "Sonnet", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "Working", "role": "label", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "38m", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 28, "height": 28, "cornerRadius": 14, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "Georgia", "role": "label" },
+                      { "type": "text", "text": "audit boss pages · goddard", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "SWE-2 High", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  {
+                    "type": "frame", "direction": "column", "width": "hug",
+                    "children": [
+                      { "type": "text", "text": "Queued", "role": "label", "tone": "accent" },
+                      { "type": "text", "text": "waiting for Thea's simulator", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "text", "text": "4m", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 28, "height": 28, "cornerRadius": 14, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "Josephine", "role": "label" },
+                      { "type": "text", "text": "layout precedents · goddard", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "Opus", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "Finishing", "role": "label", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "1h", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Employee — task page",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "annotations": "The existing task/transcript surface — not the Brain page",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 10 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 12, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Elsie — wireframes", "role": "label" },
+                  { "type": "text", "text": "task · goddard", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "text", "text": "Working · 12m", "role": "caption", "tone": "secondary", "width": "hug" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "column",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "row",
+                "padding": { "x": 16, "y": 6 },
+                "gap": 6,
+                "align": "center",
+                "annotations": "Compact assignment summary — expands on click, dismisses on click",
+                "children": [
+                  { "type": "text", "text": "▾", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "Assignment", "role": "label", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "schema v1 + JSON-to-SVG renderer + brain example", "role": "body", "tone": "tertiary" },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "SWE-2 High", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "Working", "role": "label", "tone": "secondary", "width": "hug" }
+                ]
+              },
+              {
+                "type": "frame",
+                "direction": "column",
+                "padding": { "x": 16 },
+                "children": [
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Brief", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "Prove the wireframe format on the Brain redesign", "role": "body", "tone": "secondary" }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Persona", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "wireframes", "role": "body", "tone": "secondary" }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Model", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "SWE-2 High", "role": "body", "tone": "secondary" }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Workspace", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "worktree happy-ibex", "role": "body", "tone": "secondary" }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Access", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "no extra grants", "role": "body", "tone": "secondary" }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame", "direction": "row", "padding": { "y": 5 }, "gap": 8,
+                    "children": [
+                      { "type": "text", "text": "Resources", "role": "caption", "tone": "tertiary", "width": 120 },
+                      { "type": "text", "text": "none requested", "role": "body", "tone": "secondary" }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "height": "fill",
+            "direction": "column",
+            "justify": "center",
+            "align": "center",
+            "gap": 8,
+            "annotations": "The transcript stays the primary content after launch",
+            "children": [
+              { "type": "rect", "width": 40, "height": 40, "cornerRadius": 10, "fill": "inset" },
+              { "type": "text", "text": "Employee transcript — turns render here", "role": "body", "tone": "tertiary" },
+              { "type": "text", "text": "Before launch this area shows the brief and queue reason instead", "role": "caption", "tone": "tertiary" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Plans",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Memory", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Plans", "role": "label" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Deliverables", "role": "label", "tone": "secondary" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": 300,
+                "children": [
+                  {
+                    "type": "frame",
+                    "padding": { "x": 10, "y": 10 },
+                    "children": [
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "fill": "inset",
+                        "cornerRadius": 6,
+                        "padding": 2,
+                        "gap": 2,
+                        "children": [
+                          {
+                            "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "fill": "surface", "width": "fill",
+                            "children": [ { "type": "text", "text": "Active", "role": "label", "align": "center" } ]
+                          },
+                          {
+                            "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "width": "fill",
+                            "children": [ { "type": "text", "text": "Approved", "role": "label", "tone": "secondary", "align": "center" } ]
+                          },
+                          {
+                            "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "width": "fill",
+                            "children": [ { "type": "text", "text": "Archived", "role": "label", "tone": "secondary", "align": "center" } ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "column", "padding": { "x": 10, "y": 6 }, "fill": "overlay", "cornerRadius": 6,
+                    "children": [
+                      { "type": "text", "text": "Boss Brain pages redesign", "role": "body" },
+                      { "type": "text", "text": "In discussion · 2d", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "column", "padding": { "x": 10, "y": 6 },
+                    "children": [
+                      { "type": "text", "text": "Wireframe emission", "role": "body" },
+                      { "type": "text", "text": "In discussion · 1d", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  {
+                    "type": "frame", "direction": "column", "padding": { "x": 10, "y": 6 },
+                    "children": [
+                      { "type": "text", "text": "OTA updates", "role": "body" },
+                      { "type": "text", "text": "In discussion · 6h", "role": "caption", "tone": "tertiary" }
+                    ]
+                  }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "padding": { "x": 16, "y": 10 },
+                    "gap": 8,
+                    "align": "center",
+                    "children": [
+                      { "type": "rect", "width": 14, "height": 14, "fill": "overlay" },
+                      {
+                        "type": "frame", "direction": "row", "gap": 8, "align": "center",
+                        "children": [
+                          { "type": "text", "text": "Boss Brain pages redesign", "role": "body", "width": "hug" },
+                          { "type": "text", "text": "In discussion", "role": "caption", "tone": "tertiary", "width": "hug" }
+                        ]
+                      },
+                      { "type": "frame", "width": "fill", "height": 1 },
+                      {
+                        "type": "rect",
+                        "label": "Open discussion",
+                        "width": "hug",
+                        "height": "hug",
+                        "cornerRadius": 6,
+                        "stroke": "inset",
+                        "annotations": "Active plans return to the planning session with the Plan tab selected"
+                      }
+                    ]
+                  },
+                  { "type": "divider" },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": { "x": 24, "y": 16 },
+                    "gap": 10,
+                    "height": "fill",
+                    "annotations": "The plan document through the same read-only Markdown view the Plan tab uses",
+                    "children": [
+                      { "type": "text", "text": "Boss Brain Pages Redesign", "role": "title" },
+                      { "type": "text", "text": "Make the Boss pages cleaner, easier to browse, and consistent", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "with the rest of Goddard.", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "## Navigation: one home, focused pages", "role": "label" },
+                      { "type": "text", "text": "Keep the Boss chat entry. Brain opens the last visited section,", "role": "body", "tone": "secondary" },
+                      { "type": "text", "text": "or Memory on first use.", "role": "body", "tone": "secondary" },
+                      { "type": "rect", "height": 44, "fill": "inset", "cornerRadius": 6, "label": "wireframe preview" }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Deliverables",
+      "width": 1200,
+      "height": 800,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 12 },
+            "gap": 10,
+            "align": "center",
+            "children": [
+              { "type": "rect", "width": 24, "height": 24, "cornerRadius": 6, "fill": "overlay" },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "hug",
+                "children": [
+                  { "type": "text", "text": "Amber", "role": "label" },
+                  { "type": "text", "text": "This Mac", "role": "caption", "tone": "tertiary" }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 },
+              { "type": "rect", "label": "Identity", "width": "hug", "height": "hug", "cornerRadius": 6, "stroke": "inset" },
+              { "type": "rect", "label": "Chat", "width": "hug", "height": "hug", "cornerRadius": 6, "fill": "ink" }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 6 },
+            "gap": 4,
+            "children": [
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Memory", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Personas", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Employees", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "overlay" },
+                  { "type": "text", "text": "Plans", "role": "label", "tone": "secondary" }
+                ]
+              },
+              {
+                "type": "frame", "direction": "row", "gap": 6, "padding": { "x": 10, "y": 5 }, "cornerRadius": 6, "fill": "overlay", "align": "center",
+                "children": [
+                  { "type": "rect", "width": 13, "height": 13, "fill": "ink" },
+                  { "type": "text", "text": "Deliverables", "role": "label" }
+                ]
+              }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "row",
+            "padding": { "x": 16, "y": 8 },
+            "gap": 8,
+            "align": "center",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "row",
+                "fill": "inset",
+                "cornerRadius": 6,
+                "padding": 2,
+                "gap": 2,
+                "width": "hug",
+                "annotations": "All / Pinned / Dormant / Archived — the library behind the 12-hour recents",
+                "children": [
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5, "fill": "surface",
+                    "children": [ { "type": "text", "text": "All", "role": "label" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "Pinned", "role": "label", "tone": "secondary" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "Dormant", "role": "label", "tone": "secondary" } ]
+                  },
+                  {
+                    "type": "frame", "padding": { "x": 10, "y": 3 }, "cornerRadius": 5,
+                    "children": [ { "type": "text", "text": "Archived", "role": "label", "tone": "secondary" } ]
+                  }
+                ]
+              },
+              { "type": "frame", "width": "fill", "height": 1 }
+            ]
+          },
+          { "type": "divider" },
+          {
+            "type": "frame",
+            "direction": "column",
+            "padding": { "x": 16, "y": 6 },
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "brain-shell.svg", "role": "body" },
+                      { "type": "text", "text": "SVG · Elsie's wireframes task", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "rect", "width": 8, "height": 8, "cornerRadius": 4, "fill": "accent", "annotations": "Unread" },
+                  { "type": "text", "text": "12m", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "xplat-reference-apps.md", "role": "body" },
+                      { "type": "text", "text": "Markdown · Georgia's audit", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "Pinned", "role": "caption", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "2d", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "memory-engine-redesign.md", "role": "body" },
+                      { "type": "text", "text": "Markdown · remote host atlas", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "Remote — preview unavailable", "role": "caption", "tone": "tertiary", "width": "hug" },
+                  { "type": "text", "text": "5d", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              },
+              { "type": "divider" },
+              {
+                "type": "frame", "direction": "row", "padding": { "x": 8, "y": 8 }, "gap": 10, "align": "center",
+                "children": [
+                  { "type": "rect", "width": 16, "height": 16, "fill": "overlay" },
+                  {
+                    "type": "frame", "direction": "column",
+                    "children": [
+                      { "type": "text", "text": "release-notes-4.2.md", "role": "body" },
+                      { "type": "text", "text": "Markdown · release task", "role": "caption", "tone": "tertiary" }
+                    ]
+                  },
+                  { "type": "frame", "width": "fill", "height": 1 },
+                  { "type": "text", "text": "Dormant", "role": "caption", "tone": "secondary", "width": "hug" },
+                  { "type": "text", "text": "3w", "role": "caption", "tone": "tertiary", "width": "hug" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
