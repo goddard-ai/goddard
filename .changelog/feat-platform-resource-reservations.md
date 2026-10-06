@@ -1,1 +1,1 @@
-- Agents can queue native builds, virtual devices, and shared desktop input with `goddard-agent resource`, using shared capacity across Goddard projects under the same OS account; raw launches still require cooperative coordination.
+- Agents can queue native builds, virtual devices, and shared desktop input with `goddard-agent resource`, using shared capacity across Goddard projects under the same OS account; raw launches still require cooperative coordination. Queued requests leave spare capacity available to other work while preserving earlier requests’ priority.

@@ -586,7 +586,7 @@ fn admission_blockers(
     if used >= cap {
         blockers.push(AdmissionBlocker::ModelLimit { used, limit: cap });
     }
-    if blocked(request, ledger, policy, observation, Some(task)) {
+    if blocked(request, ledger, policy, observation, Some(task), 0) {
         blockers.push(AdmissionBlocker::HostResources {
             detail: "host capacity is occupied".into(),
         });
@@ -623,9 +623,11 @@ fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observat
         if r.granted_at.is_some() || r.cancelled || r.released {
             continue;
         }
-        // Strict FIFO prevents a stream of small requests starving an atomic multi-resource request.
-        if blocked(&r.resources, ledger, policy, observation, None) {
-            break;
+        // Earlier waiters reserve their full sets in the capacity calculation,
+        // but do not prevent later requests from using spare or unrelated pools.
+        // They still hold nothing until their atomic set can actually grant.
+        if blocked(&r.resources, ledger, policy, observation, None, index) {
+            continue;
         }
         ledger.reservations[index].granted_at = Some(now);
     }
@@ -633,13 +635,15 @@ fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observat
 /// Whether `request` cannot grant now. `exclude` names a task whose own
 /// granted claims should not count — a re-admission swap releases them
 /// on grant, so they are not part of the capacity the request competes
-/// for.
+/// for. `queued_before` also protects the capacity needed by earlier
+/// waiters, allowing later requests to use only the remaining capacity.
 fn blocked(
     request: &ResourceSet,
     ledger: &Ledger,
     policy: &ResourcePolicy,
     observation: &Observation,
     exclude: Option<Uuid>,
+    queued_before: usize,
 ) -> bool {
     let held: Vec<_> = ledger
         .reservations
@@ -660,29 +664,34 @@ fn blocked(
     {
         return true;
     }
-    request
-        .exclusive
-        .iter()
-        .any(|key| held.iter().any(|r| r.resources.exclusive.contains(key)))
-        || request.resident_devices > 0
-            && (u64::from(request.resident_devices)
-                + held
-                    .iter()
-                    .map(|r| u64::from(r.resources.resident_devices))
-                    .sum::<u64>()
-                > u64::from(policy.resident_devices))
+    let claims = held.iter().map(|r| &r.resources).chain(
+        ledger.reservations[..queued_before]
+            .iter()
+            .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
+            .map(|r| &r.resources),
+    );
+    request.exclusive.iter().any(|key| {
+        claims
+            .clone()
+            .any(|resources| resources.exclusive.contains(key))
+    }) || request.resident_devices > 0
+        && (u64::from(request.resident_devices)
+            + claims
+                .clone()
+                .map(|resources| u64::from(resources.resident_devices))
+                .sum::<u64>()
+            > u64::from(policy.resident_devices))
         || request.native_builds > 0
             && (u64::from(request.native_builds)
-                + held
-                    .iter()
-                    .map(|r| u64::from(r.resources.native_builds))
+                + claims
+                    .clone()
+                    .map(|resources| u64::from(resources.native_builds))
                     .sum::<u64>()
                 > u64::from(policy.native_builds))
         || request.desktop_input > 0
             && (u64::from(request.desktop_input)
-                + held
-                    .iter()
-                    .map(|r| u64::from(r.resources.desktop_input))
+                + claims
+                    .map(|resources| u64::from(resources.desktop_input))
                     .sum::<u64>()
                 > u64::from(policy.desktop_input))
 }
@@ -1008,6 +1017,71 @@ mod tests {
         );
         assert!(granted(&status, id(&second)));
         assert!(!granted(&status, id(&third)));
+    }
+
+    #[test]
+    fn blocked_device_waiter_leaves_spare_build_capacity_without_losing_fifo_priority() {
+        let h = Harness::new();
+        h.op(Uuid::new_v4(), ResourceOperation::Status { id: None });
+        fs::write(
+            h.broker.root.join("policy.json"),
+            serde_json::to_vec(&ResourcePolicy {
+                native_builds: 3,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let device_task = Uuid::new_v4();
+        let observation = || Observation {
+            devices: ios().exclusive,
+            errors: vec![],
+        };
+        let device = h
+            .broker
+            .transaction(
+                device_task,
+                acquisition(
+                    ResourceSet {
+                        native_builds: 1,
+                        ..ios()
+                    },
+                    None,
+                ),
+                observation(),
+            )
+            .unwrap();
+        assert!(!granted(&device, id(&device)));
+        let build_task = Uuid::new_v4();
+        let native = h
+            .broker
+            .transaction(
+                build_task,
+                acquisition(
+                    ResourceSet {
+                        native_builds: 2,
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                observation(),
+            )
+            .unwrap();
+        assert!(granted(&native, id(&native)));
+        assert!(!granted(&native, id(&device)));
+        let later_task = Uuid::new_v4();
+        let later = h
+            .broker
+            .transaction(later_task, acquisition(build(), None), observation())
+            .unwrap();
+        // The last slot remains available for the earlier atomic request.
+        assert!(!granted(&later, id(&later)));
+        let status = h.op(device_task, ResourceOperation::Status { id: None });
+        assert!(granted(&status, id(&device)));
+        assert!(!granted(&status, id(&later)));
+        h.op(build_task, ResourceOperation::Release { id: id(&native) });
+        let status = h.op(later_task, ResourceOperation::Status { id: None });
+        assert!(granted(&status, id(&later)));
     }
 
     #[test]
