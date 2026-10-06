@@ -887,17 +887,34 @@ impl ScratchpadTranscript {
 
     /// Open the annotation box on a paragraph; an open box moves. The
     /// provisional suffix retargets with the append point — leaving it
-    /// behind would pin stale dimmed text on the last row.
-    fn annotate(&mut self, index: usize) {
-        if index < self.paragraphs.len() {
-            // Speech retargets into the box — the closing append point's
-            // tail is finished dictation, so it cleans now.
-            self.flush_open_tail();
-            self.annotation_target = Some(AnnotationTarget::Paragraph(index));
-            self.annotation_interim = std::mem::take(&mut self.interim);
-            self.caret = None;
-            self.caret_anchor = None;
+    /// behind would pin stale dimmed text on the last row. Returns true
+    /// when the box opened.
+    ///
+    /// A line with nothing written has nothing to annotate: the click
+    /// lands the caret there instead — the dictation insertion point —
+    /// after committing any box already open the way clicking open space
+    /// would.
+    fn annotate(&mut self, index: usize) -> bool {
+        if index >= self.paragraphs.len() {
+            return false;
         }
+        if self.paragraphs[index].text.is_empty() {
+            self.commit_annotation();
+            self.caret = Some(CaretPos {
+                node: ScratchpadNode::Paragraph(index),
+                offset: 0,
+            });
+            self.caret_anchor = None;
+            return false;
+        }
+        // Speech retargets into the box — the closing append point's
+        // tail is finished dictation, so it cleans now.
+        self.flush_open_tail();
+        self.annotation_target = Some(AnnotationTarget::Paragraph(index));
+        self.annotation_interim = std::mem::take(&mut self.interim);
+        self.caret = None;
+        self.caret_anchor = None;
+        true
     }
 
     /// Open the annotation box on a bullet — its commits land as sibling
@@ -3309,12 +3326,19 @@ impl Waku {
                                 window.insert_hitbox(bounds, HitboxBehavior::Normal).id
                             },
                             move |_, region, window, _cx| {
-                                // Registered ahead of install's listeners:
+                                md::render::install_selection_input(
+                                    region, window, &selection, None,
+                                );
+                                // Registered after install's listeners:
                                 // bubble order is reverse registration, so
-                                // the drag's release() settles the spans
-                                // before this observes them. A selection
-                                // that lands takes keyboard focus — typing
-                                // then edits the transcript, not the draft.
+                                // this runs ahead of the drag's release()
+                                // and sees the live gesture. A press that
+                                // settled into real spans hands the surface
+                                // keyboard focus — typing then edits the
+                                // transcript, not the draft. A mouse-up
+                                // without a live drag — a click into the
+                                // composer while a selection still stands —
+                                // leaves focus where the press put it.
                                 window.on_mouse_event({
                                     let selection = selection.clone();
                                     let focus = edit_focus.clone();
@@ -3322,15 +3346,17 @@ impl Waku {
                                         if phase != DispatchPhase::Bubble {
                                             return;
                                         }
-                                        if selection.selection.borrow().is_empty() {
-                                            return;
+                                        let grabbed = {
+                                            let selection =
+                                                selection.selection.borrow();
+                                            selection.is_dragging()
+                                                && !selection.is_empty()
+                                        };
+                                        if grabbed {
+                                            window.focus(&focus, cx);
                                         }
-                                        window.focus(&focus, cx);
                                     }
                                 });
-                                md::render::install_selection_input(
-                                    region, window, &selection, None,
-                                );
                                 if let Some((key, offset)) = &caret_glyph
                                     && let Some(rect) =
                                         scratchpad_caret_rect(&selection, key, *offset)
@@ -3509,8 +3535,9 @@ impl Waku {
     /// The transcript rows: paragraphs separated by hairlines, bullets under
     /// their paragraph, the recording dot at the live append point, and an
     /// annotation box hanging off its target while one is open. The whole
-    /// column is the edit surface — a settled selection or a Tab landing
-    /// puts its focus here so typing edits the transcript.
+    /// column is the edit surface — a settled selection, a caret-placing
+    /// click on an unwritten line, or a Tab landing puts its focus here so
+    /// typing edits the transcript.
     fn render_scratchpad_rows(
         &mut self,
         theme: &Theme,
@@ -3567,7 +3594,7 @@ impl Waku {
             .text_color(theme.text)
             .on_key_down(cx.listener(Self::voice_scratchpad_edit_key))
             // A fresh press retires the caret — the drag re-selects and the
-            // click handlers sort out annotation.
+            // click handlers sort out annotation or a new insertion point.
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                     && scratchpad.transcript.caret.take().is_some()
@@ -3656,22 +3683,30 @@ impl Waku {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         }),
                 )
-                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                         && !scratchpad_click_was_drag(event, &scratchpad.selection)
+                        && !scratchpad.transcript.annotate(index)
                     {
-                        scratchpad.transcript.annotate(index);
+                        // No box opened — the line had nothing written
+                        // and the caret landed as the insertion point.
+                        // The surface takes the keys now.
+                        let focus = scratchpad.edit_focus.clone();
+                        window.focus(&focus, cx);
                     }
                     this.drain_cleanup_requests(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     if !event.keystroke.modifiers.modified()
                         && matches!(event.keystroke.key.as_str(), "enter" | "space")
                     {
-                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
-                            scratchpad.transcript.annotate(index);
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
+                            && !scratchpad.transcript.annotate(index)
+                        {
+                            let focus = scratchpad.edit_focus.clone();
+                            window.focus(&focus, cx);
                         }
                         this.drain_cleanup_requests(cx);
                         cx.stop_propagation();
@@ -3789,8 +3824,10 @@ impl Waku {
             );
             blocks = blocks.child(
                 div()
+                    .id("vs-live-row")
                     .w_full()
                     .py(px(2.0))
+                    .cursor_default()
                     .child(
                         div()
                             .flex()
@@ -3806,7 +3843,23 @@ impl Waku {
                                 false,
                             ))
                             .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
-                    ),
+                    )
+                    // Nothing is written here yet — the live row is the
+                    // insertion point, so the click lands the caret and
+                    // the surface's keys rather than annotating.
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
+                            && !scratchpad_click_was_drag(event, &scratchpad.selection)
+                        {
+                            let caret = scratchpad.transcript.append_point_caret();
+                            scratchpad.transcript.caret = Some(caret);
+                            scratchpad.transcript.caret_anchor = None;
+                            let focus = scratchpad.edit_focus.clone();
+                            window.focus(&focus, cx);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    })),
             );
         }
         blocks
@@ -4715,15 +4768,15 @@ mod tests {
         // is lost, and the append point returns to the live row.
         let mut transcript = ScratchpadTranscript::default();
         transcript.append_finalized("the plan okay next");
-        transcript.annotate(1);
+        transcript.annotate(0);
         transcript.append_finalized("first okay next");
-        transcript.annotate_bullet(1, 0);
+        transcript.annotate_bullet(0, 0);
         transcript.append_finalized("still talking");
         transcript.set_interim("for a".to_owned());
         transcript.commit_annotation();
         assert!(transcript.annotation_target.is_none());
         assert_eq!(
-            transcript.paragraphs[1].bullets,
+            transcript.paragraphs[0].bullets,
             vec!["first", "still talking for a"]
         );
         // The provisional tail's re-delivery strips instead of appending a
@@ -4733,12 +4786,66 @@ mod tests {
     }
 
     #[test]
+    fn clicking_an_unwritten_line_lands_the_caret_not_the_box() {
+        // The empty paragraph "okay next" left open has nothing to
+        // annotate — activating it becomes the dictation insertion point
+        // instead of opening a box.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan okay next");
+        assert!(!transcript.annotate(1));
+        assert!(transcript.annotation_target.is_none());
+        assert!(matches!(
+            transcript.caret,
+            Some(CaretPos {
+                node: ScratchpadNode::Paragraph(1),
+                offset: 0
+            })
+        ));
+        // The caret sits on the live row — fresh speech writes there.
+        transcript.append_finalized("second line");
+        assert_eq!(transcript.paragraphs[1].text, "second line");
+        // A written line still opens the box, and a missing row opens
+        // nothing without touching the box already up.
+        assert!(transcript.annotate(0));
+        assert!(matches!(
+            transcript.annotation_target,
+            Some(AnnotationTarget::Paragraph(0))
+        ));
+        assert!(!transcript.annotate(9));
+        assert!(matches!(
+            transcript.annotation_target,
+            Some(AnnotationTarget::Paragraph(0))
+        ));
+        // Activating an unwritten line while a box is open commits the
+        // box's content at its slot first, the way clicking open space
+        // does.
+        transcript.append_finalized("a note");
+        transcript.exit_annotation();
+        transcript.append_finalized("okay next");
+        transcript.annotate(0);
+        transcript.append_finalized("under the plan");
+        assert!(!transcript.annotate(2));
+        assert!(transcript.annotation_target.is_none());
+        assert_eq!(
+            transcript.paragraphs[0].bullets,
+            vec!["a note under the plan"]
+        );
+        assert!(matches!(
+            transcript.caret,
+            Some(CaretPos {
+                node: ScratchpadNode::Paragraph(2),
+                offset: 0
+            })
+        ));
+    }
+
+    #[test]
     fn selection_edit_replaces_across_paragraph_and_bullet() {
         // A drag over a paragraph's tail into a bullet cuts both painted
         // spans; the typed text lands where the grab began.
         let mut transcript = ScratchpadTranscript::default();
         transcript.append_finalized("alpha beta okay next");
-        transcript.annotate(1);
+        transcript.annotate(0);
         transcript.append_finalized("gamma delta okay next");
         transcript.exit_annotation();
         let spans = vec![
@@ -4750,7 +4857,7 @@ mod tests {
                 copy: Rc::default(),
             },
             md::selection::Span {
-                key: md::selection::TextKey::new("vs-b-1", 0),
+                key: md::selection::TextKey::new("vs-b-0", 0),
                 range: 0..5,
                 text: "gamma delta".into(),
                 block_break: false,
@@ -4759,7 +4866,7 @@ mod tests {
         ];
         let caret = transcript.apply_selection_edit(&spans, "omega");
         assert_eq!(transcript.paragraphs[0].text, "alpha omega");
-        assert_eq!(transcript.paragraphs[1].bullets[0], " delta");
+        assert_eq!(transcript.paragraphs[0].bullets[0], " delta");
         assert!(matches!(
             caret,
             Some(CaretPos {
@@ -4774,7 +4881,7 @@ mod tests {
         // Cutting a bullet's last word removes its row outright — the
         // caret lands on the paragraph the row hung under.
         let mut transcript = ScratchpadTranscript::default();
-        transcript.append_finalized("keep me okay next");
+        transcript.append_finalized("keep me okay next second line");
         transcript.annotate(1);
         transcript.append_finalized("gone okay next");
         transcript.exit_annotation();
@@ -4788,8 +4895,8 @@ mod tests {
             caret,
             CaretPos {
                 node: ScratchpadNode::Paragraph(1),
-                offset: 0
-            }
+                offset
+            } if offset == "second line".len()
         ));
     }
 
