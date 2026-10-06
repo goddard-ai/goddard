@@ -973,7 +973,13 @@ impl Waku {
                             scratchpad.status = ScratchpadStatus::ConnectionLost;
                         }
                     }
-                    None => scratchpad.status = ScratchpadStatus::ConnectionLost,
+                    None => {
+                        eprintln!(
+                            "Goddard: voice scratchpad found no {} credential",
+                            InferenceProvider::VercelGateway.display_name()
+                        );
+                        scratchpad.status = ScratchpadStatus::ConnectionLost;
+                    }
                 }
                 cx.notify();
             });
@@ -1529,13 +1535,36 @@ impl Waku {
             }
         }
         // A fresh session's empty scratchpad still shows its live row —
-        // the dot marks where speech will land.
+        // interim speech paints beside the dot until the first finalized
+        // chunk gives it a paragraph to land in.
         if transcript.paragraphs.is_empty() {
+            let flat = scratchpad_paragraph_text(
+                &ScratchpadParagraph::default(),
+                true,
+                &transcript.interim,
+                &ui_family,
+                theme,
+            );
             blocks = blocks.child(
                 div()
                     .w_full()
                     .py(px(2.0))
-                    .child(scratchpad_dot(muted, status, theme)),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_start()
+                            .gap(px(4.0))
+                            .child(md::render::selectable_flat_text(
+                                &flat,
+                                md::selection::TextKey::new("vs-p-live", 0),
+                                selection.clone(),
+                                theme.code_wash,
+                                theme.selection,
+                                false,
+                            ))
+                            .child(scratchpad_dot(muted, status, theme)),
+                    ),
             );
         }
         blocks
