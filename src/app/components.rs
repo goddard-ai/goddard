@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::ActivationExt;
 
 use chrono::{Datelike, Days};
 use std::path::Path;
@@ -212,10 +213,6 @@ impl Waku {
 pub(super) enum VoiceBriefingFooter {
     Generate,
     Generating,
-    Playback {
-        playing: bool,
-        remaining: Duration,
-    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -285,8 +282,7 @@ pub(super) fn render_message_footer(
         });
     // The in-flight indicator is always visible — it carries state the
     // footer otherwise only reveals on hover.
-    let force_visible =
-        force_visible || matches!(voice_briefing, Some(VoiceBriefingFooter::Generating));
+    let force_visible = force_visible || voice_briefing.is_some();
     // The hover gate wraps only this strip — a voicing clip's pause/resume
     // button sits beside it and stays on without hover.
     let mut strip = div()
@@ -378,6 +374,7 @@ pub(super) fn render_message_footer(
                     .id(SharedString::from(format!(
                         "voice-briefing-generate-{message_id}"
                     )))
+                    .tab_index(0)
                     .w(px(27.0))
                     .h(px(27.0))
                     .rounded(px(10.0))
@@ -385,10 +382,11 @@ pub(super) fn render_message_footer(
                     .items_center()
                     .justify_center()
                     .cursor_default()
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay_strong))
                     .child(icon("icons/headphones.svg", 14.0, footer_color))
                     .tooltip(Tooltip::text(tr_cow!("session.voice_briefing_generate")))
-                    .on_click(move |_, _, cx| {
+                    .on_activation_app(move |_, cx| {
                         let _ = brief_waku.update(cx, |this, cx| {
                             this.request_voice_briefing(message_id, cx);
                         });
@@ -464,62 +462,6 @@ pub(super) fn render_message_footer(
         );
     }
 
-    // The voicing clip's pause/resume rides outside the hover-gated strip —
-    // flat like the neighboring controls, but on while it speaks.
-    let playback_button = if let Some(VoiceBriefingFooter::Playback {
-        playing,
-        remaining,
-    }) = voice_briefing
-    {
-        let seconds = remaining.as_secs();
-        let time_remaining = format!("{:02}:{:02}", seconds / 60, seconds % 60);
-        let toggle_waku = waku.clone();
-        Some(
-            div()
-                .id(SharedString::from(format!(
-                    "voice-briefing-playback-{message_id}"
-                )))
-                .h(px(27.0))
-                .px(px(6.0))
-                .rounded(px(10.0))
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .cursor_default()
-                .hover(|element| element.bg(theme.overlay_strong))
-                .child(icon(
-                    if playing {
-                        "icons/pause.svg"
-                    } else {
-                        "icons/play.svg"
-                    },
-                    14.0,
-                    footer_color,
-                ))
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .text_color(footer_color)
-                        .child(tr!(
-                            "experiments.voice_briefing_time_remaining",
-                            time = time_remaining
-                        )),
-                )
-                .tooltip(Tooltip::text(if playing {
-                    tr_cow!("automations.pause")
-                } else {
-                    tr_cow!("automations.resume")
-                }))
-                .on_click(move |_, _, cx| {
-                    let _ = toggle_waku.update(cx, |this, cx| {
-                        this.toggle_voice_briefing_playback(cx);
-                    });
-                }),
-        )
-    } else {
-        None
-    };
-
     let mut footer = div()
         .w_full()
         .h(px(27.0))
@@ -529,9 +471,9 @@ pub(super) fn render_message_footer(
         .when(!align_right, |element| element.ml(-px(7.0)))
         .when(align_right, |element| element.justify_end());
     if align_right {
-        footer = footer.child(strip).children(playback_button);
+        footer = footer.child(strip);
     } else {
-        footer = footer.children(playback_button).child(strip);
+        footer = footer.child(strip);
     }
     footer.into_any_element()
 }
@@ -768,12 +710,7 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(attachment.name.clone()),
-                )
+                .child(div().min_w_0().truncate().child(attachment.name.clone()))
                 .on_click(move |_, _, cx| {
                     let _ = navigate_waku.update(cx, |this, cx| {
                         this.select_session(session_id, cx);
@@ -930,12 +867,7 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon(icon_path, 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(attachment.name.clone()),
-                )
+                .child(div().min_w_0().truncate().child(attachment.name.clone()))
                 .on_click(move |_, _, cx| {
                     let _ = click_waku.update(cx, |this, cx| {
                         this.open_path_in_default_app(&click_path, cx);

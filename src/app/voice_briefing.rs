@@ -444,6 +444,9 @@ impl Waku {
         if !self.state.voice_briefing_enabled {
             return;
         }
+        self.sync_voice_briefing_navigation();
+        // Manual replay claims playback and removes any automatic waiting clip.
+        self.briefing_queue.waiting = None;
         // A gate eval in flight loses to the click — generate directly.
         self.briefing_gate_pending.remove(&message_id);
         if let Some(play) = self.briefing_pending.get_mut(&message_id) {
@@ -507,35 +510,17 @@ impl Waku {
             .map(|message| message.id)
     }
 
-    /// What the response footer shows for one reply: the always-visible
-    /// pause/resume control while its clip voices, the always-visible
-    /// cancellable indicator while its clip is being decided or generated,
-    /// the on-demand headphones button while manual mode is armed —
-    /// experiment on, autoplay off, provider credential configured.
+    /// Manual replay is available independently of automatic playback.
     pub(super) fn message_voice_briefing_footer(
         &self,
         message_id: Uuid,
     ) -> Option<VoiceBriefingFooter> {
-        if let Some(playback) = self.voice_briefing_playback
-            && playback.message_id == Some(message_id)
-        {
-            return Some(VoiceBriefingFooter::Playback {
-                playing: playback.playing,
-                remaining: playback.remaining,
-            });
-        }
         if self.voice_briefing_in_flight(message_id) {
             return Some(VoiceBriefingFooter::Generating);
         }
-        let provider = self.state.voice_briefing_provider;
-        let armed = self.state.voice_briefing_enabled
-            && !self.state.voice_briefing_autoplay
-            && self
-                .state
-                .inference
-                .get(&provider)
-                .is_some_and(|entry| entry.credential_configured);
-        armed.then_some(VoiceBriefingFooter::Generate)
+        self.state
+            .voice_briefing_enabled
+            .then_some(VoiceBriefingFooter::Generate)
     }
 
     /// Briefing pipelines — decided or generating — that belong to this
@@ -949,7 +934,8 @@ impl Waku {
                         self.briefing_clips.remove(&oldest);
                     }
                 }
-                if play && !self.briefed_messages.contains(&message_id) {
+                if play && (sequence.is_none() || !self.briefed_messages.contains(&message_id))
+                {
                     // AVAudioPlayer must start on the UI thread, so the
                     // bytes ride the spawn back rather than playing from
                     // the executor.
