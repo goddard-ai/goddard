@@ -22,7 +22,7 @@ use std::sync::atomic::AtomicBool;
 use std::thread;
 
 use anyhow::Context as _;
-use gpui::DispatchPhase;
+use gpui::{DispatchPhase, Font, ease_in_out};
 use serde_json::Value;
 use tungstenite::handshake::client::Request;
 use tungstenite::protocol::WebSocketConfig;
@@ -122,6 +122,16 @@ const RECORDING_DOT_PERIOD: Duration = Duration::from_millis(1500);
 /// The text model that scrubs finished dictation — reached through the
 /// same Vercel AI Gateway credential the transcription socket uses.
 const CLEANUP_MODEL_ID: &str = "alibaba/qwen3.8-27b";
+/// A partial that only shrinks the interim tail or rewrites its trailing
+/// punctuation holds for this long before it may repaint — recognizer
+/// revisions flap on a 10–50ms cadence, so a shorter hold still flickers.
+const INTERIM_DWELL: Duration = Duration::from_millis(200);
+/// A landed append paints in over this long — long enough to read as
+/// materializing, short enough not to lag behind speech.
+const WORD_FADE: Duration = Duration::from_millis(150);
+/// A cleanup answer's crossfade: the row's prior text lifts and dissolves
+/// while the rewritten span resolves beneath it.
+const CLEANUP_MORPH: Duration = Duration::from_millis(240);
 /// The cleanup call's whole brief: fix dictation artifacts without
 /// rewriting. The span it sees is raw speech-to-text, never a draft.
 const CLEANUP_INSTRUCTIONS: &str = "Clean up raw dictated speech-to-text. Remove filler words (um, uh, ah), false starts, and stuttered repetitions; fix obvious transcription errors; add light punctuation and capitalization. Keep the speaker's words and meaning exactly — rewrite as little as possible, never summarize, reorder, or answer. Reply with only the cleaned text — no quotes or commentary.";
@@ -258,6 +268,14 @@ pub(super) struct VoiceScratchpad {
     /// paragraph, `b{index}-{bullet}` for a bullet — created lazily the
     /// way the sidebar's group rows are.
     row_focuses: HashMap<String, FocusHandle>,
+    /// Render-layer records of landed cleanup answers — the model swap
+    /// stays instant; each morph paints the prior text dissolving over
+    /// the rewritten span for [`CLEANUP_MORPH`].
+    cleanup_morphs: Vec<CleanupMorph>,
+    /// Appended text still inside its [`WORD_FADE`], keyed like
+    /// `row_focuses` plus `"interim"` and `"annotation"` for the tails
+    /// and the open box.
+    text_fades: HashMap<String, TextFade>,
     // The pill handles stay live for the floating controls row — the top
     // bar that hosted it is gone.
     #[allow(dead_code)]
@@ -291,12 +309,99 @@ impl VoiceScratchpad {
             follow_tail: true,
             edit_focus: cx.focus_handle(),
             row_focuses: HashMap::new(),
+            cleanup_morphs: Vec::new(),
+            text_fades: HashMap::new(),
             mute_focus: cx.focus_handle(),
             hide_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
             keep_focus: cx.focus_handle(),
             discard_focus: cx.focus_handle(),
         }
+    }
+
+    /// A landed cleanup answer rewrote `target` — record the transition
+    /// the rows paint: `old` dissolves over the rewritten text for
+    /// [`CLEANUP_MORPH`]. The slot's fade resets too so the swap doesn't
+    /// also read as an append.
+    fn morph_landed(&mut self, target: CleanTarget, old: String) {
+        let new = self.transcript.clean_target_text(target).to_owned();
+        self.cleanup_morphs.retain(|morph| morph.target != target);
+        self.cleanup_morphs.push(CleanupMorph {
+            target,
+            old,
+            new,
+            started: Instant::now(),
+        });
+        self.text_fades.insert(
+            scratchpad_fade_key(target),
+            TextFade {
+                settled: self.fade_slot_len(target),
+                fresh: Vec::new(),
+            },
+        );
+    }
+
+    /// The painted length of a fade slot's buffer — the annotation box's
+    /// slot covers its composed display string, interim included.
+    fn fade_slot_len(&self, target: CleanTarget) -> usize {
+        match target {
+            CleanTarget::Node(node) => self.transcript.node_text(node).len(),
+            CleanTarget::Annotation => self.annotation_display_len(),
+        }
+    }
+
+    /// The annotation box's painted text length — what
+    /// `render_annotation_box` builds.
+    fn annotation_display_len(&self) -> usize {
+        let mut text = self.transcript.annotation_text.clone();
+        append_word_text(
+            &mut text,
+            &strip_interim_terminators(&self.transcript.annotation_interim),
+        );
+        text.len()
+    }
+
+    /// A slot's fresh spans as `(byte offset, alpha)` boundaries — a run
+    /// from each offset to the next boundary paints at that alpha while
+    /// its [`WORD_FADE`] runs.
+    fn fade_boundaries(&self, key: &str, now: Instant) -> Vec<(usize, f32)> {
+        self.text_fades
+            .get(key)
+            .map(|fade| {
+                fade.fresh
+                    .iter()
+                    .map(|&(start, at)| {
+                        let t = (now.duration_since(at).as_secs_f32()
+                            / WORD_FADE.as_secs_f32())
+                        .min(1.0);
+                        (start, ease_out_quint()(t))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The transition a row should paint for `target`, if one's in
+    /// flight — `Some` only while the buffer still matches the swap.
+    fn cleanup_morph(&self, target: CleanTarget) -> Option<&CleanupMorph> {
+        self.cleanup_morphs
+            .iter()
+            .find(|morph| morph.target == target)
+    }
+
+    /// Retire finished morphs and any whose buffer moved on since the
+    /// answer landed.
+    fn prune_cleanup_morphs(&mut self, now: Instant) {
+        self.cleanup_morphs.retain(|morph| {
+            now.duration_since(morph.started) < CLEANUP_MORPH
+                && self.transcript.clean_target_text(morph.target) == morph.new
+        });
+    }
+
+    /// Whether any morph or word-fade still needs repaint ticks.
+    fn motion_live(&self) -> bool {
+        !self.cleanup_morphs.is_empty()
+            || self.text_fades.values().any(|fade| !fade.fresh.is_empty())
     }
 
     /// Pause the capture side: the worker exits and closes its socket,
@@ -309,6 +414,65 @@ impl VoiceScratchpad {
         self.generation = self.generation.wrapping_add(1);
         while self.audio_rx.try_recv().is_ok() {}
         self.capture_live = false;
+    }
+}
+
+/// A cleanup transition in flight on one buffer: `new` must still match
+/// the painted text — a mismatch means the buffer moved past the answer
+/// and the morph is stale.
+struct CleanupMorph {
+    target: CleanTarget,
+    /// The buffer's text before the swap — it lifts and dissolves.
+    old: String,
+    /// The buffer's text after — it resolves in underneath.
+    new: String,
+    started: Instant,
+}
+
+/// One painted slot's word-fade bookkeeping.
+struct TextFade {
+    /// Buffer length already painted settled — growth past it is fresh.
+    settled: usize,
+    /// Spans appended inside their [`WORD_FADE`]: `(byte offset, landed)`.
+    fresh: Vec<(usize, Instant)>,
+}
+
+/// Diff one painted buffer's length for the word-fade: growth past the
+/// settled length marks a fresh span, a shrink clears them — rewrites
+/// and user-typed text (`fade_in` false) land instantly. Free function
+/// so the render prep pass can call it on the field while the transcript
+/// stays borrowed.
+fn note_text_fade(
+    fades: &mut HashMap<String, TextFade>,
+    key: String,
+    len: usize,
+    fade_in: bool,
+    now: Instant,
+) {
+    let entry = fades.entry(key).or_insert_with(|| TextFade {
+        settled: len,
+        fresh: Vec::new(),
+    });
+    entry
+        .fresh
+        .retain(|(_, at)| now.duration_since(*at) < WORD_FADE);
+    if len < entry.settled {
+        entry.fresh.clear();
+    } else if len > entry.settled && fade_in {
+        entry.fresh.push((entry.settled, now));
+    }
+    entry.settled = len;
+}
+
+/// The fade slot a cleanup target maps to — the same key the prep pass
+/// diffs that buffer under.
+fn scratchpad_fade_key(target: CleanTarget) -> String {
+    match target {
+        CleanTarget::Annotation => "annotation".to_owned(),
+        CleanTarget::Node(ScratchpadNode::Paragraph(index)) => format!("p{index}"),
+        CleanTarget::Node(ScratchpadNode::Bullet(index, bullet)) => {
+            format!("b{index}-{bullet}")
+        }
     }
 }
 
@@ -368,6 +532,10 @@ pub(super) struct ScratchpadTranscript {
     annotation_interim: String,
     /// Interim speech at the main append point.
     interim: String,
+    /// When the live interim last changed on screen — the hysteresis
+    /// clock a shrinking partial's hold runs against. One stamp covers
+    /// whichever slot is live; only one is painted at a time.
+    interim_written: Option<Instant>,
     /// Where typed text and deletes land while the transcript surface holds
     /// focus — set by a selection edit or arrow press.
     caret: Option<CaretPos>,
@@ -622,6 +790,15 @@ impl ScratchpadTranscript {
     /// the recognizer has emitted: the paragraph break lands when the
     /// command is spoken, not when the segment finalizes.
     fn set_interim(&mut self, text: String) {
+        self.set_interim_at(text, Instant::now());
+    }
+
+    /// `set_interim` stamped by the caller — tests drive the dwell clock.
+    fn set_interim_at(&mut self, text: String, now: Instant) {
+        // Whether the processing below moves committed text — a consumed
+        // command or folded span commits words out of the partial, and a
+        // hold must never leave a consumed tail painted.
+        let append_shape = (self.paragraphs.len(), self.append_point_text().len());
         let mut rest = self.strip_delivered(&text);
         rest = self.strip_folded(rest, false);
         loop {
@@ -663,11 +840,30 @@ impl ScratchpadTranscript {
             }
         }
         let rest = rest.to_owned();
-        if self.annotation_target.is_some() {
-            self.annotation_interim = rest;
+        let settled = append_shape == (self.paragraphs.len(), self.append_point_text().len());
+        let slot = if self.annotation_target.is_some() {
+            &mut self.annotation_interim
         } else {
-            self.interim = rest;
+            &mut self.interim
+        };
+        if *slot == rest {
+            return;
         }
+        // Hysteresis: a partial that only clips the shown tail or shuffles
+        // its trailing punctuation is the recognizer's token jitter — hold
+        // the painted text through the dwell rather than repaint-flicker.
+        // Committed text moving under the partial, growth, and real
+        // rewrites all still land immediately.
+        let held = settled
+            && self
+                .interim_written
+                .is_some_and(|written| now.duration_since(written) < INTERIM_DWELL)
+            && interim_hold_covers(slot, &rest);
+        if held {
+            return;
+        }
+        *slot = rest;
+        self.interim_written = Some(now);
     }
 
     /// Commit the provisional suffix in place — muting and the silence
@@ -1004,6 +1200,15 @@ impl ScratchpadTranscript {
             .iter()
             .chain(&self.cleanup_inflight)
             .any(|request| request.target == target)
+    }
+
+    /// The buffer a cleanup target rewrites — `apply_cleanup`'s view of
+    /// it, for the render layer's morph bookkeeping.
+    fn clean_target_text(&self, target: CleanTarget) -> &str {
+        match target {
+            CleanTarget::Annotation => &self.annotation_text,
+            CleanTarget::Node(node) => self.node_text(node),
+        }
     }
 
     /// One node's committed text — `""` for anything not currently painted.
@@ -1693,8 +1898,35 @@ fn completed_sentence_end(text: &str) -> Option<usize> {
 fn strip_interim_terminators(text: &str) -> String {
     text.trim()
         .chars()
-        .filter(|c| !matches!(c, '.' | '!' | '?' | '…'))
+        .filter(|c| !is_interim_terminator(*c))
         .collect()
+}
+
+fn is_interim_terminator(c: char) -> bool {
+    matches!(c, '.' | '!' | '?' | '…')
+}
+
+/// The painted length of an interim tail once its terminators strip —
+/// the number the fade diff measures, without building the string.
+fn scratchpad_interim_len(interim: &str) -> usize {
+    interim
+        .trim()
+        .chars()
+        .filter(|&c| !is_interim_terminator(c))
+        .map(char::len_utf8)
+        .sum()
+}
+
+/// Whether swapping the shown interim for a partial's `new` tail only
+/// clips characters or shuffles trailing punctuation — the jitter the
+/// dwell holds back. An empty candidate is a clip too: a retracted tail
+/// waits out the window like any other shrink. Nothing holds against an
+/// empty slot — there are no shown characters left to protect.
+fn interim_hold_covers(shown: &str, new: &str) -> bool {
+    !shown.is_empty()
+        && (shown.starts_with(new)
+            || shown.trim_end_matches(is_stray_punct_char)
+                == new.trim_end_matches(is_stray_punct_char))
 }
 
 /// `text`'s words as byte spans — maximal alphanumeric runs, the
@@ -3062,6 +3294,8 @@ impl Waku {
                 if let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) {
                     // The call settled — its tail spinner clears whether
                     // the answer lands or the failure kept the raw text.
+                    // Clearing it before the morph records means a landed
+                    // answer swaps spinner for crossfade in one paint.
                     let inflight = &mut scratchpad.transcript.cleanup_inflight;
                     if let Some(at) = inflight.iter().position(|request| {
                         request.target == target && request.start == start && request.raw == raw
@@ -3070,9 +3304,15 @@ impl Waku {
                         changed = true;
                     }
                     if let Some(cleaned) = cleaned {
-                        changed |= scratchpad
+                        let before =
+                            scratchpad.transcript.clean_target_text(target).to_owned();
+                        if scratchpad
                             .transcript
-                            .apply_cleanup(target, start, &raw, &cleaned);
+                            .apply_cleanup(target, start, &raw, &cleaned)
+                        {
+                            changed = true;
+                            scratchpad.morph_landed(target, before);
+                        }
                     }
                 }
                 continue;
@@ -3547,9 +3787,16 @@ impl Waku {
         let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return div().into_any_element();
         };
+        let now = Instant::now();
+        // Reduce-motion skips the transitions entirely — fades and morphs
+        // settle instantly and no repaint ticks get leased.
+        let animate = !cx.reduce_motion();
+        scratchpad.prune_cleanup_morphs(now);
         // Every row's focus handle exists before the paint loop — it then
         // works off a shared borrow so the status row and an open
-        // annotation box can render through `self` beside it.
+        // annotation box can render through `self` beside it. The same
+        // pass diffs each painted buffer for the word-fade — typed text
+        // (`edited`) lands instantly, dictation materializes.
         let mut row_focuses = Vec::with_capacity(scratchpad.transcript.paragraphs.len());
         for (index, paragraph) in scratchpad.transcript.paragraphs.iter().enumerate() {
             let paragraph_focus = scratchpad
@@ -3567,7 +3814,42 @@ impl Waku {
                 })
                 .collect();
             row_focuses.push((paragraph_focus, bullet_focuses));
+            note_text_fade(
+                &mut scratchpad.text_fades,
+                format!("p{index}"),
+                paragraph.text.len(),
+                animate && !paragraph.edited,
+                now,
+            );
+            for (bullet_index, bullet) in paragraph.bullets.iter().enumerate() {
+                note_text_fade(
+                    &mut scratchpad.text_fades,
+                    format!("b{index}-{bullet_index}"),
+                    bullet.len(),
+                    // `edited` is paragraph-scoped — it covers the bullets
+                    // a caret or selection edit touched.
+                    animate && !paragraph.edited,
+                    now,
+                );
+            }
         }
+        let interim_len = scratchpad_interim_len(&scratchpad.transcript.interim);
+        note_text_fade(
+            &mut scratchpad.text_fades,
+            "interim".to_owned(),
+            interim_len,
+            animate,
+            now,
+        );
+        let annotation_len = scratchpad.annotation_display_len();
+        note_text_fade(
+            &mut scratchpad.text_fades,
+            "annotation".to_owned(),
+            annotation_len,
+            animate,
+            now,
+        );
+        let motion_live = animate && scratchpad.motion_live();
         let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
         };
@@ -3641,13 +3923,47 @@ impl Waku {
             let show_dot = is_current && annotation_target.is_none();
             let cleaning =
                 transcript.is_cleaning(CleanTarget::Node(ScratchpadNode::Paragraph(index)));
+            let morph = if animate {
+                scratchpad.cleanup_morph(CleanTarget::Node(ScratchpadNode::Paragraph(index)))
+            } else {
+                None
+            };
+            let morph_t = morph.map(|morph| {
+                (morph.started.elapsed().as_secs_f32() / CLEANUP_MORPH.as_secs_f32()).min(1.0)
+            });
+            let fades = scratchpad.fade_boundaries(&format!("p{index}"), now);
+            let interim_fades = if is_current && !annotating {
+                scratchpad.fade_boundaries("interim", now)
+            } else {
+                Vec::new()
+            };
             let flat = scratchpad_paragraph_text(
-                paragraph,
-                is_current && !annotating,
-                &transcript.interim,
+                &paragraph.text,
+                if is_current && !annotating {
+                    &transcript.interim
+                } else {
+                    ""
+                },
+                &fades,
+                &interim_fades,
+                morph_t.map(ease_in_out).unwrap_or(1.0),
                 &ui_family,
                 theme,
             );
+            // The swap already landed in the model — the morph only
+            // repaints: the row's prior text lifts and dissolves while the
+            // rewritten span resolves beneath it.
+            let ghost = morph.zip(morph_t).map(|(morph, t)| {
+                scratchpad_morph_ghost(
+                    &morph.old,
+                    t,
+                    2.0,
+                    0.0,
+                    if show_dot { 19.0 } else { 0.0 },
+                    theme.text,
+                    &ui_family,
+                )
+            });
             let paragraph_focus = row_focuses[index].0.clone();
             let paragraph_div = div()
                 .id(SharedString::from(format!("vs-paragraph-{index}")))
@@ -3683,6 +3999,7 @@ impl Waku {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         }),
                 )
+                .when_some(ghost, |row, ghost| row.child(ghost))
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                         && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -3723,16 +4040,43 @@ impl Waku {
                         if p == index && b == bullet_index
                 );
                 let bullet_focus = row_focuses[index].1[bullet_index].clone();
+                let morph = if animate {
+                    scratchpad.cleanup_morph(CleanTarget::Node(ScratchpadNode::Bullet(
+                        index,
+                        bullet_index,
+                    )))
+                } else {
+                    None
+                };
+                let morph_t = morph.map(|morph| {
+                    (morph.started.elapsed().as_secs_f32() / CLEANUP_MORPH.as_secs_f32()).min(1.0)
+                });
+                let fades =
+                    scratchpad.fade_boundaries(&format!("b{index}-{bullet_index}"), now);
+                let mut runs = Vec::new();
+                push_fade_runs(
+                    &mut runs,
+                    0,
+                    bullet.len(),
+                    &fades,
+                    morph_t.map(ease_in_out).unwrap_or(1.0),
+                    &font(ui_family.clone()),
+                    theme.text_secondary,
+                );
+                let ghost = morph.zip(morph_t).map(|(morph, t)| {
+                    scratchpad_morph_ghost(
+                        &morph.old,
+                        t,
+                        2.0,
+                        32.0,
+                        0.0,
+                        theme.text_secondary,
+                        &ui_family,
+                    )
+                });
                 let flat = md::render::FlatText {
                     text: bullet.clone().into(),
-                    runs: vec![TextRun {
-                        len: bullet.len(),
-                        font: font(ui_family.clone()),
-                        color: theme.text_secondary,
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    }],
+                    runs,
                     links: Vec::new(),
                     code_ranges: Vec::new(),
                     atom_ranges: Vec::new(),
@@ -3784,6 +4128,7 @@ impl Waku {
                         ))),
                         |row| row.child(scratchpad_cleanup_spinner(14.0, theme)),
                     )
+                    .when_some(ghost, |row, ghost| row.child(ghost))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                             && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -3816,9 +4161,11 @@ impl Waku {
         // chunk gives it a paragraph to land in.
         if transcript.paragraphs.is_empty() {
             let flat = scratchpad_paragraph_text(
-                &ScratchpadParagraph::default(),
-                true,
+                "",
                 &transcript.interim,
+                &[],
+                &scratchpad.fade_boundaries("interim", now),
+                1.0,
                 &ui_family,
                 theme,
             );
@@ -3862,7 +4209,7 @@ impl Waku {
                     })),
             );
         }
-        blocks
+        let element = blocks
             // Clicking open space finishes an open annotation as a bullet
             // and drops the editing caret — focus goes home to the
             // composer so typing resumes the draft. A drag that ended over
@@ -3893,7 +4240,13 @@ impl Waku {
                 }
                 this.drain_cleanup_requests(cx);
             }))
-            .into_any_element()
+            .into_any_element();
+        // Fades and morphs ride the shared pulse clock — the window
+        // repaints at ~30fps only while a transition is in flight.
+        if motion_live {
+            motion::pulse_lease(window.current_view(), cx);
+        }
+        element
     }
 
     /// The failure row at the top of the content — mic denial, a dropped
@@ -4027,7 +4380,7 @@ impl Waku {
         _index: usize,
         theme: &Theme,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
@@ -4035,9 +4388,45 @@ impl Waku {
         let mut text = scratchpad.transcript.annotation_text.clone();
         let interim = strip_interim_terminators(&scratchpad.transcript.annotation_interim);
         append_word_text(&mut text, &interim);
+        let morph = if !cx.reduce_motion() {
+            scratchpad.cleanup_morph(CleanTarget::Annotation)
+        } else {
+            None
+        };
+        let morph_t = morph.map(|morph| {
+            (morph.started.elapsed().as_secs_f32() / CLEANUP_MORPH.as_secs_f32()).min(1.0)
+        });
+        let fades = scratchpad.fade_boundaries("annotation", Instant::now());
         if text.is_empty() {
             text = tr!("voice_scratchpad.annotation_hint");
         }
+        let text_element: AnyElement = if morph_t.is_some() || !fades.is_empty() {
+            let ui_family = crate::fonts::current(cx).ui;
+            let mut runs = Vec::new();
+            push_fade_runs(
+                &mut runs,
+                0,
+                text.len(),
+                &fades,
+                morph_t.map(ease_in_out).unwrap_or(1.0),
+                &font(ui_family),
+                theme.text_secondary,
+            );
+            gpui::StyledText::new(text).with_runs(runs).into_any_element()
+        } else {
+            text.into_any_element()
+        };
+        let ghost = morph.zip(morph_t).map(|(morph, t)| {
+            scratchpad_morph_ghost(
+                &morph.old,
+                t,
+                0.0,
+                0.0,
+                0.0,
+                theme.text_secondary,
+                &crate::fonts::current(cx).ui,
+            )
+        });
         let box_content = div()
             .min_w(px(240.0))
             .max_w(px(360.0))
@@ -4064,15 +4453,17 @@ impl Waku {
                 div()
                     .min_w_0()
                     .flex_1()
+                    .relative()
                     .flex()
                     .flex_wrap()
                     .items_start()
                     .gap(px(4.0))
-                    .child(text)
+                    .child(text_element)
                     .when(
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
-                    ),
+                    )
+                    .when_some(ghost, |row, ghost| row.child(ghost)),
             );
         deferred(FloatingSurface::anchored_to_parent(
             box_content.into_any_element(),
@@ -4274,44 +4665,86 @@ fn scratchpad_caret_rect(
     Some(Bounds::new(origin, size(px(1.5), layout.line_height())))
 }
 
+/// Split `text[lo..hi]` into styled runs at each `(offset, alpha)` fade
+/// boundary — the span from a boundary to the next one (or `hi`) paints
+/// at `color` scaled by `alpha × scale`. Boundaries outside the region
+/// just set the alpha it opens with.
+fn push_fade_runs(
+    runs: &mut Vec<TextRun>,
+    lo: usize,
+    hi: usize,
+    fades: &[(usize, f32)],
+    scale: f32,
+    font: &Font,
+    color: Hsla,
+) {
+    let mut pos = lo;
+    let mut alpha = 1.0;
+    for &(start, next) in fades {
+        let start = start.clamp(lo, hi);
+        if start > pos {
+            runs.push(TextRun {
+                len: start - pos,
+                font: font.clone(),
+                color: color.opacity(alpha * scale),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            pos = start;
+        }
+        alpha = next;
+    }
+    if pos < hi {
+        runs.push(TextRun {
+            len: hi - pos,
+            font: font.clone(),
+            color: color.opacity(alpha * scale),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        });
+    }
+}
+
 /// A paragraph's FlatText: finalized speech in ink, the interim suffix
 /// dimmed — the "appears dimmed, snaps to black on finalize" rule.
+/// `fades` are committed-text `(offset, alpha)` boundaries and
+/// `interim_fades` the same relative to the stripped interim tail;
+/// `text_alpha` dims the committed region wholesale during a morph's
+/// resolve.
 fn scratchpad_paragraph_text(
-    paragraph: &ScratchpadParagraph,
-    with_interim: bool,
+    text: &str,
     interim: &str,
+    fades: &[(usize, f32)],
+    interim_fades: &[(usize, f32)],
+    text_alpha: f32,
     ui_family: &SharedString,
     theme: &Theme,
 ) -> md::render::FlatText {
-    let mut text = paragraph.text.clone();
-    let split = text.len();
-    if with_interim {
-        append_word_text(&mut text, &strip_interim_terminators(interim));
-    }
+    let mut full = text.to_owned();
+    let split = full.len();
+    let stripped = strip_interim_terminators(interim);
+    append_word_text(&mut full, &stripped);
+    let interim_start = full.len() - stripped.len();
+    let ui_font = font(ui_family.clone());
     let mut runs = Vec::new();
-    if split > 0 {
-        runs.push(TextRun {
-            len: split,
-            font: font(ui_family.clone()),
-            color: theme.text,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        });
-    }
-    let tail = text.len().saturating_sub(split);
-    if tail > 0 {
-        runs.push(TextRun {
-            len: tail,
-            font: font(ui_family.clone()),
-            color: theme.text_tertiary,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        });
-    }
+    push_fade_runs(&mut runs, 0, split, fades, text_alpha, &ui_font, theme.text);
+    let shifted: Vec<(usize, f32)> = interim_fades
+        .iter()
+        .map(|&(start, alpha)| (start + interim_start, alpha))
+        .collect();
+    push_fade_runs(
+        &mut runs,
+        split,
+        full.len(),
+        &shifted,
+        1.0,
+        &ui_font,
+        theme.text_tertiary,
+    );
     md::render::FlatText {
-        text: text.into(),
+        text: full.into(),
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
@@ -4370,6 +4803,36 @@ fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> AnyEl
             .into_any_element()
     })
     .into_any_element()
+}
+
+/// The dissolving half of a cleanup morph: the buffer's prior text
+/// painted at `1 − t` and lifting `3t`px while the rewritten span
+/// resolves beneath. `top`/`left`/`right` pin its wrap column to the
+/// row's text block.
+fn scratchpad_morph_ghost(
+    old: &str,
+    t: f32,
+    top: f32,
+    left: f32,
+    right: f32,
+    color: Hsla,
+    ui_family: &SharedString,
+) -> Div {
+    div()
+        .absolute()
+        .top(px(top - 3.0 * t))
+        .left(px(left))
+        .right(px(right))
+        .child(
+            gpui::StyledText::new(old.to_owned()).with_runs(vec![TextRun {
+                len: old.len(),
+                font: font(ui_family.clone()),
+                color: color.opacity(1.0 - t),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }]),
+        )
 }
 
 /// The dot's offset centers it on the first text line — GPUI's default phi
@@ -5155,5 +5618,101 @@ mod tests {
         assert_eq!(strip_interim_terminators("done…"), "done");
         assert_eq!(strip_interim_terminators("comma, stays"), "comma, stays");
         assert_eq!(strip_interim_terminators("   "), "");
+    }
+
+    #[test]
+    fn partial_shrink_holds_through_the_dwell() {
+        // The recognizer clipping the tail inside the dwell keeps the
+        // painted text — the comma doesn't flicker.
+        let mut transcript = ScratchpadTranscript::default();
+        let t0 = Instant::now();
+        transcript.set_interim_at("the tail,".to_owned(), t0);
+        transcript.set_interim_at("the tail".to_owned(), t0 + Duration::from_millis(40));
+        assert_eq!(transcript.interim, "the tail,");
+        // The same clip lands once the shown text is dwell-old.
+        transcript.set_interim_at("the tail".to_owned(), t0 + Duration::from_millis(400));
+        assert_eq!(transcript.interim, "the tail");
+    }
+
+    #[test]
+    fn partial_punctuation_swaps_hold_but_rewrites_land() {
+        let mut transcript = ScratchpadTranscript::default();
+        let t0 = Instant::now();
+        transcript.set_interim_at("the end.".to_owned(), t0);
+        transcript.set_interim_at("the end,".to_owned(), t0 + Duration::from_millis(30));
+        assert_eq!(transcript.interim, "the end.");
+        // Growth and real rewrites are never held.
+        transcript.set_interim_at("the end. really".to_owned(), t0 + Duration::from_millis(60));
+        assert_eq!(transcript.interim, "the end. really");
+        transcript.set_interim_at("wait, no".to_owned(), t0 + Duration::from_millis(90));
+        assert_eq!(transcript.interim, "wait, no");
+    }
+
+    #[test]
+    fn held_partial_never_pins_a_consumed_command() {
+        // The "okay next" partial commits words out of the interim — a
+        // hold there would paint the consumed span as a ghost tail in
+        // the new paragraph.
+        let mut transcript = ScratchpadTranscript::default();
+        let t0 = Instant::now();
+        transcript.set_interim_at("the end okay".to_owned(), t0);
+        transcript.set_interim_at("the end okay next".to_owned(), t0 + Duration::from_millis(30));
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert!(transcript.interim.is_empty());
+    }
+
+    #[test]
+    fn interim_hold_covers_only_tail_jitter() {
+        assert!(interim_hold_covers("the tail,", "the tail"));
+        assert!(interim_hold_covers("the tail", ""));
+        assert!(interim_hold_covers("the end.", "the end,"));
+        assert!(interim_hold_covers("the end…", "the end"));
+        assert!(!interim_hold_covers("the tail", "the taill"));
+        assert!(!interim_hold_covers("the tail", "the head"));
+        // An empty slot has nothing to protect — fresh text lands.
+        assert!(!interim_hold_covers("", "."));
+    }
+
+    #[test]
+    fn word_fade_marks_growth_and_forgets_shrinks() {
+        let mut fades = HashMap::new();
+        let t0 = Instant::now();
+        // First sighting seeds — nothing is "fresh" before it.
+        note_text_fade(&mut fades, "p0".to_owned(), 5, true, t0);
+        assert!(fades["p0"].fresh.is_empty());
+        note_text_fade(&mut fades, "p0".to_owned(), 12, true, t0);
+        assert_eq!(fades["p0"].fresh, vec![(5, t0)]);
+        // A second append lands its own span; expired ones prune.
+        note_text_fade(&mut fades, "p0".to_owned(), 20, true, t0 + WORD_FADE);
+        assert_eq!(fades["p0"].fresh, vec![(12, t0 + WORD_FADE)]);
+        // Shrinks clear — a rewrite is not an append.
+        note_text_fade(&mut fades, "p0".to_owned(), 3, true, t0 + WORD_FADE);
+        assert!(fades["p0"].fresh.is_empty());
+        assert_eq!(fades["p0"].settled, 3);
+        // Typed text never fades.
+        note_text_fade(&mut fades, "p0".to_owned(), 8, false, t0 + WORD_FADE);
+        assert!(fades["p0"].fresh.is_empty());
+    }
+
+    #[test]
+    fn fade_runs_split_at_boundaries() {
+        let ui_font = font("test-ui");
+        let color: Hsla = rgb(0xFFFFFF).into();
+        let mut runs = Vec::new();
+        push_fade_runs(&mut runs, 0, 10, &[(5, 0.5)], 1.0, &ui_font, color);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].len, 5);
+        assert!((runs[0].color.a - 1.0).abs() < 0.01);
+        assert_eq!(runs[1].len, 5);
+        assert!((runs[1].color.a - 0.5).abs() < 0.01);
+        // A boundary at the region's start dims the whole span.
+        let mut runs = Vec::new();
+        push_fade_runs(&mut runs, 0, 10, &[(0, 0.25)], 1.0, &ui_font, color);
+        assert_eq!(runs.len(), 1);
+        assert!((runs[0].color.a - 0.25).abs() < 0.01);
+        // A morph's scale multiplies through.
+        let mut runs = Vec::new();
+        push_fade_runs(&mut runs, 0, 10, &[(5, 0.5)], 0.5, &ui_font, color);
+        assert!((runs[1].color.a - 0.25).abs() < 0.01);
     }
 }
