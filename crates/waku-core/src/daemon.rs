@@ -7650,9 +7650,18 @@ impl WakuBackend {
         // goal's stays silent — the record lists on the client's Goals
         // page instead. Either kind's finish still reports when the
         // employee flagged a blocker or its session failed.
-        let reports = employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
-            || employee.blocker.is_some()
-            || failed;
+        // Cancelled queued tickets skip `finishing` and arrive already expired.
+        // Keep their cancellation transcript and teardown, but do not wake
+        // the supervisor for work it cancelled before launch. Running stops
+        // arrive as `finishing`; legacy ticket-less employees may arrive
+        // expired too, so only queued tickets suppress the failure report.
+        let cancelled_while_queued = employee.cancelled
+            && employee.ticket.is_some()
+            && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Expired;
+        let reports = !cancelled_while_queued
+            && (employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
+                || employee.blocker.is_some()
+                || failed);
         if reports
             && let Some(supervisor) = self.boss.report_target(&employee)
         {
@@ -16034,6 +16043,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn stopping_a_running_employee_still_reports_to_its_supervisor() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-running-stop-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Stop,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(backend.boss.employee(employee_id).unwrap().cancelled);
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains(&employee_id.to_string()));
+        drop(prompts);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// `reportBlocker` is the employee's mid-job attention channel: it
     /// steers into the supervisor's open turn when the runtime can take
     /// one, flags the record so the finish still reports, and refuses
@@ -17970,9 +18003,33 @@ mod tests {
             })
             .is_err()
         );
+        backend
+            .boss
+            .set_employee_goal(session_id, waku_protocol::boss::EmployeeGoal::Errand)
+            .unwrap();
         control(EmployeeControl::Stop).unwrap();
         let employee = backend.boss.employee(session_id).unwrap();
         assert!(employee.expired);
+        assert!(employee.cancelled);
+        assert!(
+            !backend.agent.has_queued(boss),
+            "cancelling queued work must not enqueue a supervisor finish report"
+        );
+        let state = backend.task_state.lock();
+        let supervisor = state
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap();
+        assert!(
+            supervisor
+                .messages
+                .iter()
+                .all(|message| message.report_trigger.is_none())
+                && supervisor.queued_messages.is_empty(),
+            "cancelling queued work must not start or mirror a supervisor finish report"
+        );
+        drop(state);
         assert!(backend.sessions.lock().get(&session_id).is_none());
         let status = backend
             .resource_broker()
