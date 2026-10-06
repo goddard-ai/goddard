@@ -3241,9 +3241,14 @@ impl Waku {
         let group_name = SharedString::from(format!("deliverable-row-{key:?}-{deliverable_id}"));
         // The mini controls share the task row's chrome: zero-width until
         // the row is hovered or the button takes keyboard focus. The
-        // Finder button is the escape hatch the in-app preview replaced —
-        // remote deliverables keep it out since the path is not local.
-        let finder_button = (key == DaemonKey::Local).then(|| {
+        // Finder button stays on non-Markdown files and directories; Markdown
+        // opens in-app and keeps Reveal in the context menu. Remote paths
+        // cannot be revealed locally.
+        let markdown = !deliverable.directory
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+        let finder_button = (key == DaemonKey::Local && !markdown).then(|| {
             let focus = self
                 .sidebar_deliverable_finder_focuses
                 .borrow_mut()
