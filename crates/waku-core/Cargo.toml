@@ -29,6 +29,7 @@ trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-drivers = { path = "../waku-drivers" }
+waku-store = { path = "../waku-store" }
 waku-base = { path = "../waku-base" }
 waku-exec = { path = "../waku-exec" }
 waku-git = { path = "../waku-git" }

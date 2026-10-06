@@ -1,0 +1,22 @@
+[package]
+name = "waku-store"
+version = "0.1.0"
+edition = "2024"
+description = "Persistence, migrations, and Boss context snapshots for Goddard"
+license = "GPL-3.0-only"
+
+[dependencies]
+dirs = "6.0"
+dunce = "1"
+parking_lot = "0.12"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+waku-base = { path = "../waku-base" }
+waku-git = { path = "../waku-git" }
+waku-boss = { path = "../waku-boss" }
+waku-protocol = { path = "../waku-protocol" }
+
+[dev-dependencies]
+base64 = "0.22"

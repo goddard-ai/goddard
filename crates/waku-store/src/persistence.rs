@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::blob_store::BlobStore;
-use crate::computer_use::ComputerAppGrant;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
@@ -35,6 +34,7 @@ use crate::model::{
     RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
+use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
@@ -1861,9 +1861,7 @@ impl StateStore {
                             boss_project.to_string(),
                             limit as i64
                         ],
-                        |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                        },
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     )?
                     .collect()
             })
@@ -1917,7 +1915,7 @@ impl StateStore {
     /// should remove `batch.dirty_ids` from the live dirty set up front and
     /// re-mark them if the write fails: a session re-dirtied mid-write then
     /// keeps its flag instead of losing it to a stale clear.
-    pub(crate) fn save_batch(&self, state: &mut PersistedState) -> SaveBatch {
+    pub fn save_batch(&self, state: &mut PersistedState) -> SaveBatch {
         // Only changed sessions can hold a new inline payload, so the blob walk
         // follows the same set rather than every transcript on every save.
         // Incognito sessions are excluded here too — externalizing would leak
@@ -1981,7 +1979,7 @@ impl StateStore {
 
     /// Writes one snapshotted batch. Holds only the storage lock, so it can
     /// run after the caller's state lock is released.
-    pub(crate) fn write_batch(&self, batch: &SaveBatch) -> io::Result<()> {
+    pub fn write_batch(&self, batch: &SaveBatch) -> io::Result<()> {
         let mut guard = self.storage.lock();
         if guard.is_none() {
             *guard = Some(Storage {
@@ -2251,8 +2249,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         .and_then(|cursor| serde_json::from_str::<RuntimeEventCursor>(&cursor).ok());
     // Same duplication story as `workspace`: the sidebar badges and orders
     // planning rows from the column without hydrating the session.
-    let planning = planning
-        .and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
+    let planning =
+        planning.and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         title,
@@ -2325,7 +2323,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
 /// The field list is everything [`StateStore::hydrate`] fills in, kept in one
 /// place so a session loaded on a background thread and one hydrated in place
 /// cannot drift apart.
-pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
+pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     // Resolved before the field moves — `environment()` borrows `stored`.
     let stored_environment = stored.environment();
     session.transcript_blocks = stored.transcript_blocks;
@@ -2359,9 +2357,12 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
     // A queue entry whose id already runs in the transcript was delivered —
     // the chip's id doubles as its sent message's id. Restoring it as
     // parked would drain and resend the same prompt.
-    session
-        .queued_messages
-        .retain(|queued| !session.messages.iter().any(|message| message.id == queued.id));
+    session.queued_messages.retain(|queued| {
+        !session
+            .messages
+            .iter()
+            .any(|message| message.id == queued.id)
+    });
     session.details_pruned = stored.details_pruned;
     session.detail_loaded = true;
 }
@@ -2369,7 +2370,7 @@ pub(crate) fn apply_session_detail(session: &mut AgentSession, stored: AgentSess
 /// Everything one save writes, snapshotted by [`StateStore::save_batch`] while
 /// the caller's state lock is held so [`StateStore::write_batch`] can run its
 /// serialization and SQLite transaction without it.
-pub(crate) struct SaveBatch {
+pub struct SaveBatch {
     app_settings: AppSettings,
     app_state: AppState,
     projects: Vec<Project>,
@@ -2381,7 +2382,7 @@ pub(crate) struct SaveBatch {
     /// The dirty set as captured. Callers racing the write remove these marks
     /// up front and re-add them on failure, so a session re-dirtied mid-write
     /// keeps its flag.
-    pub(crate) dirty_ids: HashSet<Uuid>,
+    pub dirty_ids: HashSet<Uuid>,
 }
 
 type MessageColumns = (
@@ -3507,10 +3508,7 @@ mod tests {
         assert_eq!(restored.projects[0].created_at, project.created_at);
         assert!(restored.projects[0].starred);
         assert!(restored.projects[0].submissions_enabled);
-        assert_eq!(
-            restored.projects[0].qa_branch.as_deref(),
-            Some("release")
-        );
+        assert_eq!(restored.projects[0].qa_branch.as_deref(), Some("release"));
 
         fs::remove_dir_all(directory).ok();
     }

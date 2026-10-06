@@ -11526,6 +11526,7 @@ dependencies = [
  "waku-repo-map",
  "waku-sessions",
  "waku-share",
+ "waku-store",
  "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
@@ -11710,6 +11711,24 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "waku-protocol",
+]
+
+[[package]]
+name = "waku-store"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 6.0.0",
+ "dunce",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "uuid",
+ "waku-base",
+ "waku-boss",
+ "waku-git",
  "waku-protocol",
 ]
 
