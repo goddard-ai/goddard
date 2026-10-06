@@ -1157,7 +1157,7 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH`.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -2195,6 +2195,33 @@ impl BossService {
         Ok(())
     }
 
+    /// A deliverable is the caller's work product, not Boss-owned state, so
+    /// the owner gate relaxes for employees: the boss and human publish any
+    /// existing path, while an employee publishes only inside its assigned
+    /// workspace — the project checkout or its daemon-managed worktree —
+    /// recorded as its run directory at launch.
+    fn require_deliverable_publisher(
+        &self,
+        caller: Option<Uuid>,
+        target: &Path,
+    ) -> anyhow::Result<()> {
+        let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) else {
+            return Ok(());
+        };
+        let workspace = self.projects.lock().get(&caller).cloned();
+        let inside = workspace
+            .and_then(|root| {
+                fs::canonicalize(root)
+                    .ok()
+                    .zip(fs::canonicalize(target).ok())
+            })
+            .is_some_and(|(root, target)| target.starts_with(root));
+        if !inside {
+            bail!("employees can publish deliverables only from inside their own workspace");
+        }
+        Ok(())
+    }
+
     /// Authorize and normalize a `speak` request: only the boss session or a
     /// human client may voice an utterance, and the fragments stay small —
     /// speak is for short canned phrases, not narration.
@@ -2774,12 +2801,12 @@ impl BossService {
                 Ok(BossResult::Saved)
             }
             BossOperation::PublishDeliverable { path, name } => {
-                self.require_owner(caller)?;
                 let target = PathBuf::from(&path);
                 if !target.is_absolute() {
                     bail!("deliverable paths must be absolute");
                 }
                 let metadata = fs::metadata(&target).context("deliverable path does not exist")?;
+                self.require_deliverable_publisher(caller, &target)?;
                 let directory = metadata.is_dir();
                 let name = match name {
                     Some(name) => {
@@ -5028,6 +5055,8 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+        // Sidebar affordances stay owner-gated for employees; publish is
+        // refused too until the employee has an assigned workspace.
         for op in [
             BossOperation::PublishDeliverable {
                 path: file_path.clone(),
@@ -5050,6 +5079,46 @@ mod tests {
         ] {
             assert!(service.handle(Some(employee_id), op).is_err());
         }
+        // With an assigned workspace the employee publishes its own outputs —
+        // paths outside it are still refused.
+        service.set_project_context(employee_id, output.clone());
+        let outside = std::env::temp_dir().join(format!("boss-foreign-{}", Uuid::new_v4()));
+        fs::create_dir_all(&outside).unwrap();
+        let foreign = outside.join("foreign.md");
+        fs::write(&foreign, "not mine").unwrap();
+        assert!(
+            service
+                .handle(
+                    Some(employee_id),
+                    BossOperation::PublishDeliverable {
+                        path: foreign.to_string_lossy().into_owned(),
+                        name: None,
+                    },
+                )
+                .is_err()
+        );
+        service
+            .handle(
+                Some(employee_id),
+                BossOperation::PublishDeliverable {
+                    path: file_path.clone(),
+                    name: Some("Employee Report".into()),
+                },
+            )
+            .unwrap();
+        // Publishing is the only deliverable door that opens — the sidebar
+        // affordances still refuse the employee.
+        assert!(
+            service
+                .handle(
+                    Some(employee_id),
+                    BossOperation::PinDeliverable {
+                        id: Uuid::nil(),
+                        pinned: true,
+                    },
+                )
+                .is_err()
+        );
         // Deliverables carry absolute paths to real outputs — relative paths and
         // missing files are both refused.
         assert!(
@@ -5251,6 +5320,7 @@ mod tests {
         drop(restored);
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(output).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]
