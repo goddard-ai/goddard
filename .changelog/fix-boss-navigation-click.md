@@ -1,0 +1,1 @@
+- Clicking the Boss chat while a previous Boss request is still in flight now navigates instead of silently doing nothing.

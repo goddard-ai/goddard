@@ -2418,6 +2418,11 @@ pub struct Waku {
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: HashSet<Uuid>,
+    /// The selected session's summon-card employee ids under a fingerprint of
+    /// the transcript's `boss_summon` markers, so activations and the
+    /// resident-transcript trim reuse one scan instead of re-parsing every
+    /// activity. `RefCell` because the readers take `&self`.
+    summon_card_cache: RefCell<Option<(u64, Vec<Uuid>)>>,
     /// Selection is committed only after this target's transcript arrives, so
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
@@ -6796,6 +6801,7 @@ impl Waku {
                 daemon_hostname,
                 daemon_lan_ip,
                 session_hydrations: HashSet::new(),
+                summon_card_cache: RefCell::new(None),
                 pending_session_activation: None,
                 pending_deep_link_prompt: None,
                 sweep_visited: HashSet::new(),

@@ -435,6 +435,28 @@ pub(super) fn next_idle_session(
     )
 }
 
+/// Summon-card employees a selected boss chat keeps hydrated and pinned —
+/// see [`Waku::summon_card_employees`].
+const SUMMON_CARD_LIVE_LIMIT: usize = 12;
+
+/// Fingerprint of the `boss_summon` markers [`Waku::summon_card_employees`]
+/// scans — the card payloads in transcript order, so a stream commit that
+/// touches anything else leaves the cache warm.
+fn summon_card_fingerprint(session: &AgentSession) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = transcript::mix_uuid(transcript::EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
+    for block in &session.transcript_blocks {
+        for activity in &block.activities {
+            if activity.tool_name.as_deref() == Some(crate::model::BOSS_SUMMON_TOOL_NAME) {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                activity.arguments.hash(&mut hasher);
+                hash = transcript::mix(hash, hasher.finish());
+            }
+        }
+    }
+    hash
+}
+
 impl Waku {
     pub(crate) fn open_task_from_notification(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.select_session(session_id, cx);
@@ -443,7 +465,13 @@ impl Waku {
     /// Employee sessions the selected transcript's `boss_summon` markers
     /// reference — the summon cards stream their live status and latest
     /// line, so these details stay hydrated and pinned while the boss chat
-    /// is on screen.
+    /// is on screen. Capped to the most recent [`SUMMON_CARD_LIVE_LIMIT`]
+    /// employees: a long-running chat names a new one per job, and
+    /// rehydrating all of them after the resident window evicted their
+    /// transcripts made every return to the chat a burst of full-session
+    /// transfers. Cards past the cap still render — the marker carries the
+    /// employee's identity and the skeleton keeps its status — they just
+    /// lose the streamed commentary until the session is opened itself.
     pub(super) fn summon_card_employees(&self) -> Vec<Uuid> {
         let Some(session) = self
             .state
@@ -453,12 +481,23 @@ impl Waku {
         else {
             return Vec::new();
         };
-        session
+        let fingerprint = summon_card_fingerprint(session);
+        if let Some((cached, ids)) = &*self.summon_card_cache.borrow()
+            && *cached == fingerprint
+        {
+            return ids.clone();
+        }
+        let mut seen = HashSet::new();
+        let mut ids: Vec<Uuid> = session
             .transcript_blocks
             .iter()
             .flat_map(|block| &block.activities)
             .filter_map(transcript_view::boss_summon_session_id)
-            .collect()
+            .filter(|id| seen.insert(*id))
+            .collect();
+        ids.drain(..ids.len().saturating_sub(SUMMON_CARD_LIVE_LIMIT));
+        *self.summon_card_cache.borrow_mut() = Some((fingerprint, ids.clone()));
+        ids
     }
 
     /// Whether a "Sent by agent" chip's source task can still be opened: it

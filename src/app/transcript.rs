@@ -724,6 +724,15 @@ pub(super) fn transcript_navigation_turns(
         })
         .collect::<Vec<_>>();
 
+    // A per-prompt `turns.iter().any()` made this O(prompts × turns); the
+    // running set answers the same question in one pass.
+    let running_turns: HashSet<Uuid> = session
+        .turns
+        .iter()
+        .filter(|turn| turn.status == TurnStatus::Running)
+        .map(|turn| turn.id)
+        .collect();
+
     // Message rows keep ascending message order through folding, so one cursor
     // walk resolves every prompt's row. A `position` scan from the top per
     // turn made this quadratic over a long session.
@@ -758,12 +767,8 @@ pub(super) fn transcript_navigation_turns(
                     .map(|offset| message_index + 1 + offset)
                     .unwrap_or(session.messages.len()),
             );
-        let turn_running = message.turn_id.is_some_and(|turn_id| {
-            session
-                .turns
-                .iter()
-                .any(|turn| turn.id == turn_id && turn.status == TurnStatus::Running)
-        });
+        let turn_running =
+            message.turn_id.is_some_and(|turn_id| running_turns.contains(&turn_id));
         let response = (!turn_running)
             .then(|| {
                 session.messages[message_index + 1..next_user_index]
@@ -1273,6 +1278,17 @@ pub(super) fn folded_transcript_row_kinds(
         .map(|block| block.after_message)
         .collect::<Vec<_>>();
     let raw_rows = transcript_row_kinds(session.messages.len(), &anchors);
+    // Bucket every turn's rows in one pass: the owner of a row is the turn
+    // id its assistant message or block already carries, and `raw_rows`
+    // order is the transcript order `turn_rows` reproduces. Rebuilding each
+    // turn's list with a full scan instead made the fold O(turns × rows) on
+    // the render thread.
+    let mut rows_by_turn: HashMap<Uuid, Vec<TranscriptRowKind>> = HashMap::new();
+    for row in raw_rows.iter().copied() {
+        if let Some(turn_id) = response_row_turn_id(session, row) {
+            rows_by_turn.entry(turn_id).or_default().push(row);
+        }
+    }
     let mut hidden_rows = HashSet::new();
     let mut fold_anchors = HashMap::new();
     let mut response_footers = HashMap::new();
@@ -1281,14 +1297,17 @@ pub(super) fn folded_transcript_row_kinds(
         if turn.status == TurnStatus::Running {
             continue;
         }
-        let turn_rows = turn_rows(session, turn.id);
-        if let Some(message_index) = response_footer_message_index_from_rows(session, &turn_rows) {
+        let turn_rows = rows_by_turn
+            .get(&turn.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if let Some(message_index) = response_footer_message_index_from_rows(session, turn_rows) {
             response_footers.insert(turn.id, message_index);
         }
         // A compaction block is the transcript's only record that `/compact`
         // ran — folding it behind a generic "Worked for …" row erases the
         // evidence, so it keeps its own row.
-        let hidden: Vec<TranscriptRowKind> = turn_rows[..turn_answer_start(session, &turn_rows)]
+        let hidden: Vec<TranscriptRowKind> = turn_rows[..turn_answer_start(session, turn_rows)]
             .iter()
             .copied()
             .filter(|row| {

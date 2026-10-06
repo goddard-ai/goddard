@@ -295,6 +295,11 @@ pub(super) struct BossUi {
     /// `finalized_at` lands on the session so neither flickers back; a
     /// failed reply removes it so both restore for a retry.
     pub(super) plan_finalizing: HashSet<Uuid>,
+    /// An `Open` a boss-chat click carried while another request held the
+    /// pipe. Navigation activates the locally held session immediately and
+    /// parks the operation here; the next request completion re-issues it so
+    /// the daemon still sees the open. Last click wins.
+    queued_open: Option<(DaemonKey, BossOperation)>,
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
@@ -378,6 +383,7 @@ impl Default for BossUi {
             pending: false,
             pending_reply: None,
             plan_finalizing: HashSet::new(),
+            queued_open: None,
             list: ListState::new(0, ListAlignment::Top, px(640.0)),
             scrollbar: ScrollbarState::new(),
             rows: Vec::new(),
@@ -1308,7 +1314,38 @@ impl Waku {
         reply: BossReply,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.boss_experiment_enabled || self.boss_ui.pending {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
+        if self.boss_ui.pending {
+            // A boss-chat click while a request is in flight must not die —
+            // under exactly the slowness an Open suffers, a dropped click
+            // reads as a broken sidebar. A session the app already holds
+            // activates straight from its copy; one it doesn't (first open,
+            // or a session the catalog lost) parks the operation so the
+            // completion re-issues it against the daemon. Last click wins.
+            if let BossOperation::Open { .. } = operation {
+                let session_id = self
+                    .boss_ui
+                    .states
+                    .get(&key)
+                    .and_then(|state| state.session_id)
+                    .filter(|session_id| {
+                        self.state
+                            .sessions
+                            .iter()
+                            .any(|session| session.id == *session_id)
+                    });
+                if let Some(session_id) = session_id {
+                    self.request_session_activation(
+                        session_id,
+                        SessionActivationTransition::Visit,
+                        cx,
+                    );
+                } else {
+                    self.boss_ui.queued_open = Some((key, operation));
+                }
+            }
             return;
         }
         let list_path = match &operation {
@@ -1704,6 +1741,15 @@ impl Waku {
                             this.show_toast(tr!("boss.failed", error = error.clone()));
                         }
                     }
+                }
+                // A boss-chat click parked its Open while this request held
+                // the pipe — re-issue it now the pipe is free. If result
+                // handling already started another request, the parked op
+                // stays parked and the next completion retries.
+                if !this.boss_ui.pending
+                    && let Some((queued_key, operation)) = this.boss_ui.queued_open.take()
+                {
+                    this.boss_request(queued_key, operation, BossReply::Open, cx);
                 }
                 cx.notify();
             });

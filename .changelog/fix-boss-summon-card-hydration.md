@@ -1,0 +1,1 @@
+- Returning to a Boss chat no longer re-loads every employee transcript it has ever summoned; live status and commentary stream for the most recent summon cards, and older cards still show their name and status.
