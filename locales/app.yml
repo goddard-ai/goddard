@@ -6017,7 +6017,41 @@ boss.chat:
 boss.history:
   en: Employees
 boss.memory:
-  en: Memory and files
+  en: Memory
+boss.memory_documents:
+  en: Documents
+boss.memory_records:
+  en: Records
+boss.search_file_names:
+  en: Search file names
+boss.search_no_matches:
+  en: No matching files
+boss.ask_correct:
+  en: Ask Boss to correct
+boss.correction_request_hint:
+  en: Ask the Boss to correct %{path} in chat.
+boss.memory_empty:
+  en: The Boss maintains its memory.
+boss.ask_remember:
+  en: Ask Boss to remember something
+boss.memory_select:
+  en: Select a memory file to read
+boss.memory_unavailable:
+  en: Could not load %{path}.
+boss.bucket_select:
+  en: Select a bucket
+boss.bucket_unavailable:
+  en: Could not load %{bucket}.
+boss.records_empty:
+  en: This bucket has no records yet.
+boss.record_fact:
+  en: Fact
+boss.record_observation:
+  en: Observation
+boss.record_question:
+  en: Question
+boss.record_summary:
+  en: Summary
 boss.personas:
   en: Personas
 boss.history_hint:
@@ -6178,6 +6212,8 @@ boss.command_placeholder_employee:
   en: Use the boss to control this employee...
 boss.command_placeholder_deliverable:
   en: Use the boss to edit this deliverable...
+boss.command_placeholder_memory:
+  en: Ask the boss to correct this memory...
 boss.command_hint:
   en: Messages go to %{name}
 boss.save_first:

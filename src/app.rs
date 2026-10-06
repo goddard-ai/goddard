@@ -379,6 +379,8 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    /// The Boss Brain Memory section's documents/records tree pane.
+    BossMemoryTree,
     /// The horizontal divider between the Git panel's top region and its
     /// commit log — the one drag that moves on the y axis.
     GitPanelTop,
@@ -3680,6 +3682,8 @@ pub struct Waku {
     skills_scanned_at: Option<Instant>,
     /// Filter query over the Skills page's rows.
     skills_search: Entity<TextInput>,
+    /// Filename query over the Boss Brain Memory documents tree.
+    boss_memory_search: Entity<TextInput>,
     /// Virtualized list over the filtered skill rows.
     skills_list_state: ListState,
     skills_scrollbar: Rc<ScrollbarState>,
@@ -5467,6 +5471,13 @@ impl Waku {
                 .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
         });
+        let boss_memory_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("boss.search_file_names"))
+                .placeholder(tr!("boss.search_file_names"))
+        });
         let drafts_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -6486,6 +6497,18 @@ impl Waku {
                 }
             })
             .detach();
+            cx.subscribe(
+                &boss_memory_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                        // Searching is asynchronous — all directory
+                        // discovery stays in the Boss request worker.
+                        this.ensure_boss_memory_search(cx);
+                    }
+                },
+            )
+            .detach();
             cx.subscribe(&drafts_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -7279,6 +7302,7 @@ impl Waku {
                 skills_scan_pending: false,
                 skills_scanned_at: None,
                 skills_search,
+                boss_memory_search,
                 skills_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 skills_scrollbar: ScrollbarState::new(),
                 skills_rows: RefCell::new(Vec::new()),

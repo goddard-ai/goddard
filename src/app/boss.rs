@@ -4,7 +4,7 @@ use super::*;
 use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::boss::{
-    BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
+    BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
     PersonaPermissions,
 };
 use waku_protocol::custom_commands::CustomCommandIcon;
@@ -33,10 +33,96 @@ fn avatar_scale(bucket: u32) -> f32 {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BossTab {
+    Memory,
     Personas,
     Employees,
     Plans,
     Deliverables,
+}
+
+/// The Memory section's two read-only views: the Boss's document buckets
+/// under `memory/` in its files root, and the named bucket engine's
+/// structured records. Documents and records stay distinct — records never
+/// appear as files.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BossMemoryView {
+    Documents,
+    Records,
+}
+
+/// A named memory bucket the Boss's files-canonical engine lists — parsed
+/// off the `memory` operation's loose JSON so the app crate does not take a
+/// `waku-memory-engine` dependency.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MemoryBucket {
+    id: String,
+    name: String,
+    purpose: String,
+}
+
+/// One readable record inside a named bucket's overview: an original note
+/// or a stored chronological summary covering a note range.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MemoryRecord {
+    Note {
+        sequence: u64,
+        kind: waku_client::boss::MemoryNoteKind,
+        text: String,
+        created_at: u64,
+    },
+    Summary { start: u64, end: u64, text: String },
+}
+
+/// The overview item as the daemon serializes it — `{"type":"note"|"summary"}`.
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum MemoryOverviewItemWire {
+    Note { note: MemoryNoteWire },
+    Summary { summary: MemorySummaryWire },
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryNoteWire {
+    sequence: u64,
+    kind: waku_client::boss::MemoryNoteKind,
+    text: String,
+    created_at: u64,
+}
+
+#[derive(serde::Deserialize)]
+struct MemorySummaryWire {
+    start: u64,
+    end: u64,
+    text: String,
+}
+
+fn memory_bucket_from_json(value: &serde_json::Value) -> Option<MemoryBucket> {
+    Some(MemoryBucket {
+        id: value.get("id")?.as_str()?.to_owned(),
+        name: value.get("name")?.as_str()?.to_owned(),
+        purpose: value
+            .get("purpose")
+            .and_then(|purpose| purpose.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+    })
+}
+
+fn memory_record_from_json(value: &serde_json::Value) -> Option<MemoryRecord> {
+    match serde_json::from_value::<MemoryOverviewItemWire>(value.clone()).ok()? {
+        MemoryOverviewItemWire::Note { note } => Some(MemoryRecord::Note {
+            sequence: note.sequence,
+            kind: note.kind,
+            text: note.text,
+            created_at: note.created_at,
+        }),
+        MemoryOverviewItemWire::Summary { summary } => Some(MemoryRecord::Summary {
+            start: summary.start,
+            end: summary.end,
+            text: summary.text,
+        }),
+    }
 }
 
 pub(super) struct BossUi {
@@ -83,6 +169,10 @@ pub(super) struct BossUi {
     /// Cleared by a send or any landing that is not re-arming it — the
     /// `pending_deliverable` half carries it across its own navigation.
     pub command_deliverable: Option<(DaemonKey, Uuid)>,
+    /// Memory entry armed as context for a user-requested correction in
+    /// Boss chat — `(key, label, content)` where the label is the document
+    /// path or a `buckets/<name>/note-<seq>` record reference.
+    pub(super) command_memory_correction: Option<(DaemonKey, String, String)>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
@@ -101,6 +191,31 @@ pub(super) struct BossUi {
     /// The Plans tab's selected plan — a `BossState.planning` record's
     /// session id, resolved against the live state at render.
     plans_selected: Option<Uuid>,
+    /// Every loaded entry under the Boss files root's `memory/` tree —
+    /// one flat list; folder rows parent their children by path prefix.
+    files: Vec<BossFile>,
+    files_key: Option<DaemonKey>,
+    memory_expanded: HashMap<DaemonKey, HashSet<String>>,
+    memory_loaded_folders: HashMap<DaemonKey, HashSet<String>>,
+    memory_all_folders_loaded: HashSet<DaemonKey>,
+    memory_loading_folder: Option<(DaemonKey, String)>,
+    memory_error: Option<(DaemonKey, String, String)>,
+    pub(super) memory_tree_width: f32,
+    /// Read-only Boss memory document currently shown in the Brain reader.
+    preview_file: Option<(DaemonKey, String, String)>,
+    /// Documents or Records — the Memory section's active view per host.
+    memory_view: HashMap<DaemonKey, BossMemoryView>,
+    /// Named buckets the memory engine reports for a host — the Records
+    /// view's collections.
+    memory_buckets: HashMap<DaemonKey, Vec<MemoryBucket>>,
+    memory_buckets_loading: HashSet<DaemonKey>,
+    memory_buckets_error: HashMap<DaemonKey, String>,
+    /// The Records view's selected bucket id per host.
+    memory_bucket_selected: HashMap<DaemonKey, String>,
+    /// Cached overview records per (host, bucket) — populated on select.
+    memory_records: HashMap<(DaemonKey, String), Vec<MemoryRecord>>,
+    memory_records_loading: Option<(DaemonKey, String)>,
+    memory_records_error: HashMap<(DaemonKey, String), String>,
     editor: Option<BossEditor>,
     generation: u64,
     pending: bool,
@@ -144,12 +259,30 @@ impl Default for BossUi {
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             command_deliverable: None,
+            command_memory_correction: None,
             pending_deliverable: None,
             deliverable_page: None,
             revision: 0,
             page: None,
             last_section: HashMap::new(),
             plans_selected: None,
+            files: Vec::new(),
+            files_key: None,
+            memory_expanded: HashMap::new(),
+            memory_loaded_folders: HashMap::new(),
+            memory_all_folders_loaded: HashSet::new(),
+            memory_loading_folder: None,
+            memory_error: None,
+            memory_tree_width: 280.0,
+            preview_file: None,
+            memory_view: HashMap::new(),
+            memory_buckets: HashMap::new(),
+            memory_buckets_loading: HashSet::new(),
+            memory_buckets_error: HashMap::new(),
+            memory_bucket_selected: HashMap::new(),
+            memory_records: HashMap::new(),
+            memory_records_loading: None,
+            memory_records_error: HashMap::new(),
             editor: None,
             generation: 0,
             pending: false,
@@ -212,8 +345,66 @@ pub(super) struct BossGoalRow {
 enum BossItem {
     Employee(Uuid),
     Persona(Uuid),
+    /// A `memory/` entry — `(path, directory, depth)`; directories at depth
+    /// zero are the named buckets the tree tops out at.
+    File(String, bool, usize),
+    /// An expanded folder's in-place loading or failed-load status row.
+    MemoryStatus(String, usize, bool),
+    /// A named bucket's engine id — a Records view collection row.
+    Bucket(String),
     /// A `BossState.planning` record's session — Plans tab rows.
     Plan(Uuid),
+}
+
+fn memory_tree_rows(
+    files: &[BossFile],
+    expanded: &HashSet<String>,
+    loading: Option<&str>,
+    error: Option<&str>,
+) -> Vec<BossItem> {
+    fn visit(
+        parent: &str,
+        depth: usize,
+        files: &[BossFile],
+        expanded: &HashSet<String>,
+        loading: Option<&str>,
+        error: Option<&str>,
+        rows: &mut Vec<BossItem>,
+    ) {
+        let mut children = files
+            .iter()
+            .filter(|file| {
+                file.path
+                    .rsplit_once('/')
+                    .map_or("", |(parent, _)| parent)
+                    == parent
+            })
+            .collect::<Vec<_>>();
+        children.sort_by(|a, b| {
+            b.directory.cmp(&a.directory).then_with(|| {
+                a.path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&a.path)
+                    .to_lowercase()
+                    .cmp(&b.path.rsplit('/').next().unwrap_or(&b.path).to_lowercase())
+            })
+        });
+        for file in children {
+            rows.push(BossItem::File(file.path.clone(), file.directory, depth));
+            if file.directory && expanded.contains(&file.path) {
+                if loading == Some(file.path.as_str()) {
+                    rows.push(BossItem::MemoryStatus(file.path.clone(), depth + 1, false));
+                } else if error == Some(file.path.as_str()) {
+                    rows.push(BossItem::MemoryStatus(file.path.clone(), depth + 1, true));
+                }
+                visit(&file.path, depth + 1, files, expanded, loading, error, rows);
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    visit("memory", 0, files, expanded, loading, error, &mut rows);
+    rows
 }
 
 /// An armed composer command: the boss chat that answers the next
@@ -230,6 +421,10 @@ pub(super) struct BossCommand {
 /// is on screen, or the deliverable a sidebar click armed.
 pub(super) enum BossCommandContext {
     Employee(Uuid),
+    /// A read-only memory entry the user is asking the Boss to correct —
+    /// `path` is the document's `memory/…` path or a record's
+    /// `buckets/<name>/note-<seq>` label; `content` is the shown text.
+    MemoryCorrection { path: String, content: String },
     Deliverable {
         path: PathBuf,
         name: String,
@@ -260,6 +455,14 @@ enum BossEditorKind {
 pub(super) enum BossReply {
     Open,
     List,
+    Read,
+    /// A recursive `memory/` walk issued so filename search sees the whole
+    /// tree — its result still lands as `BossResult::Files`.
+    Search,
+    /// `memory` bucket listing for the Records view.
+    Buckets,
+    /// A bucket's overview records for the Records view.
+    Records,
     Saved,
     Finalize,
 }
@@ -575,6 +778,47 @@ impl Waku {
             return;
         };
         let rows = match tab {
+            BossTab::Memory => {
+                match self
+                    .boss_ui
+                    .memory_view
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(BossMemoryView::Documents)
+                {
+                    BossMemoryView::Documents => {
+                        let expanded = self
+                            .boss_ui
+                            .memory_expanded
+                            .get(&key)
+                            .cloned()
+                            .unwrap_or_default();
+                        let loading = self
+                            .boss_ui
+                            .memory_loading_folder
+                            .as_ref()
+                            .filter(|(loading_key, _)| *loading_key == key)
+                            .map(|(_, path)| path.as_str());
+                        let error = self
+                            .boss_ui
+                            .memory_error
+                            .as_ref()
+                            .filter(|(error_key, path, _)| {
+                                *error_key == key && path != "memory"
+                            })
+                            .map(|(_, path, _)| path.as_str());
+                        memory_tree_rows(&self.boss_ui.files, &expanded, loading, error)
+                    }
+                    BossMemoryView::Records => self
+                        .boss_ui
+                        .memory_buckets
+                        .get(&key)
+                        .into_iter()
+                        .flatten()
+                        .map(|bucket| BossItem::Bucket(bucket.id.clone()))
+                        .collect(),
+                }
+            }
             BossTab::Employees => self
                 .boss_ui
                 .recent
@@ -607,9 +851,22 @@ impl Waku {
         };
         if self.boss_ui.rows != rows {
             self.boss_ui.rows = rows;
+            let row_height = if matches!(tab, BossTab::Memory)
+                && self
+                    .boss_ui
+                    .memory_view
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(BossMemoryView::Documents)
+                    == BossMemoryView::Documents
+            {
+                px(30.0)
+            } else {
+                px(42.0)
+            };
             self.boss_ui
                 .list
-                .reset_with_uniform_height(self.boss_ui.rows.len(), px(42.0));
+                .reset_with_uniform_height(self.boss_ui.rows.len(), row_height);
         }
     }
 
@@ -649,11 +906,34 @@ impl Waku {
         self.notifications.open = false;
         self.selected_terminal = None;
         self.pending_session_activation = None;
+        if tab == BossTab::Memory && self.boss_ui.files_key != Some(key) {
+            self.boss_ui.files.clear();
+            self.boss_ui.files_key = Some(key);
+        }
         self.boss_ui.page = Some((key, tab));
         self.boss_ui.last_section.insert(key, tab);
         self.fold_terminals_group_for_navigation();
         self.sync_right_panel_owner(cx);
         self.sync_boss_page_rows();
+        if tab == BossTab::Memory {
+            match self
+                .boss_ui
+                .memory_view
+                .get(&key)
+                .copied()
+                .unwrap_or(BossMemoryView::Documents)
+            {
+                BossMemoryView::Documents => self.boss_request(
+                    key,
+                    BossOperation::ListFiles {
+                        path: "memory".into(),
+                    },
+                    BossReply::List,
+                    cx,
+                ),
+                BossMemoryView::Records => self.ensure_boss_memory_buckets(key, cx),
+            }
+        }
         let focus = self
             .boss_ui
             .focus
@@ -673,12 +953,57 @@ impl Waku {
         if !self.state.boss_experiment_enabled || self.boss_ui.pending {
             return;
         }
+        let list_path = match &operation {
+            BossOperation::ListFiles { path } => Some(path.clone()),
+            _ => None,
+        };
+        let memory_request_path = match &operation {
+            BossOperation::ListFiles { path } | BossOperation::ReadFile { path } => {
+                Some(path.clone())
+            }
+            _ => None,
+        };
+        let records_bucket = match &operation {
+            BossOperation::Memory {
+                operation: waku_client::boss::MemoryOperation::Overview { bucket },
+            } if reply == BossReply::Records => Some(bucket.clone()),
+            _ => None,
+        };
         let Some(client) = self
             .daemons
             .supervisor(key)
             .map(|supervisor| supervisor.client())
         else {
-            self.show_toast(tr!("boss.unreachable"));
+            let unreachable = tr!("boss.unreachable").to_string();
+            match reply {
+                BossReply::List | BossReply::Read | BossReply::Search
+                    if self
+                        .boss_ui
+                        .page
+                        .is_some_and(|(page_key, tab)| page_key == key && tab == BossTab::Memory) =>
+                {
+                    self.boss_ui.memory_loading_folder = None;
+                    self.boss_ui.memory_error = Some((
+                        key,
+                        memory_request_path.unwrap_or_else(|| "memory".into()),
+                        unreachable,
+                    ));
+                    self.sync_boss_page_rows();
+                }
+                BossReply::Buckets => {
+                    self.boss_ui.memory_buckets_loading.remove(&key);
+                    self.boss_ui.memory_buckets_error.insert(key, unreachable);
+                }
+                BossReply::Records => {
+                    self.boss_ui.memory_records_loading = None;
+                    if let Some(bucket) = records_bucket {
+                        self.boss_ui
+                            .memory_records_error
+                            .insert((key, bucket), unreachable);
+                    }
+                }
+                _ => self.show_toast(tr!("boss.unreachable")),
+            }
             cx.notify();
             return;
         };
@@ -704,15 +1029,70 @@ impl Waku {
         let generation = self.boss_ui.generation;
         self.boss_ui.pending = true;
         self.boss_ui.pending_reply = Some(reply);
+        if let Some(path) = list_path.as_ref() {
+            self.boss_ui.memory_error = None;
+            self.boss_ui.memory_loading_folder = Some((key, path.clone()));
+            self.sync_boss_page_rows();
+        } else if memory_request_path.is_some() {
+            self.boss_ui.memory_error = None;
+        }
+        if reply == BossReply::Buckets {
+            self.boss_ui.memory_buckets_loading.insert(key);
+            self.boss_ui.memory_buckets_error.remove(&key);
+        }
+        if let Some(bucket) = records_bucket.as_ref() {
+            self.boss_ui.memory_records_loading = Some((key, bucket.clone()));
+            self.boss_ui.memory_records_error.remove(&(key, bucket.clone()));
+        }
+        let tree_list_path = list_path.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::Boss { operation },
-                    )
+                    // Filename search needs the whole tree: walk directories
+                    // breadth-first and fold every listing into one `Files`.
+                    if let Some(root) = tree_list_path
+                        .as_deref()
+                        .filter(|_| reply == BossReply::Search)
+                    {
+                        let mut directories = VecDeque::from([root.to_owned()]);
+                        let mut all_files = Vec::new();
+                        while let Some(path) = directories.pop_front() {
+                            let response = client
+                                .request(
+                                    Uuid::nil(),
+                                    Uuid::nil(),
+                                    waku_client::Command::Boss {
+                                        operation: BossOperation::ListFiles {
+                                            path: path.clone(),
+                                        },
+                                    },
+                                )
+                                .map_err(|error| anyhow::anyhow!("{path}: {error}"))?;
+                            let waku_client::ResponsePayload::Boss {
+                                result: BossResult::Files { files },
+                            } = response
+                            else {
+                                anyhow::bail!("unexpected memory directory response");
+                            };
+                            directories.extend(
+                                files
+                                    .iter()
+                                    .filter(|file| file.directory)
+                                    .map(|file| file.path.clone()),
+                            );
+                            all_files.extend(files);
+                        }
+                        Ok(waku_client::ResponsePayload::Boss {
+                            result: BossResult::Files { files: all_files },
+                        })
+                    } else {
+                        client.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::Boss { operation },
+                        )
+                    }
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
@@ -721,6 +1101,20 @@ impl Waku {
                 }
                 this.boss_ui.pending = false;
                 this.boss_ui.pending_reply = None;
+                if this
+                    .boss_ui
+                    .memory_loading_folder
+                    .as_ref()
+                    .is_some_and(|(loading_key, _)| *loading_key == key)
+                {
+                    this.boss_ui.memory_loading_folder = None;
+                }
+                if reply == BossReply::Buckets {
+                    this.boss_ui.memory_buckets_loading.remove(&key);
+                }
+                if reply == BossReply::Records {
+                    this.boss_ui.memory_records_loading = None;
+                }
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
@@ -773,6 +1167,108 @@ impl Waku {
                             {
                                 this.boss_request(key, BossOperation::View, BossReply::List, cx);
                             }
+                            BossResult::Files { files } => {
+                                if let Some((current_key, BossTab::Memory)) = this.boss_ui.page
+                                    && current_key == key
+                                    && let Some(path) = list_path.as_deref()
+                                {
+                                    this.boss_ui.memory_loading_folder = None;
+                                    this.boss_ui.memory_error = None;
+                                    if reply == BossReply::Search {
+                                        this.boss_ui.files = files;
+                                        this.boss_ui.memory_all_folders_loaded.insert(key);
+                                        let loaded = this
+                                            .boss_ui
+                                            .memory_loaded_folders
+                                            .entry(key)
+                                            .or_default();
+                                        loaded.insert("memory".into());
+                                        loaded.extend(
+                                            this.boss_ui
+                                                .files
+                                                .iter()
+                                                .filter(|file| file.directory)
+                                                .map(|file| file.path.clone()),
+                                        );
+                                    } else if path == "memory" {
+                                        this.boss_ui.files = files;
+                                        this.boss_ui.memory_loaded_folders.insert(
+                                            key,
+                                            HashSet::from(["memory".into()]),
+                                        );
+                                        this.boss_ui.memory_all_folders_loaded.remove(&key);
+                                    } else {
+                                        this.boss_ui.files.retain(|file| {
+                                            file.path
+                                                .rsplit_once('/')
+                                                .map_or("", |(parent, _)| parent)
+                                                != path
+                                        });
+                                        this.boss_ui.files.extend(files);
+                                        this.boss_ui
+                                            .memory_loaded_folders
+                                            .entry(key)
+                                            .or_default()
+                                            .insert(path.to_owned());
+                                    }
+                                    this.boss_ui.files_key = Some(key);
+                                    this.sync_boss_page_rows();
+                                    if reply != BossReply::Search
+                                        && !this
+                                            .boss_memory_search
+                                            .read(cx)
+                                            .content()
+                                            .trim()
+                                            .is_empty()
+                                    {
+                                        this.ensure_boss_memory_search(cx);
+                                    } else if reply == BossReply::List {
+                                        this.ensure_boss_expanded_memory_folders(key, cx);
+                                    }
+                                }
+                            }
+                            BossResult::File { path, content }
+                                if matches!(reply, BossReply::Read) =>
+                            {
+                                this.boss_ui.memory_error = None;
+                                this.boss_ui.preview_file = Some((key, path, content));
+                            }
+                            BossResult::Memory {
+                                buckets, overview, ..
+                            } => match reply {
+                                BossReply::Buckets => {
+                                    this.boss_ui.memory_buckets_error.remove(&key);
+                                    this.boss_ui.memory_buckets.insert(
+                                        key,
+                                        buckets
+                                            .iter()
+                                            .filter_map(memory_bucket_from_json)
+                                            .collect(),
+                                    );
+                                    this.sync_boss_page_rows();
+                                }
+                                BossReply::Records => {
+                                    if let Some(bucket) = records_bucket.as_ref() {
+                                        let items = overview
+                                            .as_ref()
+                                            .and_then(|overview| overview.get("items"))
+                                            .and_then(|items| items.as_array())
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        this.boss_ui.memory_records.insert(
+                                            (key, bucket.clone()),
+                                            items
+                                                .iter()
+                                                .filter_map(memory_record_from_json)
+                                                .collect(),
+                                        );
+                                        this.boss_ui
+                                            .memory_records_error
+                                            .remove(&(key, bucket.clone()));
+                                    }
+                                }
+                                _ => {}
+                            },
                             _ => {}
                         }
                         if matches!(reply, BossReply::Saved) {
@@ -790,13 +1286,142 @@ impl Waku {
                         }
                     }
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
-                    Err(error) => this.show_toast(tr!("boss.failed", error = error.to_string())),
+                    Err(error) => {
+                        let error = error.to_string();
+                        if matches!(reply, BossReply::List | BossReply::Read | BossReply::Search)
+                            && this
+                                .boss_ui
+                                .page
+                                .is_some_and(|(page_key, tab)| {
+                                    page_key == key && tab == BossTab::Memory
+                                })
+                        {
+                            this.boss_ui.memory_loading_folder = None;
+                            this.boss_ui.memory_error = Some((
+                                key,
+                                memory_request_path
+                                    .clone()
+                                    .unwrap_or_else(|| "memory".into()),
+                                error,
+                            ));
+                            this.sync_boss_page_rows();
+                        } else if reply == BossReply::Buckets {
+                            this.boss_ui.memory_buckets_error.insert(key, error);
+                        } else if reply == BossReply::Records {
+                            if let Some(bucket) = records_bucket.as_ref() {
+                                this.boss_ui
+                                    .memory_records_error
+                                    .insert((key, bucket.clone()), error);
+                            }
+                        } else {
+                            this.show_toast(tr!("boss.failed", error = error.clone()));
+                        }
+                    }
                 }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+
+    /// Filename search reads every folder under `memory/` — kick off the
+    /// recursive walk once while a query is active; it is a no-op once the
+    /// whole tree is loaded.
+    pub(super) fn ensure_boss_memory_search(&mut self, cx: &mut Context<Self>) {
+        let Some((key, BossTab::Memory)) = self.boss_ui.page else {
+            return;
+        };
+        if !self.boss_memory_search.read(cx).content().trim().is_empty()
+            && !self.boss_ui.memory_all_folders_loaded.contains(&key)
+            && !self.boss_ui.pending
+        {
+            self.boss_request(
+                key,
+                BossOperation::ListFiles {
+                    path: "memory".into(),
+                },
+                BossReply::Search,
+                cx,
+            );
+        }
+    }
+
+    /// Expanded folders load on demand: after each listing lands, fetch the
+    /// next expanded folder that has not been read yet.
+    fn ensure_boss_expanded_memory_folders(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        if self.boss_ui.pending || self.boss_ui.memory_all_folders_loaded.contains(&key) {
+            return;
+        }
+        let loaded = self.boss_ui.memory_loaded_folders.get(&key);
+        let next = self
+            .boss_ui
+            .memory_expanded
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .find(|path| {
+                !loaded.is_some_and(|loaded| loaded.contains(*path))
+                    && self
+                        .boss_ui
+                        .files
+                        .iter()
+                        .any(|file| file.directory && file.path.as_str() == path.as_str())
+            })
+            .cloned();
+        if let Some(path) = next {
+            self.boss_request(
+                key,
+                BossOperation::ListFiles { path },
+                BossReply::List,
+                cx,
+            );
+        }
+    }
+
+    /// The Records view's bucket list — loaded once per host on demand.
+    fn ensure_boss_memory_buckets(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        if self.boss_ui.memory_buckets.contains_key(&key)
+            || self.boss_ui.memory_buckets_loading.contains(&key)
+            || self.boss_ui.pending
+        {
+            return;
+        }
+        self.boss_request(
+            key,
+            BossOperation::Memory {
+                operation: waku_client::boss::MemoryOperation::ListBuckets,
+            },
+            BossReply::Buckets,
+            cx,
+        );
+    }
+
+    /// A bucket's overview — loaded on first selection, cached per bucket.
+    fn ensure_boss_memory_overview(
+        &mut self,
+        key: DaemonKey,
+        bucket: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.boss_ui.memory_records.contains_key(&(key, bucket.clone()))
+            || self
+                .boss_ui
+                .memory_records_loading
+                .as_ref()
+                .is_some_and(|(loading_key, loading)| *loading_key == key && loading == &bucket)
+            || self.boss_ui.pending
+        {
+            return;
+        }
+        self.boss_request(
+            key,
+            BossOperation::Memory {
+                operation: waku_client::boss::MemoryOperation::Overview { bucket },
+            },
+            BossReply::Records,
+            cx,
+        );
     }
 
     pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
@@ -882,6 +1507,20 @@ impl Waku {
         if self.big_picture.is_open() {
             return None;
         }
+        if let Some((key, path, content)) = self.boss_ui.command_memory_correction.as_ref()
+            && let Some(state) = self.boss_ui.states.get(key)
+            && self.state.selected_session == state.session_id
+            && let Some(session_id) = state.session_id
+        {
+            return Some(BossCommand {
+                session_id,
+                identity: state.identity.clone(),
+                context: BossCommandContext::MemoryCorrection {
+                    path: path.clone(),
+                    content: content.clone(),
+                },
+            });
+        }
         if let Some((key, deliverable_id)) = self.boss_ui.command_deliverable {
             let command = self.boss_ui.states.get(&key).and_then(|state| {
                 state
@@ -965,6 +1604,19 @@ impl Waku {
                 pasted_text_preview: None,
                 session_id: None,
             },
+            // The chip wears the entry's label; the shown text rides the
+            // pasted-text preview so the user sees exactly what the Boss is
+            // asked to reconcile.
+            BossCommandContext::MemoryCorrection { path, content } => MessageAttachment {
+                path: PathBuf::from(path),
+                mention: path.clone(),
+                name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+                is_dir: false,
+                is_image: false,
+                blob_reference: None,
+                pasted_text_preview: Some(content.clone()),
+                session_id: None,
+            },
         }
     }
 
@@ -989,6 +1641,18 @@ impl Waku {
             submission.display_content = Some(submission.prompt.trim_end().to_owned());
         }
         let prompt = submission.prompt.trim_end().to_owned();
+        // A correction request reads as a request — the Boss decides how to
+        // reconcile its memory; nothing claims the record changed.
+        let prompt = if matches!(command.context, BossCommandContext::MemoryCorrection { .. }) {
+            let instruction = "Please consider this memory correction request and update the Boss-managed memory if appropriate.";
+            if prompt.is_empty() {
+                instruction.to_owned()
+            } else {
+                format!("{instruction}\n\n{prompt}")
+            }
+        } else {
+            prompt
+        };
         submission.prompt = if prompt.is_empty() {
             token
         } else {
@@ -996,6 +1660,7 @@ impl Waku {
         };
         submission.attachments.push(attachment);
         self.boss_ui.command_deliverable = None;
+        self.boss_ui.command_memory_correction = None;
         self.unmount_deliverable_page(cx);
         self.note_user_message_target(command.session_id);
         self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
@@ -1018,6 +1683,9 @@ impl Waku {
             Some(BossCommandContext::Employee(..)) => tr!("boss.command_placeholder_employee"),
             Some(BossCommandContext::Deliverable { .. }) => {
                 tr!("boss.command_placeholder_deliverable")
+            }
+            Some(BossCommandContext::MemoryCorrection { .. }) => {
+                tr!("boss.command_placeholder_memory")
             }
             None => tr!("input.do_anything"),
         };
@@ -1373,6 +2041,7 @@ impl Waku {
         // the armed composer context and any parked landing die with it.
         self.boss_ui.command_deliverable = None;
         self.boss_ui.pending_deliverable = None;
+        self.boss_ui.command_memory_correction = None;
         // The page's draft goes home before the chat's slot reclaims the
         // composer; without one the hint still needs the re-read.
         if !self.unmount_deliverable_page(cx) {
@@ -1793,7 +2462,7 @@ impl Waku {
                     .aria_label(tr!("boss.brain_label"))
                     .tooltip(Tooltip::text(tr!("boss.brain_label")))
                     .on_activation(cx, move |this, window, cx| {
-                        let section = this.boss_ui.last_section.get(&key).copied().unwrap_or(BossTab::Personas);
+                        let section = this.boss_ui.last_section.get(&key).copied().unwrap_or(BossTab::Memory);
                         this.open_boss_page(key, section, window, cx)
                     })
                     .child(icon("icons/brain.svg", 14.0, theme.text_secondary)),
@@ -2711,6 +3380,7 @@ impl Waku {
         let section_strip = div().flex().items_center().gap(px(2.0)).px(px(16.0)).py(px(6.0))
             .border_b_1().border_color(theme.separator)
             .children([
+                (BossTab::Memory, "boss.memory", "icons/brain.svg"),
                 (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
                 (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
                 (BossTab::Plans, "boss.plans", "icons/map.svg"),
@@ -2722,6 +3392,12 @@ impl Waku {
                     .child(tr!(label))
                     .on_activation(cx, move |this, window, cx| this.open_boss_page(key, target, window, cx))
             }));
+        let memory_view = self
+            .boss_ui
+            .memory_view
+            .get(&key)
+            .copied()
+            .unwrap_or(BossMemoryView::Documents);
         let mut toolbar = div()
             .flex()
             .items_center()
@@ -2729,6 +3405,67 @@ impl Waku {
             .px(px(20.0))
             .py(px(10.0));
         match tab {
+            BossTab::Memory => {
+                let mut segment_chip = |view: BossMemoryView, label: String, id: &'static str| {
+                    let active = memory_view == view;
+                    div()
+                        .id(id)
+                        .h(px(24.0))
+                        .px(px(9.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .text_size(sp(12.0))
+                        .text_color(if active {
+                            theme.text
+                        } else {
+                            theme.text_tertiary
+                        })
+                        .when(active, |element| element.bg(theme.overlay))
+                        .cursor_pointer()
+                        .tab_index(0)
+                        .focus_visible(|element| element.bg(theme.focus_highlight()))
+                        .hover(|element| element.bg(theme.overlay))
+                        .child(label)
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_ui.memory_view.insert(key, view);
+                            this.sync_boss_page_rows();
+                            if view == BossMemoryView::Records {
+                                this.ensure_boss_memory_buckets(key, cx);
+                            }
+                            cx.notify();
+                        })
+                };
+                toolbar = toolbar
+                    .child(
+                        div()
+                            .h(px(26.0))
+                            .px(px(3.0))
+                            .rounded(px(7.0))
+                            .bg(theme.sidebar_item_background)
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .child(segment_chip(
+                                BossMemoryView::Documents,
+                                tr!("boss.memory_documents"),
+                                "boss-memory-documents",
+                            ))
+                            .child(segment_chip(
+                                BossMemoryView::Records,
+                                tr!("boss.memory_records"),
+                                "boss-memory-records",
+                            )),
+                    )
+                    .when(memory_view == BossMemoryView::Documents, |bar| {
+                        bar.child(
+                            TextField::new("boss-memory-search", self.boss_memory_search.clone())
+                                .icon("icons/search.svg", 13.0)
+                                .w(px(190.0)),
+                        )
+                    })
+                    .child(div().flex_1());
+            }
             BossTab::Employees => {
                 toolbar = toolbar
                     .child(
@@ -2774,8 +3511,35 @@ impl Waku {
                 toolbar = toolbar.child(div().flex_1().text_color(theme.text_secondary).child(tr!("boss.phase_later")));
             }
         }
-        let visible_rows = self.boss_ui.rows.clone();
-        self.boss_ui.list.reset_with_uniform_height(visible_rows.len(), px(42.0));
+        let memory_documents = tab == BossTab::Memory && memory_view == BossMemoryView::Documents;
+        let query = if memory_documents {
+            self.boss_memory_search
+                .read(cx)
+                .content()
+                .trim()
+                .to_lowercase()
+        } else {
+            String::new()
+        };
+        let visible_rows: Vec<BossItem> = if query.is_empty() {
+            self.boss_ui.rows.clone()
+        } else {
+            // Search results flatten the tree — each row shows its full
+            // `memory/…` path so the match's bucket stays visible.
+            self.boss_ui
+                .files
+                .iter()
+                .filter(|file| {
+                    !file.directory && file.path.to_lowercase().contains(&query)
+                })
+                .map(|file| BossItem::File(file.path.clone(), false, 0))
+                .collect()
+        };
+        let has_search_matches = query.is_empty() || !visible_rows.is_empty();
+        self.boss_ui.list.reset_with_uniform_height(
+            visible_rows.len(),
+            px(if memory_documents { 30.0 } else { 42.0 }),
+        );
         let weak = cx.entity().downgrade();
         let list = div()
             .flex_1()
@@ -2807,7 +3571,7 @@ impl Waku {
             .child(section_strip)
             .child(toolbar.border_b_1().border_color(theme.separator))
             .when(
-                boss_loading_label_visible(self.boss_ui.pending),
+                tab != BossTab::Memory && boss_loading_label_visible(self.boss_ui.pending),
                 |element| element.child(div().px(px(20.0)).child(tr!("boss.loading"))),
             )
             .child(
@@ -2817,17 +3581,142 @@ impl Waku {
                     .flex()
                     .child(
                         div()
-                            .w(px(300.0))
+                            .w(px(if tab == BossTab::Memory {
+                                self.boss_ui.memory_tree_width
+                            } else {
+                                300.0
+                            }))
                             .flex()
                             .flex_col()
                             .min_h_0()
                             .relative()
                             .border_r_1()
                             .border_color(theme.separator)
-                            .child(list),
+                            .child(if memory_documents {
+                                if let Some((_, _, error)) =
+                                    self.boss_ui.memory_error.as_ref().filter(
+                                        |(error_key, path, _)| {
+                                            *error_key == key && path == "memory"
+                                        },
+                                    )
+                                {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_color(theme.text_secondary)
+                                                .child(error.clone()),
+                                        )
+                                        .child(
+                                            boss_button(
+                                                "boss-memory-tree-retry",
+                                                tr!("boss.retry"),
+                                                &theme,
+                                            )
+                                            .child(tr!("boss.retry"))
+                                            .on_activation(cx, move |this, _, cx| {
+                                                this.boss_request(
+                                                    key,
+                                                    BossOperation::ListFiles {
+                                                        path: "memory".into(),
+                                                    },
+                                                    BossReply::List,
+                                                    cx,
+                                                );
+                                            }),
+                                        )
+                                } else if self.boss_ui.pending
+                                    && self.boss_ui.pending_reply == Some(BossReply::Search)
+                                {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("boss.loading"))
+                                } else if self.boss_ui.files.is_empty()
+                                    && self.boss_ui.pending
+                                    && self.boss_ui.pending_reply == Some(BossReply::List)
+                                {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("boss.loading"))
+                                } else if !has_search_matches {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("boss.search_no_matches"))
+                                } else {
+                                    list
+                                }
+                            } else if tab == BossTab::Memory {
+                                if let Some(error) = self.boss_ui.memory_buckets_error.get(&key) {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .items_center()
+                                        .justify_center()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .text_color(theme.text_secondary)
+                                                .child(error.clone()),
+                                        )
+                                        .child(
+                                            boss_button(
+                                                "boss-memory-buckets-retry",
+                                                tr!("boss.retry"),
+                                                &theme,
+                                            )
+                                            .child(tr!("boss.retry"))
+                                            .on_activation(cx, move |this, _, cx| {
+                                                this.boss_ui.memory_buckets.remove(&key);
+                                                this.ensure_boss_memory_buckets(key, cx);
+                                            }),
+                                        )
+                                } else if self.boss_ui.memory_buckets_loading.contains(&key) {
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("boss.loading"))
+                                } else {
+                                    list
+                                }
+                            } else {
+                                list
+                            })
+                            .when(tab == BossTab::Memory, |pane| {
+                                pane.child(self.render_panel_resize_handle(
+                                    "boss-memory-tree-resize",
+                                    PanelResizeTarget::BossMemoryTree,
+                                    cx,
+                                ))
+                            }),
                     )
                     .child(if tab == BossTab::Plans {
                         self.render_boss_plan_detail(key, cx)
+                    } else if tab == BossTab::Memory {
+                        match memory_view {
+                            BossMemoryView::Documents => self.render_boss_memory_detail(key, cx),
+                            BossMemoryView::Records => self.render_boss_records_detail(key, cx),
+                        }
                     } else if tab == BossTab::Deliverables {
                         div().flex_1().flex().items_center().justify_center().text_color(theme.text_secondary).child(tr!("boss.phase_later")).into_any_element()
                     } else {
@@ -2851,6 +3740,192 @@ impl Waku {
         let theme = Theme::current(cx);
         match item {
             BossItem::Employee(id) => self.render_boss_employee_row(id, cx),
+            BossItem::MemoryStatus(path, depth, failed) => {
+                let label = if failed {
+                    self.boss_ui
+                        .memory_error
+                        .as_ref()
+                        .map(|(_, _, error)| error.clone())
+                        .unwrap_or_else(|| {
+                            tr!("boss.memory_unavailable", path = path.clone()).to_string()
+                        })
+                } else {
+                    tr!("boss.loading").to_string()
+                };
+                if failed {
+                    boss_button(format!("boss-memory-folder-retry-{path}"), label.clone(), &theme)
+                        .h(px(30.0))
+                        .w_full()
+                        .pl(px(8.0 + depth as f32 * 16.0))
+                        .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
+                        .child(div().truncate().child(label))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_request(
+                                key,
+                                BossOperation::ListFiles {
+                                    path: path.clone(),
+                                },
+                                BossReply::List,
+                                cx,
+                            );
+                        })
+                        .into_any_element()
+                } else {
+                    div()
+                        .h(px(30.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .pl(px(8.0 + depth as f32 * 16.0))
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(icon("icons/loader-circle.svg", 13.0, theme.text_tertiary))
+                        .child(label)
+                        .into_any_element()
+                }
+            }
+            BossItem::File(path, directory, depth) => {
+                let selected = self.boss_ui.preview_file.as_ref().is_some_and(
+                    |(file_key, selected_path, _)| *file_key == key && selected_path == &path,
+                );
+                let searching = !self
+                    .boss_memory_search
+                    .read(cx)
+                    .content()
+                    .trim()
+                    .is_empty();
+                let display = if searching {
+                    path.clone()
+                } else {
+                    path.rsplit('/').next().unwrap_or(&path).to_owned()
+                };
+                boss_button(format!("boss-file-{path}"), path.clone(), &theme)
+                    .h(px(30.0))
+                    .w_full()
+                    .pl(px(8.0 + depth as f32 * 16.0))
+                    .when(selected, |button| button.bg(theme.sidebar_item_background))
+                    .child(icon(
+                        // Depth-zero directories are the named buckets — the
+                        // tree never shows a raw `memory` root row.
+                        if directory {
+                            if self
+                                .boss_ui
+                                .memory_expanded
+                                .get(&key)
+                                .is_some_and(|expanded| expanded.contains(&path))
+                            {
+                                "icons/chevron-down.svg"
+                            } else {
+                                "icons/chevron-right.svg"
+                            }
+                        } else {
+                            "icons/file.svg"
+                        },
+                        13.0,
+                        theme.text_secondary,
+                    ))
+                    .child(div().truncate().child(display))
+                    .on_activation(cx, move |this, _, cx| {
+                        if directory {
+                            let expanded = this.boss_ui.memory_expanded.entry(key).or_default();
+                            let opening = !expanded.remove(&path);
+                            if opening {
+                                expanded.insert(path.clone());
+                            }
+                            this.sync_boss_page_rows();
+                            if opening
+                                && !this
+                                    .boss_ui
+                                    .memory_loaded_folders
+                                    .get(&key)
+                                    .is_some_and(|loaded| loaded.contains(&path))
+                            {
+                                this.boss_request(
+                                    key,
+                                    BossOperation::ListFiles {
+                                        path: path.clone(),
+                                    },
+                                    BossReply::List,
+                                    cx,
+                                );
+                            }
+                            cx.notify();
+                        } else {
+                            if searching {
+                                let expanded =
+                                    this.boss_ui.memory_expanded.entry(key).or_default();
+                                let mut parent =
+                                    path.rsplit_once('/').map(|(parent, _)| parent);
+                                while let Some(directory) =
+                                    parent.filter(|directory| *directory != "memory")
+                                {
+                                    expanded.insert(directory.to_owned());
+                                    parent =
+                                        directory.rsplit_once('/').map(|(parent, _)| parent);
+                                }
+                                this.sync_boss_page_rows();
+                            }
+                            this.boss_request(
+                                key,
+                                BossOperation::ReadFile {
+                                    path: path.clone(),
+                                },
+                                BossReply::Read,
+                                cx,
+                            );
+                        }
+                    })
+                    .into_any_element()
+            }
+            BossItem::Bucket(bucket_id) => {
+                let Some(bucket) = self
+                    .boss_ui
+                    .memory_buckets
+                    .get(&key)
+                    .and_then(|buckets| buckets.iter().find(|bucket| bucket.id == bucket_id))
+                    .cloned()
+                else {
+                    return div().into_any_element();
+                };
+                let selected = self
+                    .boss_ui
+                    .memory_bucket_selected
+                    .get(&key)
+                    .is_some_and(|selected| *selected == bucket_id);
+                boss_button(
+                    format!("boss-bucket-{bucket_id}"),
+                    bucket.name.clone(),
+                    &theme,
+                )
+                .h(px(42.0))
+                .w_full()
+                .when(selected, |button| button.bg(theme.overlay))
+                .child(icon("icons/database.svg", 15.0, theme.text_secondary))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .child(div().truncate().child(bucket.name.clone()))
+                        .when(!bucket.purpose.is_empty(), |element| {
+                            element.child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .truncate()
+                                    .child(bucket.purpose.clone()),
+                            )
+                        }),
+                )
+                .on_activation(cx, move |this, _, cx| {
+                    this.boss_ui
+                        .memory_bucket_selected
+                        .insert(key, bucket_id.clone());
+                    this.ensure_boss_memory_overview(key, bucket_id.clone(), cx);
+                    cx.notify();
+                })
+                .into_any_element()
+            }
             BossItem::Plan(session_id) => {
                 let Some(plan) = self
                     .boss_ui
@@ -2976,6 +4051,392 @@ impl Waku {
             Some(Err(error)) => empty(format!("{}\n{error}", tr!("boss.plan_unavailable"))),
             None => empty(tr!("boss.loading")),
         }
+    }
+
+    /// The Memory section's reading pane for documents: the selected file's
+    /// rendered Markdown under a quiet path header, with the correction
+    /// request that arms the boss chat's composer. Failures stay in this
+    /// pane — the tree keeps its expansion and selection.
+    fn render_boss_memory_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        if let Some((error_key, path, error)) = self.boss_ui.memory_error.as_ref()
+            && *error_key == key
+            && path == "memory"
+        {
+            let error = error.clone();
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    div().text_color(theme.text_secondary).child(format!(
+                        "{}\n{error}",
+                        tr!("boss.memory_unavailable", path = "memory")
+                    )),
+                )
+                .child(
+                    boss_button("boss-memory-preview-list-retry", tr!("boss.retry"), &theme)
+                        .child(tr!("boss.retry"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_request(
+                                key,
+                                BossOperation::ListFiles {
+                                    path: "memory".into(),
+                                },
+                                BossReply::List,
+                                cx,
+                            );
+                        }),
+                )
+                .into_any_element();
+        }
+        if let Some((error_key, path, error)) = self.boss_ui.memory_error.as_ref()
+            && *error_key == key
+            && path != "memory"
+            && !self
+                .boss_ui
+                .files
+                .iter()
+                .any(|file| file.path == path.as_str() && file.directory)
+        {
+            let path = path.clone();
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    div().text_color(theme.text_secondary).child(format!(
+                        "{}\n{error}",
+                        tr!("boss.memory_unavailable", path = path.clone())
+                    )),
+                )
+                .child(
+                    boss_button("boss-memory-preview-retry", tr!("boss.retry"), &theme)
+                        .child(tr!("boss.retry"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_request(
+                                key,
+                                BossOperation::ReadFile {
+                                    path: path.clone(),
+                                },
+                                BossReply::Read,
+                                cx,
+                            );
+                        }),
+                )
+                .into_any_element();
+        }
+        if self.boss_ui.pending && self.boss_ui.pending_reply == Some(BossReply::Read) {
+            return div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(theme.text_secondary)
+                .child(tr!("boss.loading"))
+                .into_any_element();
+        }
+        if let Some((file_key, path, content)) = self.boss_ui.preview_file.as_ref()
+            && *file_key == key
+        {
+            let path = path.clone();
+            let content = content.clone();
+            let identity = self
+                .boss_ui
+                .states
+                .get(&key)
+                .map(|state| state.identity.id)
+                .unwrap_or_default();
+            let correct_path = path.clone();
+            let correct_content = content.clone();
+            return div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(px(38.0))
+                        .px(px(18.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .border_b_1()
+                        .border_color(theme.separator)
+                        .child(icon("icons/file-text.svg", 14.0, theme.text_tertiary))
+                        .child(
+                            div()
+                                .flex_1()
+                                .truncate()
+                                .text_color(theme.text_secondary)
+                                .child(path),
+                        )
+                        .child(
+                            boss_button(
+                                "boss-memory-correction",
+                                tr!("boss.ask_correct"),
+                                &theme,
+                            )
+                            .child(tr!("boss.ask_correct"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.chat_with_boss(key, cx);
+                                this.boss_ui.command_memory_correction =
+                                    Some((key, correct_path.clone(), correct_content.clone()));
+                                this.sync_composer_placeholder(cx);
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("boss-memory-preview")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .px(px(28.0))
+                        .py(px(20.0))
+                        .child(self.plan_document_view(identity, &content, false, None, cx)),
+                )
+                .into_any_element();
+        }
+        if self.boss_ui.files.is_empty() && !self.boss_ui.pending {
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.memory_empty")),
+                )
+                .child(
+                    boss_button("boss-memory-remember", tr!("boss.ask_remember"), &theme)
+                        .child(tr!("boss.ask_remember"))
+                        .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
+                )
+                .into_any_element();
+        }
+        div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(theme.text_secondary)
+            .child(tr!("boss.memory_select"))
+            .into_any_element()
+    }
+
+    /// The Records view's detail: the selected named bucket's overview —
+    /// original notes and stored summaries as readable entries, with the
+    /// same correction-through-Boss flow documents carry. Read-only.
+    fn render_boss_records_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let center = |label: String| {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().text_color(theme.text_secondary).child(label))
+                .into_any_element()
+        };
+        let Some(bucket_id) = self.boss_ui.memory_bucket_selected.get(&key).cloned() else {
+            return center(tr!("boss.bucket_select"));
+        };
+        let Some(bucket) = self
+            .boss_ui
+            .memory_buckets
+            .get(&key)
+            .and_then(|buckets| buckets.iter().find(|bucket| bucket.id == bucket_id))
+            .cloned()
+        else {
+            return center(tr!("boss.bucket_select"));
+        };
+        self.ensure_boss_memory_overview(key, bucket_id.clone(), cx);
+        if let Some(error) = self
+            .boss_ui
+            .memory_records_error
+            .get(&(key, bucket_id.clone()))
+        {
+            let error = error.clone();
+            let retry_bucket = bucket_id.clone();
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    div().text_color(theme.text_secondary).child(format!(
+                        "{}\n{error}",
+                        tr!("boss.bucket_unavailable", bucket = bucket.name.clone())
+                    )),
+                )
+                .child(
+                    boss_button("boss-memory-records-retry", tr!("boss.retry"), &theme)
+                        .child(tr!("boss.retry"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_request(
+                                key,
+                                BossOperation::Memory {
+                                    operation: waku_client::boss::MemoryOperation::Overview {
+                                        bucket: retry_bucket.clone(),
+                                    },
+                                },
+                                BossReply::Records,
+                                cx,
+                            );
+                        }),
+                )
+                .into_any_element();
+        }
+        let Some(records) = self
+            .boss_ui
+            .memory_records
+            .get(&(key, bucket_id.clone()))
+            .cloned()
+        else {
+            return center(tr!("boss.loading"));
+        };
+        if records.is_empty() {
+            return div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.records_empty")),
+                )
+                .child(
+                    boss_button("boss-records-remember", tr!("boss.ask_remember"), &theme)
+                        .child(tr!("boss.ask_remember"))
+                        .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
+                )
+                .into_any_element();
+        }
+        let bucket_name = bucket.name.clone();
+        let rows = records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| {
+                let (label, reference, text) = match record {
+                    MemoryRecord::Note {
+                        sequence,
+                        kind,
+                        text,
+                        ..
+                    } => {
+                        let kind_label = match kind {
+                            waku_client::boss::MemoryNoteKind::Fact => tr!("boss.record_fact"),
+                            waku_client::boss::MemoryNoteKind::Observation => {
+                                tr!("boss.record_observation")
+                            }
+                            waku_client::boss::MemoryNoteKind::Question => {
+                                tr!("boss.record_question")
+                            }
+                        };
+                        (
+                            format!("#{sequence} · {kind_label}"),
+                            format!("note-{sequence}"),
+                            text.clone(),
+                        )
+                    }
+                    MemoryRecord::Summary { start, end, text } => (
+                        format!("#{}–{} · {}", start, end, tr!("boss.record_summary")),
+                        format!("summary-{start}-{end}"),
+                        text.clone(),
+                    ),
+                };
+                let correct_label = format!("buckets/{}/{reference}", bucket.name);
+                let correct_content = text.clone();
+                div()
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(label),
+                            )
+                            .child(
+                                boss_button(
+                                    format!("boss-record-correct-{index}"),
+                                    tr!("boss.ask_correct"),
+                                    &theme,
+                                )
+                                .child(tr!("boss.ask_correct"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.chat_with_boss(key, cx);
+                                    this.boss_ui.command_memory_correction = Some((
+                                        key,
+                                        correct_label.clone(),
+                                        correct_content.clone(),
+                                    ));
+                                    this.sync_composer_placeholder(cx);
+                                }),
+                            ),
+                    )
+                    .child(div().text_size(sp(13.0)).child(text))
+            })
+            .collect::<Vec<_>>();
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(38.0))
+                    .px(px(18.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .child(icon("icons/database.svg", 14.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_color(theme.text_secondary)
+                            .child(format!("buckets/{bucket_name}")),
+                    ),
+            )
+            .child(
+                div()
+                    .id("boss-memory-records")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(px(28.0))
+                    .py(px(12.0))
+                    .children(rows),
+            )
+            .into_any_element()
     }
 
     fn render_boss_editor(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -3552,6 +5013,87 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_tree_flattens_expanded_folders_and_hides_collapsed_children() {
+        let files = vec![
+            BossFile {
+                path: "memory/z.md".into(),
+                directory: false,
+            },
+            BossFile {
+                path: "memory/work".into(),
+                directory: true,
+            },
+            BossFile {
+                path: "memory/work/note.md".into(),
+                directory: false,
+            },
+        ];
+        assert_eq!(
+            memory_tree_rows(&files, &HashSet::new(), None, None),
+            vec![
+                BossItem::File("memory/work".into(), true, 0),
+                BossItem::File("memory/z.md".into(), false, 0),
+            ]
+        );
+        let expanded = HashSet::from(["memory/work".to_string()]);
+        assert_eq!(
+            memory_tree_rows(&files, &expanded, None, None),
+            vec![
+                BossItem::File("memory/work".into(), true, 0),
+                BossItem::File("memory/work/note.md".into(), false, 1),
+                BossItem::File("memory/z.md".into(), false, 0),
+            ]
+        );
+        assert_eq!(
+            memory_tree_rows(&files, &expanded, Some("memory/work"), None),
+            vec![
+                BossItem::File("memory/work".into(), true, 0),
+                BossItem::MemoryStatus("memory/work".into(), 1, false),
+                BossItem::File("memory/work/note.md".into(), false, 1),
+                BossItem::File("memory/z.md".into(), false, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_overview_items_parse_notes_and_summaries() {
+        let note = serde_json::json!({
+            "type": "note",
+            "note": {
+                "id": "1-abc",
+                "bucketId": "project-x",
+                "sequence": 3,
+                "kind": "observation",
+                "text": "watch the queue",
+                "retryKey": "k",
+                "createdAt": 99
+            }
+        });
+        let summary = serde_json::json!({
+            "type": "summary",
+            "summary": { "bucketId": "project-x", "start": 1, "end": 2, "text": "early notes" }
+        });
+        assert_eq!(
+            memory_record_from_json(&note),
+            Some(MemoryRecord::Note {
+                sequence: 3,
+                kind: waku_client::boss::MemoryNoteKind::Observation,
+                text: "watch the queue".into(),
+                created_at: 99,
+            })
+        );
+        assert_eq!(
+            memory_record_from_json(&summary),
+            Some(MemoryRecord::Summary {
+                start: 1,
+                end: 2,
+                text: "early notes".into(),
+            })
+        );
+        assert_eq!(memory_record_from_json(&serde_json::json!({"type": "other"})), None);
+    }
 
     fn boss_employee(created_at: Option<u64>) -> waku_protocol::boss::BossEmployee {
         waku_protocol::boss::BossEmployee {
