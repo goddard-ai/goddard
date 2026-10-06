@@ -102,6 +102,13 @@ pub enum ComposerDraftInlineAtomKind {
         session_id: Uuid,
         title: String,
     },
+    /// A non-session reference — `target` is the handle the payload names
+    /// (a project's path, a persona/deliverable id, a bucket id).
+    Reference {
+        kind: crate::model::AtomRefKind,
+        name: String,
+        target: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]

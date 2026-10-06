@@ -5,7 +5,7 @@ use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::boss::{
     BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
-    PersonaPermissions,
+    MemoryOperation, PersonaPermissions,
 };
 use waku_protocol::custom_commands::CustomCommandIcon;
 
@@ -144,6 +144,19 @@ pub(super) struct BossUi {
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
+    /// Cached `ListBuckets` replies per daemon — the `@` mention pool's
+    /// memory-bucket source. Fetched lazily the first time a boss surface's
+    /// pool is drawn; a daemon that never answers simply lists none.
+    pub(super) buckets: HashMap<DaemonKey, Rc<Vec<BossBucketRef>>>,
+    /// Daemons a bucket pull is already in flight for — interior-mutable so
+    /// the render-path pool draw can arm a fetch without `&mut self`.
+    pub(super) buckets_requested: RefCell<HashSet<DaemonKey>>,
+    /// The `memory/` tree listing per daemon — the `@` mention pool's
+    /// memory-file source, fetched with the same lazy one-shot rule as
+    /// `buckets`.
+    pub(super) memory_files: HashMap<DaemonKey, Rc<Vec<BossFile>>>,
+    /// Daemons a memory-tree pull is already in flight for.
+    pub(super) memory_files_requested: RefCell<HashSet<DaemonKey>>,
     pub(super) job_titles: HashMap<Uuid, String>,
     pub(super) employee_icons: HashMap<Uuid, Option<CustomCommandIcon>>,
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
@@ -248,6 +261,10 @@ impl Default for BossUi {
             hosts: Vec::new(),
             managed: HashSet::new(),
             identities: HashMap::new(),
+            buckets: HashMap::new(),
+            buckets_requested: RefCell::new(HashSet::new()),
+            memory_files: HashMap::new(),
+            memory_files_requested: RefCell::new(HashSet::new()),
             job_titles: HashMap::new(),
             employee_icons: HashMap::new(),
             active: HashMap::new(),
@@ -297,6 +314,29 @@ impl Default for BossUi {
             focus: None,
         }
     }
+}
+
+/// One memory bucket the `@` mention pool can name — the fields a
+/// `ListBuckets` reply carries, parsed at fetch so rows never read the
+/// daemon's loose JSON.
+#[derive(Clone)]
+pub(super) struct BossBucketRef {
+    pub id: String,
+    pub name: String,
+    pub purpose: String,
+}
+
+/// The `ListBuckets` reply's per-bucket shape — the daemon serializes the
+/// memory engine's record as loose JSON, so the client reads only the
+/// fields a mention needs.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireBossBucket {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    purpose: String,
 }
 
 /// A Goals panel section, in display order. Only `EmployeeGoal::Goal`
@@ -753,6 +793,125 @@ impl Waku {
         }
     }
 
+    /// One `ListBuckets` pull for `key` — armed lazily when a boss
+    /// surface's `@` pool draws, so a daemon without a memory engine costs
+    /// one request rather than a per-keystroke miss. A failure clears the
+    /// request flag so the next popup open retries.
+    pub(super) fn ensure_boss_buckets(&self, key: DaemonKey, cx: &mut Context<Self>) {
+        if self.boss_ui.buckets.contains_key(&key)
+            || !self.boss_ui.buckets_requested.borrow_mut().insert(key)
+        {
+            return;
+        }
+        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        else {
+            self.boss_ui.buckets_requested.borrow_mut().remove(&key);
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss {
+                            operation: BossOperation::Memory {
+                                operation: MemoryOperation::ListBuckets,
+                            },
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.boss_ui.buckets_requested.borrow_mut().remove(&key);
+                if let Ok(waku_client::ResponsePayload::Boss {
+                    result:
+                        BossResult::Memory {
+                            buckets: raw, ..
+                        },
+                }) = result
+                {
+                    let buckets = raw
+                        .iter()
+                        .filter_map(|value| {
+                            serde_json::from_value::<WireBossBucket>(value.clone()).ok()
+                        })
+                        .map(|bucket| BossBucketRef {
+                            id: bucket.id,
+                            name: bucket.name,
+                            purpose: bucket.purpose,
+                        })
+                        .collect();
+                    this.boss_ui.buckets.insert(key, Rc::new(buckets));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// One `memory/` tree pull for `key` — the mention pool's memory-file
+    /// source, armed the same way [`Self::ensure_boss_buckets`] is: lazily
+    /// on first pool draw, one breadth-first `ListFiles` walk per daemon,
+    /// retried on the next draw after a failure.
+    pub(super) fn ensure_boss_memory_files(&self, key: DaemonKey, cx: &mut Context<Self>) {
+        if self.boss_ui.memory_files.contains_key(&key)
+            || !self.boss_ui.memory_files_requested.borrow_mut().insert(key)
+        {
+            return;
+        }
+        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        else {
+            self.boss_ui.memory_files_requested.borrow_mut().remove(&key);
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut directories = VecDeque::from(["memory".to_owned()]);
+                    let mut files = Vec::new();
+                    while let Some(path) = directories.pop_front() {
+                        let response = client
+                            .request(
+                                Uuid::nil(),
+                                Uuid::nil(),
+                                waku_client::Command::Boss {
+                                    operation: BossOperation::ListFiles {
+                                        path: path.clone(),
+                                    },
+                                },
+                            )
+                            .map_err(|error| anyhow::anyhow!("{path}: {error}"))?;
+                        let waku_client::ResponsePayload::Boss {
+                            result: BossResult::Files { files: listing },
+                        } = response
+                        else {
+                            anyhow::bail!("unexpected memory directory response");
+                        };
+                        directories.extend(
+                            listing
+                                .iter()
+                                .filter(|file| file.directory)
+                                .map(|file| file.path.clone()),
+                        );
+                        files.extend(listing);
+                    }
+                    Ok::<_, anyhow::Error>(files)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.boss_ui.memory_files_requested.borrow_mut().remove(&key);
+                if let Ok(files) = result {
+                    this.boss_ui.memory_files.insert(key, Rc::new(files));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Fetch one host's Boss document off the UI thread. The daemon still
     /// answers for its own copy of the experiment setting, and a returned
     /// state lands through `drain_boss_events` like any other boss reply.
@@ -965,7 +1124,11 @@ impl Waku {
         };
         let records_bucket = match &operation {
             BossOperation::Memory {
-                operation: waku_client::boss::MemoryOperation::Overview { bucket },
+                operation:
+                    waku_client::boss::MemoryOperation::Overview {
+                        bucket: Some(bucket),
+                        ..
+                    },
             } if reply == BossReply::Records => Some(bucket.clone()),
             _ => None,
         };
@@ -1417,7 +1580,10 @@ impl Waku {
         self.boss_request(
             key,
             BossOperation::Memory {
-                operation: waku_client::boss::MemoryOperation::Overview { bucket },
+                operation: waku_client::boss::MemoryOperation::Overview {
+                    bucket: Some(bucket),
+                    project: None,
+                },
             },
             BossReply::Records,
             cx,
@@ -1433,6 +1599,20 @@ impl Waku {
             .states
             .iter()
             .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
+    }
+
+    /// The boss owning the selected session's surface beyond the chat
+    /// itself — a planning session or deliverable page lives in the
+    /// boss-minted project, so the project maps straight back to its owner
+    /// the way `surface_boss_key` resolves composer pools. `None` outside
+    /// boss surfaces.
+    pub(super) fn selected_surface_boss_key(&self) -> Option<DaemonKey> {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| Some(session.id) == self.state.selected_session)?;
+        self.boss_key_for_project(session.project_id)
     }
 
     /// ⌘N's recency stamps: a user send to a boss chat marks that boss the
@@ -1759,6 +1939,47 @@ impl Waku {
             });
         }
         (Rc::new(mentions), Rc::new(avatars))
+    }
+
+    /// Every managed identity's mention avatar across bosses — the
+    /// avatar half of [`Self::boss_session_mentions`] without the prose
+    /// name matching. A `@`-typed session chip in any transcript paints
+    /// the face the mention row and sidebar row wear; only boss surfaces
+    /// additionally resolve bare names in prose.
+    pub(super) fn all_mention_avatars(&self) -> Rc<HashMap<Uuid, Arc<gpui::RenderImage>>> {
+        // Planning sessions stay out of the map on purpose — their chips
+        // keep the compass glyph rather than the boss's face.
+        let chats = self.boss_ui.states.values().filter_map(|state| {
+            state.session_id.map(|id| (id, &state.identity))
+        });
+        let employees = self
+            .boss_ui
+            .identities
+            .iter()
+            .map(|(id, identity)| (*id, identity));
+        Rc::new(
+            chats
+                .chain(employees)
+                .filter_map(|(id, identity)| {
+                    self.boss_avatar_image(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+                        .map(|image| (id, image))
+                })
+                .collect(),
+        )
+    }
+
+    /// The session-chip glyph overrides every transcript shares —
+    /// planning sessions paint the compass wherever a chip names them,
+    /// matching the sidebar row and the `@` row that staged the mention.
+    pub(super) fn mention_glyphs(&self) -> Rc<HashMap<Uuid, &'static str>> {
+        Rc::new(
+            self.state
+                .sessions
+                .iter()
+                .filter(|session| session.is_planning())
+                .map(|session| (session.id, crate::input::ATOM_PLANNING_ICON))
+                .collect(),
+        )
     }
 
     /// The `(daemon, identity, job title)` a managed session's top bar
@@ -4290,7 +4511,8 @@ impl Waku {
                                 key,
                                 BossOperation::Memory {
                                     operation: waku_client::boss::MemoryOperation::Overview {
-                                        bucket: retry_bucket.clone(),
+                                        bucket: Some(retry_bucket.clone()),
+                                        project: None,
                                     },
                                 },
                                 BossReply::Records,

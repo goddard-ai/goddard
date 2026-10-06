@@ -1,0 +1,1 @@
+- Typing `@` in a boss chat or planning-session composer now offers the roster's employees with their avatars, the planning sessions with a compass, and non-session references — projects, personas, deliverables, memory buckets and documents, and automations — that insert as labeled chips naming the target in the prompt.

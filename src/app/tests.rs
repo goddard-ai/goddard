@@ -1,7 +1,7 @@
 use super::autocomplete::session_mention_candidate;
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
-    ComposerAtomKind, ComposerInlineAtom, ComposerSubmitAction, ContinueState,
+    ComposerAtomKind, ComposerInlineAtom, ComposerRef, ComposerSubmitAction, ContinueState,
     atom_display_content, atom_payload_content, composer_submit_action, continue_state,
     dropped_file_mention, merged_submission, pasted_text_preview, project_picker_order,
     queued_message_is_continue, remap_marker_seats, splice_inline_atoms, visible_branch_entries,
@@ -614,6 +614,36 @@ fn session_atom(marker: usize) -> ComposerInlineAtom {
             title: "Big refactor".into(),
         },
     }
+}
+
+#[test]
+fn reference_atoms_splice_their_token_and_chip() {
+    use crate::input::INLINE_ATOM_MARKER as M;
+    use waku_protocol::model::{
+        AtomRefKind, MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN,
+        MESSAGE_ATOM_REF as REF, atom_visible_text,
+    };
+    let atom = ComposerInlineAtom {
+        marker: 0,
+        revision: Uuid::new_v4(),
+        paste_category: None,
+        kind: ComposerAtomKind::Ref(ComposerRef {
+            kind: AtomRefKind::Project,
+            name: "Goddard".into(),
+            target: "/abs/repo".into(),
+            detail: "".into(),
+        }),
+    };
+    assert_eq!(
+        splice_inline_atoms(&format!("ship {M} first"), std::slice::from_ref(&atom)),
+        "ship [project \"Goddard\" (path: /abs/repo)] first"
+    );
+    let display = atom_display_content(&format!("{M}"), &[atom]);
+    assert_eq!(
+        display,
+        format!("{OPEN}{REF}{kind}Goddard{END}", kind = AtomRefKind::Project.mark())
+    );
+    assert_eq!(atom_visible_text(&display), "Goddard");
 }
 
 #[test]

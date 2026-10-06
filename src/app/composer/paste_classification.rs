@@ -113,7 +113,7 @@ impl Waku {
             }
             match &atom.kind {
                 ComposerAtomKind::PastedText(text) => Some(text.clone()),
-                ComposerAtomKind::SessionRef { .. } => None,
+                ComposerAtomKind::SessionRef { .. } | ComposerAtomKind::Ref(_) => None,
             }
         }) else {
             return;

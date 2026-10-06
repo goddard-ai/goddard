@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::md::highlight::{self, Lang, TokenClass};
@@ -659,24 +660,63 @@ pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2002}";
 /// the session attachment chip carry.
 pub(crate) const ATOM_SESSION_ICON: &str = "icons/chat.svg";
 
+/// The chip glyph a planning-session atom paints — the compass the
+/// sidebar's planning rows and the `@` popup's planning rows carry.
+pub(crate) const ATOM_PLANNING_ICON: &str = "icons/compass.svg";
+
 /// A collapsed paste's chip icon — the same file glyph the pasted-block
 /// attachment chip carries.
 pub(crate) const ATOM_PASTED_ICON: &str = "icons/file.svg";
 
+/// The chip glyph a reference atom paints — the same icon the reference's
+/// own surfaces carry (the sidebar's Projects row, the boss page's
+/// Personas and Deliverables tabs, the memory brain's database glyph).
+pub(crate) fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
+    use waku_protocol::model::AtomRefKind;
+    match kind {
+        AtomRefKind::Project => "icons/projects.svg",
+        AtomRefKind::Persona => "icons/user-round.svg",
+        AtomRefKind::Deliverable => "icons/file-text.svg",
+        AtomRefKind::MemoryBucket => "icons/database.svg",
+        AtomRefKind::Automation => "icons/automations.svg",
+        AtomRefKind::MemoryFile => "icons/brain.svg",
+    }
+}
+
+/// What a chip's reserved slot paints — a stroked icon or a session
+/// mention's rendered avatar.
+#[derive(Clone)]
+pub(crate) enum AtomGlyph {
+    Icon(&'static str),
+    Avatar(Arc<gpui::RenderImage>),
+}
+
 /// An atom the owner staged against an [`INLINE_ATOM_MARKER`]: the label
 /// the marker substitutes to in the painted text, and the icon the chip
-/// opens with. An `icon` of `None` paints a plain text chip.
+/// opens with. An `icon` of `None` paints a plain text chip. `avatar`
+/// swaps the stroked icon for a mention's seeded face — the chip still
+/// reserves the slot, so set `icon` alongside it as the raster's
+/// placeholder and fallback.
 #[derive(Clone)]
 pub struct InlineAtom {
     pub label: SharedString,
     pub icon: Option<&'static str>,
+    pub avatar: Option<Arc<gpui::RenderImage>>,
 }
 
 impl InlineAtom {
+    /// The glyph the chip's leading slot paints, when the atom carries one.
+    fn glyph(&self) -> Option<AtomGlyph> {
+        self.avatar
+            .clone()
+            .map(AtomGlyph::Avatar)
+            .or_else(|| self.icon.map(AtomGlyph::Icon))
+    }
+
     /// The painted substitution — [`ATOM_ICON_SLOT`] ahead of the label
-    /// when the chip leads with an icon.
+    /// when the chip leads with a glyph.
     fn display_label(&self) -> Cow<'_, str> {
-        if self.icon.is_some() {
+        if self.icon.is_some() || self.avatar.is_some() {
             Cow::Owned(format!("{ATOM_ICON_SLOT}{}", self.label))
         } else {
             Cow::Borrowed(self.label.as_ref())
@@ -687,7 +727,7 @@ impl InlineAtom {
     /// display↔content index translation needs.
     fn display_len(&self) -> usize {
         self.label.len()
-            + if self.icon.is_some() {
+            + if self.icon.is_some() || self.avatar.is_some() {
                 ATOM_ICON_SLOT.len()
             } else {
                 0
@@ -3459,17 +3499,17 @@ struct InputLayoutState {
     /// Atom label ranges in display coordinates — prepaint turns them into
     /// the chip quads the wash paints as.
     atom_ranges: Vec<Range<usize>>,
-    /// Each atom's icon, parallel to `atom_ranges` — `None` for a marker
-    /// without an atom or a chip that paints no icon.
-    atom_icons: Vec<Option<&'static str>>,
+    /// Each atom's glyph, parallel to `atom_ranges` — `None` for a marker
+    /// without an atom or a chip that paints no leading glyph.
+    atom_icons: Vec<Option<AtomGlyph>>,
 }
 
 struct PrepaintState {
     cursor: Option<PaintQuad>,
     /// The chip quads under each atom's label, painted beneath the text.
     atom_chips: Vec<PaintQuad>,
-    /// Each icon's path and painted bounds, inside its chip's leading edge.
-    atom_icons: Vec<(&'static str, Bounds<Pixels>)>,
+    /// Each glyph and its painted bounds, inside its chip's leading edge.
+    atom_icons: Vec<(AtomGlyph, Bounds<Pixels>)>,
 }
 
 /// Find-match washes layered into [`input_text_runs`]: every match gets
@@ -3792,16 +3832,23 @@ impl Element for InputElement {
                 emphasized_color: annotation_wash.opacity((annotation_wash.a * 1.75).min(1.0)),
             }
         };
-        let atom_icons: Vec<Option<&'static str>> = atom_ranges
+        let atom_icons: Vec<Option<AtomGlyph>> = atom_ranges
             .iter()
             .enumerate()
-            .map(|(index, _)| input.inline_atoms.get(index).and_then(|atom| atom.icon))
+            .map(|(index, _)| {
+                input
+                    .inline_atoms
+                    .get(index)
+                    .and_then(|atom| atom.glyph())
+            })
             .collect();
         let atom_slots: Vec<Range<usize>> = atom_ranges
             .iter()
             .zip(&atom_icons)
-            .filter_map(|(range, icon)| {
-                icon.map(|_| range.start..range.start + ATOM_ICON_SLOT.len())
+            .filter_map(|(range, glyph)| {
+                glyph
+                    .as_ref()
+                    .map(|_| range.start..range.start + ATOM_ICON_SLOT.len())
             })
             .collect();
         let atoms = if has_atoms {
@@ -3869,10 +3916,14 @@ impl Element for InputElement {
         let mut atom_icons = Vec::new();
         for (index, range) in layout_state.atom_ranges.iter().enumerate() {
             let bounds = atom_chip_bounds(&layout, range);
-            if let Some(icon) = layout_state.atom_icons.get(index).copied().flatten()
+            if let Some(glyph) = layout_state.atom_icons.get(index).cloned().flatten()
                 && let Some(chip) = bounds.first()
             {
-                atom_icons.push((icon, atom_icon_bounds(*chip)));
+                let glyph_bounds = match glyph {
+                    AtomGlyph::Icon(_) => atom_icon_bounds(*chip),
+                    AtomGlyph::Avatar(_) => atom_avatar_bounds(*chip),
+                };
+                atom_icons.push((glyph, glyph_bounds));
             }
             atom_chips.extend(bounds.into_iter().map(|bounds| {
                 fill(bounds, theme.accent.opacity(0.12))
@@ -3982,18 +4033,32 @@ impl Element for InputElement {
             window,
             cx,
         );
-        // The icons land inside their chip's icon slot — whitespace the
+        // The glyphs land inside their chip's icon slot — whitespace the
         // label's own substitution reserved — so they paint over the text.
         let icon_color = Theme::current(cx).accent;
-        for (path, icon_bounds) in prepaint.atom_icons.drain(..) {
-            let _ = window.paint_svg(
-                icon_bounds,
-                path.into(),
-                None,
-                gpui::TransformationMatrix::default(),
-                icon_color,
-                cx,
-            );
+        for (glyph, glyph_bounds) in prepaint.atom_icons.drain(..) {
+            match glyph {
+                AtomGlyph::Icon(path) => {
+                    let _ = window.paint_svg(
+                        glyph_bounds,
+                        path.into(),
+                        None,
+                        gpui::TransformationMatrix::default(),
+                        icon_color,
+                        cx,
+                    );
+                }
+                AtomGlyph::Avatar(image) => {
+                    let _ = window.paint_image(
+                        glyph_bounds,
+                        glyph_bounds,
+                        gpui::Corners::all(px(3.0)),
+                        image,
+                        0,
+                        false,
+                    );
+                }
+            }
         }
         if visually_focused && let Some(cursor) = prepaint.cursor.take() {
             window.paint_quad(cursor);
@@ -4654,6 +4719,7 @@ mod tests {
                     vec![InlineAtom {
                         label: "Big refactor".into(),
                         icon: Some(ATOM_SESSION_ICON),
+                        avatar: None,
                     }],
                     cx,
                 );
@@ -4708,6 +4774,7 @@ mod tests {
                     vec![InlineAtom {
                         label: "pasted text".into(),
                         icon: Some(ATOM_PASTED_ICON),
+                        avatar: None,
                     }],
                     cx,
                 );

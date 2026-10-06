@@ -23,7 +23,9 @@ use gpui::{
 };
 use nucleo_matcher::Matcher;
 
-use waku_client::{GitHubAvailability, GitHubRepoRef, WorkItemKind, WorkItemQueryState};
+use waku_client::boss::BossIdentity;
+use waku_client::{DaemonKey, GitHubAvailability, GitHubRepoRef, WorkItemKind, WorkItemQueryState};
+use waku_protocol::model::AtomRefKind;
 
 use crate::composer_complete::{
     self, ComposerWorkItem, ComposerWorkItemState, FILE_INDEX_CAP, FileEntry, Scored, SlashCommand,
@@ -60,23 +62,34 @@ pub(super) enum AutocompleteRow {
     Command(Scored<SlashCommand>),
     /// A task mention under `@` — accepting splices an inline session atom.
     Session(Scored<ComposerSessionRef>),
+    /// A project, persona, deliverable, memory bucket/file, or automation
+    /// mention under `@` — accepting splices an inline reference atom.
+    Ref(Scored<composer::ComposerRef>),
     File(Scored<FileEntry>),
     WorkItem(Scored<ComposerWorkItem>),
 }
 
 /// What a session `@` row carries: the id the atom records, the title the
-/// popup matches and the mention paints, and the project for disambiguation.
+/// popup matches and the mention paints, the project for disambiguation,
+/// and the row's glyph — the seeded identity an employee or the boss chat
+/// wears, or the planning marker that swaps it for the compass.
 #[derive(Clone)]
 pub(super) struct ComposerSessionRef {
     pub id: Uuid,
     pub title: SharedString,
     pub project: SharedString,
+    pub identity: Option<BossIdentity>,
+    pub planning: bool,
 }
 
 /// Session rows cap under `@` — they lead the list so a title match is
 /// never buried under the file index, but a broad query still leaves files
 /// reachable.
 const SESSION_MENTION_CAP: usize = 8;
+
+/// Reference rows share the same cap for the same reason — the `@` list is
+/// a mention list first, never a second file picker.
+const REF_MENTION_CAP: usize = 8;
 
 /// The `mentionable_sessions` pool minus the staged/target exclusions:
 /// started, unarchived, not a side chat, and in the composer's own project
@@ -709,15 +722,57 @@ impl Waku {
         }
     }
 
+    /// The boss owning `surface`'s workspace — the surface's project is the
+    /// boss-minted project id, so the boss chat, its planning sessions, and
+    /// its deliverable page all resolve to the same daemon.
+    fn surface_boss_key(&self, surface: &composer::ComposerCard) -> Option<DaemonKey> {
+        let project = self.surface_project_id(surface)?;
+        self.boss_key_for_project(project)
+    }
+
+    /// Whether `session` is on the live roster of `surface`'s boss — the
+    /// pool's cross-project extension: a mention in a boss chat is how the
+    /// user names who should take work, so employees are offered whatever
+    /// project their task lives in.
+    fn boss_employee_mentionable(&self, boss: Option<DaemonKey>, session: &AgentSession) -> bool {
+        boss.is_some_and(|key| {
+            self.boss_ui
+                .states
+                .get(&key)
+                .is_some_and(|state| {
+                    state
+                        .employees
+                        .iter()
+                        .any(|employee| employee.session_id == session.id)
+                })
+        }) && session.has_started()
+            && session.archived_at.is_none()
+            && !session.is_side_chat()
+    }
+
+    /// The full session pool predicate — project-scoped candidates plus the
+    /// boss-roster extension. `mentionable_sessions_for` and the memo
+    /// fingerprint share it so both watch the same set.
+    fn session_mentionable(
+        &self,
+        session: &AgentSession,
+        project: Option<Uuid>,
+        boss: Option<DaemonKey>,
+    ) -> bool {
+        session_mention_candidate(session, project)
+            || self.boss_employee_mentionable(boss, session)
+    }
+
     /// Sessions the `@` popup can offer — the same set the sidebar drags:
     /// started, unarchived, not side chats, in the composer's own project,
-    /// minus the session the composer addresses and any already staged.
-    /// Recent activity first.
+    /// plus a boss surface's live roster — minus the session the composer
+    /// addresses and any already staged. Recent activity first.
     fn mentionable_sessions_for(
         &self,
         surface: &composer::ComposerCard,
     ) -> Vec<ComposerSessionRef> {
         let project = self.surface_project_id(surface);
+        let boss = self.surface_boss_key(surface);
         let project_name = |session: &AgentSession| {
             self.state
                 .projects
@@ -732,7 +787,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session_mention_candidate(session, project)
+                self.session_mentionable(session, project, boss)
                     && self.surface_session_atom_allowed(surface, session.id)
             })
             .collect();
@@ -745,14 +800,164 @@ impl Waku {
                 id: session.id,
                 title: SharedString::from(session.display_title().to_owned()),
                 project: project_name(session),
+                // A planning session's row paints the compass — the boss
+                // identity it would otherwise inherit is the wrong glyph.
+                planning: session.is_planning(),
+                identity: if session.is_planning() {
+                    None
+                } else {
+                    self.boss_session_identity(session.id)
+                },
             })
             .collect()
     }
 
-    /// A cheap fingerprint of what the session rows derive from — the
-    /// offerable set and the exclusions — so a session title edit or a
-    /// freshly staged atom invalidates the memo the way a new file index
-    /// does.
+    /// Whether a `(kind, target)` reference is not already staged in
+    /// `surface`'s field — the ref half of `surface_session_atom_allowed`'s
+    /// dedupe rule.
+    fn surface_ref_atom_allowed(
+        &self,
+        surface: &composer::ComposerCard,
+        kind: AtomRefKind,
+        target: &str,
+    ) -> bool {
+        !self.surface_atoms(surface).iter().any(|atom| {
+            matches!(
+                &atom.kind,
+                composer::ComposerAtomKind::Ref(reference)
+                    if reference.kind == kind && reference.target == target
+            )
+        })
+    }
+
+    /// The `@` pool's project references — registered, durable projects the
+    /// boss's `summon` takes by path — minus the surface's own and the
+    /// boss-minted workspaces (a boss chat is not a summon target).
+    fn mentionable_projects(&self, surface: &composer::ComposerCard) -> Vec<composer::ComposerRef> {
+        let current = self.surface_project_id(surface);
+        let home = self.home_directory.as_deref();
+        self.state
+            .projects
+            .iter()
+            .filter(|project| {
+                !project.temporary
+                    && !project.is_projectless()
+                    && !project.is_friends()
+                    && Some(project.id) != current
+                    && !self.boss_ui.projects.contains_key(&project.id)
+                    && self.surface_ref_atom_allowed(
+                        surface,
+                        AtomRefKind::Project,
+                        &project.path.display().to_string(),
+                    )
+            })
+            .map(|project| composer::ComposerRef {
+                kind: AtomRefKind::Project,
+                name: SharedString::from(project.display_name()),
+                target: SharedString::from(project.path.display().to_string()),
+                detail: SharedString::from(settings::abbreviate_home_path(&project.path, home)),
+            })
+            .collect()
+    }
+
+    /// The boss-domain references a boss surface's `@` pool offers: the
+    /// personas `summon` casts employees from, the published deliverables a
+    /// reply can correct, the memory buckets a hint can grant or consult,
+    /// the `memory/` documents an ask can read or correct, and the
+    /// daemon's automations an ask can pause, resume, or rework. `None`
+    /// off boss surfaces — the tokens mean nothing to a plain provider
+    /// session.
+    fn mentionable_boss_refs(&self, surface: &composer::ComposerCard) -> Vec<composer::ComposerRef> {
+        let Some(key) = self.surface_boss_key(surface) else {
+            return Vec::new();
+        };
+        let Some(state) = self.boss_ui.states.get(&key) else {
+            return Vec::new();
+        };
+        let personas = state.personas.iter().map(|persona| composer::ComposerRef {
+            kind: AtomRefKind::Persona,
+            name: SharedString::from(persona.name.clone()),
+            target: SharedString::from(persona.id.to_string()),
+            detail: SharedString::default(),
+        });
+        let deliverables = state
+            .deliverables
+            .iter()
+            .filter(|deliverable| deliverable.archived_at.is_none())
+            .map(|deliverable| {
+                let file_name = Path::new(&deliverable.path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                composer::ComposerRef {
+                    kind: AtomRefKind::Deliverable,
+                    name: SharedString::from(deliverable.name.clone()),
+                    target: SharedString::from(deliverable.id.to_string()),
+                    detail: SharedString::from(file_name),
+                }
+            });
+        let buckets = self
+            .boss_ui
+            .buckets
+            .get(&key)
+            .into_iter()
+            .flat_map(|buckets| buckets.iter())
+            .map(|bucket| composer::ComposerRef {
+                kind: AtomRefKind::MemoryBucket,
+                name: SharedString::from(bucket.name.clone()),
+                target: SharedString::from(bucket.id.clone()),
+                detail: SharedString::from(bucket.purpose.clone()),
+            });
+        let memory_files = self
+            .boss_ui
+            .memory_files
+            .get(&key)
+            .into_iter()
+            .flat_map(|files| files.iter())
+            .filter(|file| !file.directory)
+            .map(|file| {
+                let (parent, name) = file
+                    .path
+                    .rsplit_once('/')
+                    .map(|(parent, name)| (parent, name.to_owned()))
+                    .unwrap_or(("", file.path.clone()));
+                composer::ComposerRef {
+                    kind: AtomRefKind::MemoryFile,
+                    name: SharedString::from(name),
+                    target: SharedString::from(file.path.clone()),
+                    detail: SharedString::from(parent.to_owned()),
+                }
+            });
+        let home = self.home_directory.as_deref();
+        let automations = self
+            .automations
+            .get(&key)
+            .into_iter()
+            .flat_map(|state| state.automations.iter())
+            .map(|automation| composer::ComposerRef {
+                kind: AtomRefKind::Automation,
+                name: SharedString::from(automation.name.clone()),
+                target: SharedString::from(automation.id.to_string()),
+                detail: SharedString::from(settings::abbreviate_home_path(
+                    &automation.project_path,
+                    home,
+                )),
+            });
+        personas
+            .chain(deliverables)
+            .chain(buckets)
+            .chain(memory_files)
+            .chain(automations)
+            .filter(|reference| {
+                self.surface_ref_atom_allowed(surface, reference.kind, &reference.target)
+            })
+            .collect()
+    }
+
+    /// A cheap fingerprint of what the `@` mention rows derive from — the
+    /// offerable sets and the exclusions — so a session title edit, a
+    /// roster or project change, or a freshly staged atom invalidates the
+    /// memo the way a new file index does.
     fn session_mention_fingerprint_for(&self, surface: &composer::ComposerCard) -> usize {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         let target = match surface {
@@ -764,16 +969,59 @@ impl Waku {
         project.hash(&mut hasher);
         for atom in self.surface_atoms(surface) {
             atom.session_id().hash(&mut hasher);
+            if let composer::ComposerAtomKind::Ref(reference) = &atom.kind {
+                reference.kind.hash(&mut hasher);
+                reference.target.hash(&mut hasher);
+            }
         }
         if matches!(surface, composer::ComposerCard::Main) {
             for attachment in &self.composer_attachments {
                 attachment.session_id.hash(&mut hasher);
             }
         }
+        let boss = self.surface_boss_key(surface);
         for session in &self.state.sessions {
-            if session_mention_candidate(session, project) {
+            if self.session_mentionable(session, project, boss) {
                 session.id.hash(&mut hasher);
                 session.display_title().hash(&mut hasher);
+                session.is_planning().hash(&mut hasher);
+                if let Some(identity) = self.boss_session_identity(session.id) {
+                    identity.name.hash(&mut hasher);
+                    identity.avatar_seed.hash(&mut hasher);
+                }
+            }
+        }
+        for project in &self.state.projects {
+            project.id.hash(&mut hasher);
+            project.name.hash(&mut hasher);
+            project.resolved_name.hash(&mut hasher);
+        }
+        if let Some(state) = boss.and_then(|key| self.boss_ui.states.get(&key)) {
+            for persona in &state.personas {
+                persona.id.hash(&mut hasher);
+                persona.name.hash(&mut hasher);
+            }
+            for deliverable in &state.deliverables {
+                deliverable.id.hash(&mut hasher);
+                deliverable.name.hash(&mut hasher);
+                deliverable.archived_at.is_some().hash(&mut hasher);
+            }
+        }
+        if let Some(buckets) = boss.and_then(|key| self.boss_ui.buckets.get(&key)) {
+            for bucket in buckets.iter() {
+                bucket.id.hash(&mut hasher);
+                bucket.name.hash(&mut hasher);
+            }
+        }
+        if let Some(files) = boss.and_then(|key| self.boss_ui.memory_files.get(&key)) {
+            for file in files.iter() {
+                file.path.hash(&mut hasher);
+            }
+        }
+        if let Some(state) = boss.and_then(|key| self.automations.get(&key)) {
+            for automation in &state.automations {
+                automation.id.hash(&mut hasher);
+                automation.name.hash(&mut hasher);
             }
         }
         hasher.finish() as usize
@@ -848,12 +1096,23 @@ impl Waku {
             }
             TriggerKind::File => {
                 // Session mentions lead: a title match names a task the user
-                // is thinking about, while a broad query still leaves files
-                // reachable below the cap.
+                // is thinking about. References — projects, and a boss
+                // surface's personas, deliverables, and memory buckets —
+                // follow; a broad query still leaves files reachable below
+                // the cap.
                 let sessions = self.mentionable_sessions_for(surface);
                 let titles = sessions
                     .iter()
                     .map(|session| session.title.as_str())
+                    .collect::<Vec<_>>();
+                let references = self
+                    .mentionable_projects(surface)
+                    .into_iter()
+                    .chain(self.mentionable_boss_refs(surface))
+                    .collect::<Vec<_>>();
+                let names = references
+                    .iter()
+                    .map(|reference| reference.name.as_str())
                     .collect::<Vec<_>>();
                 composer_complete::filter_scored(
                     &titles,
@@ -868,6 +1127,21 @@ impl Waku {
                         positions,
                     })
                 })
+                .chain(
+                    composer_complete::filter_scored(
+                        &names,
+                        &trigger.query,
+                        &mut matcher,
+                        REF_MENTION_CAP,
+                    )
+                    .into_iter()
+                    .map(|(index, positions)| {
+                        AutocompleteRow::Ref(Scored {
+                            item: references[index].clone(),
+                            positions,
+                        })
+                    }),
+                )
                 .chain(
                     composer_complete::filter_files(&files, &trigger.query, &mut matcher)
                         .into_iter()
@@ -960,6 +1234,19 @@ impl Waku {
             cx.notify();
             return;
         }
+        // A reference row splices its marker the same way — the atom
+        // carries the kind's token instead of a session reference.
+        if let AutocompleteRow::Ref(scored) = row {
+            let reference = scored.item.clone();
+            if self.surface_ref_atom_allowed(surface, reference.kind, &reference.target) {
+                let marker = composer.update(cx, |input, cx| {
+                    input.insert_inline_marker_at(trigger.range.clone(), cx)
+                });
+                self.record_ref_atom_for(surface, reference, marker, cx);
+            }
+            cx.notify();
+            return;
+        }
         let insert = match row {
             AutocompleteRow::Command(scored) => {
                 let composer_text = composer_complete::command_composer_text(&scored.item);
@@ -970,7 +1257,7 @@ impl Waku {
             // titled link happens at the transport boundary, like a command
             // template.
             AutocompleteRow::WorkItem(scored) => format!("#{} ", scored.item.number),
-            AutocompleteRow::Session(_) => unreachable!(),
+            AutocompleteRow::Session(_) | AutocompleteRow::Ref(_) => unreachable!(),
         };
         if matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = composer.read(cx).content(cx).to_owned();
@@ -995,14 +1282,40 @@ impl Waku {
         marker: usize,
         cx: &mut Context<Self>,
     ) {
+        self.record_atom_for(
+            surface,
+            composer::ComposerAtomKind::SessionRef {
+                session_id,
+                title: SharedString::from(title.to_owned()),
+            },
+            marker,
+            cx,
+        );
+    }
+
+    /// The reference half of [`Self::record_session_atom_for`].
+    fn record_ref_atom_for(
+        &mut self,
+        surface: &composer::ComposerCard,
+        reference: composer::ComposerRef,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.record_atom_for(surface, composer::ComposerAtomKind::Ref(reference), marker, cx);
+    }
+
+    fn record_atom_for(
+        &mut self,
+        surface: &composer::ComposerCard,
+        kind: composer::ComposerAtomKind,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
         let atom = composer::ComposerInlineAtom {
             marker,
             revision: Uuid::new_v4(),
             paste_category: None,
-            kind: composer::ComposerAtomKind::SessionRef {
-                session_id,
-                title: SharedString::from(title.to_owned()),
-            },
+            kind,
         };
         match surface {
             composer::ComposerCard::Main => {
@@ -1285,6 +1598,14 @@ impl Waku {
         let ui = self.surface_ui(surface)?;
         let trigger = self.composer_trigger_for(surface, window, cx)?;
         self.schedule_work_item_search(surface, &trigger, cx);
+        // The bucket and memory-file pools are lazily fetched: one pull
+        // each per boss the first time a boss surface's mention list draws.
+        if trigger.kind == TriggerKind::File
+            && let Some(key) = self.surface_boss_key(surface)
+        {
+            self.ensure_boss_buckets(key, cx);
+            self.ensure_boss_memory_files(key, cx);
+        }
         let rows = self.autocomplete_rows_for(surface, &trigger);
         let (loading, hint) = match trigger.kind {
             TriggerKind::Command => (self.surface_commands_loading(surface), None),
@@ -1495,6 +1816,17 @@ impl Waku {
             }
             AutocompleteRow::Session(scored) => {
                 let session = &scored.item;
+                // The row's face matches the sidebar's: the seeded avatar a
+                // boss-owned session wears, the planning session's compass,
+                // a plain task's chat glyph.
+                let glyph: AnyElement = if session.planning {
+                    icon(crate::input::ATOM_PLANNING_ICON, 14.0, theme.text_tertiary)
+                        .into_any_element()
+                } else if let Some(identity) = session.identity.as_ref() {
+                    self.boss_avatar(identity, 16.0, cx)
+                } else {
+                    icon("icons/chat.svg", 14.0, theme.text_tertiary).into_any_element()
+                };
                 base.gap(px(10.0))
                     .child(
                         div()
@@ -1504,7 +1836,7 @@ impl Waku {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("icons/chat.svg", 14.0, theme.text_tertiary)),
+                            .child(glyph),
                     )
                     .child(
                         div()
@@ -1529,6 +1861,50 @@ impl Waku {
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_ghost)
                                 .child(session.project.clone()),
+                        )
+                    })
+                    .into_any_element()
+            }
+            AutocompleteRow::Ref(scored) => {
+                let reference = &scored.item;
+                base.gap(px(10.0))
+                    .child(
+                        div()
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon(
+                                crate::input::atom_ref_icon(reference.kind),
+                                14.0,
+                                theme.text_tertiary,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(300.0))
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .child(matched_text(
+                                reference.name.to_string(),
+                                highlight_byte_ranges(&reference.name, &scored.positions, 0),
+                                theme.text,
+                                theme.accent,
+                                font.clone(),
+                            )),
+                    )
+                    .when(!reference.detail.is_empty(), |element| {
+                        element.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_ghost)
+                                .child(reference.detail.clone()),
                         )
                     })
                     .into_any_element()

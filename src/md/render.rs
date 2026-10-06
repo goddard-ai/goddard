@@ -337,11 +337,11 @@ pub struct FlatText {
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
-    /// Submitted inline-atom ranges — a sent chip's label, paired with the
-    /// task a session chip opens. They paint the accent wash, keep the
-    /// label out of commit/file/annotation detection, and a session atom
-    /// also lands its `goddard://task/` link in `links`.
-    pub atom_ranges: Vec<(Range<usize>, Option<Uuid>)>,
+    /// Submitted inline-atom ranges — a sent chip's label, paired with what
+    /// the chip points at. They paint the accent wash, keep the label out
+    /// of commit/file/annotation detection, and a session atom also lands
+    /// its `goddard://task/` link in `links`.
+    pub atom_ranges: Vec<(Range<usize>, AtomChipTarget)>,
     /// `Annotation N` citations that resolve against a submitted annotation
     /// set: byte ranges paired with the label's 1-based index. Painted as a
     /// dotted underline; hovering previews the annotation.
@@ -360,6 +360,16 @@ pub struct FlatText {
     /// How the flat text maps back to markdown for copy; default emits the
     /// flat text unchanged.
     pub copy: Rc<CopySpec>,
+}
+
+/// What an atom chip's span carries: a task the chip links to, a
+/// kind-marked non-session reference (label and glyph only — no link
+/// target), or folded text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AtomChipTarget {
+    Session(Uuid),
+    Ref(waku_protocol::model::AtomRefKind),
+    Text,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -406,11 +416,13 @@ pub fn flatten(
     // Sentinels wrap a submitted atom's chip label and can straddle run
     // boundaries — a marker's text is plain to the parser — so the scan
     // state crosses them: `Id` collects a session reference's nibble
-    // encoding, `Label` is inside the span itself.
+    // encoding, `Ref` waits for a reference span's kind nibble, and
+    // `Label` is inside the span itself.
     enum Scan {
         Text,
         Id(Vec<u8>),
-        Label { start: usize, session: Option<Uuid> },
+        Ref,
+        Label { start: usize, target: AtomChipTarget },
     }
     let mut scan = Scan::Text;
     let mut atom_font = font(families.ui.clone());
@@ -500,7 +512,8 @@ pub fn flatten(
                                     [start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
                             ),
                         ));
-                        flat.atom_ranges.push((range.clone(), Some(session)));
+                        flat.atom_ranges
+                            .push((range.clone(), AtomChipTarget::Session(session)));
                         flat.links.push((
                             range,
                             format!("{}{session}", waku_protocol::TASK_LINK_PREFIX),
@@ -526,7 +539,11 @@ pub fn flatten(
                     }
                 }
                 Scan::Id(nibbles) => {
-                    if nibbles.len() < 32 && is_atom_id_char(ch) {
+                    if nibbles.is_empty() && ch == waku_protocol::model::MESSAGE_ATOM_REF {
+                        // A reference span: one kind nibble follows the mark.
+                        scan = Scan::Ref;
+                        segment_start = index + ch.len_utf8();
+                    } else if nibbles.len() < 32 && is_atom_id_char(ch) {
                         nibbles.push((ch as u32 - 0xFE00) as u8);
                         segment_start = index + ch.len_utf8();
                     } else {
@@ -534,13 +551,15 @@ pub fn flatten(
                         // label; anything else was never an id, and its
                         // characters rejoin the label — the same way
                         // `atom_visible_text` keeps a longer selector run.
-                        let session = (nibbles.len() == 32 && !is_atom_id_char(ch)).then(|| {
-                            let mut bytes = [0u8; 16];
-                            for (position, pair) in nibbles.chunks_exact(2).enumerate() {
-                                bytes[position] = (pair[0] << 4) | pair[1];
-                            }
-                            Uuid::from_bytes(bytes)
-                        });
+                        let target = (nibbles.len() == 32 && !is_atom_id_char(ch))
+                            .then(|| {
+                                let mut bytes = [0u8; 16];
+                                for (position, pair) in nibbles.chunks_exact(2).enumerate() {
+                                    bytes[position] = (pair[0] << 4) | pair[1];
+                                }
+                                Uuid::from_bytes(bytes)
+                            })
+                            .map_or(AtomChipTarget::Text, AtomChipTarget::Session);
                         let start = flat.text.len();
                         // The label's icon slot — the same leading
                         // whitespace the composer field paints its chip
@@ -554,7 +573,7 @@ pub fn flatten(
                             palette,
                             true,
                         );
-                        if session.is_none() && !nibbles.is_empty() {
+                        if matches!(target, AtomChipTarget::Text) && !nibbles.is_empty() {
                             let selectors: String = nibbles
                                 .iter()
                                 .filter_map(|nibble| char::from_u32(0xFE00 + *nibble as u32))
@@ -563,11 +582,36 @@ pub fn flatten(
                                 &selectors, &run.style, &atom_font, base_color, palette, true,
                             );
                         }
-                        scan = Scan::Label { start, session };
+                        scan = Scan::Label { start, target };
                         segment_start = index;
                     }
                 }
-                Scan::Label { start, session } => {
+                Scan::Ref => {
+                    if ch == waku_protocol::model::MESSAGE_ATOM_END {
+                        // An unterminated reference — never opened a label,
+                        // so it paints nothing.
+                        scan = Scan::Text;
+                    } else {
+                        // The nibble after the mark names the kind; an
+                        // unknown one still opens a chip — a span whose
+                        // kind a newer client invented keeps its label and
+                        // glyph slot rather than leaking markup.
+                        let target = waku_protocol::model::AtomRefKind::from_mark(ch)
+                            .map_or(AtomChipTarget::Text, AtomChipTarget::Ref);
+                        let start = flat.text.len();
+                        flat.emit(
+                            crate::input::ATOM_ICON_SLOT,
+                            &run.style,
+                            &slot_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
+                        scan = Scan::Label { start, target };
+                    }
+                    segment_start = index + ch.len_utf8();
+                }
+                Scan::Label { start, target } => {
                     if ch == waku_protocol::model::MESSAGE_ATOM_END {
                         flat.emit(
                             &run.text[segment_start..index],
@@ -587,8 +631,8 @@ pub fn flatten(
                                     [*start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
                             ),
                         ));
-                        flat.atom_ranges.push((range.clone(), *session));
-                        if let Some(session_id) = session {
+                        flat.atom_ranges.push((range.clone(), *target));
+                        if let AtomChipTarget::Session(session_id) = target {
                             flat.links.push((
                                 range,
                                 format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX),
@@ -709,7 +753,7 @@ struct FlatAcc {
     runs: Vec<TextRun>,
     links: Vec<(Range<usize>, String)>,
     code_ranges: Vec<Range<usize>>,
-    atom_ranges: Vec<(Range<usize>, Option<Uuid>)>,
+    atom_ranges: Vec<(Range<usize>, AtomChipTarget)>,
     math: Vec<math_text::MathSpan>,
     fragments: Vec<(Range<usize>, Rc<str>)>,
 }
@@ -1528,6 +1572,9 @@ pub struct Ctx<'a> {
     /// Session id → rendered avatar image, painted into a chip's icon slot
     /// when the atom's session has one.
     mention_avatars: Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
+    /// Session id → icon override a session chip paints instead of the
+    /// chat glyph — the planning sessions' compass.
+    mention_glyphs: Rc<HashMap<Uuid, &'static str>>,
     now: Instant,
 }
 
@@ -1569,6 +1616,7 @@ impl<'a> Ctx<'a> {
             code_run: None,
             session_mentions: Rc::default(),
             mention_avatars: Rc::default(),
+            mention_glyphs: Rc::default(),
             now: Instant::now(),
         }
     }
@@ -1711,6 +1759,14 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// Session chips' icon overrides — a planning session's chip paints
+    /// the compass the sidebar row and `@` row carry rather than the
+    /// generic chat glyph.
+    pub fn with_mention_glyphs(mut self, glyphs: Rc<HashMap<Uuid, &'static str>>) -> Self {
+        self.mention_glyphs = glyphs;
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         Self {
             row: self.row.clone(),
@@ -1743,6 +1799,7 @@ impl<'a> Ctx<'a> {
             code_run: self.code_run.clone(),
             session_mentions: self.session_mentions.clone(),
             mention_avatars: self.mention_avatars.clone(),
+            mention_glyphs: self.mention_glyphs.clone(),
             now: Instant::now(),
         }
     }
@@ -1864,6 +1921,7 @@ fn text_element_with_selection(
     ref_underline: Hsla,
     ref_underline_hovered: Hsla,
     mention_avatars: Rc<HashMap<Uuid, Arc<gpui::RenderImage>>>,
+    mention_glyphs: Rc<HashMap<Uuid, &'static str>>,
     block_break: bool,
     copy: Rc<CopySpec>,
 ) -> AnyElement {
@@ -1903,18 +1961,21 @@ fn text_element_with_selection(
         // Each atom's chip range, its task, leading icon, and the icon's
         // tint — the label's own run color, so the glyph reads as part of
         // the chip's text.
-        let atom_chips: Vec<(Range<usize>, Option<Uuid>, &'static str, Hsla)> = flat
+        let atom_chips: Vec<(Range<usize>, AtomChipTarget, &'static str, Hsla)> = flat
             .atom_ranges
             .iter()
-            .map(|(range, session)| {
-                let icon = if session.is_some() {
-                    crate::input::ATOM_SESSION_ICON
-                } else {
-                    crate::input::ATOM_PASTED_ICON
+            .map(|(range, target)| {
+                let icon = match target {
+                    AtomChipTarget::Session(id) => mention_glyphs
+                        .get(id)
+                        .copied()
+                        .unwrap_or(crate::input::ATOM_SESSION_ICON),
+                    AtomChipTarget::Ref(kind) => crate::input::atom_ref_icon(*kind),
+                    AtomChipTarget::Text => crate::input::ATOM_PASTED_ICON,
                 };
                 (
                     range.clone(),
-                    *session,
+                    *target,
                     icon,
                     run_color_at(&flat.runs, range.start),
                 )
@@ -1940,7 +2001,7 @@ fn text_element_with_selection(
             }
             // The composer's chip chrome — the same inset wash and leading
             // icon a live atom paints in the field.
-            for (range, session, icon, color) in &atom_chips {
+            for (range, target, icon, color) in &atom_chips {
                 let rects = range_rects(
                     &layout,
                     range,
@@ -1958,7 +2019,10 @@ fn text_element_with_selection(
                     ));
                 }
                 if let Some(chip) = rects.first() {
-                    let avatar = session.and_then(|id| mention_avatars.get(&id));
+                    let avatar = match target {
+                        AtomChipTarget::Session(id) => mention_avatars.get(id),
+                        _ => None,
+                    };
                     if let Some(avatar) = avatar {
                         let bounds = crate::input::atom_avatar_bounds(*chip);
                         let _ = window.paint_image(
@@ -2235,6 +2299,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.palette.tertiary,
         ctx.palette.secondary,
         ctx.mention_avatars.clone(),
+        ctx.mention_glyphs.clone(),
         ctx.take_block_break(),
         ctx.copy_spec(flat),
     )
@@ -2272,6 +2337,7 @@ pub fn selectable_flat_text(
         gpui::transparent_black(),
         gpui::transparent_black(),
         gpui::transparent_black(),
+        Rc::default(),
         Rc::default(),
         block_break,
         flat.copy.clone(),
@@ -4161,7 +4227,10 @@ mod tests {
         );
         assert_eq!(
             flat.atom_ranges,
-            vec![(4..22, Some(session_id)), (27..54, None)]
+            vec![
+                (4..22, AtomChipTarget::Session(session_id)),
+                (27..54, AtomChipTarget::Text)
+            ]
         );
         // Only the session chip carries a link — the routed task URL.
         assert_eq!(
@@ -4198,6 +4267,56 @@ mod tests {
     }
 
     #[test]
+    fn flatten_turns_reference_spans_into_kind_marked_chips() {
+        use waku_protocol::model::{
+            AtomRefKind, MESSAGE_ATOM_END, MESSAGE_ATOM_OPEN, MESSAGE_ATOM_REF,
+        };
+        // The non-session atom span — OPEN, the REF mark, one kind
+        // nibble, the label, END — chips with its kind and no link.
+        let runs = runs_of(&format!(
+            "ship {OPEN}{REF}{kind}Goddard{END} now",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            REF = MESSAGE_ATOM_REF,
+            kind = AtomRefKind::Project.mark(),
+        ));
+        let flat = flatten(
+            &runs,
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &[],
+        );
+        assert_eq!(
+            flat.text.as_ref(),
+            format!("ship {SLOT}Goddard now", SLOT = crate::input::ATOM_ICON_SLOT)
+        );
+        assert_eq!(
+            flat.atom_ranges,
+            vec![(5..18, AtomChipTarget::Ref(AtomRefKind::Project))]
+        );
+        assert!(flat.links.is_empty());
+        // A kind nibble this build does not know still opens a chip —
+        // it paints as folded text rather than leaking markup.
+        let runs = runs_of(&format!(
+            "{OPEN}{REF}\u{FE0A}Mystery{END}",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            REF = MESSAGE_ATOM_REF,
+        ));
+        let flat = flatten(
+            &runs,
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &[],
+        );
+        assert_eq!(flat.atom_ranges, vec![(0..13, AtomChipTarget::Text)]);
+    }
+
+    #[test]
     fn flatten_handles_spans_split_across_runs_and_lone_sentinels() {
         use waku_protocol::model::{MESSAGE_ATOM_END, MESSAGE_ATOM_OPEN};
         // A span straddling a style boundary still records one atom range,
@@ -4228,7 +4347,10 @@ mod tests {
                 SLOT = crate::input::ATOM_ICON_SLOT
             )
         );
-        assert_eq!(flat.atom_ranges, vec![(2..19, None)]);
+        assert_eq!(
+            flat.atom_ranges,
+            vec![(2..19, AtomChipTarget::Text)]
+        );
     }
 
     #[test]
@@ -4258,7 +4380,7 @@ mod tests {
         assert!(
             flat.atom_ranges
                 .iter()
-                .all(|(_, id)| *id == Some(session_id))
+                .all(|(_, target)| *target == AtomChipTarget::Session(session_id))
         );
         assert_eq!(flat.links.len(), 1 + 2);
         assert!(flat.links.iter().any(|(_, url)| url == "https://x"));

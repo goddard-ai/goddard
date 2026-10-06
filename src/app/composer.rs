@@ -86,6 +86,24 @@ pub(super) enum ComposerAtomKind {
         session_id: Uuid,
         title: SharedString,
     },
+    /// A non-session reference — a project, boss persona, deliverable,
+    /// memory bucket or document, or automation — spliced to its
+    /// `[kind "name" (key: target)]` token.
+    Ref(ComposerRef),
+}
+
+/// A non-session reference atom's payload: `kind` tags the token and picks
+/// the chip glyph, `name` is the chip label, and `target` the handle the
+/// token names — a project's absolute path, a persona, deliverable, or
+/// automation's id, a memory bucket's id, a boss file's `memory/` path.
+#[derive(Clone, Debug)]
+pub(super) struct ComposerRef {
+    pub kind: waku_protocol::model::AtomRefKind,
+    pub name: SharedString,
+    pub target: SharedString,
+    /// The row's trailing detail — a path tail or purpose — never part of
+    /// the token.
+    pub detail: SharedString,
 }
 
 impl ComposerInlineAtom {
@@ -102,6 +120,7 @@ impl ComposerInlineAtom {
                 }
             }
             ComposerAtomKind::SessionRef { title, .. } => session_atom_label(title),
+            ComposerAtomKind::Ref(reference) => session_atom_label(&reference.name),
         }
     }
 
@@ -110,6 +129,7 @@ impl ComposerInlineAtom {
         match &self.kind {
             ComposerAtomKind::PastedText(text) => text.trim().to_owned(),
             ComposerAtomKind::SessionRef { session_id, title } => session_token(*session_id, title),
+            ComposerAtomKind::Ref(reference) => ref_token(reference),
         }
     }
 
@@ -117,7 +137,7 @@ impl ComposerInlineAtom {
     pub(super) fn session_id(&self) -> Option<Uuid> {
         match &self.kind {
             ComposerAtomKind::SessionRef { session_id, .. } => Some(*session_id),
-            ComposerAtomKind::PastedText(_) => None,
+            ComposerAtomKind::PastedText(_) | ComposerAtomKind::Ref(_) => None,
         }
     }
 
@@ -127,6 +147,7 @@ impl ComposerInlineAtom {
         match &self.kind {
             ComposerAtomKind::PastedText(_) => crate::input::ATOM_PASTED_ICON,
             ComposerAtomKind::SessionRef { .. } => crate::input::ATOM_SESSION_ICON,
+            ComposerAtomKind::Ref(reference) => crate::input::atom_ref_icon(reference.kind),
         }
     }
 
@@ -234,6 +255,20 @@ impl Render for PastedTextPreview {
 /// legibility.
 pub(super) fn session_token(session_id: Uuid, name: &str) -> String {
     format!("[session \"{name}\" (task_id: {session_id})]")
+}
+
+/// The provider-facing token a reference atom contributes to the prompt:
+/// the kind's tag and operand key with the display name for legibility —
+/// `[project "Goddard" (path: /abs/repo)]`, `[persona "Rhea"
+/// (persona_id: …)]`. The boss's tools consume the operand directly.
+pub(super) fn ref_token(reference: &ComposerRef) -> String {
+    format!(
+        "[{} \"{}\" ({}: {})]",
+        reference.kind.tag(),
+        reference.name,
+        reference.kind.operand_key(),
+        reference.target,
+    )
 }
 
 pub(super) fn session_attachment_token(attachment: &MessageAttachment) -> Option<String> {
@@ -2973,17 +3008,23 @@ impl Waku {
     /// Push the atoms into the field, in marker order — the painted text
     /// substitutes each [`INLINE_ATOM_MARKER`] for its atom's chip.
     pub(super) fn sync_inline_atoms(&mut self, cx: &mut Context<Self>) {
-        let atoms = inline_atom_paints(&self.composer_inline_atoms);
+        let atoms = inline_atom_paints(
+            &self.composer_inline_atoms,
+            &planning_session_ids(&self.state.sessions),
+            &self.all_mention_avatars(),
+        );
         self.composer
             .update(cx, |composer, cx| composer.set_inline_atoms(atoms, cx));
     }
 
     /// The lane's version of [`Self::sync_inline_atoms`].
     pub(super) fn sync_side_chat_atoms(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let planning = planning_session_ids(&self.state.sessions);
+        let avatars = self.all_mention_avatars();
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
-        let painted = inline_atom_paints(&chat.atoms);
+        let painted = inline_atom_paints(&chat.atoms, &planning, &avatars);
         chat.composer
             .update(cx, |composer, cx| composer.set_inline_atoms(painted, cx));
     }
@@ -3043,6 +3084,8 @@ impl Waku {
         splice: &ComposerSplice,
         cx: &mut Context<Self>,
     ) {
+        let planning = planning_session_ids(&self.state.sessions);
+        let avatars = self.all_mention_avatars();
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
@@ -3050,7 +3093,7 @@ impl Waku {
             return;
         }
         let composer = chat.composer.clone();
-        remap_atoms_for_splice(&composer, &mut chat.atoms, splice, cx);
+        remap_atoms_for_splice(&composer, &mut chat.atoms, splice, &planning, &avatars, cx);
     }
 
     fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
@@ -3370,7 +3413,7 @@ impl Waku {
             Some(ComposerAtomKind::SessionRef { session_id, .. }) => {
                 self.select_session(session_id, cx)
             }
-            None => {}
+            Some(ComposerAtomKind::Ref(_)) | None => {}
         }
         cx.notify();
     }
@@ -3386,7 +3429,7 @@ impl Waku {
             .find(|atom| atom.marker == marker)
             .and_then(|atom| match &atom.kind {
                 ComposerAtomKind::PastedText(text) => Some(text.clone()),
-                ComposerAtomKind::SessionRef { .. } => None,
+                ComposerAtomKind::SessionRef { .. } | ComposerAtomKind::Ref(_) => None,
             })
         else {
             return;
@@ -3526,7 +3569,16 @@ impl Waku {
                 .position(|atom| atom.marker == editor.marker)
         });
         let composer = self.composer.clone();
-        let seats = remap_atoms_for_splice(&composer, &mut self.composer_inline_atoms, splice, cx);
+        let planning = planning_session_ids(&self.state.sessions);
+        let avatars = self.all_mention_avatars();
+        let seats = remap_atoms_for_splice(
+            &composer,
+            &mut self.composer_inline_atoms,
+            splice,
+            &planning,
+            &avatars,
+            cx,
+        );
         if let Some(editor) = self.pasted_text_editor.as_mut() {
             match editor_seat.and_then(|index| seats.get(index).copied().flatten()) {
                 Some(marker) => editor.marker = marker,
@@ -8750,14 +8802,49 @@ pub(super) fn remap_marker_seats(
     seats
 }
 
+/// The sessions that paint the planning compass — a session's
+/// planning-ness is fixed at creation, so a set lookup is as true at
+/// paint as it was when the row offered the glyph.
+fn planning_session_ids(sessions: &[AgentSession]) -> HashSet<Uuid> {
+    sessions
+        .iter()
+        .filter(|session| session.is_planning())
+        .map(|session| session.id)
+        .collect()
+}
+
 /// The painted labels one field shows for `atoms`, in marker order —
-/// the shape every composer's `set_inline_atoms` wants.
-fn inline_atom_paints(atoms: &[ComposerInlineAtom]) -> Vec<crate::input::InlineAtom> {
+/// the shape every composer's `set_inline_atoms` wants. `planning`
+/// names the sessions whose chips carry the compass instead of the
+/// chat glyph; `avatars` swaps a session chip's icon for the managed
+/// identity's seeded face while its raster is available.
+fn inline_atom_paints(
+    atoms: &[ComposerInlineAtom],
+    planning: &HashSet<Uuid>,
+    avatars: &HashMap<Uuid, Arc<gpui::RenderImage>>,
+) -> Vec<crate::input::InlineAtom> {
     atoms
         .iter()
-        .map(|atom| crate::input::InlineAtom {
-            label: SharedString::from(atom.label()),
-            icon: Some(atom.icon()),
+        .map(|atom| {
+            let icon = match &atom.kind {
+                ComposerAtomKind::SessionRef { session_id, .. }
+                    if planning.contains(session_id) =>
+                {
+                    crate::input::ATOM_PLANNING_ICON
+                }
+                _ => atom.icon(),
+            };
+            let avatar = match &atom.kind {
+                ComposerAtomKind::SessionRef { session_id, .. } => {
+                    avatars.get(session_id).cloned()
+                }
+                _ => None,
+            };
+            crate::input::InlineAtom {
+                label: SharedString::from(atom.label()),
+                icon: Some(icon),
+                avatar,
+            }
         })
         .collect()
 }
@@ -8773,6 +8860,8 @@ fn remap_atoms_for_splice(
     composer: &Entity<ComposerInput>,
     atoms: &mut Vec<ComposerInlineAtom>,
     splice: &ComposerSplice,
+    planning: &HashSet<Uuid>,
+    avatars: &HashMap<Uuid, Arc<gpui::RenderImage>>,
     cx: &mut Context<Waku>,
 ) -> Vec<Option<usize>> {
     let positions: Vec<usize> = composer
@@ -8795,7 +8884,7 @@ fn remap_atoms_for_splice(
         .collect();
     live.sort_by_key(|atom| atom.marker);
     *atoms = live;
-    let painted = inline_atom_paints(atoms);
+    let painted = inline_atom_paints(atoms, planning, avatars);
     composer.update(cx, |composer, cx| composer.set_inline_atoms(painted, cx));
     seats
 }
@@ -8898,6 +8987,11 @@ fn draft_inline_atom(
                 title: title.to_string(),
             }
         }
+        ComposerAtomKind::Ref(reference) => ComposerDraftInlineAtomKind::Reference {
+            kind: reference.kind,
+            name: reference.name.to_string(),
+            target: reference.target.to_string(),
+        },
     };
     ComposerDraftInlineAtom {
         offset,
@@ -8958,6 +9052,20 @@ pub(super) fn restore_inline_atoms(
                     None,
                 )
             }
+            ComposerDraftInlineAtomKind::Reference { kind, name, target } => {
+                let reference = ComposerRef {
+                    kind: *kind,
+                    name: SharedString::from(name.clone()),
+                    target: SharedString::from(target.clone()),
+                    // The row detail is pool-side chrome — a restored atom
+                    // never lists again.
+                    detail: SharedString::default(),
+                };
+                if payload != ref_token(&reference) {
+                    continue;
+                }
+                (ComposerAtomKind::Ref(reference), None)
+            }
         };
 
         content.push_str(&text[cursor..atom.offset]);
@@ -9010,12 +9118,20 @@ pub(super) fn atom_display_content(prompt: &str, atoms: &[ComposerInlineAtom]) -
 }
 
 /// One atom's transcript span: the open sentinel, a session reference's id
-/// encoded invisibly, the escaped chip label, and the close sentinel.
+/// or a non-session reference's mark and kind nibble encoded invisibly, the
+/// escaped chip label, and the close sentinel.
 fn atom_span(atom: &ComposerInlineAtom) -> String {
     let mut span = String::new();
     span.push(waku_protocol::model::MESSAGE_ATOM_OPEN);
-    if let ComposerAtomKind::SessionRef { session_id, .. } = &atom.kind {
-        span.push_str(&waku_protocol::model::encode_atom_session_id(*session_id));
+    match &atom.kind {
+        ComposerAtomKind::SessionRef { session_id, .. } => {
+            span.push_str(&waku_protocol::model::encode_atom_session_id(*session_id));
+        }
+        ComposerAtomKind::Ref(reference) => {
+            span.push(waku_protocol::model::MESSAGE_ATOM_REF);
+            span.push(reference.kind.mark());
+        }
+        ComposerAtomKind::PastedText(_) => {}
     }
     // A label can never legitimately carry the sentinels or the id
     // alphabet — scrub them so a stray one cannot truncate its own span.
@@ -9025,6 +9141,7 @@ fn atom_span(atom: &ComposerInlineAtom) -> String {
         .filter(|ch| {
             *ch != waku_protocol::model::MESSAGE_ATOM_OPEN
                 && *ch != waku_protocol::model::MESSAGE_ATOM_END
+                && *ch != waku_protocol::model::MESSAGE_ATOM_REF
                 && !('\u{FE00}'..='\u{FE0F}').contains(ch)
         })
         .collect::<String>();

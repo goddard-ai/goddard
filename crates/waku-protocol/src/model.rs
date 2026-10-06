@@ -3450,13 +3450,85 @@ pub struct SuspendedProviderSession {
 
 /// Sentinels wrapping a submitted inline atom's chip label inside
 /// [`Message::display_content`] — `OPEN <session-id encoding> <label> END`
-/// for a session reference, `OPEN <label> END` for folded pasted text. A
-/// renderer paints the span back as a chip; clients that do not strip the
-/// markup still read the label. A session atom's id is nibble-encoded as
-/// variation selectors (U+FE00–U+FE0F) ahead of the label, so the metadata
-/// stays invisible in clients that show `display_content` raw.
+/// for a session reference, `OPEN <label> END` for folded pasted text, and
+/// `OPEN REF_MARK <kind encoding> <label> END` for a non-session reference
+/// (a project, persona, deliverable, memory bucket or document, or
+/// automation). A renderer paints the span back as a chip; clients that
+/// do not strip the markup still read the label. A session atom's id is
+/// nibble-encoded as variation selectors (U+FE00–U+FE0F) ahead of the
+/// label, so the metadata stays invisible in clients that show
+/// `display_content` raw.
 pub const MESSAGE_ATOM_OPEN: char = '\u{FFF9}';
 pub const MESSAGE_ATOM_END: char = '\u{FFFA}';
+
+/// The mark opening a non-session reference span — the interlinear
+/// annotation terminator (`REF` after `OPEN`/`END`'s anchor and
+/// separator). One variation-selector nibble naming the
+/// [`AtomRefKind`] follows it; a client that does not know the mark passes
+/// both through as invisible characters inside the label.
+pub const MESSAGE_ATOM_REF: char = '\u{FFFB}';
+
+/// The non-session references an atom span can carry. The mark after
+/// [`MESSAGE_ATOM_REF`] is the variant's ordinal encoded as one
+/// variation-selector nibble, so the wire stays stable while kinds are
+/// added — an unknown mark still decodes as some reference.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AtomRefKind {
+    Project,
+    Persona,
+    Deliverable,
+    MemoryBucket,
+    Automation,
+    MemoryFile,
+}
+
+impl AtomRefKind {
+    /// The kind's span encoding — ordinal as a variation-selector nibble.
+    pub fn mark(self) -> char {
+        char::from_u32(0xFE00 + self as u32).unwrap()
+    }
+
+    /// The kind a mark nibble encodes — `None` outside U+FE00–U+FE04.
+    pub fn from_mark(ch: char) -> Option<Self> {
+        match ch {
+            '\u{FE00}' => Some(Self::Project),
+            '\u{FE01}' => Some(Self::Persona),
+            '\u{FE02}' => Some(Self::Deliverable),
+            '\u{FE03}' => Some(Self::MemoryBucket),
+            '\u{FE04}' => Some(Self::Automation),
+            '\u{FE05}' => Some(Self::MemoryFile),
+            _ => None,
+        }
+    }
+
+    /// The token's tag in a submitted prompt — `[project "name" (path: …)]`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Persona => "persona",
+            Self::Deliverable => "deliverable",
+            Self::MemoryBucket => "bucket",
+            Self::Automation => "automation",
+            Self::MemoryFile => "file",
+        }
+    }
+
+    /// The key the token's parenthesized operand carries — the field a
+    /// reader resolves the reference through (a summonable project path, a
+    /// persona, deliverable, or automation id, a memory bucket id, a boss
+    /// file path).
+    pub fn operand_key(self) -> &'static str {
+        match self {
+            Self::Project => "path",
+            Self::Persona => "persona_id",
+            Self::Deliverable => "deliverable_id",
+            Self::MemoryBucket => "bucket_id",
+            Self::Automation => "automation_id",
+            Self::MemoryFile => "path",
+        }
+    }
+}
 
 /// The `tool_name` the daemon stamps on the transcript activity it records
 /// into a supervisor's session when a `BossOperation::Summon` succeeds.
@@ -3570,6 +3642,13 @@ fn atom_text(text: &str, unescape: bool) -> String {
         match ch {
             MESSAGE_ATOM_OPEN => {
                 in_atom = true;
+                // A reference span opens with REF plus one kind nibble —
+                // both skipped before the label, whether or not this
+                // build knows the kind.
+                if chars.clone().next() == Some(MESSAGE_ATOM_REF) {
+                    chars.next();
+                    chars.next();
+                }
                 // A session id encodes as exactly 32 variation selectors;
                 // a shorter run is label text (an emoji's own selector,
                 // for instance) and stays.
@@ -8568,6 +8647,26 @@ mod tests {
         );
         assert_eq!(atom_visible_text(&styled), "use _it* ⚠️ now");
         assert_eq!(atom_visible_text("plain text"), "plain text");
+    }
+
+    #[test]
+    fn atom_visible_text_strips_a_reference_spans_mark_and_kind() {
+        let display = format!(
+            "ship {OPEN}{REF}{kind}Goddard{END} first",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            REF = MESSAGE_ATOM_REF,
+            kind = AtomRefKind::Project.mark(),
+        );
+        assert_eq!(atom_visible_text(&display), "ship Goddard first");
+        // A kind nibble this build does not know still leaves the label.
+        let unknown = format!(
+            "{OPEN}{REF}\u{FE0A}Mystery{END}",
+            OPEN = MESSAGE_ATOM_OPEN,
+            END = MESSAGE_ATOM_END,
+            REF = MESSAGE_ATOM_REF,
+        );
+        assert_eq!(atom_visible_text(&unknown), "Mystery");
     }
 
     #[test]

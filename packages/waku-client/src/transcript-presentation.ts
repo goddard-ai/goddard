@@ -28,6 +28,8 @@ export function wireTranslationText(
  */
 const MESSAGE_ATOM_OPEN = '\uFFF9'
 const MESSAGE_ATOM_END = '\uFFFA'
+/** The mark opening a non-session reference span — OPEN REF <kind nibble> <label> END. */
+const MESSAGE_ATOM_REF = '\uFFFB'
 
 /** The variation-selector range carrying a session id inside an atom span. */
 function isAtomIdChar(code: number): boolean {
@@ -49,6 +51,15 @@ function atomText(text: string, unescape: boolean): string {
     const ch = chars[index]!
     if (ch === MESSAGE_ATOM_OPEN) {
       inAtom = true
+      // A reference span opens with REF plus one kind nibble — both
+      // skipped before the label, whether or not this build knows the
+      // kind.
+      if (chars[index + 1] === MESSAGE_ATOM_REF) {
+        index += 1
+        if (chars[index + 1] !== undefined) {
+          index += 1
+        }
+      }
       // A session id encodes as exactly 32 variation selectors; a shorter
       // run is label text (an emoji's own selector, for instance) and stays.
       let count = 0
