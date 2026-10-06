@@ -279,7 +279,7 @@ settings.computer_use: 电脑操作
 settings.commands: 命令
 settings.terminal: 终端
 settings.diagnostics: 诊断
-settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 声音 提示音 音量 通知 完成 回合 sound audio notification volume 触控板 轻扫 三指 手势 导航 后退 前进 trackpad swipe gesture 侧边栏 快捷键 标签 数字 sidebar shortcut tags 草稿 未发送 预览 preview 休眠 归档 工作区 默认 工作树 分支 合并 同步 冲突 解决 worktree merge sync conflict resolve archive dormant 智能体 环境 沙箱 qa 审查
+settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 声音 提示音 音量 通知 完成 回合 sound audio notification volume 触控板 轻扫 三指 手势 导航 后退 前进 trackpad swipe gesture 侧边栏 快捷键 标签 数字 sidebar shortcut tags 草稿 未发送 预览 preview 休眠 归档 工作区 默认 工作树 分支 合并 同步 冲突 解决 worktree merge sync conflict resolve archive dormant 智能体 环境 沙箱 qa 审查 语音 麦克风 输入 设备 voice microphone mic input device
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明 边框 分隔线 粗 细 预览 preview 数学 公式 表达式 math latex markdown 文件 渲染 源码 转录 令牌 速度 token speed footer 引导式阅读 注视 眼跳 不透明度
 settings.terminal_keywords: 终端 终端机 控制台 shell 字体 字号 等宽 链接 修饰键 点击 打开 鼠标 程序 vim htop 复制 选择 剪贴板 粘贴 terminal shell font size link modifier click open mouse copy select clipboard paste
 settings.diagnostics_keywords: 诊断 错误 日志 崩溃 panic 重启 恢复 守护进程 报告 故障排查 问题 diagnostics errors error log logs crash panic restart recovery daemon report troubleshooting problem
@@ -300,6 +300,7 @@ settings.group_sessions: 会话
 settings.group_agents: 智能体
 settings.group_git: Git
 settings.group_notifications: 通知
+settings.group_voice: 语音
 settings.group_transcript: 转录
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
@@ -525,6 +526,10 @@ settings.terminal_copy_on_select: 选中即复制
 settings.terminal_copy_on_select_description: 在终端中选中文字后立即复制到剪贴板；选中区域保持可见
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
+settings.microphone: 麦克风
+settings.microphone_description: 听写和语音确认使用的输入设备 — 拔出时会暂停，而不会悄悄切换到其他麦克风
+settings.microphone_system_default: 系统默认
+settings.microphone_device_missing: 设备不可用
 settings.completion_sound_name: 提示音
 settings.completion_sound_volume: 音量
 settings.finished_turn_notification: 回合完成

@@ -1,0 +1,1 @@
+- Voice dictation no longer loses the microphone when Bluetooth devices connect or disconnect. Settings → General → **Voice → Microphone** now pins dictation and voice consent to a specific input device; if it disappears, capture waits for it to return instead of silently switching mics.

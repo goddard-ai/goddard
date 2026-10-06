@@ -542,7 +542,7 @@ settings.commands:
 settings.terminal:
   en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit scroll position transcript pin keep
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit scroll position transcript pin keep voice microphone mic input device airpods bluetooth dictation
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer guided reading fixation saccade opacity
 settings.terminal_keywords:
@@ -675,6 +675,8 @@ settings.group_git:
   en: Git
 settings.group_notifications:
   en: Notifications
+settings.group_voice:
+  en: Voice
 settings.group_transcript:
   en: Transcript
 integrations.description:
@@ -1791,6 +1793,14 @@ settings.waiting_input_notification:
   en: Waiting for input
 settings.waiting_input_notification_description:
   en: Send a system notification when a task in the background is blocked on your approval or a question
+settings.microphone:
+  en: Microphone
+settings.microphone_description:
+  en: Input device for dictation and voice consent — parks when unplugged instead of swapping mics
+settings.microphone_system_default:
+  en: System Default
+settings.microphone_device_missing:
+  en: Unavailable device
 settings.completion_sound_starred:
   en: Distinct sound for starred projects
 settings.completion_sound_starred_description:
@@ -6482,6 +6492,8 @@ voice_scratchpad.discard:
   en: Discard
 voice_scratchpad.mic_denied:
   en: Microphone access is needed for VoicePad
+voice_scratchpad.mic_unavailable:
+  en: Microphone unavailable — waiting for the selected device to return
 voice_scratchpad.retry:
   en: Retry
 voice_scratchpad.open_settings:

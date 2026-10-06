@@ -474,6 +474,9 @@ pub(super) enum VoiceGateEvent {
     MicAccess(bool),
     /// `SFSpeechRecognizer.requestAuthorization` answered.
     SpeechAuth(bool),
+    /// The system's audio device set changed — re-evaluate the mic binding
+    /// on the main thread, where the engine lives.
+    InputDevicesChanged,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -5796,6 +5799,23 @@ impl Waku {
         let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (voice_scratchpad_tx, voice_scratchpad_events) = unbounded();
+        #[cfg(target_os = "macos")]
+        {
+            // The persisted mic pick binds before the first listener start;
+            // device (dis)connects land on the voice-gate channel so the
+            // engine can rebind on the main thread.
+            crate::platform::set_voice_input_device(
+                (!state.voice_input_device_uid.is_empty())
+                    .then(|| state.voice_input_device_uid.clone()),
+            );
+            let tx = boss_voice_gate_tx.clone();
+            let wake = event_wake_tx.clone();
+            crate::platform::set_voice_input_change_hook(Some(Box::new(move || {
+                if tx.try_send(VoiceGateEvent::InputDevicesChanged).is_ok() {
+                    signal_event_pump(&wake);
+                }
+            })));
+        }
         let (review_tx, review_events) = unbounded();
         let (friend_session_closed_tx, friend_session_closed_events) = unbounded();
         let (status_marker_tx, status_marker_events) = unbounded();

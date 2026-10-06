@@ -2425,6 +2425,11 @@ impl Waku {
         .flatten()
         .collect();
 
+        let voice_cards: Vec<AnyElement> = [self.microphone_row(theme, search, cx)]
+            .into_iter()
+            .flatten()
+            .collect();
+
         div()
             .mt(px(15.0))
             .flex()
@@ -2448,11 +2453,101 @@ impl Waku {
                         notification_cards,
                         theme,
                     ),
+                    settings_group(tr!("settings.group_voice"), voice_cards, theme),
                 ]
                 .into_iter()
                 .flatten(),
             )
             .into_any_element()
+    }
+
+    /// The microphone picker: which input device VoicePad and the consent
+    /// listener bind to. The pick persists by CoreAudio UID — an unplugged
+    /// device parks capture until it returns rather than silently swapping
+    /// mics; the empty pick follows the system default.
+    fn microphone_row(
+        &self,
+        theme: Theme,
+        search: &SettingSearch,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let selected_uid = self.state.voice_input_device_uid.clone();
+        let devices = crate::platform::voice_input_devices();
+        let selected_label = devices
+            .iter()
+            .find(|device| device.uid == selected_uid)
+            .map(|device| device.name.clone())
+            .unwrap_or_else(|| {
+                if selected_uid.is_empty() {
+                    tr!("settings.microphone_system_default")
+                } else {
+                    tr!("settings.microphone_device_missing")
+                }
+            });
+        let weak = cx.entity().downgrade();
+        let mic_handle = self.menu_handle("voice-input-device-selector", cx);
+        let mic_selector = dropdown_menu(
+            MenuChip::new("voice-input-device-selector")
+                .label(selected_label)
+                .outlined()
+                .selected(mic_handle.is_open())
+                .w(px(220.0))
+                .justify_between(),
+            "voice-input-device-selector-menu",
+            &mic_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = Vec::with_capacity(devices.len() + 1);
+                items.push({
+                    let weak = weak.clone();
+                    MenuItem::new(
+                        tr!("settings.microphone_system_default"),
+                        move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_input_device_uid(String::new(), cx);
+                            });
+                        },
+                    )
+                    .selected(selected_uid.is_empty())
+                });
+                items.extend(devices.iter().map(|device| {
+                    let uid = device.uid.clone();
+                    let selected = device.uid == selected_uid;
+                    let weak = weak.clone();
+                    MenuItem::new(device.name.clone(), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.set_voice_input_device_uid(uid.clone(), cx);
+                        });
+                    })
+                    .selected(selected)
+                }));
+                items
+            },
+        );
+        settings_row_card(
+            vec![settings_row(
+                "icons/mic.svg",
+                tr!("settings.microphone"),
+                tr!("settings.microphone_description"),
+                mic_selector,
+                theme,
+                search,
+            )],
+            theme,
+        )
+        .map(|card| card.into_any_element())
+    }
+
+    /// Persist the microphone pick and rebind the listener — an empty uid
+    /// returns to following the system default.
+    fn set_voice_input_device_uid(&mut self, uid: String, cx: &mut Context<Self>) {
+        if self.state.voice_input_device_uid == uid {
+            return;
+        }
+        self.state.voice_input_device_uid = uid.clone();
+        crate::platform::set_voice_input_device((!uid.is_empty()).then_some(uid));
+        self.save();
+        cx.notify();
     }
 
     /// The Terminal page — the integrated terminal's preferences. The font

@@ -967,6 +967,13 @@ impl Waku {
                     }
                 }
                 VoiceGateEvent::SpeechAuth(false) => {}
+                VoiceGateEvent::InputDevicesChanged => {
+                    // The platform rebinds (or parks) the engine here, on the
+                    // main thread that owns it; scratchpads just mirror the
+                    // availability into their status.
+                    let available = crate::platform::voice_input_devices_changed();
+                    self.set_voice_input_unavailable(!available);
+                }
             }
         }
         changed

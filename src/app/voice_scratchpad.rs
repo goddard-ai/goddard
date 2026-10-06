@@ -231,6 +231,9 @@ pub(super) struct VoiceScratchpad {
     /// worker runs (or is launching) for it. Only the selected chat's
     /// unmuted scratchpad may hold this — a switch or a mute clears it.
     capture_live: bool,
+    /// The picked mic is unplugged — capture parks until it returns rather
+    /// than silently hopping to another device.
+    input_unavailable: bool,
     /// The Cancel affordance armed its confirmation.
     confirm_discard: bool,
     /// Bumped on each (re)connect and on pause so a retired worker's
@@ -276,6 +279,7 @@ impl VoiceScratchpad {
             muted: false,
             hidden: false,
             capture_live: false,
+            input_unavailable: false,
             confirm_discard: false,
             generation: 0,
             stop: Arc::new(AtomicBool::new(false)),
@@ -2410,6 +2414,7 @@ impl Waku {
         })));
         crate::platform::start_voice_listener();
         scratchpad.capture_live = true;
+        scratchpad.input_unavailable = !crate::platform::voice_input_available();
         self.spawn_transcription_worker(session_id, cx);
     }
 
@@ -2871,6 +2876,15 @@ impl Waku {
         });
         if detached {
             self.detach_voice_sink();
+        }
+    }
+
+    /// Mirror the mic's availability into every scratchpad — one engine
+    /// feeds them all. The status row shows it; the tap itself rebinds
+    /// inside the platform layer when the device returns.
+    pub(super) fn set_voice_input_unavailable(&mut self, unavailable: bool) {
+        for scratchpad in self.voice_scratchpads.values_mut() {
+            scratchpad.input_unavailable = unavailable;
         }
     }
 
@@ -3531,7 +3545,8 @@ impl Waku {
             return div().into_any_element();
         };
         let transcript = &scratchpad.transcript;
-        let muted = scratchpad.muted;
+        // An unplugged mic grays the record dot the way muting does.
+        let muted = scratchpad.muted || scratchpad.input_unavailable;
         let status = scratchpad.status;
         let annotation_target = transcript.annotation_target;
         let annotating = annotation_target.is_some();
@@ -3836,9 +3851,12 @@ impl Waku {
     fn render_scratchpad_status(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         let scratchpad = self.selected_voice_scratchpad()?;
         let (message, can_retry, system_settings) = match scratchpad.status {
+            ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true, true),
+            _ if scratchpad.input_unavailable => {
+                (tr!("voice_scratchpad.mic_unavailable"), false, false)
+            }
             ScratchpadStatus::Connecting | ScratchpadStatus::Live => return None,
             ScratchpadStatus::Paused => (tr!("voice_scratchpad.paused"), false, false),
-            ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true, true),
             ScratchpadStatus::ConnectionLost => {
                 (tr!("voice_scratchpad.connection_lost"), true, false)
             }
@@ -3985,7 +4003,7 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(scratchpad_dot_on_line(
                 13.0,
-                scratchpad.muted,
+                scratchpad.muted || scratchpad.input_unavailable,
                 scratchpad.status,
                 theme,
             ))

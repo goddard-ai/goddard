@@ -136,13 +136,25 @@ fn hears_consent(text: &str) -> bool {
 #[cfg(target_os = "macos")]
 mod voice_gate {
     use std::cell::RefCell;
+    use std::ffi::c_void;
     use std::ptr::NonNull;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     use block2::RcBlock;
     use objc2::rc::Retained;
+    use objc2_audio_toolbox::{
+        AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
+    };
     use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
+    use objc2_core_audio::{
+        AudioObjectAddPropertyListenerBlock, AudioObjectGetPropertyData,
+        AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
+        kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreamConfiguration,
+        kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyScopeInput, kAudioObjectSystemObject,
+    };
     use objc2_foundation::{NSArray, NSError, NSString};
     use objc2_speech::{
         SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
@@ -186,6 +198,24 @@ mod voice_gate {
     /// gating the tap.
     type AudioSink = Box<dyn Fn(&[f32], f64) + Send + Sync>;
     static AUDIO_SINK: Mutex<Option<AudioSink>> = Mutex::new(None);
+
+    /// The user's pinned input device UID — `None` follows the system
+    /// default input, which macOS retargets whenever a Bluetooth device
+    /// connects or drops.
+    static PREFERRED_INPUT_UID: Mutex<Option<String>> = Mutex::new(None);
+    /// Whether the chosen input (unpinned: any input device) is present.
+    static INPUT_AVAILABLE: AtomicBool = AtomicBool::new(true);
+    /// Set while any consumer still wants the mic — a returning device
+    /// rebuilds the engine it took away.
+    static ENGINE_WANTED: AtomicBool = AtomicBool::new(false);
+    /// The AudioDeviceID the running engine is bound to: the pinned device
+    /// when one is chosen, the observed default input otherwise.
+    static BOUND_DEVICE: Mutex<Option<AudioObjectID>> = Mutex::new(None);
+    /// Device-list changes report through here — the app forwards them onto
+    /// the event pump so `devices_changed` can rebuild on the thread that
+    /// owns the engine.
+    static DEVICE_CHANGE_HOOK: Mutex<Option<Box<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+    static DEVICE_LISTENER_INSTALLED: AtomicBool = AtomicBool::new(false);
 
     /// The recognizer objects — created and retired on the main thread only.
     /// The recognizer is only held, never called: the task may not retain it.
@@ -283,47 +313,329 @@ mod voice_gate {
         }
     }
 
+    /// Read a CoreAudio property's raw bytes, or `None` on any failure.
+    fn audio_property_data(
+        object: AudioObjectID,
+        selector: u32,
+        scope: u32,
+    ) -> Option<Vec<u8>> {
+        let mut address = AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut size = 0u32;
+        let status = unsafe {
+            AudioObjectGetPropertyDataSize(
+                object,
+                NonNull::from(&mut address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+            )
+        };
+        if status != 0 || size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        let out = NonNull::new(data.as_mut_ptr() as *mut c_void)?;
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                object,
+                NonNull::from(&mut address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+                out,
+            )
+        };
+        (status == 0).then_some(data)
+    }
+
+    /// Read a CoreAudio property reported as a `u32`.
+    fn audio_property_u32(object: AudioObjectID, selector: u32, scope: u32) -> Option<u32> {
+        let data = audio_property_data(object, selector, scope)?;
+        Some(u32::from_ne_bytes(data.first_chunk::<4>()?.to_owned()))
+    }
+
+    /// Read a CoreAudio property reported as a CFString. The string arrives
+    /// retained — CFString toll-free bridges to NSString, so owning it as
+    /// one releases correctly.
+    fn audio_property_string(object: AudioObjectID, selector: u32) -> Option<String> {
+        let data = audio_property_data(object, selector, kAudioObjectPropertyScopeGlobal)?;
+        let raw = usize::from_ne_bytes(data.first_chunk::<8>()?.to_owned());
+        let string = unsafe { Retained::<NSString>::from_raw(raw as *mut NSString) }?;
+        Some(string.to_string())
+    }
+
+    /// Every audio device the HAL reports, as `(id, uid, name)` — filtered
+    /// to devices with at least one live input channel.
+    pub fn audio_input_devices() -> Vec<(AudioObjectID, String, String)> {
+        let Some(ids) = audio_property_data(
+            kAudioObjectSystemObject as AudioObjectID,
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+        ) else {
+            return Vec::new();
+        };
+        ids.chunks_exact(4)
+            .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()))
+            .filter(|device| {
+                // The stream-configuration buffer list: a u32 buffer count
+                // followed by 16-byte AudioBuffer entries — an input device
+                // has at least one buffer with channels.
+                let Some(config) = audio_property_data(
+                    *device,
+                    kAudioDevicePropertyStreamConfiguration,
+                    kAudioObjectPropertyScopeInput,
+                ) else {
+                    return false;
+                };
+                let buffers = u32::from_ne_bytes(config[0..4].try_into().unwrap_or([0; 4])) as usize;
+                (0..buffers).any(|index| {
+                    config
+                        .get(8 + index * 16..)
+                        .and_then(|rest| rest.first_chunk::<4>())
+                        .is_some_and(|channels| u32::from_ne_bytes(*channels) > 0)
+                })
+            })
+            .map(|device| {
+                let uid = audio_property_string(device, kAudioDevicePropertyDeviceUID)
+                    .unwrap_or_default();
+                let name = audio_property_string(device, kAudioObjectPropertyName)
+                    .unwrap_or_default();
+                (device, uid, name)
+            })
+            .collect()
+    }
+
+    /// The AudioDeviceID behind a device UID, when the device is attached.
+    fn resolve_device_uid(uid: &str) -> Option<AudioObjectID> {
+        audio_input_devices()
+            .into_iter()
+            .find(|(_, device_uid, _)| device_uid == uid)
+            .map(|(id, _, _)| id)
+    }
+
+    /// The device the engine should bind to right now: the pinned device,
+    /// or the current default input when nothing is pinned. `None` means
+    /// the wanted device is gone (or, unpinned, that no default exists).
+    fn current_target_device() -> Option<AudioObjectID> {
+        match PREFERRED_INPUT_UID.lock().unwrap().as_deref() {
+            Some(uid) => resolve_device_uid(uid),
+            None => audio_property_u32(
+                kAudioObjectSystemObject as AudioObjectID,
+                kAudioHardwarePropertyDefaultInputDevice,
+                kAudioObjectPropertyScopeGlobal,
+            )
+            .filter(|id| *id != 0),
+        }
+    }
+
+    /// Whether the wanted input can capture at all — the pinned device is
+    /// attached, or some input device exists for the default to pick.
+    fn input_present() -> bool {
+        if PREFERRED_INPUT_UID.lock().unwrap().is_some() {
+            current_target_device().is_some()
+        } else {
+            !audio_input_devices().is_empty()
+        }
+    }
+
+    /// Arm the tap on a fresh engine: pin the chosen input device onto the
+    /// input node's audio unit (a pinned mic never follows the default), then
+    /// install the buffer tap and start. Returns false when the wanted
+    /// device can't be bound or the engine refuses to start.
+    fn configure_and_start(engine: &AVAudioEngine) -> bool {
+        let input = unsafe { engine.inputNode() };
+        let target = current_target_device();
+        if PREFERRED_INPUT_UID.lock().unwrap().is_some() {
+            let Some(device) = target else {
+                return false;
+            };
+            let unit = unsafe { input.audioUnit() };
+            if unit.is_null() {
+                return false;
+            }
+            let status = unsafe {
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global,
+                    0,
+                    &device as *const AudioObjectID as *const c_void,
+                    std::mem::size_of::<AudioObjectID>() as u32,
+                )
+            };
+            if status != 0 {
+                return false;
+            }
+        }
+        let tap = RcBlock::new(
+            |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
+                let buffer = unsafe { buffer.as_ref() };
+                capture_dictation(buffer);
+                if let Ok(feed) = CONSENT_FEED.try_lock()
+                    && let Some(request) = feed.0.as_ref()
+                {
+                    unsafe { request.appendAudioPCMBuffer(buffer) };
+                }
+                observe_ambient_level(buffer);
+                if let Ok(sink) = AUDIO_SINK.try_lock()
+                    && let Some(sink) = sink.as_ref()
+                    && let Some((mono, rate)) = mono_samples(buffer)
+                {
+                    sink(&mono, rate);
+                }
+            },
+        );
+        let tap_pointer = &*tap as *const _ as *mut _;
+        unsafe { input.installTapOnBus_bufferSize_format_block(0, 4_800, None, tap_pointer) };
+        if unsafe { engine.startAndReturnError() }.is_err() {
+            unsafe { input.removeTapOnBus(0) };
+            return false;
+        }
+        *BOUND_DEVICE.lock().unwrap() = target;
+        true
+    }
+
+    /// Tear down the engine only — consent state is the caller's call.
+    fn teardown_engine(listener: &VoiceListener) {
+        let input = unsafe { listener.engine.inputNode() };
+        unsafe {
+            input.removeTapOnBus(0);
+            listener.engine.stop();
+        }
+    }
+
+    /// Register the CoreAudio device-list listener once — its block fires
+    /// on a HAL-owned thread and only forwards into the app's hook, which
+    /// lands the real work on the event pump.
+    fn install_device_listener() {
+        if DEVICE_LISTENER_INSTALLED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let listener = RcBlock::new(|_count: u32, _addresses: NonNull<AudioObjectPropertyAddress>| {
+            if let Ok(hook) = DEVICE_CHANGE_HOOK.lock()
+                && let Some(hook) = hook.as_ref()
+            {
+                hook();
+            }
+        });
+        let block = &*listener as *const _ as *mut _;
+        // The device list covers plugs and unplugs; the default-input
+        // property covers macOS retargeting the default without one
+        // (System Settings picks, Bluetooth routing).
+        for selector in [
+            kAudioHardwarePropertyDevices,
+            kAudioHardwarePropertyDefaultInputDevice,
+        ] {
+            let mut address = AudioObjectPropertyAddress {
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain,
+            };
+            unsafe {
+                AudioObjectAddPropertyListenerBlock(
+                    kAudioObjectSystemObject as AudioObjectID,
+                    NonNull::from(&mut address),
+                    None,
+                    block,
+                );
+            }
+        }
+        // The HAL copies the block into its own dispatch list, so the local
+        // handle can drop — but keeping it makes the lifetime obvious.
+        std::mem::forget(listener);
+    }
+
     /// Start the capture engine and its tap. Audio is only inspected for
     /// short-term energy and forwarded to any live consent request — samples
     /// are never retained or sent anywhere. Returns false when the engine
-    /// cannot start; callers keep fail-open playback in that case.
+    /// cannot start (including when a pinned mic is absent); callers keep
+    /// fail-open playback in that case, and `devices_changed` rebinds when
+    /// the device returns.
     pub fn start() -> bool {
+        install_device_listener();
+        ENGINE_WANTED.store(true, Ordering::Relaxed);
         VOICE_LISTENER.with_borrow_mut(|slot| {
             if slot.is_some() {
                 return true;
             }
-            let engine = unsafe { AVAudioEngine::new() };
-            let input = unsafe { engine.inputNode() };
-            let tap = RcBlock::new(
-                |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
-                    let buffer = unsafe { buffer.as_ref() };
-                    capture_dictation(buffer);
-                    if let Ok(feed) = CONSENT_FEED.try_lock()
-                        && let Some(request) = feed.0.as_ref()
-                    {
-                        unsafe { request.appendAudioPCMBuffer(buffer) };
-                    }
-                    observe_ambient_level(buffer);
-                    if let Ok(sink) = AUDIO_SINK.try_lock()
-                        && let Some(sink) = sink.as_ref()
-                        && let Some((mono, rate)) = mono_samples(buffer)
-                    {
-                        sink(&mono, rate);
-                    }
-                },
-            );
-            let tap_pointer = &*tap as *const _ as *mut _;
-            unsafe { input.installTapOnBus_bufferSize_format_block(0, 4_800, None, tap_pointer) };
-            if unsafe { engine.startAndReturnError() }.is_err() {
-                unsafe { input.removeTapOnBus(0) };
+            if !input_present() {
+                INPUT_AVAILABLE.store(false, Ordering::Relaxed);
                 return false;
             }
+            let engine = unsafe { AVAudioEngine::new() };
+            if !configure_and_start(&engine) {
+                return false;
+            }
+            INPUT_AVAILABLE.store(true, Ordering::Relaxed);
             *slot = Some(VoiceListener {
                 engine,
                 consent: None,
             });
             true
         })
+    }
+
+    /// Choose the input device the engine binds to. `None` follows the
+    /// system default. Takes effect immediately — a live engine rebuilds
+    /// onto the new selection.
+    pub fn set_preferred_device(uid: Option<String>) {
+        install_device_listener();
+        *PREFERRED_INPUT_UID.lock().unwrap() = uid.filter(|uid| !uid.is_empty());
+        let _ = devices_changed();
+    }
+
+    /// Register the hook called whenever the system's device set changes.
+    /// Fires off the main thread — it must only forward, never rebuild.
+    pub fn set_device_change_hook(hook: Option<Box<dyn Fn() + Send + Sync + 'static>>) {
+        install_device_listener();
+        *DEVICE_CHANGE_HOOK.lock().unwrap() = hook;
+    }
+
+    /// Whether the wanted input device can capture right now.
+    pub fn input_available() -> bool {
+        INPUT_AVAILABLE.load(Ordering::Relaxed)
+    }
+
+    /// Re-evaluate the device set: stop the engine when its input vanished,
+    /// (re)build it when the wanted device is back or the default moved.
+    /// Call on the thread that owns `VOICE_LISTENER`; returns the input's
+    /// current availability.
+    pub fn devices_changed() -> bool {
+        let available = input_present();
+        INPUT_AVAILABLE.store(available, Ordering::Relaxed);
+        let target = current_target_device();
+        VOICE_LISTENER.with_borrow_mut(|slot| {
+            let mut consent = None;
+            if let Some(mut listener) = slot.take() {
+                let bound = *BOUND_DEVICE.lock().unwrap();
+                let engine_dead = !unsafe { listener.engine.isRunning() };
+                if available && !engine_dead && bound == target {
+                    // Nothing the engine cares about moved — put it back
+                    // rather than interrupting live capture.
+                    *slot = Some(listener);
+                    return;
+                }
+                // The consent session and its feed outlive the engine —
+                // the rebuilt tap keeps appending to the same request.
+                consent = listener.consent.take();
+                teardown_engine(&listener);
+                if !available {
+                    return;
+                }
+            }
+            if !available || !ENGINE_WANTED.load(Ordering::Relaxed) {
+                return;
+            }
+            let engine = unsafe { AVAudioEngine::new() };
+            if configure_and_start(&engine) {
+                *slot = Some(VoiceListener { engine, consent });
+            }
+        });
+        available
     }
 
     fn capture_dictation(buffer: &AVAudioPCMBuffer) {
@@ -393,16 +705,14 @@ mod voice_gate {
 
     /// Stop the engine and any consent session, and reset the VAD window.
     pub fn stop() {
+        ENGINE_WANTED.store(false, Ordering::Relaxed);
         end_consent();
         VOICE_LISTENER.with_borrow_mut(|slot| {
             if let Some(listener) = slot.take() {
-                let input = unsafe { listener.engine.inputNode() };
-                unsafe {
-                    input.removeTapOnBus(0);
-                    listener.engine.stop();
-                }
+                teardown_engine(&listener);
             }
         });
+        *BOUND_DEVICE.lock().unwrap() = None;
         AMBIENT_WINDOWS.store(0, Ordering::Relaxed);
     }
 
@@ -563,6 +873,54 @@ pub fn consent_recognition_active() -> bool {
     voice_gate::consent_active()
 }
 
+/// An audio input device the voice listener can be pinned to.
+#[cfg(target_os = "macos")]
+pub struct VoiceInputDevice {
+    /// The CoreAudio device UID — stable across reconnects and reboots.
+    pub uid: String,
+    /// The device's display name.
+    pub name: String,
+}
+
+/// The system's current audio input devices — the mic picker's options.
+#[cfg(target_os = "macos")]
+pub fn voice_input_devices() -> Vec<VoiceInputDevice> {
+    voice_gate::audio_input_devices()
+        .into_iter()
+        .map(|(_, uid, name)| VoiceInputDevice { uid, name })
+        .collect()
+}
+
+/// Pin the voice listener to one input device UID — `None` (or empty)
+/// follows the system default. The listener binds to the specific device,
+/// never silently to another mic; if it disappears the engine stops and
+/// rebinds when it returns.
+#[cfg(target_os = "macos")]
+pub fn set_voice_input_device(uid: Option<String>) {
+    voice_gate::set_preferred_device(uid)
+}
+
+/// Register the hook that fires (off the main thread) whenever the system's
+/// audio device set changes. `None` detaches it.
+#[cfg(target_os = "macos")]
+pub fn set_voice_input_change_hook(hook: Option<Box<dyn Fn() + Send + Sync + 'static>>) {
+    voice_gate::set_device_change_hook(hook)
+}
+
+/// Re-evaluate the device set after a reported change — stops or rebuilds
+/// the engine as needed. Must run on the thread that owns the listener
+/// (the main thread); returns whether the wanted input can capture.
+#[cfg(target_os = "macos")]
+pub fn voice_input_devices_changed() -> bool {
+    voice_gate::devices_changed()
+}
+
+/// Whether the wanted input device can capture right now.
+#[cfg(target_os = "macos")]
+pub fn voice_input_available() -> bool {
+    voice_gate::input_available()
+}
+
 /// Begin on-device recognition of the spoken consent phrase. `hook` is
 /// invoked off the UI thread for each `ConsentSignal`.
 #[cfg(target_os = "macos")]
@@ -608,6 +966,33 @@ pub fn voice_audio_sink_active() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub fn dictation_capture_active() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub struct VoiceInputDevice {
+    pub uid: String,
+    pub name: String,
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn voice_input_devices() -> Vec<VoiceInputDevice> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_voice_input_device(_: Option<String>) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_voice_input_change_hook(_: Option<Box<dyn Fn() + Send + Sync + 'static>>) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn voice_input_devices_changed() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn voice_input_available() -> bool {
     false
 }
 
