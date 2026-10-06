@@ -354,6 +354,10 @@ pub struct BossService {
     router: Mutex<BossRouter>,
     evals: Mutex<BossEval>,
     project_catalog: Mutex<Option<crate::ProjectCatalog>>,
+    /// The PERSONA.md bytes each persona id last had `save` write — most
+    /// updates touch employees, not personas, so unchanged files skip
+    /// their write+fsync entirely.
+    persona_writes: Mutex<std::collections::HashMap<Uuid, String>>,
 }
 
 impl BossService {
@@ -377,6 +381,7 @@ impl BossService {
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
+            persona_writes: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -427,6 +432,7 @@ impl BossService {
         self.injected.lock().clear();
         *self.router.lock() = BossRouter::default();
         *self.evals.lock() = BossEval::default();
+        self.persona_writes.lock().clear();
         self.active.store(false, Ordering::Release);
     }
 
@@ -498,6 +504,7 @@ impl BossService {
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
+            persona_writes: Mutex::new(std::collections::HashMap::new()),
         };
         service.migrate_plan_documents();
         service.save(&service.state.lock())?;
@@ -3203,6 +3210,12 @@ impl BossService {
         let mut state = self.state.lock();
         let mut next = state.clone();
         change(&mut next)?;
+        // A change that lands nothing — e.g. a scheduler pass over an
+        // already-settled ticket — pays no revision bump and none of the
+        // write set `save` performs under this lock.
+        if serde_json::to_vec(&next)? == serde_json::to_vec(&*state)? {
+            return Ok(());
+        }
         next.revision = next.revision.saturating_add(1);
         self.save(&next)?;
         *state = next;
@@ -3214,11 +3227,19 @@ impl BossService {
     }
 
     fn save(&self, state: &BossState) -> anyhow::Result<()> {
+        let mut writes = self.persona_writes.lock();
+        writes.retain(|id, _| state.personas.iter().any(|persona| persona.id == *id));
         for persona in &state.personas {
             let directory = self.file_path(&format!("personas/{}", persona.id), false)?;
+            let file = directory.join("PERSONA.md");
+            if writes.get(&persona.id) == Some(&persona.markdown) && file.exists() {
+                continue;
+            }
             fs::create_dir_all(&directory)?;
-            atomic_write(&directory.join("PERSONA.md"), persona.markdown.as_bytes())?;
+            atomic_write(&file, persona.markdown.as_bytes())?;
+            writes.insert(persona.id, persona.markdown.clone());
         }
+        drop(writes);
         atomic_write(
             &self.root.join("boss.json"),
             &serde_json::to_vec_pretty(state)?,
@@ -4723,6 +4744,37 @@ mod tests {
                     }
                 )
                 .is_ok()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn updates_that_change_nothing_skip_the_persona_write_set() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let revision = service.document().revision;
+        // A change that lands nothing bumps no revision and writes nothing.
+        service.update(|_| Ok(())).unwrap();
+        assert_eq!(service.document().revision, revision);
+        // A real update rewrites boss.json but leaves a persona file whose
+        // content already matches the state untouched.
+        let state = service.document();
+        let persona_file = root.join(format!(
+            "files/personas/{}/PERSONA.md",
+            state.personas[0].id
+        ));
+        fs::write(&persona_file, b"locally edited").unwrap();
+        service.set_session_id(Uuid::new_v4()).unwrap();
+        assert_eq!(fs::read_to_string(&persona_file).unwrap(), "locally edited");
+        // A persona change still reaches disk.
+        let mut upsert = BossPersonaUpsert::from(service.document().personas[0].clone());
+        upsert.markdown = "revised persona".into();
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: upsert })
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&persona_file).unwrap(),
+            "revised persona"
         );
         fs::remove_dir_all(root).unwrap();
     }

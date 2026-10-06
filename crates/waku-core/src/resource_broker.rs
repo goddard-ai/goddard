@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 use waku_protocol::boss::AdmissionBlocker;
@@ -31,7 +31,7 @@ pub struct AdmissionAttempt {
 pub struct Broker {
     root: PathBuf,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Observation {
     devices: Vec<String>,
     errors: Vec<String>,
@@ -55,7 +55,35 @@ impl Broker {
     pub fn operate(&self, task: Uuid, operation: ResourceOperation) -> Result<ResourceStatus> {
         #[cfg(not(unix))]
         bail!("resource workload supervision currently requires a Unix host");
-        self.with_observation(task, operation, observe)
+        // A live observation spawns xcrun+ps probes, so it is reserved for
+        // the ops that decide from the device inventory: acquisitions that
+        // claim devices get a fresh one, and Status polls share a short
+        // cache — a waiter's 500 ms poll must not serialize the authority
+        // lock behind probe latency. Every other op reports "not probed":
+        // an errored observation keeps resident-device claims
+        // conservatively and still blocks resident-device grants, which is
+        // what `release_admission` already relies on.
+        let claims_devices = match &operation {
+            ResourceOperation::Acquire { resources, .. }
+            | ResourceOperation::Admission { resources, .. } => {
+                !resources.exclusive.is_empty() || resources.resident_devices > 0
+            }
+            _ => false,
+        };
+        if claims_devices {
+            self.with_observation(task, operation, observe)
+        } else if matches!(operation, ResourceOperation::Status { .. }) {
+            self.transaction(task, operation, cached_observation())
+        } else {
+            self.transaction(
+                task,
+                operation,
+                Observation {
+                    devices: Vec::new(),
+                    errors: vec!["device inventory not probed".into()],
+                },
+            )
+        }
     }
 
     fn transaction(
@@ -777,6 +805,24 @@ fn probe(program: &str, args: &[&str]) -> Result<Vec<u8>> {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+/// Status pollers share one fresh-enough probe per process — the cache is
+/// evaluated before the authority lock, so waiting callers cannot queue
+/// xcrun+ps subprocesses inside it.
+fn cached_observation() -> Observation {
+    const TTL: Duration = Duration::from_secs(2);
+    static CACHE: parking_lot::Mutex<Option<(Instant, Observation)>> =
+        parking_lot::Mutex::new(None);
+    let mut cache = CACHE.lock();
+    if let Some((probed_at, observation)) = cache.as_ref()
+        && probed_at.elapsed() < TTL
+    {
+        return observation.clone();
+    }
+    let observation = observe();
+    *cache = Some((Instant::now(), observation.clone()));
+    observation
+}
+
 fn observe() -> Observation {
     let mut observation = Observation::default();
     #[cfg(target_os = "macos")]
@@ -939,6 +985,39 @@ mod tests {
         fn drop(&mut self) {
             self.stop();
         }
+    }
+
+    #[test]
+    fn operate_probes_devices_only_for_status_and_device_claims() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        // Device-free acquire, release, and cancel never spawn xcrun+ps —
+        // they report "not probed" instead of a live inventory.
+        let status = h.broker.operate(task, acquisition(build(), None)).unwrap();
+        assert_eq!(
+            status.observation_errors,
+            ["device inventory not probed"]
+        );
+        let status = h
+            .broker
+            .operate(task, ResourceOperation::Release { id: id(&status) })
+            .unwrap();
+        assert_eq!(
+            status.observation_errors,
+            ["device inventory not probed"]
+        );
+        // Status still runs the real (cached) observation — its errors are
+        // genuine probe failures, never the skip marker.
+        let status = h
+            .broker
+            .operate(task, ResourceOperation::Status { id: None })
+            .unwrap();
+        assert!(
+            !status
+                .observation_errors
+                .iter()
+                .any(|error| error == "device inventory not probed")
+        );
     }
 
     #[test]
