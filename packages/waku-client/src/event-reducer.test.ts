@@ -20,6 +20,15 @@ const SUBMISSION = {
 }
 
 describe('promptSubmitted', () => {
+  test('an employee submission preserves its reference checkout in the live projection', () => {
+    const origin = { projectRoot: '/employee-project', worktree: '/employee-worktree' }
+    const session = reduceRuntimeEvent(idleSession(), event('promptSubmitted', {
+      ...SUBMISSION, sentByTask: 'employee', referenceContext: origin,
+    }), clock).session
+    expect(session.messages.at(-1)?.reference_context).toEqual(origin)
+    expect(apply(session, 'textDelta', 'src/x.rs abcdef1').messages.at(-1)?.turn_id).toBe(SUBMISSION.turnId)
+  })
+
   test('a client following the runtime mirrors another client’s submission under its ids', () => {
     // The desktop stayed attached to the idle runtime after the first turn;
     // the phone then submitted the second prompt.

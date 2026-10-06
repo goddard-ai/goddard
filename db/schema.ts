@@ -148,6 +148,7 @@ export const messages = sqliteTable(
     /** JSON-serialized ReportTrigger — the employee report this hidden prompt
      *  delivered, so the transcript can mark which report woke the turn. */
     reportTrigger: text("report_trigger"),
+    referenceContext: text("reference_context"),
     /** Provider-facing text no client renders — the internal "continue" nudge. */
     hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
   },

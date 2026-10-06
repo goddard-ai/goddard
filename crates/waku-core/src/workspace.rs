@@ -21,10 +21,65 @@ pub use waku_protocol::workspace::{
     WorkspaceOperation, WorkspaceResult,
 };
 
+fn reference_workspace(context: &waku_protocol::model::ReferenceContext) -> PathBuf {
+    context
+        .worktree
+        .as_ref()
+        .filter(|path| path.is_dir())
+        .unwrap_or(&context.project_root)
+        .clone()
+}
+
+fn reference_file(context: &waku_protocol::model::ReferenceContext, path: &Path) -> PathBuf {
+    let workspace = reference_workspace(context);
+    if !path.is_absolute() {
+        return workspace.join(path);
+    }
+    let relative = path
+        .strip_prefix(context.workspace())
+        .ok()
+        .or_else(|| path.strip_prefix(&context.project_root).ok());
+    if let Some(relative) = relative {
+        let preferred = workspace.join(relative);
+        if preferred.exists() || !path.exists() {
+            return preferred;
+        }
+    }
+    // An absolute citation can name another checkout of the same file. Use
+    // its repository-relative suffix only when the employee's copy exists.
+    if let Some(parent) = path.parent()
+        && let Ok(output) = crate::command_env::search_path_command("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .current_dir(parent)
+            .output()
+        && output.status.success()
+    {
+        let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        let canonical_path = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Ok(relative) = canonical_path.strip_prefix(root) {
+            let preferred = workspace.join(relative);
+            if preferred.exists() {
+                return preferred;
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
 /// `qa_branch` is the daemon's configured review-train branch — only the
 /// `Review*` operations read it.
 pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
+        WorkspaceOperation::ResolveReferenceFile { context, path } => {
+            WorkspaceResult::ReferenceWorkspace {
+                path: reference_file(&context, &path),
+            }
+        }
+        WorkspaceOperation::ResolveReferenceWorkspace { context } => {
+            WorkspaceResult::ReferenceWorkspace {
+                path: reference_workspace(&context),
+            }
+        }
         WorkspaceOperation::ListTree {
             root,
             expanded_paths,
@@ -1529,5 +1584,62 @@ mod tests {
         assert!(root.join("temp/scratch.txt").exists());
         assert!(root.join("src/lib.rs").exists());
         fs::remove_dir_all(root).ok();
+    }
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+
+    #[test]
+    fn employee_references_prefer_worktree_and_fall_back_after_removal() {
+        let root = std::env::temp_dir().join(format!("reference-context-{}", uuid::Uuid::new_v4()));
+        let project_root = root.join("project");
+        let worktree = root.join("employee");
+        for directory in [&project_root, &worktree] {
+            fs::create_dir_all(directory.join("src")).unwrap();
+            fs::write(directory.join("src/x.rs"), "test").unwrap();
+        }
+        let context = waku_protocol::model::ReferenceContext {
+            project_root: project_root.clone(),
+            worktree: Some(worktree.clone()),
+        };
+        assert_eq!(reference_workspace(&context), worktree);
+        assert_eq!(
+            reference_file(&context, Path::new("src/x.rs")),
+            worktree.join("src/x.rs")
+        );
+        // An absolute citation to the primary checkout still prefers the employee's copy.
+        assert_eq!(
+            reference_file(&context, &project_root.join("src/x.rs")),
+            worktree.join("src/x.rs")
+        );
+        let boss_repo = root.join("boss");
+        fs::create_dir_all(boss_repo.join("src")).unwrap();
+        let initialized = crate::command_env::search_path_command("git")
+            .args(["init", "-q"])
+            .current_dir(&boss_repo)
+            .status()
+            .unwrap();
+        assert!(initialized.success());
+        fs::write(boss_repo.join("src/x.rs"), "boss").unwrap();
+        assert_eq!(
+            reference_file(&context, &boss_repo.join("src/x.rs")),
+            worktree.join("src/x.rs")
+        );
+        let external = root.join("outside.rs");
+        fs::write(&external, "external").unwrap();
+        assert_eq!(reference_file(&context, &external), external);
+        fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(reference_workspace(&context), project_root);
+        assert_eq!(
+            reference_file(&context, Path::new("src/x.rs")),
+            project_root.join("src/x.rs")
+        );
+        assert_eq!(
+            reference_file(&context, &worktree.join("src/x.rs")),
+            project_root.join("src/x.rs")
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

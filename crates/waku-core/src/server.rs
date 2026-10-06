@@ -2868,6 +2868,8 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::FileDiff { .. } => "fileDiff",
         WorkspaceOperation::CommitDiff { .. } => "commitDiff",
         WorkspaceOperation::CommitEntry { .. } => "commitEntry",
+        WorkspaceOperation::ResolveReferenceWorkspace { .. } => "resolveReferenceWorkspace",
+        WorkspaceOperation::ResolveReferenceFile { .. } => "resolveReferenceFile",
         WorkspaceOperation::ReviewQueue { .. } => "reviewQueue",
         WorkspaceOperation::ReviewApprove { .. } => "reviewApprove",
         WorkspaceOperation::ReviewReject { .. } => "reviewReject",

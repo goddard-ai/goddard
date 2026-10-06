@@ -341,7 +341,7 @@ pub(super) struct TranscriptCommitHover {
 /// same card the Git panel's commit rows use.
 pub(super) enum TranscriptCommitDetail {
     Loading,
-    Ready(CommitEntry),
+    Ready(CommitEntry, std::path::PathBuf),
     Failed(SharedString),
 }
 
@@ -2759,9 +2759,13 @@ impl Waku {
     /// The commit entry already known for `sha`, either from the Git panel's
     /// loaded history or a transcript lookup that has landed.
     fn transcript_commit_entry(&self, sha: &str) -> Option<CommitEntry> {
-        if let Some(TranscriptCommitDetail::Ready(entry)) = self.transcript_commit_details.get(sha)
+        if let Some(TranscriptCommitDetail::Ready(entry, _)) =
+            self.transcript_commit_details.get(sha)
         {
             return Some(entry.clone());
+        }
+        if crate::model::ReferenceContext::decode_reference(sha).is_some() {
+            return None;
         }
         self.git_panel.as_ref().and_then(|panel| {
             panel
@@ -2782,7 +2786,7 @@ impl Waku {
         let entry = self.transcript_commit_entry(sha);
         let full_sha = entry
             .as_ref()
-            .map_or_else(|| sha.to_owned(), |entry| entry.sha.clone());
+            .map_or_else(|| reference_sha(sha).to_owned(), |entry| entry.sha.clone());
         let message = entry.as_ref().map(|entry| {
             let body = entry.body.trim();
             if body.is_empty() {
@@ -2828,28 +2832,42 @@ impl Waku {
         if self.transcript_commit_details.contains_key(sha) {
             return;
         }
-        if let Some(entry) = self.git_panel.as_ref().and_then(|panel| {
-            panel
-                .commits
-                .iter()
-                .find(|entry| commit_entry_matches(entry, sha))
-                .cloned()
-        }) {
-            self.transcript_commit_details
-                .insert(sha.to_owned(), TranscriptCommitDetail::Ready(entry));
+        let reference = crate::model::ReferenceContext::decode_reference(sha);
+        if reference.is_none()
+            && let Some(entry) = self.git_panel.as_ref().and_then(|panel| {
+                panel
+                    .commits
+                    .iter()
+                    .find(|entry| commit_entry_matches(entry, sha))
+                    .cloned()
+            })
+        {
+            self.transcript_commit_details.insert(
+                sha.to_owned(),
+                TranscriptCommitDetail::Ready(
+                    entry,
+                    self.selected_workspace_path()
+                        .unwrap_or(std::path::Path::new(""))
+                        .to_path_buf(),
+                ),
+            );
             self.mark_transcript_commit_resolved(sha);
             return;
         }
-        let Some(workspace) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+        let Some(workspace) = reference
+            .as_ref()
+            .map(|(context, _)| context.workspace().to_path_buf())
+            .or_else(|| {
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            })
         else {
             return;
         };
         let session_id = self.selected_session().map(|session| session.id);
         let key = sha.to_owned();
         let requested_sha = sha.to_owned();
-        let request_sha = sha.to_owned();
+        let request_sha = reference_sha(sha).to_owned();
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             return;
         };
@@ -2859,10 +2877,21 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(WorkspaceOperation::CommitEntry {
-                        cwd: workspace,
+                    let workspace = if let Some((context, _)) = reference {
+                        match client
+                            .request(WorkspaceOperation::ResolveReferenceWorkspace { context })?
+                        {
+                            WorkspaceResult::ReferenceWorkspace { path } => path,
+                            _ => anyhow::bail!("unexpected workspace result"),
+                        }
+                    } else {
+                        workspace
+                    };
+                    let result = client.request(WorkspaceOperation::CommitEntry {
+                        cwd: workspace.clone(),
                         sha: request_sha,
-                    })
+                    })?;
+                    Ok::<_, anyhow::Error>((result, workspace))
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -2870,7 +2899,7 @@ impl Waku {
                     return;
                 }
                 let detail = match result {
-                    Ok(WorkspaceResult::CommitEntry { entry }) => {
+                    Ok((WorkspaceResult::CommitEntry { entry }, workspace)) => {
                         // A transcript-clicked SHA may have opened the modal
                         // with only the written abbreviation for a title. Land
                         // its metadata there too.
@@ -2881,7 +2910,7 @@ impl Waku {
                             modal.subject = entry.subject.clone();
                             modal.body = entry.body.clone();
                         }
-                        TranscriptCommitDetail::Ready(entry)
+                        TranscriptCommitDetail::Ready(entry, workspace)
                     }
                     Ok(_) => TranscriptCommitDetail::Failed(SharedString::from(
                         "unexpected workspace result",
@@ -2890,7 +2919,7 @@ impl Waku {
                         TranscriptCommitDetail::Failed(SharedString::from(error.to_string()))
                     }
                 };
-                if matches!(detail, TranscriptCommitDetail::Ready(_)) {
+                if matches!(detail, TranscriptCommitDetail::Ready(_, _)) {
                     waku.mark_transcript_commit_resolved(&key);
                 }
                 waku.transcript_commit_details.insert(key, detail);
@@ -2983,17 +3012,25 @@ impl Waku {
         }
         self.set_git_panel_visible(true, window, cx);
         let Some(workspace) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+            .transcript_commit_details
+            .get(sha)
+            .and_then(|detail| match detail {
+                TranscriptCommitDetail::Ready(_, workspace) => Some(workspace.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            })
         else {
             return;
         };
         let entry = self.transcript_commit_entry(sha).unwrap_or_else(|| {
             self.ensure_transcript_commit_detail(sha, cx);
             CommitEntry {
-                short_sha: sha.chars().take(7).collect(),
-                sha: sha.to_owned(),
-                subject: sha.to_owned(),
+                short_sha: reference_sha(sha).chars().take(7).collect(),
+                sha: reference_sha(sha).to_owned(),
+                subject: reference_sha(sha).to_owned(),
                 body: String::new(),
                 author: String::new(),
                 author_email: String::new(),
@@ -3002,7 +3039,48 @@ impl Waku {
                 deletions: 0,
             }
         });
-        self.open_commit_diff(workspace, &entry, cx);
+        if let Some((context, _)) = crate::model::ReferenceContext::decode_reference(sha) {
+            let Some(client) = self.workspace_client_for_path(context.workspace()) else {
+                return;
+            };
+            let session_id = self.selected_session().map(|session| session.id);
+            let request_sha = entry.sha.clone();
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let workspace = match client
+                            .request(WorkspaceOperation::ResolveReferenceWorkspace { context })?
+                        {
+                            WorkspaceResult::ReferenceWorkspace { path } => path,
+                            _ => anyhow::bail!("unexpected workspace result"),
+                        };
+                        let entry = match client.request(WorkspaceOperation::CommitEntry {
+                            cwd: workspace.clone(),
+                            sha: request_sha,
+                        })? {
+                            WorkspaceResult::CommitEntry { entry } => entry,
+                            _ => anyhow::bail!("unexpected workspace result"),
+                        };
+                        Ok::<_, anyhow::Error>((workspace, entry))
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| match result {
+                    Ok((path, entry)) => {
+                        if this.selected_session().map(|session| session.id) == session_id {
+                            this.open_commit_diff(path, &entry, cx);
+                        }
+                    }
+                    Err(error) => {
+                        this.show_toast(error.to_string());
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        } else {
+            self.open_commit_diff(workspace, &entry, cx);
+        }
     }
 
     /// First on-screen glyph rect of a transcript SHA, for anchoring its card.
@@ -3037,7 +3115,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let detail = self.transcript_commit_details.get(&hover.sha);
         let card = match detail {
-            Some(TranscriptCommitDetail::Ready(entry)) => git_panel_commit_card(entry, &theme),
+            Some(TranscriptCommitDetail::Ready(entry, _)) => git_panel_commit_card(entry, &theme),
             Some(TranscriptCommitDetail::Failed(error)) => div()
                 .overflow_hidden()
                 .rounded(px(10.0))
@@ -3055,7 +3133,7 @@ impl Waku {
                         .font_family(crate::fonts::current(cx).code)
                         .text_size(sp(11.0))
                         .text_color(theme.text_tertiary)
-                        .child(hover.sha.clone()),
+                        .child(reference_sha(&hover.sha).to_owned()),
                 )
                 .child(
                     div()
@@ -3086,7 +3164,7 @@ impl Waku {
                         .font_family(crate::fonts::current(cx).code)
                         .text_size(sp(11.0))
                         .text_color(theme.text_tertiary)
-                        .child(hover.sha.clone()),
+                        .child(reference_sha(&hover.sha).to_owned()),
                 )
                 .into_any_element(),
         };
@@ -6175,4 +6253,9 @@ fn modal_button(
         .focus_visible(|style| style.bg(theme.focus_highlight()))
         .child(label)
         .on_activation(cx, activate)
+}
+
+fn reference_sha(reference: &str) -> String {
+    crate::model::ReferenceContext::decode_reference(reference)
+        .map_or_else(|| reference.to_owned(), |(_, sha)| sha)
 }

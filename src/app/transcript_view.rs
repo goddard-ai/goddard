@@ -2020,6 +2020,14 @@ impl Waku {
                         .with_commit_refs(
                             message.role == MessageRole::Assistant || message.notice.is_some(),
                         );
+                    if message.role == MessageRole::Assistant {
+                        ctx = ctx.with_reference_context(message.turn_id.and_then(|turn| {
+                            self.transcript_reference_contexts
+                                .borrow()
+                                .get(&turn)
+                                .cloned()
+                        }));
+                    }
                     if message.role == MessageRole::User {
                         ctx = ctx.with_file_link_root(
                             self.selected_workspace_path()

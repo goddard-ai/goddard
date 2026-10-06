@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `reference_context` text;

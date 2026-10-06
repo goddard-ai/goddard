@@ -3,6 +3,7 @@ import type { ContextMark } from "./ContextMark";
 import type { MessageAtom } from "./MessageAtom";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { MessageRole } from "./MessageRole";
+import type { ReferenceContext } from "./ReferenceContext";
 import type { ReportTrigger } from "./ReportTrigger";
 import type { TranscriptNotice } from "./TranscriptNotice";
 
@@ -47,4 +48,8 @@ hidden?: boolean,
  * visible task-to-task sends, nudges, and context injections carry no
  * marker.
  */
-report_trigger?: ReportTrigger | null, created_at: number, streaming: boolean, };
+report_trigger?: ReportTrigger | null,
+/**
+ * Checkout snapshot for a visible employee prompt, without a report marker.
+ */
+reference_context?: ReferenceContext | null, created_at: number, streaming: boolean, };

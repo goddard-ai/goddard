@@ -64,6 +64,28 @@ impl Waku {
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
             let session = self.selected_session();
+            let mut contexts = self.transcript_reference_contexts.borrow_mut();
+            contexts.clear();
+            if let Some(session) = session {
+                let mut seen = HashSet::new();
+                for prompt in session
+                    .messages
+                    .iter()
+                    .filter(|message| message.role == MessageRole::User)
+                {
+                    if let Some(turn_id) = prompt.turn_id
+                        && seen.insert(turn_id)
+                    {
+                        if let Some(context) = prompt
+                            .reference_context
+                            .as_ref()
+                            .or_else(|| prompt.report_trigger.as_ref()?.reference_context.as_ref())
+                        {
+                            contexts.insert(turn_id, context.clone());
+                        }
+                    }
+                }
+            }
             let fade = retain_fading_working_indicator(
                 &mut next_kinds,
                 session.map(|session| session.id),
@@ -1198,6 +1220,7 @@ pub(super) fn transcript_rows_fingerprint(
         // A report trigger arriving moves rows: the marker appears where the
         // hidden prompt sat.
         hash = mix(hash, message.report_trigger.is_some() as u64);
+        hash = mix(hash, message.reference_context.is_some() as u64);
         hash = mix_turn_id(hash, message.turn_id);
         // The fold counts a blank text part as work, so a part crossing that
         // line moves rows. `trim` stops at the first non-space character, so

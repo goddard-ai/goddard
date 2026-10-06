@@ -6817,6 +6817,7 @@ fn report_trigger(
         job_title: "Deliverable annotations".into(),
         kind,
         boundary,
+        reference_context: None,
     }
 }
 

@@ -3803,6 +3803,7 @@ impl Backend for WakuBackend {
                         sent_by_task: None,
                         hidden: *hidden,
                         report_trigger: None,
+                        reference_context: None,
                     };
                     if self.boss.is_managed(session_id) {
                         record_boss_event(
@@ -6308,6 +6309,7 @@ impl WakuBackend {
             sent_by_task: sender,
             hidden: false,
             report_trigger: None,
+            reference_context: None,
         })?)?;
         if driver.supports_steer() {
             // The prompt reaches the provider exactly as typed — title
@@ -9598,6 +9600,24 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        let report_trigger = report_trigger.map(|mut trigger| {
+            let state = self.task_state.lock();
+            trigger.reference_context = state
+                .sessions
+                .iter()
+                .find(|session| session.id == sender)
+                .and_then(|session| {
+                    state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| crate::model::ReferenceContext {
+                            project_root: project.path.clone(),
+                            worktree: session.workspace.path().map(Path::to_path_buf),
+                        })
+                });
+            trigger
+        });
         let driver = self
             .sessions
             .lock()
@@ -11264,6 +11284,7 @@ fn record_boss_event(
             sent_by_task,
             hidden,
             report_trigger,
+            reference_context,
         } => {
             session.adopt_submitted_prompt(
                 message,
@@ -11273,6 +11294,13 @@ fn record_boss_event(
                 *hidden,
                 report_trigger.clone(),
             );
+            if let Some(prompt) = session
+                .messages
+                .iter_mut()
+                .find(|message| message.id == *message_id)
+            {
+                prompt.reference_context = reference_context.clone();
+            }
         }
         DriverEvent::PromptContextMarked { message_id, focus } => {
             session.mark_prompt_context(*message_id, focus.clone());
@@ -11923,6 +11951,26 @@ fn deliver_agent_prompt(
         trigger.boundary = crate::model::ReportTriggerBoundary::Opening;
         trigger.event_id = message_id;
     }
+    let reference_context = entry
+        .report_trigger
+        .as_ref()
+        .and_then(|trigger| trigger.reference_context.clone())
+        .or_else(|| {
+            let sender = entry.sender.filter(|sender| {
+                boss.employee(*sender)
+                    .is_some_and(|employee| boss.report_target(&employee) == Some(session_id))
+            })?;
+            let state = task_state.lock();
+            let session = state.sessions.iter().find(|session| session.id == sender)?;
+            let project = state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)?;
+            Some(crate::model::ReferenceContext {
+                project_root: project.path.clone(),
+                worktree: session.workspace.path().map(Path::to_path_buf),
+            })
+        });
     persist_agent_prompt(
         task_state,
         task_store,
@@ -11934,6 +11982,7 @@ fn deliver_agent_prompt(
         entry.queued_id,
         entry.hidden,
         entry.report_trigger.clone(),
+        reference_context.clone(),
     )?;
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
@@ -11942,6 +11991,7 @@ fn deliver_agent_prompt(
         sent_by_task: entry.sender,
         hidden: entry.hidden,
         report_trigger: entry.report_trigger.clone(),
+        reference_context,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
     let handoff = {
@@ -12013,6 +12063,7 @@ fn persist_agent_prompt(
     queued_id: Option<Uuid>,
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
+    reference_context: Option<crate::model::ReferenceContext>,
 ) -> anyhow::Result<()> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -12039,6 +12090,13 @@ fn persist_agent_prompt(
         report_trigger,
     ) || dequeued
     {
+        if let Some(prompt) = session
+            .messages
+            .iter_mut()
+            .find(|message| message.id == message_id)
+        {
+            prompt.reference_context = reference_context;
+        }
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
     }
@@ -12934,6 +12992,7 @@ mod tests {
                 sent_by_task: None,
                 hidden: false,
                 report_trigger: None,
+                reference_context: None,
             },
         )
         .unwrap();
@@ -13610,6 +13669,7 @@ mod tests {
             sent_by_task: None,
             hidden: false,
             report_trigger: None,
+            reference_context: None,
         })
         .unwrap();
         assert_eq!(wire.kind, "promptSubmitted");
@@ -13633,6 +13693,7 @@ mod tests {
             sent_by_task: Some(sender),
             hidden: false,
             report_trigger: None,
+            reference_context: None,
         })
         .unwrap();
         assert_eq!(wire.payload["sentByTask"], sender.to_string());
@@ -15698,6 +15759,7 @@ mod tests {
                 sent_by_task: None,
                 hidden: false,
                 report_trigger: None,
+                reference_context: None,
             },
             DriverEvent::TurnStarted,
             DriverEvent::TextDelta("Checking ".into()),

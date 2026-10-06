@@ -332,6 +332,7 @@ impl Waku {
                 sent_by_task,
                 hidden,
                 report_trigger,
+                reference_context,
             } => {
                 // A prompt reached this runtime: another client's submission,
                 // or the echo of this one. The session decides whether that
@@ -348,6 +349,13 @@ impl Waku {
                         report_trigger,
                     )
                 {
+                    if let Some(prompt) = session
+                        .messages
+                        .iter_mut()
+                        .find(|message| message.id == message_id)
+                    {
+                        prompt.reference_context = reference_context;
+                    }
                     self.state.mark_session_dirty(session_id);
                 }
             }

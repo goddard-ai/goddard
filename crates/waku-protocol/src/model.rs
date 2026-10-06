@@ -2986,6 +2986,17 @@ impl AgentSession {
             .any(|message| message.turn_id == Some(turn.id))
     }
 
+    pub fn reference_context_for_turn(&self, turn_id: Option<Uuid>) -> Option<&ReferenceContext> {
+        let turn_id = turn_id?;
+        let prompt = self.messages.iter().find(|message| {
+            message.turn_id == Some(turn_id) && message.role == MessageRole::User
+        })?;
+        prompt
+            .reference_context
+            .as_ref()
+            .or_else(|| prompt.report_trigger.as_ref()?.reference_context.as_ref())
+    }
+
     pub fn active_turn_id(&self) -> Option<Uuid> {
         self.turns
             .last()
@@ -3818,6 +3829,36 @@ pub enum ReportTriggerBoundary {
     Steer,
 }
 
+/// The originating checkout for references in an employee-initiated reply.
+/// Kept on the initiating prompt so later employee moves cannot retarget it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceContext {
+    #[ts(type = "string")]
+    pub project_root: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "string | null")]
+    pub worktree: Option<PathBuf>,
+}
+
+impl ReferenceContext {
+    pub fn workspace(&self) -> &Path {
+        self.worktree.as_deref().unwrap_or(&self.project_root)
+    }
+
+    /// Scope an internal reference key without changing its visible label.
+    pub fn encode_reference(&self, target: &str) -> String {
+        format!(
+            "goddard-reference:{}",
+            serde_json::to_string(&(self, target)).unwrap()
+        )
+    }
+
+    pub fn decode_reference(reference: &str) -> Option<(Self, String)> {
+        serde_json::from_str(reference.strip_prefix("goddard-reference:")?).ok()
+    }
+}
+
 /// The event-time record of the report behind a supervisor turn — an
 /// employee's outcome or a finalized plan's handoff — the transcript's
 /// "what woke this turn" marker. Everything renderable is a snapshot taken
@@ -3836,6 +3877,8 @@ pub struct ReportTrigger {
     pub job_title: String,
     pub kind: ReportTriggerKind,
     pub boundary: ReportTriggerBoundary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_context: Option<ReferenceContext>,
 }
 
 impl ReportTrigger {
@@ -3849,6 +3892,7 @@ impl ReportTrigger {
             job_title: employee.job_title.clone(),
             kind,
             boundary: ReportTriggerBoundary::Opening,
+            reference_context: None,
         }
     }
 
@@ -3862,6 +3906,7 @@ impl ReportTrigger {
             job_title: plan.plan_file.clone(),
             kind: ReportTriggerKind::PlanFinalized,
             boundary: ReportTriggerBoundary::Opening,
+            reference_context: None,
         }
     }
 }
@@ -3909,6 +3954,9 @@ pub struct Message {
     /// marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_trigger: Option<ReportTrigger>,
+    /// Checkout snapshot for a visible employee prompt, without a report marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_context: Option<ReferenceContext>,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -3928,6 +3976,7 @@ impl Message {
             context_mark: None,
             hidden: false,
             report_trigger: None,
+            reference_context: None,
             created_at: unix_time(),
             streaming: false,
         }
@@ -4370,6 +4419,7 @@ pub enum DriverEvent {
         /// The employee report this prompt delivered — the supervisor's
         /// turn-trigger record. `None` for every other submission.
         report_trigger: Option<ReportTrigger>,
+        reference_context: Option<ReferenceContext>,
     },
     TurnStarted,
     /// The provider's turn ended while detached work it will wake the
@@ -6316,6 +6366,8 @@ pub fn detail_prefix_signature(messages: &[Message], transcript_blocks: &[Transc
         hash.json(&message.attachments);
         hash.json(&message.sent_by_task);
         hash.json(&message.context_mark);
+        hash.json(&message.report_trigger);
+        hash.json(&message.reference_context);
         hash.boolean(message.hidden);
         hash.number(message.created_at);
         hash.boolean(message.streaming);
@@ -6448,6 +6500,45 @@ pub fn compact_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reply_reference_context_belongs_to_the_opening_prompt() {
+        let context = ReferenceContext {
+            project_root: "/employee-project".into(),
+            worktree: Some("/employee-worktree".into()),
+        };
+        let other = ReferenceContext {
+            project_root: "/other-project".into(),
+            worktree: None,
+        };
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let turn = session.begin_turn("employee report");
+        session.messages.last_mut().unwrap().reference_context = Some(context.clone());
+        let mut steer = Message::new_for_turn(MessageRole::User, "other report", turn);
+        steer.reference_context = Some(other.clone());
+        session.messages.push(steer);
+        assert_eq!(
+            session.reference_context_for_turn(Some(turn)),
+            Some(&context)
+        );
+        session.finish_active_turn(TurnStatus::Completed);
+        let human_turn = session.begin_turn("human prompt");
+        assert_eq!(session.reference_context_for_turn(Some(human_turn)), None);
+        let restored: AgentSession =
+            serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+        assert_eq!(
+            restored.reference_context_for_turn(Some(turn)),
+            Some(&context)
+        );
+        assert_ne!(
+            context.encode_reference("abcdef1"),
+            other.encode_reference("abcdef1")
+        );
+        assert_eq!(
+            ReferenceContext::decode_reference(&context.encode_reference("src/x.rs:12")),
+            Some((context, "src/x.rs:12".into()))
+        );
+    }
 
     #[test]
     fn native_for_model_maps_vendor_ids_and_rejects_the_rest() {
@@ -8480,6 +8571,7 @@ mod tests {
             job_title: "Deliverable annotations".into(),
             kind,
             boundary: ReportTriggerBoundary::Opening,
+            reference_context: None,
         }
     }
 

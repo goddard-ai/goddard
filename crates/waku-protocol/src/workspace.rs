@@ -596,6 +596,15 @@ pub struct ReclaimFailure {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
+    /// Resolve on the daemon host; a removed worktree falls back to its project.
+    ResolveReferenceWorkspace {
+        context: crate::model::ReferenceContext,
+    },
+    ResolveReferenceFile {
+        context: crate::model::ReferenceContext,
+        #[ts(type = "string")]
+        path: PathBuf,
+    },
     ListTree {
         #[ts(type = "string")]
         root: PathBuf,
@@ -1300,6 +1309,10 @@ pub enum WorkspaceOperation {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceResult {
+    ReferenceWorkspace {
+        #[ts(type = "string")]
+        path: PathBuf,
+    },
     Ack,
     WorkingTree {
         entries: Vec<WorkingTreeEntry>,

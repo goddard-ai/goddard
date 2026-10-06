@@ -1622,7 +1622,7 @@ impl StateStore {
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments, atoms,
                         created_at, streaming, sent_by_task, hidden, notice, context_mark,
-                        report_trigger
+                        report_trigger, reference_context
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1643,6 +1643,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2398,6 +2399,7 @@ type MessageColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -2416,6 +2418,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         notice,
         context_mark,
         report_trigger,
+        reference_context,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
@@ -2436,6 +2439,8 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         hidden: hidden != 0,
         report_trigger: report_trigger
             .and_then(|json| serde_json::from_str::<ReportTrigger>(&json).ok()),
+        reference_context: reference_context
+            .and_then(|json| serde_json::from_str::<crate::model::ReferenceContext>(&json).ok()),
     })
 }
 
@@ -2709,8 +2714,8 @@ fn is_terminal_checkpoint(checkpoint: &Checkpoint) -> bool {
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
          attachments, atoms, created_at, streaming, sent_by_task, hidden, notice,
-         context_mark, report_trigger
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         context_mark, report_trigger, reference_context
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -2726,7 +2731,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          hidden     = excluded.hidden,
          notice     = excluded.notice,
          context_mark = excluded.context_mark,
-         report_trigger = excluded.report_trigger";
+         report_trigger = excluded.report_trigger,
+         reference_context = excluded.reference_context";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -2786,6 +2792,12 @@ fn write_messages(
             .map(serde_json::to_string)
             .transpose()
             .map_err(to_io_error)?;
+        let reference_context = message
+            .reference_context
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(to_io_error)?;
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -2813,6 +2825,7 @@ fn write_messages(
                     notice.map_or(Value::Null, Value::Text),
                     context_mark.map_or(Value::Null, Value::Text),
                     report_trigger.map_or(Value::Null, Value::Text),
+                    reference_context.map_or(Value::Null, Value::Text),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -2909,6 +2922,14 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     if let Some(trigger) = &message.report_trigger {
         fold(1);
         if let Ok(json) = serde_json::to_string(trigger) {
+            fold(fingerprint(&json));
+        }
+    } else {
+        fold(0);
+    }
+    if let Some(context) = &message.reference_context {
+        fold(1);
+        if let Ok(json) = serde_json::to_string(context) {
             fold(fingerprint(&json));
         }
     } else {
@@ -4842,6 +4863,10 @@ mod tests {
         // A boss context router mark persists beside the row it names.
         let marked_id = state.sessions[0].messages[1].id;
         state.sessions[0].mark_prompt_context(marked_id, Some("app".into()));
+        state.sessions[0].messages[0].reference_context = Some(crate::model::ReferenceContext {
+            project_root: "/employee-project".into(),
+            worktree: Some("/employee-worktree".into()),
+        });
         let expected = state.sessions[0].messages.clone();
         store.save(&mut state).unwrap();
 
@@ -4875,8 +4900,27 @@ mod tests {
             assert_eq!(restored.streaming, expected.streaming);
             assert_eq!(restored.hidden, expected.hidden);
             assert_eq!(restored.context_mark, expected.context_mark);
+            assert_eq!(restored.reference_context, expected.reference_context);
         }
         assert!(messages[3].hidden, "the continue nudge survives the save");
+
+        // Metadata-only changes must also invalidate the incremental message write.
+        state.sessions[0].messages[0]
+            .reference_context
+            .as_mut()
+            .unwrap()
+            .worktree = None;
+        state.mark_session_dirty(state.sessions[0].id);
+        store.save(&mut state).unwrap();
+        let restored = load_hydrated(&store_in(&directory));
+        assert_eq!(
+            restored.sessions[0].messages[0]
+                .reference_context
+                .as_ref()
+                .unwrap()
+                .worktree,
+            None
+        );
 
         fs::remove_dir_all(directory).ok();
     }

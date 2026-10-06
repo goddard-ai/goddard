@@ -210,6 +210,14 @@ export function reduceRuntimeEvent(
         value.hidden === true,
         clock,
       )
+      const prompt = session.messages.find((message) => message.id === value.messageId)
+      const origin = asRecord(value.referenceContext)
+      if (prompt && origin && typeof origin.projectRoot === 'string') {
+        prompt.reference_context = {
+          projectRoot: origin.projectRoot,
+          worktree: typeof origin.worktree === 'string' ? origin.worktree : null,
+        }
+      }
       break
     }
     case 'promptContextMarked': {

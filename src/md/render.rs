@@ -968,6 +968,14 @@ pub fn contains_commit_reference(text: &str) -> bool {
     })
 }
 
+/// File-like paths in prose or inline code in employee-initiated replies.
+static REPLY_FILE_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?:~/|/)?(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+(?::[0-9]+(?::[0-9]+)?)?",
+    )
+    .unwrap()
+});
+
 /// An `@path` token — the composer file mention's submitted form. The `@`
 /// must not follow a word character, so `user@host` is not a mention, and the
 /// path runs to whitespace; punctuation typed right after it is prose, not
@@ -1246,6 +1254,7 @@ pub struct MarkdownView {
     /// Mended replacement for the final block while streaming.
     tail: Vec<TopBlock>,
     flats: RefCell<HashMap<usize, Rc<FlatText>>>,
+    reference_context: RefCell<Option<waku_protocol::model::ReferenceContext>>,
     /// First element ordinal belonging to the final block — the only block an
     /// append can change. Recorded during render, because only the renderer
     /// knows how many text elements each block expands into.
@@ -1325,6 +1334,7 @@ impl MarkdownView {
             parser: IncrementalParser::new(),
             tail: Vec::new(),
             flats: RefCell::new(HashMap::new()),
+            reference_context: RefCell::new(None),
             volatile_from: Cell::new(0),
             style: RefCell::new(None),
             veil: RefCell::new(RowVeil::default()),
@@ -1526,6 +1536,7 @@ pub struct Ctx<'a> {
     /// The workspace `@`-mentions in this row resolve against, when the row
     /// presents them as file links (user prompts).
     file_link_root: Option<PathBuf>,
+    reference_context: Option<waku_protocol::model::ReferenceContext>,
     /// Cross-frame flatten cache, when this render has one to consult.
     cache: Option<&'a MarkdownView>,
     next_ordinal: Cell<usize>,
@@ -1598,6 +1609,7 @@ impl<'a> Ctx<'a> {
             annotation_ref_labels: 0,
             commit_refs: false,
             file_link_root: None,
+            reference_context: None,
             cache: None,
             next_ordinal: Cell::new(0),
             starts_block: Cell::new(true),
@@ -1660,6 +1672,15 @@ impl<'a> Ctx<'a> {
     /// Enable commit-SHA references for this surface.
     pub fn with_commit_refs(mut self, enabled: bool) -> Self {
         self.commit_refs = enabled;
+        self
+    }
+
+    /// Resolve an employee-initiated reply in its initiating checkout.
+    pub fn with_reference_context(
+        mut self,
+        context: Option<waku_protocol::model::ReferenceContext>,
+    ) -> Self {
+        self.reference_context = context;
         self
     }
 
@@ -1768,6 +1789,11 @@ impl<'a> Ctx<'a> {
     }
 
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
+        if *view.reference_context.borrow() != self.reference_context {
+            *view.reference_context.borrow_mut() = self.reference_context.clone();
+            view.flats.borrow_mut().clear();
+        }
+
         Self {
             row: self.row.clone(),
             palette: self.palette,
@@ -1781,6 +1807,7 @@ impl<'a> Ctx<'a> {
             annotation_ref_labels: self.annotation_ref_labels,
             commit_refs: self.commit_refs,
             file_link_root: self.file_link_root.clone(),
+            reference_context: self.reference_context.clone(),
             cache: Some(view),
             next_ordinal: Cell::new(self.next_ordinal.get()),
             starts_block: Cell::new(self.starts_block.get()),
@@ -1885,6 +1912,31 @@ impl<'a> Ctx<'a> {
                     flat.links.extend(refs);
                 }
             }
+            if let Some(context) = &self.reference_context {
+                for (_, sha) in &mut flat.commit_refs {
+                    *sha = context.encode_reference(sha);
+                }
+                if detect_refs {
+                    // Reply paths often appear as inline code rather than Markdown links.
+                    for found in REPLY_FILE_PATH.find_iter(flat.text.as_ref()) {
+                        let range = found.range();
+                        if linked_or_math_range(&flat, &range) || atom_range(&flat, &range) {
+                            continue;
+                        }
+                        flat.file_refs.push(range.clone());
+                        flat.links.push((range, found.as_str().to_owned()));
+                    }
+                }
+                for (_, target) in &mut flat.links {
+                    if target.starts_with("file://")
+                        || (!target.contains("://")
+                            && !target.starts_with('#')
+                            && !target.starts_with("mailto:"))
+                    {
+                        *target = context.encode_reference(target);
+                    }
+                }
+            }
             flat
         };
         match self.cache {
@@ -1949,7 +2001,24 @@ fn text_element_with_selection(
                 let text = flat.text.clone();
                 move |index, window, cx| {
                     let (range, url) = links.iter().find(|(range, _)| range.contains(&index))?;
-                    (text[range.clone()] != *url).then(|| Tooltip::text(url.clone())(window, cx))
+                    let target = waku_protocol::model::ReferenceContext::decode_reference(url)
+                        .map(|(context, target)| {
+                            let path = Path::new(&target);
+                            if let Ok(relative) = path.strip_prefix(context.workspace())
+                                .or_else(|_| path.strip_prefix(&context.project_root)) {
+                                context.workspace().join(relative).to_string_lossy().into_owned()
+                            } else if path.is_absolute() {
+                                target
+                            } else {
+                                context
+                                    .workspace()
+                                    .join(path)
+                                    .to_string_lossy()
+                                    .into_owned()
+                            }
+                        })
+                        .unwrap_or_else(|| url.clone());
+                    (text[range.clone()] != target).then(|| Tooltip::text(target)(window, cx))
                 }
             })
             .into_any_element()
@@ -4089,6 +4158,54 @@ mod tests {
 
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())
+    }
+
+    #[test]
+    fn employee_reply_references_are_scoped_and_cached_without_changing_text() {
+        let palette = palette();
+        let view = MarkdownView::new();
+        let context = waku_protocol::model::ReferenceContext {
+            project_root: "/project".into(),
+            worktree: Some("/employee".into()),
+        };
+        let ctx = Ctx::new(
+            "reply",
+            &palette,
+            Metrics::BODY,
+            TranscriptSelection::default(),
+        )
+        .with_commit_refs(true)
+        .with_reference_context(Some(context.clone()));
+        let cached = ctx.with_cache(&view);
+        let build = || {
+            flatten_plain(
+                "src/x.rs:12 abcdef1".to_owned(),
+                crate::fonts::DEFAULT_UI_FAMILY,
+                FontWeight::NORMAL,
+                palette.text,
+            )
+        };
+        let flat = cached.flat_inner(0, true, build);
+        assert_eq!(flat.text.as_ref(), "src/x.rs:12 abcdef1");
+        assert_eq!(
+            waku_protocol::model::ReferenceContext::decode_reference(&flat.links[0].1),
+            Some((context.clone(), "src/x.rs:12".into()))
+        );
+        assert_eq!(
+            waku_protocol::model::ReferenceContext::decode_reference(&flat.commit_refs[0].1),
+            Some((context, "abcdef1".into()))
+        );
+        assert!(Rc::ptr_eq(&flat, &cached.flat_inner(0, true, build)));
+        let human = Ctx::new(
+            "reply",
+            &palette,
+            Metrics::BODY,
+            TranscriptSelection::default(),
+        )
+        .with_commit_refs(true);
+        let human = human.with_cache(&view).flat_inner(0, true, build);
+        assert!(human.links.is_empty());
+        assert_eq!(human.commit_refs[0].1, "abcdef1");
     }
 
     #[test]

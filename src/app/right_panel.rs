@@ -2742,6 +2742,54 @@ impl Waku {
     }
 
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
+        if let Some((context, target)) = crate::model::ReferenceContext::decode_reference(target) {
+            let Some(path) = markdown_file_link_path(&target) else {
+                return true;
+            };
+            let Some(client) = self.workspace_client_for_path(context.workspace()) else {
+                return true;
+            };
+            let session_id = self.selected_session().map(|session| session.id);
+            let location = file_link_location(&target);
+            let heading = markdown_file_link_heading(&target);
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        client.request(
+                            waku_protocol::workspace::WorkspaceOperation::ResolveReferenceFile {
+                                context,
+                                path,
+                            },
+                        )
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| match result {
+                    Ok(waku_protocol::workspace::WorkspaceResult::ReferenceWorkspace { path }) => {
+                        if this.selected_session().map(|session| session.id) != session_id {
+                            return;
+                        }
+                        let mut target = path.to_string_lossy().into_owned();
+                        if let Some((line, column)) = location {
+                            target.push_str(&format!(":{line}"));
+                            if let Some(column) = column {
+                                target.push_str(&format!(":{column}"));
+                            }
+                        } else if let Some(heading) = heading {
+                            target.push_str(&format!("#{heading}"));
+                        }
+                        this.open_transcript_link(&target, cx);
+                    }
+                    Err(error) => {
+                        this.show_toast(error.to_string());
+                        cx.notify();
+                    }
+                    _ => {}
+                });
+            })
+            .detach();
+            return true;
+        }
         let files_root = self.resolve_right_panel_files_root(cx);
         let route = transcript_link_route(target, files_root.as_deref());
         let linked_path = match &route {
@@ -2888,7 +2936,9 @@ impl Waku {
                 ));
             }
         }
-        let (copy_target, copy_key) = transcript_link_copy(url);
+        let unscoped =
+            crate::model::ReferenceContext::decode_reference(url).map(|(_, target)| target);
+        let (copy_target, copy_key) = transcript_link_copy(unscoped.as_deref().unwrap_or(url));
         items.push(MenuItem::new(tr!(copy_key), move |_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(copy_target.clone()));
         }));
@@ -6529,6 +6579,15 @@ impl Waku {
         path: &str,
         cx: &App,
     ) -> Vec<MenuItem> {
+        if crate::model::ReferenceContext::decode_reference(path).is_some() {
+            let target = path.to_owned();
+            let waku = waku.clone();
+            return vec![MenuItem::new(tr!("common.open_link"), move |_, cx| {
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_transcript_link(&target, cx);
+                });
+            })];
+        }
         let path = Path::new(path.trim());
         let absolute_path = if path.is_absolute() {
             path.to_path_buf()
