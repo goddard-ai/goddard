@@ -94,6 +94,31 @@ pub(super) fn effective_voice_briefing_summary_instructions(
     instructions
 }
 
+/// Ready automatic clips have one waiting slot. Older async completions
+/// cannot displace a newer clip, even after that clip has started playing.
+#[derive(Default)]
+pub(super) struct BriefingQueue {
+    sequence: u64,
+    accepted: u64,
+    waiting: Option<Uuid>,
+}
+
+impl BriefingQueue {
+    fn issue(&mut self) -> u64 {
+        self.sequence += 1;
+        self.sequence
+    }
+
+    fn accept(&mut self, sequence: u64, message_id: Uuid) -> bool {
+        if sequence <= self.accepted {
+            return false;
+        }
+        self.accepted = sequence;
+        self.waiting = Some(message_id);
+        true
+    }
+}
+
 impl Waku {
     /// The settle-side half: a reply that finishes off screen gets its
     /// clip built now, so landing on the task plays instantly. Runs only
@@ -254,6 +279,7 @@ impl Waku {
         play: bool,
         cx: &mut Context<Self>,
     ) {
+        let sequence = self.briefing_queue.issue();
         if self.state.voice_briefing_gate_enabled
             && self.briefing_gate_pending.len() < BRIEFING_PENDING_CAP
             && let Some((daemon, state)) = self.voice_briefing_gate_request(session_id, turn_id)
@@ -319,7 +345,7 @@ impl Waku {
                         return;
                     };
                     if approved {
-                        this.start_voice_briefing(message_id, response, play, cx);
+                        this.start_voice_briefing(message_id, response, play, Some(sequence), cx);
                     } else {
                         // The gate said no — treat the reply as settled so
                         // arrivals don't re-ask the same question.
@@ -331,7 +357,7 @@ impl Waku {
             .detach();
             return;
         }
-        self.start_voice_briefing(message_id, response, play, cx);
+        self.start_voice_briefing(message_id, response, play, Some(sequence), cx);
     }
 
     /// The daemon and turn state the gate needs, or `None` when eval cannot
@@ -389,7 +415,7 @@ impl Waku {
         else {
             return;
         };
-        self.start_voice_briefing(message_id, response, true, cx);
+        self.start_voice_briefing(message_id, response, true, None, cx);
     }
 
     /// Drop a briefing in flight — gate eval or generation — and treat the
@@ -488,6 +514,7 @@ impl Waku {
         let Some(remaining) = remaining else {
             crate::platform::stop_briefing_audio();
             self.voice_briefing_playback = None;
+            self.pump_briefing_queue(cx);
             self.pump_speech_queue(cx);
             cx.notify();
             return;
@@ -495,6 +522,7 @@ impl Waku {
         if remaining.is_zero() {
             crate::platform::stop_briefing_audio();
             self.voice_briefing_playback = None;
+            self.pump_briefing_queue(cx);
             self.pump_speech_queue(cx);
             cx.notify();
             return;
@@ -590,8 +618,20 @@ impl Waku {
         self.voice_briefing_playback = None;
         self.voice_briefing_playback_generation =
             self.voice_briefing_playback_generation.wrapping_add(1);
+        self.pump_briefing_queue(cx);
         self.pump_speech_queue(cx);
         cx.notify();
+    }
+
+    fn pump_briefing_queue(&mut self, cx: &mut Context<Self>) {
+        if self.voice_briefing_playback.is_some() {
+            return;
+        }
+        if let Some(message_id) = self.briefing_queue.waiting.take() {
+            if !self.play_voice_briefing_clip(message_id, cx) {
+                self.show_toast(tr!("errors.voice_briefing_playback"));
+            }
+        }
     }
 
     fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {
@@ -641,6 +681,7 @@ impl Waku {
                             this.voice_briefing_playback_generation.wrapping_add(1);
                         // A queued `speak` chain hands off here — pumping
                         // starts the next clip and its own tick.
+                        this.pump_briefing_queue(cx);
                         this.pump_speech_queue(cx);
                         cx.notify();
                         return false;
@@ -650,6 +691,7 @@ impl Waku {
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
+                        this.pump_briefing_queue(cx);
                         this.pump_speech_queue(cx);
                         cx.notify();
                         return false;
@@ -681,6 +723,7 @@ impl Waku {
         message_id: Uuid,
         response: String,
         play: bool,
+        sequence: Option<u64>,
         cx: &mut Context<Self>,
     ) {
         if self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
@@ -742,7 +785,7 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_voice_briefing(message_id, voice_key, result, cx);
+                this.finish_voice_briefing(message_id, voice_key, result, sequence, cx);
             });
         })
         .detach();
@@ -801,7 +844,7 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_voice_briefing(message_id, voice_key, result, cx);
+                this.finish_voice_briefing(message_id, voice_key, result, None, cx);
             });
         })
         .detach();
@@ -815,6 +858,7 @@ impl Waku {
         message_id: Uuid,
         voice_key: String,
         result: anyhow::Result<(String, Vec<u8>)>,
+        sequence: Option<u64>,
         cx: &mut Context<Self>,
     ) {
         // A cancel that landed mid-pipeline already dropped the entry —
@@ -846,7 +890,11 @@ impl Waku {
                     // AVAudioPlayer must start on the UI thread, so the
                     // bytes ride the spawn back rather than playing from
                     // the executor.
-                    if !self.play_voice_briefing_clip(message_id, cx) {
+                    if let Some(sequence) = sequence {
+                        if self.briefing_queue.accept(sequence, message_id) {
+                            self.pump_briefing_queue(cx);
+                        }
+                    } else if !self.play_voice_briefing_clip(message_id, cx) {
                         self.show_toast(tr!("errors.voice_briefing_playback"));
                     }
                 }
@@ -1089,4 +1137,26 @@ pub(super) async fn post_json(
 ) -> anyhow::Result<Value> {
     let bytes = post(http, executor, url, key, provider, model_header, body).await?;
     serde_json::from_slice(&bytes).context("the gateway returned invalid JSON")
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    #[test]
+    fn newest_generated_briefing_is_the_only_waiting_clip() {
+        let mut queue = BriefingQueue::default();
+        let first = queue.issue();
+        let first_id = Uuid::new_v4();
+        assert!(queue.accept(first, first_id));
+        let declined = queue.issue();
+        // A declined or failed generation never reaches accept.
+        assert_eq!(queue.waiting, Some(first_id));
+        let newest = queue.issue();
+        let newest_id = Uuid::new_v4();
+        assert!(queue.accept(newest, newest_id));
+        assert_eq!(queue.waiting.take(), Some(newest_id));
+        assert!(!queue.accept(declined, Uuid::new_v4()));
+        assert!(queue.waiting.is_none());
+    }
 }

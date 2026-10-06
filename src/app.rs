@@ -2591,6 +2591,7 @@ pub struct Waku {
     voice_scratchpad_events: Receiver<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
+    briefing_queue: voice_briefing::BriefingQueue,
     briefing_pending: HashMap<Uuid, bool>,
     /// Replies whose Jev gate eval is still deciding — same play flag.
     /// Cancel removes the entry so the answer lands on nothing.
@@ -6901,6 +6902,7 @@ impl Waku {
                 briefing_clip_order: VecDeque::new(),
                 voice_briefing_playback: None,
                 voice_briefing_playback_generation: 0,
+                briefing_queue: voice_briefing::BriefingQueue::default(),
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
                 speech_clip_queue: VecDeque::new(),
