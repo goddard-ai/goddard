@@ -1410,23 +1410,6 @@ impl BossService {
         if entries.is_empty() {
             return;
         }
-        // An employee the restart cut off mid-job could not flag its own
-        // failure; flag it so the finish still reaches the supervisor.
-        // `dispatching` records are the exception: the daemon reverts
-        // unstarted launches back to the queue instead of reporting an
-        // interruption for a job that never ran — it flags started ones
-        // itself once the persisted turn identity is known.
-        let _ = self.update(|state| {
-            for entry in state.employees.iter_mut().filter(|entry| {
-                entries.iter().any(|id| id.session_id == entry.session_id)
-                    && entry.lifecycle() != EmployeeLifecycle::Dispatching
-            }) {
-                if entry.blocker.is_none() {
-                    entry.blocker = Some("interrupted by a daemon restart".into());
-                }
-            }
-            Ok(())
-        });
         if let Some(recover) = self.recover_employee.lock().clone() {
             let _ = std::thread::Builder::new()
                 .name("boss-recover-employees".into())

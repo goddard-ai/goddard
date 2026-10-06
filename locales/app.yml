@@ -6210,6 +6210,8 @@ boss.trigger_blocker:
   en: "%{name} reported a blocker"
 boss.trigger_finished_blocker:
   en: "%{name} finished with a blocker"
+boss.trigger_interrupted:
+  en: "%{name} was interrupted"
 boss.trigger_during_turn:
   en: "%{label} during this turn"
 boss.trigger_employees_finished:

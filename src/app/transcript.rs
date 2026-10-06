@@ -1919,9 +1919,9 @@ pub(super) fn boss_trigger_status(
     match kind {
         ReportTriggerKind::Finished => ("icons/circle-check.svg", theme.text_tertiary),
         ReportTriggerKind::Failed => ("icons/octagon-x.svg", theme.danger),
-        ReportTriggerKind::Blocker | ReportTriggerKind::FinishedWithBlocker => {
-            ("icons/circle-alert.svg", theme.warning)
-        }
+        ReportTriggerKind::Blocker
+        | ReportTriggerKind::FinishedWithBlocker
+        | ReportTriggerKind::Interrupted => ("icons/circle-alert.svg", theme.warning),
     }
 }
 
@@ -1942,7 +1942,9 @@ pub(super) fn boss_trigger_group_status(
     if group.iter().any(|trigger| {
         matches!(
             trigger.kind,
-            ReportTriggerKind::Blocker | ReportTriggerKind::FinishedWithBlocker
+            ReportTriggerKind::Blocker
+                | ReportTriggerKind::FinishedWithBlocker
+                | ReportTriggerKind::Interrupted
         )
     }) {
         return ("icons/circle-alert.svg", theme.warning);
@@ -1969,6 +1971,9 @@ pub(super) fn boss_trigger_entry_label(
         ReportTriggerKind::Blocker => tr!("boss.trigger_blocker", name = name),
         ReportTriggerKind::FinishedWithBlocker => {
             tr!("boss.trigger_finished_blocker", name = name)
+        }
+        ReportTriggerKind::Interrupted => {
+            tr!("boss.trigger_interrupted", name = name)
         }
     };
     if during_turn {

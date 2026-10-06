@@ -7646,12 +7646,20 @@ impl WakuBackend {
             expiry.parked_prompts,
             expiry.pending_question.is_some()
         );
+        // Re-read the expired record — it now carries the refined settle
+        // detail (cause, leftovers, resumability) the report keys on.
+        let employee = self
+            .boss
+            .employee(session_id)
+            .unwrap_or_else(|| employee.clone());
+        let expiry = employee.expiry.as_ref();
+        let interrupted = expiry.is_some_and(|expiry| expiry.reports());
         // The work kind the summon fixed decides whether a clean finish
         // reports: an errand's lands with the supervisor (escalating to
         // the boss when the supervisor cannot take prompts), while a
         // goal's stays silent — the record lists on the client's Goals
-        // page instead. Either kind's finish still reports when the
-        // employee flagged a blocker or its session failed.
+        // page instead. An interruption reports for either kind, and so
+        // does a settle that left prompts parked or an ask unanswered.
         // Cancelled queued tickets skip `finishing` and arrive already expired.
         // Keep their cancellation transcript and teardown, but do not wake
         // the supervisor for work it cancelled before launch. Running stops
@@ -7663,39 +7671,121 @@ impl WakuBackend {
         let reports = !cancelled_while_queued
             && (employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
                 || employee.blocker.is_some()
-                || failed);
+                || failed
+                || interrupted);
         if reports
             && let Some(supervisor) = self.boss.report_target(&employee)
         {
+            use waku_protocol::boss::ExpiryCause;
+            let cause = expiry.map(|expiry| expiry.cause);
+            // A repeat interruption names its ordinal — a crash loop
+            // reads "interruption #3" rather than another first failure.
+            let ordinal = employee
+                .ticket
+                .as_ref()
+                .map(|ticket| ticket.interruptions.len())
+                .filter(|count| *count > 1)
+                .map(|count| format!(" This is interruption #{count} on its ticket."))
+                .unwrap_or_default();
+            let detail = match cause {
+                Some(ExpiryCause::Restarted) => {
+                    "was interrupted by a daemon restart and expired".to_owned()
+                }
+                Some(ExpiryCause::ExitedMidTurn) => {
+                    "was interrupted — the provider process exited mid-turn — and expired"
+                        .to_owned()
+                }
+                Some(ExpiryCause::ExitedIdle) => {
+                    "expired — the provider process exited while it was idle".to_owned()
+                }
+                Some(ExpiryCause::Failed) => "expired with a failed turn".to_owned(),
+                Some(ExpiryCause::ParkedWork) => format!(
+                    "expired with {} parked prompt{} that never delivered",
+                    expiry.map(|expiry| expiry.parked_prompts).unwrap_or(0),
+                    if expiry.is_some_and(|expiry| expiry.parked_prompts == 1) {
+                        ""
+                    } else {
+                        "s"
+                    }
+                ),
+                Some(ExpiryCause::UnansweredAsk) => {
+                    "expired with an unanswered question for the user".to_owned()
+                }
+                Some(ExpiryCause::Stopped) => "was stopped and expired".to_owned(),
+                _ => "has finished and expired".to_owned(),
+            };
             let blocker = employee
                 .blocker
                 .as_deref()
                 .map(|note| format!(" It flagged a blocker: {note}"))
                 .unwrap_or_default();
-            let prompt = format!(
-                "Employee {} ({session_id}) has finished and expired.{blocker} Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}",
+            let mut prompt = format!(
+                "Employee {} ({session_id}) {detail}.{ordinal}{blocker}",
                 employee.identity.name
             );
-            // Failure outranks a flagged blocker — the marker's wording and
-            // glyph carry the verdict the finish settled on.
-            let kind = if failed {
-                crate::model::ReportTriggerKind::Failed
-            } else if employee.blocker.is_some() {
-                crate::model::ReportTriggerKind::FinishedWithBlocker
-            } else {
-                crate::model::ReportTriggerKind::Finished
+            if let Some(expiry) = expiry {
+                if let Some(question) = &expiry.pending_question {
+                    prompt.push_str(&format!(" Its unanswered question: \"{question}\""));
+                }
+                if expiry.parked_prompts > 0 && expiry.cause != ExpiryCause::ParkedWork {
+                    prompt.push_str(&format!(
+                        " {} parked prompt{} survived the expiry and drain first if it resumes.",
+                        expiry.parked_prompts,
+                        if expiry.parked_prompts == 1 { "" } else { "s" }
+                    ));
+                }
+                if interrupted && expiry.resumable {
+                    prompt.push_str(&format!(
+                        " It is resumable — goddard-agent boss '{{\"type\":\"resume\",\"sessionId\":\"{session_id}\"}}' revives it in place with its transcript and workspace intact."
+                    ));
+                }
+            }
+            prompt.push_str(&format!(
+                " Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}"
+            ));
+            // The marker carries the settle's verdict: interruption-class
+            // causes mark `interrupted`; failure still outranks a flagged
+            // blocker when the settle itself was clean.
+            let kind = match cause {
+                Some(
+                    ExpiryCause::Restarted
+                    | ExpiryCause::ExitedMidTurn
+                    | ExpiryCause::ExitedIdle
+                    | ExpiryCause::ParkedWork
+                    | ExpiryCause::UnansweredAsk,
+                ) => crate::model::ReportTriggerKind::Interrupted,
+                _ if failed || cause == Some(ExpiryCause::Failed) => {
+                    crate::model::ReportTriggerKind::Failed
+                }
+                _ if employee.blocker.is_some() => {
+                    crate::model::ReportTriggerKind::FinishedWithBlocker
+                }
+                _ => crate::model::ReportTriggerKind::Finished,
             };
-            let trigger = crate::model::ReportTrigger::new(employee, kind);
+            let trigger = crate::model::ReportTrigger::new(&employee, kind);
             let events = self.event_source.lock().clone();
-            self.queue_agent_prompt_with_id(
-                supervisor,
-                prompt,
-                Some(session_id),
-                true,
-                None,
-                Some(trigger),
-                &events,
-            )?;
+            if interrupted {
+                // Interruption reports take the blocker path — they reach
+                // a busy supervisor mid-turn rather than queueing behind
+                // its work.
+                self.deliver_employee_report(
+                    supervisor,
+                    prompt,
+                    session_id,
+                    Some(trigger),
+                    &events,
+                )?;
+            } else {
+                self.queue_agent_prompt_with_id(
+                    supervisor,
+                    prompt,
+                    Some(session_id),
+                    true,
+                    None,
+                    Some(trigger),
+                    &events,
+                )?;
+            }
         }
         // This finish may have resolved a wave — drain its notice.
         self.deliver_wave_notifications();
@@ -8566,10 +8656,6 @@ impl WakuBackend {
                     .find(|session| session.id == entry.session_id)
                     .is_some_and(|session| session.has_started());
                 if started {
-                    let _ = self.boss.set_employee_blocker_if_empty(
-                        entry.session_id,
-                        "interrupted by a daemon restart".into(),
-                    );
                     self.finish_boss_employee(
                         entry.session_id,
                         false,
@@ -15783,6 +15869,140 @@ mod tests {
             settle_rx.try_recv(),
             Ok(crate::model::AgentAskOutcome::Cancelled)
         ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An interrupted settle reports even when the work kind would keep
+    /// a clean finish silent: the cause, the resumable verdict, and the
+    /// resume command land on the supervisor — marked `interrupted`.
+    #[test]
+    fn an_interrupted_goal_employee_reports_its_cause() {
+        use crate::model::ReportTriggerKind;
+        use waku_protocol::boss::EmployeeSettle;
+        let root = std::env::temp_dir().join(format!("boss-report-restart-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+            .unwrap();
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1, "the interruption reports despite Goal kind");
+        assert!(prompts[0].contains("daemon restart"), "{}", prompts[0]);
+        assert!(prompts[0].contains("resumable"), "{}", prompts[0]);
+        assert!(prompts[0].contains(&employee_id.to_string()));
+        drop(prompts);
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        let report = session
+            .messages
+            .iter()
+            .find(|message| message.report_trigger.is_some())
+            .expect("the delivered report carries its trigger");
+        assert_eq!(
+            report.report_trigger.as_ref().unwrap().kind,
+            ReportTriggerKind::Interrupted
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A supervisor's own stop reports nothing — the marked cancel reads
+    /// as terminal intent, not a surprise the boss needs to hear about.
+    #[test]
+    fn a_stopped_employee_sends_no_report() {
+        use waku_protocol::boss::EmployeeSettle;
+        let root = std::env::temp_dir().join(format!("boss-report-stop-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend.boss.mark_cancelled(employee_id).unwrap();
+        backend
+            .finish_boss_employee(employee_id, true, EmployeeSettle::Stopped)
+            .unwrap();
+        assert!(parent_capture.prompts.lock().is_empty());
+        assert!(parent_capture.steers.lock().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Leftover prompt work on an otherwise-clean settle still reports —
+    /// the supervisor hears the parked count.
+    #[test]
+    fn a_parked_work_expiry_reports_the_count() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeSettle};
+        let root = std::env::temp_dir().join(format!("boss-report-parked-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued while working".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("1 parked prompt"), "{}", prompts[0]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An unanswered ask reports its question text — the supervisor sees
+    /// what the user was being asked when the employee expired.
+    #[test]
+    fn an_unanswered_ask_expiry_reports_the_question() {
+        use waku_protocol::boss::EmployeeSettle;
+        let root = std::env::temp_dir().join(format!("boss-report-ask-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        let (settled, _settle_rx) = crossbeam_channel::bounded(1);
+        backend.agent.try_park_ask(
+            employee_id,
+            "ask-1".into(),
+            "Ship the release?".into(),
+            settled,
+        );
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("unanswered question"), "{}", prompts[0]);
+        assert!(prompts[0].contains("Ship the release?"), "{}", prompts[0]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An interruption report takes the steer path — a supervisor mid-turn
+    /// hears about the expired employee immediately rather than after its
+    /// queue drains.
+    #[test]
+    fn an_interruption_report_steers_into_a_busy_supervisor() {
+        use waku_protocol::boss::EmployeeSettle;
+        let root = std::env::temp_dir().join(format!("boss-report-steer-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent_capture, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+        backend
+            .agent
+            .note_driver_event(supervisor, &DriverEvent::TurnParked);
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+            .unwrap();
+        assert_eq!(parent_capture.steers.lock().len(), 1);
+        assert!(parent_capture.prompts.lock().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 

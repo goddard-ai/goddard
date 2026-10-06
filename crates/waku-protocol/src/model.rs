@@ -3746,6 +3746,10 @@ pub enum ReportTriggerKind {
     Blocker,
     /// The job finished with an unresolved blocker still flagged.
     FinishedWithBlocker,
+    /// The employee was interrupted — the provider exited mid-turn, the
+    /// daemon restarted, or the settle left prompts parked or an ask
+    /// unanswered. The record's `expiry` names the cause.
+    Interrupted,
 }
 
 /// Where the report landed relative to the turn it reached.
