@@ -744,6 +744,40 @@ impl ScratchpadTranscript {
         self.annotation_interim.clear();
     }
 
+    /// Finish annotating the way "okay next" would — the box's content
+    /// lands as a bullet at its slot — then close, leaving the append
+    /// point back on the live row. The still-provisional tail goes in
+    /// with it, folded as strip credit so the stream's re-delivery of
+    /// those words doesn't append them a second time.
+    fn commit_annotation(&mut self) {
+        let Some(target) = self.annotation_target.take() else {
+            return;
+        };
+        let mut text = std::mem::take(&mut self.annotation_text).trim().to_owned();
+        let interim = std::mem::take(&mut self.annotation_interim)
+            .trim()
+            .to_owned();
+        self.fold_span(&interim);
+        append_word_text(&mut text, &interim);
+        if text.is_empty() {
+            return;
+        }
+        match target {
+            AnnotationTarget::Paragraph(index) => {
+                if let Some(paragraph) = self.paragraphs.get_mut(index) {
+                    paragraph.bullets.push(text);
+                }
+            }
+            AnnotationTarget::Bullet {
+                paragraph, insert, ..
+            } => {
+                if let Some(paragraph) = self.paragraphs.get_mut(paragraph) {
+                    paragraph.bullets.insert(insert.min(paragraph.bullets.len()), text);
+                }
+            }
+        }
+    }
+
     /// One node's committed text — `""` for anything not currently painted.
     fn node_text(&self, node: ScratchpadNode) -> &str {
         match node {
@@ -1816,10 +1850,21 @@ impl Waku {
                     .child(tr!("voice_scratchpad.short_title")),
             )
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
-        let tooltip = match state {
-            ScratchpadButtonState::Recording => tr!("voice_scratchpad.recording"),
-            ScratchpadButtonState::Muted => tr!("voice_scratchpad.muted"),
-            ScratchpadButtonState::Idle => tr!("voice_scratchpad.start"),
+        // The click's outcome decides the tooltip: a scratchpad on screen
+        // cancels, a hidden one resurfaces.
+        let cancels = session_id
+            .and_then(|id| self.voice_scratchpads.get(&id))
+            .is_some_and(|scratchpad| {
+                !scratchpad.hidden && self.state.selected_session == session_id
+            });
+        let tooltip = match (state, cancels) {
+            (ScratchpadButtonState::Recording, true) => {
+                tr!("voice_scratchpad.cancel_dictating")
+            }
+            (ScratchpadButtonState::Muted, true) => tr!("voice_scratchpad.cancel_muted"),
+            (ScratchpadButtonState::Recording, false) => tr!("voice_scratchpad.recording"),
+            (ScratchpadButtonState::Muted, false) => tr!("voice_scratchpad.muted"),
+            (ScratchpadButtonState::Idle, _) => tr!("voice_scratchpad.start"),
         };
         Some(
             pill.tooltip(Tooltip::text(tooltip))
@@ -1836,21 +1881,29 @@ impl Waku {
     }
 
     /// The VP button's click: no session starts one on this chat, a hidden
-    /// session resurfaces, a visible one hides. Each chat owns its
-    /// scratchpad — pressing the button here never touches another chat's.
+    /// session resurfaces, and a visible one cancels — the same
+    /// confirm-on-substantial rule the Cancel pill applies. Each chat owns
+    /// its scratchpad — pressing the button here never touches another
+    /// chat's.
     fn toggle_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(this_session) = self.composer_session_id() else {
             return;
         };
-        match self.voice_scratchpads.get_mut(&this_session) {
-            Some(scratchpad) => {
-                scratchpad.hidden = !scratchpad.hidden;
-                if !scratchpad.hidden {
-                    scratchpad.follow_tail = true;
-                }
-                cx.notify();
-            }
-            None => self.start_voice_scratchpad(window, cx),
+        let Some(scratchpad) = self.voice_scratchpads.get_mut(&this_session) else {
+            self.start_voice_scratchpad(window, cx);
+            return;
+        };
+        if scratchpad.hidden {
+            scratchpad.hidden = false;
+            scratchpad.follow_tail = true;
+            cx.notify();
+        } else if self.state.selected_session == Some(this_session) {
+            self.request_cancel_voice_scratchpad(window, cx);
+        } else {
+            // A scratchpad that cannot be on screen — the composer is
+            // answering for another chat — still tucks out of the way.
+            scratchpad.hidden = true;
+            cx.notify();
         }
     }
 
@@ -2965,8 +3018,10 @@ impl Waku {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         }),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
+                        && !scratchpad_click_was_drag(event, &scratchpad.selection)
+                    {
                         scratchpad.transcript.annotate(index);
                     }
                     cx.stop_propagation();
@@ -3047,8 +3102,10 @@ impl Waku {
                         theme.selection,
                         false,
                     ))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
+                            && !scratchpad_click_was_drag(event, &scratchpad.selection)
+                        {
                             scratchpad.transcript.annotate_bullet(index, bullet_index);
                         }
                         cx.stop_propagation();
@@ -3104,13 +3161,19 @@ impl Waku {
             );
         }
         blocks
-            // Clicking open space leaves annotation mode and editing —
-            // focus goes home to the composer so typing resumes the draft.
-            .on_click(cx.listener(|this, _, window, cx| {
+            // Clicking open space finishes an open annotation as a bullet
+            // and drops the editing caret — focus goes home to the
+            // composer so typing resumes the draft. A drag that ended over
+            // open space is no click-out: the gesture only meant to
+            // select.
+            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                 if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                    if scratchpad_click_was_drag(event, &scratchpad.selection) {
+                        return;
+                    }
                     let mut changed = false;
                     if scratchpad.transcript.annotation_target.is_some() {
-                        scratchpad.transcript.exit_annotation();
+                        scratchpad.transcript.commit_annotation();
                         changed = true;
                     }
                     if scratchpad.transcript.caret.take().is_some() {
@@ -3445,6 +3508,24 @@ impl Waku {
                         ),
                 ),
         )
+    }
+}
+
+/// Whether a click on the transcript surface was really a drag — the
+/// pointer ran past the 4px slop the annotation press uses, or the
+/// gesture left a settled selection. Row click handlers gate on it so a
+/// drag-select never fires the annotate or click-out actions the press
+/// would have meant.
+fn scratchpad_click_was_drag(click: &ClickEvent, selection: &TranscriptSelection) -> bool {
+    if !selection.selection.borrow().is_empty() {
+        return true;
+    }
+    match click {
+        ClickEvent::Mouse(event) => {
+            let moved = event.up.position - event.down.position;
+            moved.x.abs() > px(4.0) || moved.y.abs() > px(4.0)
+        }
+        _ => false,
     }
 }
 
@@ -3888,6 +3969,29 @@ mod tests {
             transcript.to_message(),
             "the plan\n- first\n- still talking\n- second"
         );
+    }
+
+    #[test]
+    fn click_out_commits_the_annotation_at_its_slot() {
+        // Clicking away finishes the open box — nothing dictated into it
+        // is lost, and the append point returns to the live row.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan okay next");
+        transcript.annotate(1);
+        transcript.append_finalized("first okay next");
+        transcript.annotate_bullet(1, 0);
+        transcript.append_finalized("still talking");
+        transcript.set_interim("for a".to_owned());
+        transcript.commit_annotation();
+        assert!(transcript.annotation_target.is_none());
+        assert_eq!(
+            transcript.paragraphs[1].bullets,
+            vec!["first", "still talking for a"]
+        );
+        // The provisional tail's re-delivery strips instead of appending a
+        // second copy, and fresh speech lands on the live row again.
+        transcript.append_finalized("for a moment more");
+        assert_eq!(transcript.paragraphs[1].text, "moment more");
     }
 
     #[test]
