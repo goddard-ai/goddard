@@ -71,6 +71,12 @@ const GRADIENT_SOLID: f32 = 55.0;
 const FOOTER_STRIP: f32 = 40.0;
 /// The hint line floats this far above the composer's top edge.
 const HINT_CLEARANCE: f32 = 34.0;
+/// The control row's bottom edge floats this far above the composer
+/// card's top edge — the frame's 12px gap.
+const CONTROLS_CLEARANCE: f32 = 12.0;
+/// The control row's right edge sits this far inside the card's right
+/// edge — the frame's 18px inset.
+const CONTROLS_INSET: f32 = 18.0;
 const TOP_BAR_HEIGHT: f32 = 69.0;
 /// The separator under the top bar is inset to the frame's inner content
 /// group — 15px from the card's left edge, 12px from the right.
@@ -1874,7 +1880,7 @@ impl Waku {
                 .is_some_and(|scratchpad| scratchpad.transcript.annotation_target.is_none())
     }
 
-    /// Space's pause effect — the same toggle the top bar's Mute pill
+    /// Space's pause effect — the same toggle the control row's Mute pill
     /// fires.
     pub(super) fn voice_scratchpad_space_toggle(&mut self, cx: &mut Context<Self>) {
         let muted = self
@@ -2477,18 +2483,23 @@ impl Waku {
                         .left_0()
                         .right_0()
                         .bottom(px(overlap)),
+                    )
+                    .child(
+                        // The fixed control row: painted last so the pills
+                        // sit over the gradient cover and ahead of the
+                        // selection canvas's hitbox — clicks reach the
+                        // buttons, content fades under them.
+                        self.render_scratchpad_controls(overlap, &theme, cx),
                     ),
             )
             .into_any_element()
     }
 
-    /// The 69px top bar: title left, Mute/Hide/Cancel pills right, hairline
-    /// under it.
-    fn render_scratchpad_top_bar(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let Some(scratchpad) = self.selected_voice_scratchpad() else {
+    /// The 69px top bar: title left, hairline under it.
+    fn render_scratchpad_top_bar(&self, theme: &Theme, _cx: &mut Context<Self>) -> Div {
+        if self.selected_voice_scratchpad().is_none() {
             return div();
-        };
-        let muted = scratchpad.muted;
+        }
         div()
             .h(px(TOP_BAR_HEIGHT))
             .flex_none()
@@ -2509,56 +2520,6 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(tr!("voice_scratchpad.title")),
             )
-            .child(div().flex_1())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(9.0))
-                    .child(self.scratchpad_pill(
-                        "vs-mute",
-                        &scratchpad.mute_focus,
-                        if muted {
-                            tr!("voice_scratchpad.unmute")
-                        } else {
-                            tr!("voice_scratchpad.mute")
-                        },
-                        true,
-                        theme,
-                        |this, _window, cx| {
-                            let muted = this
-                                .selected_voice_scratchpad()
-                                .is_some_and(|scratchpad| !scratchpad.muted);
-                            this.set_voice_scratchpad_muted(muted, cx);
-                        },
-                        cx,
-                    ))
-                    .child(self.scratchpad_pill(
-                        "vs-hide",
-                        &scratchpad.hide_focus,
-                        tr!("voice_scratchpad.hide"),
-                        false,
-                        theme,
-                        |this, window, cx| {
-                            if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
-                                scratchpad.hidden = true;
-                            }
-                            let focus = this.composer_focus(cx);
-                            window.focus(&focus, cx);
-                            cx.notify();
-                        },
-                        cx,
-                    ))
-                    .child(self.scratchpad_pill(
-                        "vs-cancel",
-                        &scratchpad.cancel_focus,
-                        tr!("voice_scratchpad.cancel"),
-                        false,
-                        theme,
-                        |this, window, cx| this.request_cancel_voice_scratchpad(window, cx),
-                        cx,
-                    )),
-            )
             .child(
                 // The frame's separator under the bar is a full pixel inset
                 // to the content group's edges — not a full-bleed hairline.
@@ -2572,13 +2533,80 @@ impl Waku {
             )
     }
 
-    /// One top-bar pill: Mute wears the solid dark treatment, Hide and
-    /// Cancel the light gradient with a hairline.
+    /// The fixed control row — Mute/Hide/Cancel pills anchored 12px above
+    /// the composer card's top edge, right-aligned at the frame's 18px
+    /// inset. The row is a sibling of the scroll region, so it never
+    /// scrolls; the caller paints it last so it reads over the bottom fade.
+    fn render_scratchpad_controls(&self, overlap: f32, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
+            return div();
+        };
+        let muted = scratchpad.muted;
+        div()
+            .absolute()
+            .right(px(CONTROLS_INSET))
+            .bottom(px(overlap + CONTROLS_CLEARANCE))
+            .h(px(32.0))
+            .flex()
+            .items_center()
+            .gap(px(9.0))
+            .child(self.scratchpad_pill(
+                "vs-mute",
+                &scratchpad.mute_focus,
+                if muted {
+                    tr!("voice_scratchpad.unmute")
+                } else {
+                    tr!("voice_scratchpad.mute")
+                },
+                24.0,
+                true,
+                theme,
+                |this, _window, cx| {
+                    let muted = this
+                        .selected_voice_scratchpad()
+                        .is_some_and(|scratchpad| !scratchpad.muted);
+                    this.set_voice_scratchpad_muted(muted, cx);
+                },
+                cx,
+            ))
+            .child(self.scratchpad_pill(
+                "vs-hide",
+                &scratchpad.hide_focus,
+                tr!("voice_scratchpad.hide"),
+                18.0,
+                false,
+                theme,
+                |this, window, cx| {
+                    if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                        scratchpad.hidden = true;
+                    }
+                    let focus = this.composer_focus(cx);
+                    window.focus(&focus, cx);
+                    cx.notify();
+                },
+                cx,
+            ))
+            .child(self.scratchpad_pill(
+                "vs-cancel",
+                &scratchpad.cancel_focus,
+                tr!("voice_scratchpad.cancel"),
+                18.0,
+                false,
+                theme,
+                |this, window, cx| this.request_cancel_voice_scratchpad(window, cx),
+                cx,
+            ))
+    }
+
+    /// One control-row pill: Mute wears the solid dark treatment with an
+    /// enabled hairline, Hide and Cancel the card's solid fill, borderless —
+    /// the frame's fills.
     fn scratchpad_pill(
         &self,
         id: &'static str,
         focus: &FocusHandle,
         label: String,
+        h_pad: f32,
         primary: bool,
         theme: &Theme,
         action: fn(&mut Self, &mut Window, &mut Context<Self>),
@@ -2591,7 +2619,7 @@ impl Waku {
             .track_focus(focus)
             .tab_index(0)
             .h(px(32.0))
-            .px(px(18.0))
+            .px(px(h_pad))
             .flex_none()
             .rounded(px(PILL_RADIUS))
             .flex()
@@ -2600,18 +2628,12 @@ impl Waku {
             .cursor_default()
             .text_size(sp(14.0))
             .when(primary, |pill| {
-                pill.bg(theme.inverse).text_color(theme.on_inverse)
-            })
-            .when(!primary, |pill| {
                 pill.border(hairline())
                     .border_color(theme.border_subtle)
-                    .bg(linear_gradient(
-                        180.0,
-                        linear_color_stop(theme.raised.opacity(0.5), 0.0),
-                        linear_color_stop(theme.raised, 1.0),
-                    ))
-                    .text_color(theme.text)
+                    .bg(theme.inverse)
+                    .text_color(theme.on_inverse)
             })
+            .when(!primary, |pill| pill.bg(theme.composer).text_color(theme.text))
             .focus_visible(|pill| pill.border(hairline()).border_color(theme.accent))
             .hover(|pill| pill.opacity(0.88))
             .active(|pill| pill.opacity(0.75))
