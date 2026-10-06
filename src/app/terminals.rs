@@ -1203,10 +1203,11 @@ impl Waku {
 
     /// `secondary-t` — always a fresh terminal, rooted where the user is.
     /// A focused right-panel terminal keeps the chord in the panel: the new
-    /// terminal joins its strip in the same directory. Everywhere else the
-    /// terminal lands in the Terminals group — rooted in the selected
-    /// terminal's directory, the selected session's workspace, or ~ when
-    /// the main area shows neither.
+    /// terminal joins its strip in the same directory. Over the boss chat
+    /// the chord first asks which project the terminal belongs to.
+    /// Everywhere else the terminal lands in the Terminals group — rooted
+    /// in the selected terminal's directory, the selected session's
+    /// workspace, or ~ when the main area shows neither.
     pub(super) fn new_terminal_action(
         &mut self,
         _: &NewTerminal,
@@ -1229,6 +1230,17 @@ impl Waku {
             self.right_panel_active_surface = Some(index);
             self.reveal_right_panel_tab(index);
             self.request_active_terminal_focus();
+            cx.notify();
+            return;
+        }
+        // Over the boss chat the terminal first earns a project: the
+        // switcher lists the registered projects, and the pick becomes the
+        // terminal's root. No registered projects — the chord falls back
+        // to the usual guess below.
+        if self.session_surface_active()
+            && self.boss_chat_key().is_some()
+            && self.open_terminal_project_switcher(window, cx)
+        {
             cx.notify();
             return;
         }

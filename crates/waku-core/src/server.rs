@@ -485,6 +485,17 @@ impl EventSink {
         self.hub.broadcast_boss_browse(request_id, session_id, url, title, None)
     }
 
+    /// Emit an event to exactly one subscriber — the client connection the
+    /// request is attributed to. Unlike `send` the event never joins the
+    /// replay journal: a one-client intent must not resurface in other
+    /// clients on resubscribe. Returns false when the subscriber is gone
+    /// (or the sink's runtime is stale), so the caller can fall back to
+    /// the broadcast.
+    pub fn send_to(&self, subscriber_id: u64, event: WireDriverEvent) -> bool {
+        self.hub
+            .emit_to(self.session_id, self.runtime_id, event, subscriber_id)
+    }
+
     /// Broadcast a live-only event without retaining it in the replay journal.
     /// High-volume PTY output is meaningful only to a terminal emulator that
     /// is currently attached; replaying raw chunks into a fresh emulator would
@@ -855,6 +866,40 @@ impl Hub {
         } else {
             Self::broadcast(&mut state, &message, None);
         }
+    }
+
+    /// `emit` narrowed to one subscriber: the event still takes a sequence
+    /// on the session stream but skips the replay journal and reaches only
+    /// `subscriber_id` — a client-bound intent must not replay into other
+    /// clients on resubscribe. Returns false when the runtime check or the
+    /// subscriber lookup fails, so callers can fall back to `emit`.
+    fn emit_to(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        event: WireDriverEvent,
+        subscriber_id: u64,
+    ) -> bool {
+        let mut state = self.state.lock();
+        if state.active_runtimes.get(&session_id) != Some(&runtime_id)
+            || !state.subscribers.contains_key(&subscriber_id)
+        {
+            return false;
+        }
+        let sequence = state
+            .next_sequences
+            .entry((session_id, runtime_id))
+            .or_default();
+        *sequence = sequence.saturating_add(1);
+        let event = SequencedEvent {
+            session_id,
+            runtime_id,
+            epoch: self.epoch,
+            sequence: *sequence,
+            event,
+        };
+        Self::deliver(&mut state, subscriber_id, &ServerMessage::Event(event));
+        true
     }
 
     /// Deliver `message` to one subscriber only, kicking it if its bounded
@@ -3470,6 +3515,40 @@ mod tests {
             live,
             ServerMessage::Event(SequencedEvent { sequence: 2, .. })
         ));
+        assert!(stream.events.try_recv().is_err());
+    }
+
+    /// `emit_to` narrows a session event to one subscriber: sequenced like
+    /// a normal emit but never journaled and unseen by other connections.
+    /// A stale subscriber id or a dead runtime returns false so callers
+    /// can fall back to the broadcast.
+    #[test]
+    fn emit_to_targets_one_subscriber_without_journaling() {
+        let hub = Arc::new(Hub::default());
+        let session = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        let event = || WireDriverEvent::new("bossTerminalIntent", json!({"title": "t"}));
+
+        hub.begin_runtime(session, runtime);
+        let (target_tx, target_rx) = unbounded();
+        let target = hub.subscribe(&[], Subscriber::new(target_tx).0);
+        let (other_tx, other_rx) = unbounded();
+        let other = hub.subscribe(&[], Subscriber::new(other_tx).0);
+
+        assert!(hub.emit_to(session, runtime, event(), target));
+        assert!(matches!(
+            target_rx.recv_timeout(Duration::from_secs(1)),
+            Ok(ServerMessage::Event(SequencedEvent { sequence: 1, .. }))
+        ));
+        assert!(other_rx.try_recv().is_err());
+
+        hub.unsubscribe(target);
+        assert!(!hub.emit_to(session, runtime, event(), target));
+        assert!(!hub.emit_to(session, Uuid::new_v4(), event(), other));
+
+        // The targeted event never journaled: a fresh filtered stream
+        // replays nothing for it.
+        let stream = hub.session_stream(session, None);
         assert!(stream.events.try_recv().is_err());
     }
 

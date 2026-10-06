@@ -696,9 +696,11 @@ pub enum BossOperation {
         title: Option<String>,
     },
     /// Ask the connected desktop app to create a pinned, standalone terminal.
-    /// Terminals belong to the app rather than the daemon; the daemon records
-    /// this intent on the caller's event stream for the app to fulfill.
-    /// Boss principals and the human may create terminals, employees may not.
+    /// Terminals belong to the app rather than the daemon; the daemon emits
+    /// this intent on the principal's session stream to the client that
+    /// prompted the turn — broadcasting to every client when no prompting
+    /// client is recorded. Boss principals and the human may create
+    /// terminals, employees may not.
     Terminal {
         title: String,
         cwd: String,

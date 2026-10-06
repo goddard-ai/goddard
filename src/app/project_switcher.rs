@@ -31,14 +31,16 @@ const VERTICAL_BIAS_MAX: f32 = 96.0;
 
 /// What a commit retargets: the draft the ⌘N gesture was opened on, the
 /// open Projects page's own project — the ⌘⇧P gesture's — Big Picture's
-/// standing new-task draft, or the boss chat, whose pick lands on a New
-/// Task page like the draft's.
+/// standing new-task draft, the boss chat, whose pick lands on a New
+/// Task page like the draft's, or a standalone terminal — the ⌘T
+/// gesture's — whose pick becomes the terminal's working directory.
 #[derive(Clone, Copy, PartialEq)]
 enum ProjectSwitcherTarget {
     Draft,
     ProjectsPage,
     BigPicture,
     BossChat,
+    Terminal,
 }
 
 /// Runtime-only switcher state, like its task counterpart: recency lives in
@@ -469,12 +471,38 @@ impl Waku {
         true
     }
 
+    /// ⌘T over the boss chat: the switcher asks which project the new
+    /// standalone terminal belongs to — the pick opens the terminal at the
+    /// project's root. With no registered projects the open fails and the
+    /// chord keeps its usual directory guess.
+    pub(super) fn open_terminal_project_switcher(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let opened = self.open_switcher(
+            None,
+            self.state.selected_session,
+            ProjectSwitcherTarget::Terminal,
+            false,
+            false,
+            window,
+            cx,
+        );
+        if opened {
+            self.begin_project_switcher_search(window, cx);
+        }
+        opened
+    }
+
     /// The first ⌘N opens the switcher searching — a focused field over the
     /// recency list — which the boss chat and the New Task page share.
+    /// ⌘T's terminal pick reuses the same searching overlay.
     fn begin_project_switcher_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.project_switcher.searching = true;
         self.project_switcher.recent_project_ids =
             self.project_switcher.ordered_project_ids.clone();
+        let terminal_target = self.project_switcher.target == ProjectSwitcherTarget::Terminal;
         let search = self
             .project_switcher
             .search
@@ -495,7 +523,16 @@ impl Waku {
                 search
             })
             .clone();
-        search.update(cx, |input, cx| input.clear(cx));
+        search.update(cx, |input, cx| {
+            let label = if terminal_target {
+                tr!("project_switcher.terminal_placeholder")
+            } else {
+                tr!("command_palette.new_task_in_placeholder")
+            };
+            input.set_placeholder(label.clone(), cx);
+            input.set_accessibility_label(label, cx);
+            input.clear(cx);
+        });
         self.filter_project_switcher("", cx);
     }
 
@@ -540,18 +577,29 @@ impl Waku {
         )
     }
 
-    fn open_switcher(
-        &mut self,
-        current_project: Option<Uuid>,
-        original_session_id: Option<Uuid>,
+    /// The project pool a switcher target lists. The ⌘T terminal picker's
+    /// rows are the registered durable projects — the same source the
+    /// composer's `@` project mentions draw from — while the task-flavored
+    /// targets also row in each live boss chat as a destination.
+    fn project_switcher_pool(
+        &self,
         target: ProjectSwitcherTarget,
-        // The page has no projectless scope; its cycling list excludes them.
         exclude_projectless: bool,
-        reverse: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+    ) -> Vec<Project> {
+        if target == ProjectSwitcherTarget::Terminal {
+            return self
+                .state
+                .projects
+                .iter()
+                .filter(|project| {
+                    !project.temporary
+                        && !project.is_projectless()
+                        && !project.is_friends()
+                        && !self.boss_ui.projects.contains_key(&project.id)
+                })
+                .cloned()
+                .collect();
+        }
         let mut projects: Vec<Project> = self
             .state
             .projects
@@ -567,6 +615,22 @@ impl Waku {
         ) {
             projects.extend(self.boss_switcher_projects());
         }
+        projects
+    }
+
+    fn open_switcher(
+        &mut self,
+        current_project: Option<Uuid>,
+        original_session_id: Option<Uuid>,
+        target: ProjectSwitcherTarget,
+        // The page has no projectless scope; its cycling list excludes them.
+        exclude_projectless: bool,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        let projects = self.project_switcher_pool(target, exclude_projectless);
         let ordered = ordered_project_ids(current_project, &recent, &projects);
         let Some(highlighted_index) =
             task_switcher::initial_highlight_index(&ordered, current_project, reverse)
@@ -657,13 +721,7 @@ impl Waku {
     }
 
     fn filter_project_switcher(&mut self, query: &str, cx: &mut Context<Self>) {
-        let mut projects = self.state.projects.clone();
-        if matches!(
-            self.project_switcher.target,
-            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
-        ) {
-            projects.extend(self.boss_switcher_projects());
-        }
+        let projects = self.project_switcher_pool(self.project_switcher.target, false);
         self.project_switcher.ordered_project_ids = filtered_project_ids(
             &self.project_switcher.recent_project_ids,
             &projects,
@@ -741,6 +799,27 @@ impl Waku {
                     .any(|project| project.id == project_id)
             {
                 self.switch_projects_page_project(project_id, window, cx);
+            }
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
+        // A terminal commit spawns the standalone terminal at the picked
+        // project's root — no draft or page to retarget.
+        if target == ProjectSwitcherTarget::Terminal {
+            if let Some(project_id) = selected
+                && let Some(project) = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+            {
+                let root = project.path.clone();
+                if let Some(terminal_id) = self.create_terminal(root, None, None, cx) {
+                    self.select_terminal(terminal_id, window, cx);
+                }
             }
             if let Some(previous_focus) = previous_focus {
                 window.focus(&previous_focus, cx);

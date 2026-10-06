@@ -498,6 +498,8 @@ big_picture.empty_transcript:
   en: No messages yet
 project_switcher.recently_used:
   en: Recently used
+project_switcher.terminal_placeholder:
+  en: Search projects to open a terminal in…
 
 project_map.sent:
   en: Map · %{files} files · ~%{tokens} tok

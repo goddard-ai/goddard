@@ -547,6 +547,11 @@ pub struct WakuBackend {
     automations: Arc<AutomationService>,
     boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
+    /// The subscriber id of the client connection that most recently sent
+    /// a visible prompt to each boss principal session — the attribution a
+    /// `terminal` op needs, since the agent-scoped `goddard-agent`
+    /// connection that delivers the op carries no subscriber of its own.
+    boss_prompt_subscribers: Mutex<HashMap<Uuid, u64>>,
     /// Summon-queue wake channel — the scheduler thread parks on the
     /// condvar between passes; summons, policy writes, releases, and the
     /// reconciliation tick set the flag to run one pass.
@@ -683,6 +688,7 @@ impl WakuBackend {
             automations,
             boss,
             auto_prompts,
+            boss_prompt_subscribers: Mutex::new(HashMap::new()),
             summon_wake: Arc::new((Mutex::new(false), Condvar::new())),
             summon_scheduler_started: std::sync::atomic::AtomicBool::new(false),
             broker_root: Mutex::new(None),
@@ -3699,6 +3705,20 @@ impl Backend for WakuBackend {
                         )?;
                     }
                     events.send(event_to_wire(submitted)?)?;
+                    if !*hidden && self.boss.is_boss_principal(session_id) {
+                        // A boss op reaching back to the user — a `terminal`
+                        // intent — is owed to the client this prompt came
+                        // from. Record it while the prompting connection's
+                        // subscriber id is still on the request's sink; the
+                        // agent sentinel only ever marks connections that
+                        // cannot render a terminal anyway.
+                        let source = events.source_subscriber_id();
+                        if source != u64::MAX {
+                            self.boss_prompt_subscribers
+                                .lock()
+                                .insert(session_id, source);
+                        }
+                    }
                     if !*hidden && self.boss.is_boss(session_id) {
                         self.route_boss_prompt(session_id, prompt, submitted_message_id, &events);
                     }
@@ -6801,13 +6821,42 @@ impl WakuBackend {
                 if cwd.is_empty() {
                     bail!("a terminal needs a working directory");
                 }
-                events.send(waku_protocol::event_to_wire(
+                // The intent rides the principal's own session stream —
+                // `Command::Boss` requests carry no runtime id, so resolve
+                // the live one or the emit drops on the runtime check.
+                let session_id = caller
+                    .or(self.boss.document().session_id)
+                    .ok_or_else(|| anyhow!("open the boss before creating a terminal"))?;
+                let runtime_id = self
+                    .sessions
+                    .lock()
+                    .get(&session_id)
+                    .map(|entry| entry.runtime_id)
+                    .ok_or_else(|| anyhow!("the boss session is not running"))?;
+                // The terminal belongs to the client that triggered the
+                // boss's turn: a human client's own request answers on its
+                // connection; an agent credential carries no subscriber, so
+                // the client that prompted the session stands in. With no
+                // attribution the intent broadcasts to every client, the
+                // pre-routing behavior.
+                let attributed = match caller {
+                    Some(session) => {
+                        self.boss_prompt_subscribers.lock().get(&session).copied()
+                    }
+                    None => (events.source_subscriber_id() != u64::MAX)
+                        .then(|| events.source_subscriber_id()),
+                };
+                let sink = events.for_session(session_id, runtime_id);
+                let wire = waku_protocol::event_to_wire(
                     crate::model::DriverEvent::BossTerminalIntent {
                         title: title.clone(),
                         cwd: cwd.clone(),
                         command,
                     },
-                )?)?;
+                )?;
+                if !attributed.is_some_and(|id| sink.send_to(id, wire.clone())) {
+                    sink.send(wire)?;
+                }
                 Ok(BossResult::TerminalRequested { title, cwd })
             }
             BossOperation::FinalizePlan { plan_file } => {
@@ -14963,6 +15012,99 @@ mod tests {
         };
         assert!(projects.is_empty());
         assert!(sessions.iter().any(|session| session.id == id));
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A boss `terminal` op owes its intent to the client that prompted
+    /// the boss's turn: a visible prompt on a boss principal session
+    /// records the submitting subscriber, and the op resolves that
+    /// session's live runtime for the emit instead of dropping the event
+    /// on the request's nil runtime.
+    #[test]
+    fn boss_terminal_op_owes_the_prompting_client() {
+        use waku_protocol::boss::{BossOperation, BossResult};
+        let root = std::env::temp_dir().join(format!("boss-terminal-{}", Uuid::new_v4()));
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend.boss.set_session_id(supervisor).unwrap();
+        let runtime_id = Uuid::new_v4();
+        backend.sessions.lock().insert(
+            supervisor,
+            RuntimeEntry {
+                runtime_id,
+                driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+
+        // Hidden injections never re-attribute the session; the first
+        // visible prompt records subscriber 7 as its client.
+        let prompt = |hidden| {
+            backend.handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: supervisor,
+                    runtime_id,
+                    command: Command::Prompt {
+                        prompt: "open me a shell".into(),
+                        turn_id: None,
+                        message_id: None,
+                        hidden,
+                        attachments: Vec::new(),
+                    },
+                },
+                EventSink::detached().with_source_subscriber(7),
+                None,
+            )
+        };
+        prompt(true).unwrap();
+        assert!(backend.boss_prompt_subscribers.lock().is_empty());
+        prompt(false).unwrap();
+        assert_eq!(
+            backend.boss_prompt_subscribers.lock().get(&supervisor),
+            Some(&7)
+        );
+
+        let terminal = || BossOperation::Terminal {
+            title: "Dev server".into(),
+            cwd: "/work/app".into(),
+            command: None,
+        };
+        // A non-principal caller is refused before any routing.
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(Uuid::new_v4()),
+                    terminal(),
+                    &EventSink::detached()
+                )
+                .is_err()
+        );
+        let result = backend
+            .handle_boss_operation(
+                Some(supervisor),
+                terminal(),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(matches!(result, BossResult::TerminalRequested { .. }));
+
+        // With the runtime gone the op reports the miss instead of
+        // silently dropping the intent on a stale stream.
+        backend.sessions.lock().remove(&supervisor);
+        assert!(
+            backend
+                .handle_boss_operation(
+                    Some(supervisor),
+                    terminal(),
+                    &EventSink::detached()
+                )
+                .is_err()
+        );
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

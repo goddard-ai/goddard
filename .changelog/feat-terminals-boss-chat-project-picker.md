@@ -1,0 +1,1 @@
+- ⌘T over the boss chat now asks which project the new terminal belongs to — pick a registered project and the terminal opens at its root. With no registered projects the shortcut keeps its usual directory guess.
