@@ -11511,7 +11511,6 @@ dependencies = [
  "smol",
  "subtle",
  "tokio",
- "tungstenite 0.30.0",
  "uuid",
  "waku-base",
  "waku-boss",
@@ -11522,6 +11521,7 @@ dependencies = [
  "waku-localization",
  "waku-protocol",
  "waku-repo-map",
+ "waku-server",
  "waku-sessions",
  "waku-share",
  "waku-store",
@@ -11662,6 +11662,28 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "uuid",
+]
+
+[[package]]
+name = "waku-server"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "base64 0.22.1",
+ "crossbeam-channel",
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tungstenite 0.30.0",
+ "uuid",
+ "waku-base",
+ "waku-client",
+ "waku-drivers",
+ "waku-exec",
+ "waku-protocol",
 ]
 
 [[package]]

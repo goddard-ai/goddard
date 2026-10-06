@@ -24,10 +24,10 @@ sha2 = "0.10"
 smol = "2"
 subtle = "2"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-drivers = { path = "../waku-drivers" }
 waku-store = { path = "../waku-store" }
+waku-server = { path = "../waku-server" }
 waku-vcs = { path = "../waku-vcs" }
 waku-workspace = { path = "../waku-workspace" }
 waku-base = { path = "../waku-base" }
@@ -64,6 +64,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+waku-server = { path = "../waku-server", features = ["test-support"] }
 waku-drivers = { path = "../waku-drivers", features = ["test-support"] }
 waku-sessions = { path = "../waku-sessions", features = ["test-support"] }
 waku-client = { path = "../waku-client" }

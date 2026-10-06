@@ -78,7 +78,10 @@ pub mod whistle;
 pub use waku_workspace::workspace;
 pub use waku_git::worktree;
 
-mod server;
+pub(crate) use waku_server as server;
+
+#[cfg(all(test, unix))]
+mod server_tests;
 
 // `waku-base` leaves, re-exported so `waku_core::x` paths keep working while
 // the crate split lands in stages.

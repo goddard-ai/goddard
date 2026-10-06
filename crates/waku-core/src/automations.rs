@@ -36,9 +36,7 @@ use crate::daemon::{AgentCreateSelection, WakuBackend};
 use crate::model::DriverEvent;
 use crate::server::EventSink;
 
-/// Broadcast channel the server installs: the whole automations document on
-/// every change.
-pub type AutomationsSink = Arc<dyn Fn(AutomationsState) + Send + Sync>;
+pub use waku_server::AutomationsSink;
 
 /// One scheduler pass every this often. Sub-minute schedules would need a
 /// faster cadence; the tick itself is cheap, the bound is scheduling jitter.

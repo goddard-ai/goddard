@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, anyhow};
+use anyhow::Context as _;
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
 use subtle::ConstantTimeEq as _;
@@ -671,32 +671,7 @@ impl AgentState {
 
 pub use waku_exec::{AgentLaunchEnv, AgentSurfaceScope};
 
-/// Locate the `goddard-agent` binary to place on a provider's `PATH`.
-///
-/// Development and unpackaged installs keep it beside the daemon
-/// executable; a packaged macOS app keeps it in `Contents/Resources` like
-/// `goddard_js_repl`. Resolution goes through the staged copy so a
-/// directory lost under a running daemon — a collected build cache, a
-/// swapped app bundle — does not strip every new session's agent surface.
-pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
-    let executable =
-        std::env::current_exe().context("Goddard daemon executable path is unavailable")?;
-    let name = if cfg!(windows) {
-        "goddard-agent.exe"
-    } else {
-        "goddard-agent"
-    };
-    let bundled = executable
-        .parent()
-        .and_then(|macos| macos.parent())
-        .map(|contents| contents.join("Resources").join(name));
-    let packaged = [Some(executable.with_file_name(name)), bundled]
-        .into_iter()
-        .flatten()
-        .find(|path| path.is_file());
-    crate::computer_use::staged_resource(packaged.as_deref(), name, None)
-        .ok_or_else(|| anyhow!("the goddard-agent CLI is missing from this Goddard build"))
-}
+pub use waku_exec::agent_cli_path;
 
 /// Write the session-scoped `goddard-agent` launcher shared-service providers
 /// use. The shim bakes this session's credential into itself and execs the

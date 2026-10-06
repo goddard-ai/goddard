@@ -3,6 +3,11 @@
 //! over crossbeam channels and every state change broadcasts a whole
 //! `FriendsState` document to subscribers (the `FriendsChanged` message).
 
+pub use waku_server::{
+    FriendSessionSink, FriendSessionUpdate, FriendsSink, ReviewNotifier, SessionStreamer,
+    TaskNotifier,
+};
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +25,7 @@ use waku_protocol::friends::{
 };
 use waku_protocol::git::SyncInProgress;
 use waku_protocol::model::AgentSession;
-use waku_protocol::{ReplayCursor, SequencedEvent, ServerMessage};
+use waku_protocol::{ReplayCursor, ServerMessage};
 use waku_share::friends::{
     self, Friend, FriendStore, FriendsMessage, FriendsProtocol, OfferInfo, PendingRequest,
     RequestDecision, SessionFeed,
@@ -175,10 +180,6 @@ enum RuntimeEffect {
     },
 }
 
-/// Installed by the server so async share events (incoming request, offer,
-/// progress) reach every subscribed client.
-pub type FriendsSink = Arc<dyn Fn(FriendsState) + Send + Sync>;
-
 /// Fired when an incoming transfer finishes and its files are on disk —
 /// the transfer plus the peer's display name (nickname-aware). The daemon
 /// creates the transfer's agent session from this hook and returns its id,
@@ -199,15 +200,6 @@ pub struct ChatDelivery {
 /// the row like a transfer's.
 pub type ChatHook = Arc<dyn Fn(ChatDelivery) -> Option<Uuid> + Send + Sync>;
 
-/// Fired when the share layer changed session/project state — the hub
-/// translates it into a `TaskStateChanged` bump for every client.
-pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
-
-/// Fired when `refs/notes/qa` (or a promoted base branch) moved for an
-/// origin — locally or on a friend's machine. The hub broadcasts a
-/// `ReviewChanged` with the origin URL so review surfaces re-read.
-pub type ReviewNotifier = Arc<dyn Fn(String) + Send + Sync>;
-
 /// The daemon's session catalog as the share layer needs it — installed
 /// by `WakuBackend` like `RepoResolver`. Called on the share runtime and
 /// worker threads only.
@@ -220,27 +212,6 @@ pub struct SessionSource {
     /// Full snapshot for a subscription's first frame.
     pub snapshot: Arc<dyn Fn(Uuid) -> Option<AgentSession> + Send + Sync>,
 }
-
-/// A hub-provided live event stream for one session — what the share
-/// layer pumps onto a friend's `SessionSubscribe` stream.
-pub type SessionStreamer =
-    Arc<dyn Fn(Uuid, Option<ReplayCursor>) -> crate::server::SessionStream + Send + Sync>;
-
-/// What a peer subscription delivers back to this daemon — the hub sink
-/// in `serve` turns these into client broadcasts.
-pub enum FriendSessionUpdate {
-    Event(SequencedEvent),
-    /// The stream ended: `revoked` when the friend turned sharing off or
-    /// unshared the project, `false` for disconnects and gone sessions.
-    Closed {
-        session_id: Uuid,
-        revoked: bool,
-    },
-}
-
-/// Installed by the server so peer session events reach subscribed
-/// clients, like `FriendsSink` for the friends document.
-pub type FriendSessionSink = Arc<dyn Fn(FriendSessionUpdate) + Send + Sync>;
 
 /// An open `SessionSubscribe` stream we serve to a peer — the worker
 /// revokes by pushing `SharingRevoked` then dropping the sender.

@@ -1,3 +1,4 @@
+use crate::sinks::*;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::io::Write as _;
@@ -22,9 +23,9 @@ use uuid::Uuid;
 use waku_protocol::event_to_wire;
 use waku_protocol::workspace::WorkspaceOperation;
 
-use crate::model::{AgentSession, DriverEvent, Project, ProviderKind, SessionStatus};
-use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
-use crate::protocol::{
+use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
+use waku_protocol::model::{AgentSession, DriverEvent, Project, ProviderKind, SessionStatus};
+use waku_protocol::{
     ClientMessage, Command, DaemonExposure, PROTOCOL_VERSION, ReplayCursor, Request,
     ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
 };
@@ -117,10 +118,10 @@ fn request_pools() -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<P
     REQUEST_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Pool counters for [`crate::stats`]: totals accumulate since boot, while
+/// Pool counters for daemon diagnostics: totals accumulate since boot, while
 /// `queued` and each command's `running`/`running_ms` read live at call
 /// time — the fields that name a pinned queue's jobs.
-pub(crate) fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSample> {
+pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSample> {
     let mut pools = request_pools().lock();
     pools
         .iter_mut()
@@ -351,16 +352,16 @@ pub trait Backend: Send + Sync + 'static {
     /// Queue a device name for a local pairing decision and wait for it.
     /// Runs on the connection's own thread. The default declines — pairing
     /// exists only where the backend stores minted tokens.
-    fn request_pair(&self, device_name: &str, transport: &str) -> crate::pairing::PairReply {
+    fn request_pair(&self, device_name: &str, transport: &str) -> waku_base::pairing::PairReply {
         let _ = (device_name, transport);
-        crate::pairing::PairReply::Declined {
+        waku_base::pairing::PairReply::Declined {
             message: "this daemon does not support pairing".into(),
         }
     }
 
     /// Where the pairing document's `PairingChanged` broadcast is
     /// installed — `serve` sets this before accepting connections.
-    fn set_pairing_sink(&self, _sink: crate::pairing::PairingSink) {}
+    fn set_pairing_sink(&self, _sink: PairingSink) {}
 
     /// The name granted clients and LAN browsers see for this daemon.
     fn daemon_name(&self) -> String {
@@ -396,15 +397,15 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Where async friend/share events are delivered once the hub exists —
     /// `serve` installs this before accepting connections.
-    fn set_friends_sink(&self, _sink: crate::share::FriendsSink) {}
+    fn set_friends_sink(&self, _sink: FriendsSink) {}
 
     /// Where the share layer reports session-catalog mutations (a transfer
     /// session materialized outside any client request).
-    fn set_task_state_sink(&self, _sink: crate::share::TaskNotifier) {}
+    fn set_task_state_sink(&self, _sink: TaskNotifier) {}
 
     /// Where the automation scheduler publishes document changes — `serve`
     /// installs this before accepting connections.
-    fn set_automations_sink(&self, _sink: crate::automations::AutomationsSink) {}
+    fn set_automations_sink(&self, _sink: AutomationsSink) {}
 
     /// Root event sink for work the backend initiates without a client
     /// request — a scheduled automation dispatching a run.
@@ -412,15 +413,15 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Where the share layer reports QA review state moving — here or on
     /// a friend's machine.
-    fn set_review_notifier(&self, _notifier: crate::share::ReviewNotifier) {}
+    fn set_review_notifier(&self, _notifier: ReviewNotifier) {}
 
     /// Where the hub registers per-session event streams for friends
     /// watching shared sessions — installed by `serve` once the hub exists.
-    fn set_session_streamer(&self, _streamer: crate::share::SessionStreamer) {}
+    fn set_session_streamer(&self, _streamer: SessionStreamer) {}
 
     /// Where friend-session updates arriving from peer subscriptions are
     /// published — the hub turns them into `ServerMessage`s for clients.
-    fn set_friend_session_sink(&self, _sink: crate::share::FriendSessionSink) {}
+    fn set_friend_session_sink(&self, _sink: FriendSessionSink) {}
 
     /// A plain-HTTP `POST /automations/{id}/trigger?key=…` on the daemon
     /// listener. Backends without automations report every id as unknown.
@@ -445,8 +446,8 @@ pub struct EventSink {
     source_subscriber_id: u64,
 }
 
-impl crate::integrations::IntegrationEventSink for EventSink {
-    fn settings_changed(&self, settings: crate::DaemonSettings) {
+impl waku_drivers::integrations::IntegrationEventSink for EventSink {
+    fn settings_changed(&self, settings: waku_protocol::DaemonSettings) {
         EventSink::settings_changed(self, settings)
     }
 
@@ -455,7 +456,7 @@ impl crate::integrations::IntegrationEventSink for EventSink {
     }
 }
 
-impl crate::terminal::TerminalEventSink for EventSink {
+impl waku_exec::terminal::TerminalEventSink for EventSink {
     fn send_ephemeral(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         EventSink::send_ephemeral(self, event)
     }
@@ -470,14 +471,14 @@ impl EventSink {
     /// Push the daemon's settings document to every subscribed client except
     /// the request's own connection — the initiator already holds the
     /// document it sent.
-    pub fn settings_changed(&self, settings: crate::DaemonSettings) {
+    pub fn settings_changed(&self, settings: waku_protocol::DaemonSettings) {
         self.hub
             .settings_changed(settings, self.source_subscriber_id);
     }
 
     /// The connection the in-flight request arrived on. The dispatcher sets
     /// this so broadcasts the request triggers can skip their source.
-    pub(crate) fn with_source_subscriber(mut self, id: u64) -> Self {
+    pub fn with_source_subscriber(mut self, id: u64) -> Self {
         self.source_subscriber_id = id;
         self
     }
@@ -498,7 +499,8 @@ impl EventSink {
         url: String,
         title: Option<String>,
     ) {
-        self.hub.broadcast_boss_browse(request_id, session_id, url, title, None)
+        self.hub
+            .broadcast_boss_browse(request_id, session_id, url, title, None)
     }
 
     /// Emit an event to exactly one subscriber — the client connection the
@@ -525,7 +527,7 @@ impl EventSink {
     /// A sink bound to a private hub — events go nowhere. Fallback for code
     /// paths that run before `serve` installs the real event source (tests,
     /// a backend constructed without a server).
-    pub(crate) fn detached() -> EventSink {
+    pub fn detached() -> EventSink {
         EventSink {
             session_id: Uuid::nil(),
             runtime_id: Uuid::nil(),
@@ -602,8 +604,8 @@ impl EventSink {
 
     /// Test hook: subscribe to this sink's hub the way a connected client
     /// does, so a teardown path can assert what it broadcast.
-    #[cfg(test)]
-    pub(crate) fn tapped_events(&self) -> Receiver<ServerMessage> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn tapped_events(&self) -> Receiver<ServerMessage> {
         let (messages, events) = unbounded();
         self.hub.subscribe(&[], Subscriber::new(messages).0);
         events
@@ -611,8 +613,8 @@ impl EventSink {
 
     /// Replay depth retained for `session_id` — tests assert a dead
     /// runtime's backlog is gone, not just unreachable.
-    #[cfg(test)]
-    pub(crate) fn journaled_event_count(&self, session_id: Uuid) -> usize {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn journaled_event_count(&self, session_id: Uuid) -> usize {
         self.hub
             .state
             .lock()
@@ -1120,7 +1122,7 @@ impl Hub {
         Self::broadcast(state, &message, Some(source_subscriber_id));
     }
 
-    fn settings_changed(&self, settings: crate::DaemonSettings, source_subscriber_id: u64) {
+    fn settings_changed(&self, settings: waku_protocol::DaemonSettings, source_subscriber_id: u64) {
         let mut state = self.state.lock();
         Self::broadcast(
             &mut state,
@@ -1378,7 +1380,7 @@ impl RequestDispatcher {
         self.backend.authenticate_paired(token)
     }
 
-    fn request_pair(&self, device_name: &str) -> crate::pairing::PairReply {
+    fn request_pair(&self, device_name: &str) -> waku_base::pairing::PairReply {
         self.backend.request_pair(device_name, "ws")
     }
 
@@ -1686,8 +1688,8 @@ pub fn serve(
     {
         let hub = hub.clone();
         backend.set_friend_session_sink(Arc::new(move |update| match update {
-            crate::share::FriendSessionUpdate::Event(event) => hub.emit_external(event),
-            crate::share::FriendSessionUpdate::Closed {
+            FriendSessionUpdate::Event(event) => hub.emit_external(event),
+            FriendSessionUpdate::Closed {
                 session_id,
                 revoked,
             } => hub.friend_session_closed(session_id, revoked),
@@ -1704,7 +1706,7 @@ pub fn serve(
         }
         backend.kickstart_reachability();
         backend.lan_advertisement().and_then(|(name, instance_id)| {
-            match crate::lan::LanAdvert::start(
+            match waku_base::lan::LanAdvert::start(
                 &name,
                 &instance_id,
                 address.port(),
@@ -1765,7 +1767,7 @@ struct ExposedListener {
     config: DaemonExposure,
     port: u16,
     shutdown: Arc<AtomicBool>,
-    _advert: Option<crate::lan::LanAdvert>,
+    _advert: Option<waku_base::lan::LanAdvert>,
     thread: std::thread::JoinHandle<()>,
 }
 
@@ -1817,7 +1819,8 @@ impl ExposureControl {
             .backend
             .lan_advertisement()
             .and_then(|(name, instance_id)| {
-                match crate::lan::LanAdvert::start(&name, &instance_id, port, PROTOCOL_VERSION) {
+                match waku_base::lan::LanAdvert::start(&name, &instance_id, port, PROTOCOL_VERSION)
+                {
                     Ok(advert) => Some(advert),
                     Err(error) => {
                         eprintln!("could not advertise the daemon on the LAN: {error:#}");
@@ -2033,12 +2036,12 @@ fn handle_connection(
         }
         write_json(&mut socket, &ServerMessage::PairPending)?;
         let reply = match dispatcher.request_pair(device_name) {
-            crate::pairing::PairReply::Granted { token } => ServerMessage::PairGranted {
+            waku_base::pairing::PairReply::Granted { token } => ServerMessage::PairGranted {
                 token,
                 daemon_name: dispatcher.backend.daemon_name(),
             },
-            crate::pairing::PairReply::Declined { message }
-            | crate::pairing::PairReply::Busy { message } => {
+            waku_base::pairing::PairReply::Declined { message }
+            | waku_base::pairing::PairReply::Busy { message } => {
                 ServerMessage::PairDeclined { message }
             }
         };
@@ -2092,7 +2095,7 @@ fn handle_connection(
             protocol_version: PROTOCOL_VERSION,
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             daemon_commit: options.build_commit.clone(),
-            agent_cli_available: crate::agent::agent_cli_path().is_ok(),
+            agent_cli_available: waku_exec::agent_cli_path().is_ok(),
         },
     )?;
     socket.set_config(|config| {
@@ -3177,20 +3180,12 @@ mod tests {
         assert!(is_health_check(&Command::GetSettings));
         assert!(!is_health_check(&Command::LoadTaskState));
     }
-    #[cfg(unix)]
-    use crate::daemon::WakuBackend;
-    #[cfg(unix)]
-    use crate::model::Project;
-    use crate::model::{AgentSession, ProviderKind};
-    #[cfg(unix)]
-    use crate::persistence::StateStore;
-    #[cfg(unix)]
-    use crate::settings::DaemonSettingsStore;
-    use crate::{DaemonSettings, WireDriverStartOptions};
     use crossbeam_channel::{RecvTimeoutError, bounded};
     use serde_json::json;
     use std::path::PathBuf;
     use waku_client::{DaemonClient, DaemonSupervisor};
+    use waku_protocol::model::{AgentSession, ProviderKind};
+    use waku_protocol::{DaemonSettings, WireDriverStartOptions};
 
     #[derive(Default)]
     struct TestBackend {
@@ -3279,7 +3274,7 @@ mod tests {
     /// through `request_blocking` and the test drives decisions through
     /// the same commands a connected client would.
     struct PairingBackend {
-        pairing: Arc<crate::pairing::PairingService>,
+        pairing: Arc<waku_base::pairing::PairingService>,
     }
 
     impl Backend for PairingBackend {
@@ -3287,11 +3282,15 @@ mod tests {
             self.pairing.authenticate(token)
         }
 
-        fn request_pair(&self, device_name: &str, transport: &str) -> crate::pairing::PairReply {
+        fn request_pair(
+            &self,
+            device_name: &str,
+            transport: &str,
+        ) -> waku_base::pairing::PairReply {
             self.pairing.request_blocking(device_name, transport)
         }
 
-        fn set_pairing_sink(&self, sink: crate::pairing::PairingSink) {
+        fn set_pairing_sink(&self, sink: PairingSink) {
             self.pairing.set_sink(sink);
         }
 
@@ -3335,7 +3334,10 @@ mod tests {
         (
             PairingDir(dir.clone()),
             Arc::new(PairingBackend {
-                pairing: Arc::new(crate::pairing::PairingService::new(&dir, "testbox".into())),
+                pairing: Arc::new(waku_base::pairing::PairingService::new(
+                    &dir,
+                    "testbox".into(),
+                )),
             }),
         )
     }
@@ -3790,8 +3792,7 @@ mod tests {
         // operations. The caller still owns a request id and must not be
         // left waiting out its response timeout.
         let stream = TcpStream::connect(address).unwrap();
-        let (mut socket, _) =
-            tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
+        let (mut socket, _) = tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
         write_json(
             &mut socket,
             &ClientMessage::Hello {
@@ -3842,8 +3843,10 @@ mod tests {
         loop {
             match socket.read() {
                 Ok(Message::Text(text)) => {
-                    if let Ok(ServerMessage::Response { request_id: id, outcome }) =
-                        serde_json::from_str(text.as_ref())
+                    if let Ok(ServerMessage::Response {
+                        request_id: id,
+                        outcome,
+                    }) = serde_json::from_str(text.as_ref())
                     {
                         responses.push((id, outcome));
                         if id == request_id {
@@ -3859,841 +3862,12 @@ mod tests {
         match responses.as_slice() {
             [(id, ResponseOutcome::Error { error })] => {
                 assert_eq!(id, &request_id);
-                assert!(
-                    error.message.contains("could not decode"),
-                    "{error:?}"
-                );
+                assert!(error.message.contains("could not decode"), "{error:?}");
             }
             other => panic!("expected one error response, got {other:?}"),
         }
         shutdown.store(true, Ordering::Release);
         server.join().unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn stale_projection_cannot_resurrect_a_removed_session() {
-        let root = std::env::temp_dir().join(format!("waku-remove-race-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let stale_client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let remover = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let project = Project::from_path(root.join("repo"));
-        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
-        session.begin_turn("persist me");
-        stale_client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project.clone()],
-                    live_session_ids: vec![session.id],
-                    sessions: vec![session.clone()],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-        remover
-            .request(session.id, Uuid::nil(), Command::RemoveSession)
-            .unwrap();
-        let ResponsePayload::TaskStateSaved { sessions } = stale_client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project],
-                    live_session_ids: vec![session.id],
-                    sessions: vec![session],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap()
-        else {
-            panic!("expected task-state save response");
-        };
-        assert!(sessions.is_empty());
-        let ResponsePayload::TaskState { sessions, .. } = stale_client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert!(sessions.is_empty());
-
-        stale_client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn an_unstarted_draft_is_never_catalogued() {
-        let root = std::env::temp_dir().join(format!("waku-draft-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let project = Project::from_path(root.join("repo"));
-        // A detail-loaded draft: real to the client, but it owns no row.
-        let draft = AgentSession::new(project.id, ProviderKind::Codex);
-        let ResponsePayload::TaskStateSaved { sessions } = client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project.clone()],
-                    live_session_ids: vec![draft.id],
-                    sessions: vec![draft.clone()],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap()
-        else {
-            panic!("expected task-state save response");
-        };
-        assert!(sessions.is_empty());
-        let ResponsePayload::TaskState { sessions, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert!(sessions.is_empty());
-
-        // Once the draft starts it is catalogued like any other session.
-        let mut started = draft;
-        started.begin_turn("run it");
-        let ResponsePayload::TaskStateSaved { sessions } = client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project],
-                    live_session_ids: vec![started.id],
-                    sessions: vec![started.clone()],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap()
-        else {
-            panic!("expected task-state save response");
-        };
-        assert_eq!(sessions.len(), 1);
-        let ResponsePayload::TaskState { sessions, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].id, started.id);
-
-        client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// The projectless workspace root is a process-global slot, so tests that
-    /// need it point it at one shared throwaway directory — every test writes
-    /// the same value, making the set idempotent regardless of ordering, and
-    /// per-test paths stay unique through their uuid names.
-    #[cfg(unix)]
-    fn projectless_test_root() -> PathBuf {
-        std::env::temp_dir()
-            .join("waku-projectless-test-root")
-            .join("projects")
-    }
-
-    /// Clients that provision a projectless workspace persist its project
-    /// row before the first prompt's session exists; the save's orphan sweep
-    /// must leave a freshly created row alone or the submit fails on a
-    /// project the daemon forgot it just catalogued. Classification is
-    /// path-based, so the workspace directory never needs to exist.
-    #[cfg(unix)]
-    #[test]
-    fn a_fresh_projectless_project_survives_until_its_first_task() {
-        crate::projectless::set_workspace_root(Some(projectless_test_root()));
-        let root = std::env::temp_dir().join(format!("waku-projectless-gc-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let workspace_root = projectless_test_root();
-        let project = Project::from_path(
-            workspace_root
-                .join("2026-01-01")
-                .join(format!("grace-{}", Uuid::new_v4())),
-        );
-        assert!(project.is_projectless());
-        client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project.clone()],
-                    live_session_ids: vec![],
-                    sessions: vec![],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-        let ResponsePayload::TaskState { projects, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert!(
-            projects.iter().any(|item| item.id == project.id),
-            "a pending projectless project must outlive the save"
-        );
-
-        // A row past the grace window with no task is still swept — the
-        // window only covers provisioning, not abandoned orphans.
-        let mut stale = Project::from_path(
-            workspace_root
-                .join("2026-01-01")
-                .join(format!("orphan-{}", Uuid::new_v4())),
-        );
-        stale.created_at = crate::model::unix_time() - 2 * 24 * 60 * 60;
-        client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![stale.clone()],
-                    live_session_ids: vec![],
-                    sessions: vec![],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-        let ResponsePayload::TaskState { projects, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert!(
-            !projects.iter().any(|item| item.id == stale.id),
-            "an orphaned projectless project must still be swept"
-        );
-
-        // A task-claimed row survives regardless of age.
-        let mut claimed = Project::from_path(
-            workspace_root
-                .join("2026-01-01")
-                .join(format!("claimed-{}", Uuid::new_v4())),
-        );
-        claimed.created_at = stale.created_at;
-        let mut session = AgentSession::new(claimed.id, ProviderKind::Codex);
-        session.begin_turn("run it");
-        client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![claimed.clone()],
-                    live_session_ids: vec![session.id],
-                    sessions: vec![session],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-        let ResponsePayload::TaskState { projects, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected task state");
-        };
-        assert!(
-            projects.iter().any(|item| item.id == claimed.id),
-            "a projectless project with a task is never swept"
-        );
-
-        client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    /// A projectless workspace directory can vanish between draft creation
-    /// and the first prompt — trash emptied, archive cleanup, a stale
-    /// listing. The daemon owns the scratch space, so Start recreates it
-    /// instead of dying inside the provider spawn with an opaque ENOENT.
-    #[cfg(unix)]
-    #[test]
-    fn start_recreates_a_missing_projectless_workspace() {
-        let root = std::env::temp_dir().join(format!("waku-start-cwd-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        // The daemon's restore writes land under the shared test root, not
-        // the real home.
-        crate::projectless::set_workspace_root(Some(projectless_test_root()));
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let missing_workspace = projectless_test_root()
-            .join("2026-01-01")
-            .join(format!("gone-{}", Uuid::new_v4()));
-        let mut options = WireDriverStartOptions {
-            binary: PathBuf::from("/nonexistent/waku-test-provider"),
-            cwd: missing_workspace.clone(),
-            ..test_start_options()
-        };
-        // The launch still fails — no provider binary — but the missing
-        // projectless cwd is recreated first.
-        let _ = client.request(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Command::Start {
-                options: options.clone(),
-            },
-        );
-        assert!(
-            missing_workspace.is_dir(),
-            "start must recreate a missing projectless workspace"
-        );
-
-        // An ordinary missing cwd names the path instead of spawning blind.
-        options.cwd = root.join("repo-that-was-deleted");
-        let error = client
-            .request(Uuid::new_v4(), Uuid::new_v4(), Command::Start { options })
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("the task's working directory does not exist"),
-            "{error}"
-        );
-        assert!(!root.join("repo-that-was-deleted").exists());
-
-        client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).ok();
-        std::fs::remove_dir_all(
-            projectless_test_root()
-                .parent()
-                .expect("the test root has a parent"),
-        )
-        .ok();
-    }
-
-    #[cfg(unix)]
-    fn serve_task_state(
-        root: &std::path::Path,
-        state: crate::persistence::PersistedState,
-    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
-        let store = StateStore::daemon(root.join("app.db"));
-        let mut state = state;
-        store.save(&mut state).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            store,
-        )
-        .unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-        (address, server)
-    }
-
-    #[cfg(unix)]
-    fn hydrate(client: &DaemonClient, session_id: Uuid) -> AgentSession {
-        let ResponsePayload::Session {
-            session: Some(session),
-        } = client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::HydrateSession { session_id },
-            )
-            .unwrap()
-        else {
-            panic!("expected the stored session to hydrate");
-        };
-        session
-    }
-
-    /// The post-restart orphaned-runtime save: a session that was busy when
-    /// the daemon stopped is interrupted and saved while still a skeleton on
-    /// the client. Its column update must land without the projection's
-    /// placeholder workspace or empty transcript erasing stored detail.
-    #[cfg(unix)]
-    #[test]
-    fn a_skeleton_save_updates_columns_without_erasing_detail() {
-        let root = std::env::temp_dir().join(format!("waku-skeleton-save-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let mut state = crate::persistence::PersistedState::fresh(root.join("repo"));
-        let session_id = state.sessions[0].id;
-        let worktree = crate::model::SessionWorkspace::Worktree {
-            path: root.join("repo-worktrees/task"),
-            name: "task".into(),
-            branch: Some("waku/task".into()),
-            base_branch: None,
-            adopted_by: None,
-        };
-        {
-            let session = &mut state.sessions[0];
-            session.workspace = worktree.clone();
-            session.begin_turn("ship it");
-            session.finish_active_turn(crate::model::TurnStatus::Completed);
-            session.status = SessionStatus::Working;
-            session.runtime_event_cursor = Some(crate::model::RuntimeEventCursor {
-                runtime_id: Uuid::new_v4(),
-                epoch: Uuid::new_v4(),
-                sequence: 3,
-            });
-        }
-        let (address, server) = serve_task_state(&root, state);
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-
-        // The reattach path hydrates the daemon's copy before the attach
-        // fails, so the merge below runs against a hydrated, busy session.
-        let hydrated = hydrate(&client, session_id);
-        assert_eq!(hydrated.workspace, worktree);
-
-        let mut skeleton = hydrated.list_projection();
-        skeleton.status = SessionStatus::Idle;
-        client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: Vec::new(),
-                    live_session_ids: vec![session_id],
-                    sessions: vec![skeleton],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-
-        let after = hydrate(&client, session_id);
-        assert_eq!(after.status, SessionStatus::Idle);
-        assert_eq!(after.workspace, worktree);
-        assert_eq!(after.turns.len(), 1);
-
-        // The stored detail survived too — this is not just in memory.
-        let store = StateStore::daemon(root.join("app.db"));
-        let mut stored = store.load().unwrap().sessions;
-        let stored = stored
-            .iter_mut()
-            .find(|session| session.id == session_id)
-            .unwrap();
-        store.hydrate(stored).unwrap();
-        assert_eq!(stored.workspace, worktree);
-        assert_eq!(stored.turns.len(), 1);
-
-        client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    /// Pinning or archiving a task that was never opened since launch sends
-    /// its skeleton: the columns must merge while the stored transcript and
-    /// workspace stay untouched, and an unknown skeleton creates nothing.
-    #[cfg(unix)]
-    #[test]
-    fn a_skeleton_save_merges_columns_and_never_creates_a_row() {
-        let root = std::env::temp_dir().join(format!("waku-skeleton-pin-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let mut state = crate::persistence::PersistedState::fresh(root.join("repo"));
-        let session_id = state.sessions[0].id;
-        let worktree = crate::model::SessionWorkspace::Worktree {
-            path: root.join("repo-worktrees/task"),
-            name: "task".into(),
-            branch: None,
-            base_branch: None,
-            adopted_by: None,
-        };
-        {
-            let session = &mut state.sessions[0];
-            session.workspace = worktree.clone();
-            session.begin_turn("ship it");
-            session.finish_active_turn(crate::model::TurnStatus::Completed);
-        }
-        let (address, server) = serve_task_state(&root, state);
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-
-        // The daemon's copy stays a skeleton here — nothing hydrated it.
-        let ResponsePayload::TaskState { sessions, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected daemon task state");
-        };
-        let mut skeleton = sessions
-            .into_iter()
-            .find(|session| session.id == session_id)
-            .unwrap();
-        assert!(!skeleton.detail_loaded);
-        skeleton.pinned_at = Some(1);
-        skeleton.updated_at += 1;
-        let ghost = AgentSession::new(
-            crate::model::Project::from_path(root.join("repo")).id,
-            ProviderKind::Codex,
-        )
-        .list_projection();
-        let ghost_id = ghost.id;
-        client
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: Vec::new(),
-                    live_session_ids: vec![session_id],
-                    sessions: vec![skeleton, ghost],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-
-        let after = hydrate(&client, session_id);
-        assert_eq!(after.pinned_at, Some(1));
-        assert_eq!(after.workspace, worktree);
-        assert_eq!(after.turns.len(), 1);
-
-        // The projection of a task the daemon never stored creates no row,
-        // and the stored task's skeleton still reports its worktree — the
-        // sidebar's badge must not depend on a hydrate.
-        let ResponsePayload::TaskState { sessions, .. } = client
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap()
-        else {
-            panic!("expected daemon task state");
-        };
-        assert!(!sessions.iter().any(|session| session.id == ghost_id));
-        assert_eq!(
-            sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .map(|session| &session.workspace),
-            Some(&worktree)
-        );
-
-        client.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_scoped_agent_token_reaches_only_agent_commands() {
-        let root = std::env::temp_dir().join(format!("goddard-agent-auth-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
-        settings
-            .replace(DaemonSettings {
-                agent_tools_enabled: true,
-                // A binary that cannot exist keeps the cold-start path from
-                // ever spawning a real provider in a test.
-                provider_binary_overrides: HashMap::from([(
-                    ProviderKind::Codex,
-                    "/nonexistent/waku-test-provider".into(),
-                )]),
-                ..DaemonSettings::default()
-            })
-            .unwrap();
-        let backend = WakuBackend::new(settings, StateStore::daemon(root.join("app.db"))).unwrap();
-        let sender_id = Uuid::new_v4();
-        let agent_token = backend.agent.mint(sender_id);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        // A token the daemon never minted is no credential.
-        let error = match DaemonClient::connect(&address.to_string(), "forged".into()) {
-            Ok(_) => panic!("a forged token must not authenticate"),
-            Err(error) => error,
-        };
-        assert!(
-            error.to_string().contains("authentication failed"),
-            "{error}"
-        );
-
-        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
-        let human = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-
-        // A target task the daemon knows but has never run.
-        let project = Project::from_path(root.join("repo"));
-        let mut target = AgentSession::new(project.id, ProviderKind::Codex);
-        target.provider_cursor = Some(crate::model::ProviderResumeCursor::from_session_id(
-            ProviderKind::Codex,
-            "thread-42".into(),
-        ));
-        let target_id = target.id;
-        human
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects: vec![project],
-                    live_session_ids: vec![],
-                    sessions: vec![target],
-                    session_tails: Vec::new(),
-                },
-            )
-            .unwrap();
-
-        // The credential is confined to the agent command surface.
-        let error = agent
-            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("may only run agent commands"),
-            "{error}"
-        );
-
-        // Unknown targets are refused rather than queued.
-        let error = agent
-            .request(
-                sender_id,
-                Uuid::nil(),
-                Command::AgentPrompt {
-                    task_id: Some(Uuid::new_v4()),
-                    thread_id: None,
-                    provider: None,
-                    prompt: "hi".into(),
-                    delivery: crate::AgentPromptDelivery::Queue,
-                },
-            )
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("unknown to the daemon"),
-            "{error}"
-        );
-
-        // A provider-native thread id resolves to the same task; steer mode
-        // on a task with no running turn is a clean error, not a cold start.
-        let error = agent
-            .request(
-                sender_id,
-                Uuid::nil(),
-                Command::AgentPrompt {
-                    task_id: None,
-                    thread_id: Some("thread-42".into()),
-                    provider: None,
-                    prompt: "hi".into(),
-                    delivery: crate::AgentPromptDelivery::Steer,
-                },
-            )
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("no running session to steer"),
-            "{error}"
-        );
-
-        // Queue mode on a known task attempts the cold start; the fake
-        // binary makes the launch itself the deterministic failure.
-        let error = agent
-            .request(
-                sender_id,
-                Uuid::nil(),
-                Command::AgentPrompt {
-                    task_id: Some(target_id),
-                    thread_id: None,
-                    provider: None,
-                    prompt: "hi".into(),
-                    delivery: crate::AgentPromptDelivery::Queue,
-                },
-            )
-            .unwrap_err();
-        assert!(
-            !error.to_string().contains("unknown to the daemon"),
-            "{error}"
-        );
-
-        agent.shutdown();
-        human.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn agent_commands_require_the_daemon_setting() {
-        let root = std::env::temp_dir().join(format!("goddard-agent-gate-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let sender_id = Uuid::new_v4();
-        let agent_token = backend.agent.mint(sender_id);
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
-        let human = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let error = agent
-            .request(
-                sender_id,
-                Uuid::nil(),
-                Command::AgentPrompt {
-                    task_id: Some(Uuid::new_v4()),
-                    thread_id: None,
-                    provider: None,
-                    prompt: "hi".into(),
-                    delivery: crate::AgentPromptDelivery::Queue,
-                },
-            )
-            .unwrap_err();
-        assert!(error.to_string().contains("disabled"), "{error}");
-
-        let error = agent
-            .request(
-                sender_id,
-                Uuid::nil(),
-                Command::AgentComputerUse {
-                    code: "1".into(),
-                    timeout_ms: None,
-                    title: None,
-                },
-            )
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("computer use is disabled"),
-            "{error}"
-        );
-        let error = agent
-            .request(Uuid::new_v4(), Uuid::nil(), Command::AgentComputerUseReset)
-            .unwrap_err();
-        assert!(
-            error.to_string().contains("cannot target another task"),
-            "{error}"
-        );
-
-        human.shutdown();
-        agent.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -4979,12 +4153,15 @@ mod tests {
         let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let hub = Arc::new(Hub::default());
-        let terminal = crate::terminal::DaemonTerminal::open_with_shell(
+        let terminal = waku_exec::terminal::DaemonTerminal::open_with_shell(
             &root,
             80,
             24,
             hub.event_sink(Uuid::new_v4(), Uuid::new_v4()),
-            terminal_test_shell("while IFS= read -r line; do :; done"),
+            alacritty_terminal::tty::Shell::new(
+                "/bin/sh".into(),
+                vec!["-c".into(), "while IFS= read -r line; do :; done".into()],
+            ),
         )
         .unwrap();
         let (dropped, finished) = bounded(1);
@@ -4998,281 +4175,6 @@ mod tests {
             "dropping an idle daemon terminal blocked on its output reader"
         );
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn websocket_terminal_round_trip_streams_input_and_output() {
-        websocket_terminal_round_trip(false);
-    }
-
-    /// Terminal bytes are private to the connection that opened the PTY: a
-    /// second client subscribed to the same channel hears nothing until it
-    /// issues a terminal command, which claims the channel and replays the
-    /// retained output tail to the claimant.
-    #[cfg(unix)]
-    #[test]
-    fn terminal_output_stays_with_the_owning_connection() {
-        let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap()
-        .with_terminal_shell(terminal_test_shell(
-            "while IFS= read -r line; do printf 'received:%s\\n' \"$line\"; done",
-        ));
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let bystander = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let terminal_id = Uuid::new_v4();
-        let owned = owner.subscribe(terminal_id, terminal_id);
-        let tapped = bystander.subscribe(terminal_id, terminal_id);
-        assert!(matches!(
-            owner
-                .request(
-                    terminal_id,
-                    terminal_id,
-                    Command::OpenTerminal {
-                        cwd: root.clone(),
-                        cols: 80,
-                        rows: 24,
-                        owner: None,
-                    },
-                )
-                .unwrap(),
-            ResponsePayload::Ack
-        ));
-        owner
-            .request(
-                terminal_id,
-                terminal_id,
-                Command::WriteTerminal {
-                    data: b"first\n".to_vec(),
-                },
-            )
-            .unwrap();
-        terminal_output_until(&owned, b"received:first");
-        // The whole exchange — open, write, output — stayed on the owner's
-        // connection; the bystander's identical subscription got nothing.
-        assert!(
-            tapped.recv_timeout(Duration::from_millis(500)).is_err(),
-            "a second connection received terminal events it never claimed"
-        );
-
-        // A terminal command from another connection claims the channel:
-        // ownership moves and the claim answers with the retained tail.
-        assert!(matches!(
-            bystander
-                .request(
-                    terminal_id,
-                    terminal_id,
-                    Command::ResizeTerminal { cols: 80, rows: 24 },
-                )
-                .unwrap(),
-            ResponsePayload::Ack
-        ));
-        let repainted = terminal_output_until(&tapped, b"received:first");
-        assert!(
-            !repainted.is_empty(),
-            "the claim did not replay the terminal's output tail"
-        );
-        bystander
-            .request(
-                terminal_id,
-                terminal_id,
-                Command::WriteTerminal {
-                    data: b"second\n".to_vec(),
-                },
-            )
-            .unwrap();
-        terminal_output_until(&tapped, b"received:second");
-        // The former owner stays silent once the channel moves.
-        while owned.recv_timeout(Duration::from_millis(300)).is_ok() {}
-        bystander
-            .request(
-                terminal_id,
-                terminal_id,
-                Command::WriteTerminal {
-                    data: b"third\n".to_vec(),
-                },
-            )
-            .unwrap();
-        terminal_output_until(&tapped, b"received:third");
-        assert!(
-            owned.recv_timeout(Duration::from_millis(500)).is_err(),
-            "the previous owner still received terminal events after the claim"
-        );
-
-        bystander
-            .request(terminal_id, terminal_id, Command::CloseTerminal)
-            .unwrap();
-        owner.shutdown();
-        bystander.shutdown();
-        shutdown.store(true, Ordering::Release);
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn websocket_terminal_close_does_not_wait_for_a_shell_ignoring_hangup() {
-        websocket_terminal_round_trip(true);
-    }
-
-    #[cfg(unix)]
-    fn terminal_test_shell(script: &str) -> alacritty_terminal::tty::Shell {
-        // Do not load the developer's or CI runner's login files, prompt
-        // plugins, or terminal capability queries in a transport test.
-        alacritty_terminal::tty::Shell::new("/bin/sh".into(), vec!["-c".into(), script.into()])
-    }
-
-    #[cfg(unix)]
-    fn websocket_terminal_round_trip(ignore_hangup: bool) {
-        let root = std::env::temp_dir().join(format!("waku-terminal-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap()
-        .with_terminal_shell(terminal_test_shell(&format!(
-            "{}\nprintf 'ready:%s\\n' \"$$\"\nwhile IFS= read -r line; do printf 'received:%s\\n' \"$line\"; done",
-            if ignore_hangup { "trap '' HUP" } else { ":" },
-        )));
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-
-        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-        let terminal_id = Uuid::new_v4();
-        let events = client.subscribe(terminal_id, terminal_id);
-        assert!(matches!(
-            client
-                .request(
-                    terminal_id,
-                    terminal_id,
-                    Command::OpenTerminal {
-                        cwd: root.clone(),
-                        cols: 80,
-                        rows: 24,
-                        owner: None,
-                    },
-                )
-                .unwrap(),
-            ResponsePayload::Ack
-        ));
-        // Wait until the shell has installed its signal handler. Receiving
-        // local echo alone does not prove that shell startup has completed.
-        let ready = terminal_output_until(&events, b"\n");
-        let child_pid: libc::pid_t = String::from_utf8_lossy(&ready)
-            .trim()
-            .strip_prefix("ready:")
-            .unwrap()
-            .parse()
-            .unwrap();
-        client
-            .request(
-                terminal_id,
-                terminal_id,
-                Command::WriteTerminal {
-                    data: b"waku-terminal-round-trip\r".to_vec(),
-                },
-            )
-            .unwrap();
-
-        // The response prefix is absent from the input, so a PTY echo cannot
-        // satisfy this assertion before the child has actually read it.
-        terminal_output_until(&events, b"received:waku-terminal-round-trip");
-
-        let (closed, finished) = bounded(1);
-        let closing_client = client.clone();
-        let close = std::thread::spawn(move || {
-            let _ = closed.send(closing_client.request(
-                terminal_id,
-                terminal_id,
-                Command::CloseTerminal,
-            ));
-        });
-        let result = finished.recv_timeout(Duration::from_secs(3));
-        if result.is_err() {
-            // Clean up the fixture even when shutdown regresses, and fail
-            // here instead of waiting for the client's 120-second timeout.
-            unsafe {
-                libc::kill(child_pid, libc::SIGKILL);
-            }
-        }
-        client.shutdown();
-        server.join().unwrap();
-        close.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-        assert!(
-            matches!(result, Ok(Ok(ResponsePayload::Ack))),
-            "closing daemon terminal did not complete: {result:?}"
-        );
-    }
-
-    #[cfg(unix)]
-    fn terminal_output_until(events: &Receiver<SequencedEvent>, marker: &[u8]) -> Vec<u8> {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        let mut output = Vec::new();
-        let mut seen_events = Vec::new();
-        while std::time::Instant::now() < deadline
-            && !output.windows(marker.len()).any(|window| window == marker)
-        {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            let Ok(event) = events.recv_timeout(remaining) else {
-                break;
-            };
-            seen_events.push(event.event.kind.clone());
-            if event.event.kind != "terminalOutput" {
-                continue;
-            }
-            let data = event.event.payload["data"].as_str().unwrap();
-            output.extend(
-                base64::engine::general_purpose::STANDARD
-                    .decode(data)
-                    .unwrap(),
-            );
-        }
-        assert!(
-            output.windows(marker.len()).any(|window| window == marker),
-            "daemon terminal did not return the shell marker; events={seen_events:?}, output={}",
-            String::from_utf8_lossy(&output)
-        );
-        output
     }
 
     #[test]
@@ -5537,7 +4439,7 @@ mod tests {
                 session_id: Uuid::nil(),
                 runtime_id: Uuid::nil(),
                 command: Command::ProbeProvider {
-                    provider: crate::model::ProviderKind::Codex,
+                    provider: waku_protocol::model::ProviderKind::Codex,
                     binary_override: None,
                     discover_models: false,
                     probe_version: false,
@@ -6071,99 +4973,5 @@ mod tests {
         drop(remote);
         client.shutdown();
         server.join().unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn paired_and_agent_tokens_cannot_change_exposure() {
-        let root = std::env::temp_dir().join(format!("waku-exposure-gate-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let backend = WakuBackend::new(
-            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
-            StateStore::daemon(root.join("app.db")),
-        )
-        .unwrap();
-        let agent_token = backend.agent.mint(Uuid::new_v4());
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = shutdown.clone();
-        let server = std::thread::spawn(move || {
-            serve(
-                listener,
-                "secret".into(),
-                Arc::new(backend),
-                server_shutdown,
-                ServerOptions {
-                    allow_shutdown: true,
-                    ..ServerOptions::default()
-                },
-            )
-            .unwrap()
-        });
-        let owner = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
-
-        // A device pairs through the owner-approved flow, then connects
-        // with its minted token.
-        let pairing = std::thread::spawn({
-            let address = address.to_string();
-            move || waku_client::pair(&address, "test-device", Duration::from_secs(10))
-        });
-        let request_id = {
-            let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            loop {
-                let found = match owner
-                    .request(Uuid::nil(), Uuid::nil(), Command::GetPairing)
-                    .unwrap()
-                {
-                    ResponsePayload::Pairing { state } => {
-                        state.pending.first().map(|pending| pending.request_id)
-                    }
-                    _ => None,
-                };
-                if let Some(request_id) = found {
-                    break request_id;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "pair request never arrived"
-                );
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        };
-        owner
-            .request(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::RespondPairRequest {
-                    request_id,
-                    accept: true,
-                },
-            )
-            .unwrap();
-        let waku_client::PairReply::Granted { token, .. } = pairing.join().unwrap().unwrap() else {
-            panic!("pair request was not granted");
-        };
-
-        let paired = DaemonClient::connect(&address.to_string(), token).unwrap();
-        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
-        for (name, client) in [("paired", &paired), ("agent", &agent)] {
-            let error = client
-                .request(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    Command::SetDaemonExposure { exposure: None },
-                )
-                .unwrap_err();
-            assert!(
-                error.to_string().contains("primary authentication token")
-                    || error.to_string().contains("agent credential"),
-                "{name}: {error}"
-            );
-        }
-
-        owner.shutdown();
-        server.join().unwrap();
-        std::fs::remove_dir_all(root).unwrap();
     }
 }
