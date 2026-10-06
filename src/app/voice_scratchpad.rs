@@ -58,12 +58,13 @@ const CANCEL_CONFIRM_CHARS: usize = 280;
 /// The scratchpad card matches the composer card's width.
 const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
 const CARD_RADIUS: f32 = 24.0;
-/// The gradient cover's fade band above the lane — the frame runs the fade
-/// over ~45px at the top of the cover.
-const GRADIENT_FADE: f32 = 45.0;
-/// The fully opaque buffer between the fade's end and the composer's top
-/// edge — transcript text is gone well before it meets the card.
-const GRADIENT_SOLID: f32 = 55.0;
+/// The gradient cover's rise above the composer card's top edge — the
+/// frame's 178px cover hides ~95px behind the card and clears it by ~83.
+const GRADIENT_RISE: f32 = 83.0;
+/// The fade completes a third of the way down the cover — the frame's
+/// gradient vector runs from {0.5, 0} to {0.5, 0.334}, everything below
+/// solid surface.
+const GRADIENT_FADE_END: f32 = 0.334;
 /// The workspace footer's strip under the composer card — 4px top pad,
 /// 28px row, 8px bottom pad in `render_workspace_footer`. The panel's bottom
 /// edge stops at the composer card's, leaving that strip — and the screen
@@ -2387,9 +2388,9 @@ impl Waku {
                             .border_color(theme.border_subtle),
                     )
                     .child(
-                        // The gradient cover's solid half hides behind the
-                        // composer. Painted after the scroll element and the
-                        // border overlay so it obscures whatever scrolls
+                        // The gradient cover's solid two-thirds hides behind
+                        // the composer. Painted after the scroll element and
+                        // the border overlay so it obscures whatever scrolls
                         // beneath it and the card's own outline — the frame
                         // fades the transcript into the window surface, not
                         // the card.
@@ -2398,15 +2399,11 @@ impl Waku {
                             .left_0()
                             .right_0()
                             .bottom_0()
-                            .h(px(overlap + GRADIENT_FADE + GRADIENT_SOLID))
+                            .h(px(overlap + GRADIENT_RISE))
                             .bg(linear_gradient(
                                 180.0,
                                 linear_color_stop(theme.surface.opacity(0.0), 0.0),
-                                linear_color_stop(
-                                    theme.surface,
-                                    GRADIENT_FADE
-                                        / (overlap + GRADIENT_FADE + GRADIENT_SOLID).max(1.0),
-                                ),
+                                linear_color_stop(theme.surface, GRADIENT_FADE_END),
                             )),
                     )
                     .child({
@@ -3243,10 +3240,10 @@ impl Waku {
 }
 
 /// Bottom padding under the transcript rows — enough room for the last
-/// paragraph to scroll clear of the gradient's solid band, plus a line of
+/// paragraph to scroll clear of the cover's opaque band, plus a line of
 /// air.
 fn lane_padding(lane: f32) -> f32 {
-    lane - FOOTER_STRIP + GRADIENT_SOLID + 16.0
+    (lane - FOOTER_STRIP + GRADIENT_RISE) * (1.0 - GRADIENT_FADE_END) + 16.0
 }
 
 /// The caret quad for `offset` in the registered element `key` — an accent
