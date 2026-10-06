@@ -125,6 +125,40 @@ fn memory_record_from_json(value: &serde_json::Value) -> Option<MemoryRecord> {
     }
 }
 
+/// The Employees section's roster views — active work is running and
+/// queued together; history is the finished roster plus retired records.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum BossEmployeesView {
+    #[default]
+    Active,
+    History,
+}
+
+/// The Plans section's document filter. Approved plans keep their record
+/// after the planning session archives; an archived session on an
+/// unfinished draft is what Archived means here.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum BossPlansFilter {
+    #[default]
+    Active,
+    Approved,
+    Archived,
+}
+
+/// The Deliverables library's record filter — the sidebar's recency
+/// window does not apply; every published record lists under one of
+/// these.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum BossDeliverablesFilter {
+    /// Live rows — everything the record does not hide: dormant and
+    /// archived records list under their own filters.
+    #[default]
+    All,
+    Pinned,
+    Dormant,
+    Archived,
+}
+
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
     pub(super) goal_rows: HashMap<DaemonKey, Arc<Vec<BossGoalRow>>>,
@@ -202,8 +236,30 @@ pub(super) struct BossUi {
     pub page: Option<(DaemonKey, BossTab)>,
     last_section: HashMap<DaemonKey, BossTab>,
     /// The Plans tab's selected plan — a `BossState.planning` record's
-    /// session id, resolved against the live state at render.
-    plans_selected: Option<Uuid>,
+    /// session id, resolved against the live state at render. Kept per
+    /// host so a second daemon's page restores its own selection.
+    plans_selected: HashMap<DaemonKey, Uuid>,
+    /// The Personas section's selected role, per host — the boss's own
+    /// persona id is a valid entry like any role's.
+    personas_selected: HashMap<DaemonKey, Uuid>,
+    /// Per-section filters, per host: the Employees view and the Plans and
+    /// Deliverables library filters.
+    employees_view: HashMap<DaemonKey, BossEmployeesView>,
+    plans_filter: HashMap<DaemonKey, BossPlansFilter>,
+    deliverables_filter: HashMap<DaemonKey, BossDeliverablesFilter>,
+    /// The Personas list's name query — mirrored off the search input so
+    /// `sync_boss_page_rows` can filter without an `App` context.
+    persona_query: String,
+    persona_search: Option<Entity<TextInput>>,
+    /// Read-only persona instructions — the detail pane's markdown cache,
+    /// selection, and scroll position, keyed to the selected persona.
+    persona_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
+    persona_selection: TranscriptSelection,
+    persona_scroll: ScrollHandle,
+    persona_scrollbar: Rc<ScrollbarState>,
+    /// Employee task pages whose assignment summary the user expanded —
+    /// collapsed is the default so the transcript stays the content.
+    assignment_expanded: HashSet<Uuid>,
     /// Every loaded entry under the Boss files root's `memory/` tree —
     /// one flat list; folder rows parent their children by path prefix.
     files: Vec<BossFile>,
@@ -282,7 +338,18 @@ impl Default for BossUi {
             revision: 0,
             page: None,
             last_section: HashMap::new(),
-            plans_selected: None,
+            plans_selected: HashMap::new(),
+            personas_selected: HashMap::new(),
+            employees_view: HashMap::new(),
+            plans_filter: HashMap::new(),
+            deliverables_filter: HashMap::new(),
+            persona_query: String::new(),
+            persona_search: None,
+            persona_markdown: RefCell::new(None),
+            persona_selection: TranscriptSelection::default(),
+            persona_scroll: ScrollHandle::new(),
+            persona_scrollbar: ScrollbarState::new(),
+            assignment_expanded: HashSet::new(),
             files: Vec::new(),
             files_key: None,
             memory_expanded: HashMap::new(),
@@ -394,6 +461,8 @@ enum BossItem {
     Bucket(String),
     /// A `BossState.planning` record's session — Plans tab rows.
     Plan(Uuid),
+    /// A `BossState.deliverables` record — the library rows.
+    Deliverable(Uuid),
 }
 
 fn memory_tree_rows(
@@ -472,9 +541,11 @@ pub(super) enum BossCommandContext {
     },
 }
 
+/// The persona form behind the detail pane's deliberate Edit mode —
+/// `persona` is `Uuid::nil()` while a new role is being drafted.
 struct BossEditor {
     key: DaemonKey,
-    kind: BossEditorKind,
+    persona: Uuid,
     name: Entity<TextInput>,
     content: Entity<TextInput>,
     pinned: Entity<TextInput>,
@@ -485,11 +556,6 @@ struct BossEditor {
     original: Vec<String>,
     original_permissions: PersonaPermissions,
     integrations: Vec<String>,
-}
-#[derive(Clone, Copy)]
-enum BossEditorKind {
-    Persona(Uuid),
-    Name,
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum BossReply {
@@ -932,11 +998,15 @@ impl Waku {
             .detach();
     }
 
-    fn sync_boss_page_rows(&mut self) {
-        let Some((key, tab)) = self.boss_ui.page else {
-            return;
+    /// The list rows one section shows under its current filter — computed
+    /// from live state so every render and revision sees the same order.
+    /// Personnel rows follow `recent`'s newest-summon-first order; plans and
+    /// deliverables sort newest first inside each filter.
+    fn boss_page_rows(&self, key: DaemonKey, tab: BossTab) -> Vec<BossItem> {
+        let Some(state) = self.boss_ui.states.get(&key) else {
+            return Vec::new();
         };
-        let rows = match tab {
+        match tab {
             BossTab::Memory => {
                 match self
                     .boss_ui
@@ -978,55 +1048,174 @@ impl Waku {
                         .collect(),
                 }
             }
-            BossTab::Employees => self
-                .boss_ui
-                .recent
-                .get(&key)
-                .into_iter()
-                .flatten()
-                .copied()
-                .map(BossItem::Employee)
-                .collect(),
-            BossTab::Personas => self
-                .boss_ui
-                .states
-                .get(&key)
-                .into_iter()
-                .flat_map(|state| &state.personas)
-                .map(|persona| BossItem::Persona(persona.id))
-                .collect(),
-            // The page is the frozen-document archive — live drafts stay on
-            // their planning session's sidebar row, not here.
-            BossTab::Plans => self
-                .boss_ui
-                .states
-                .get(&key)
-                .into_iter()
-                .flat_map(|state| &state.planning)
-                .filter(|plan| plan.finalized_at.is_some())
-                .map(|plan| BossItem::Plan(plan.session_id))
-                .collect(),
-            BossTab::Deliverables => Vec::new(),
-        };
-        if self.boss_ui.rows != rows {
-            self.boss_ui.rows = rows;
-            let row_height = if matches!(tab, BossTab::Memory)
-                && self
+            BossTab::Employees => {
+                let history = self
                     .boss_ui
-                    .memory_view
+                    .employees_view
                     .get(&key)
                     .copied()
-                    .unwrap_or(BossMemoryView::Documents)
-                    == BossMemoryView::Documents
-            {
-                px(30.0)
-            } else {
-                px(42.0)
-            };
+                    .unwrap_or_default()
+                    == BossEmployeesView::History;
+                let mut rows: Vec<BossItem> = self
+                    .boss_ui
+                    .recent
+                    .get(&key)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|id| self.boss_ui.expired.contains(id) == history)
+                    .map(BossItem::Employee)
+                    .collect();
+                if history {
+                    // Retired records left the roster but their tasks stay
+                    // readable — they join History below the live roster's
+                    // finished rows, oldest standing last.
+                    let mut retired: Vec<&waku_protocol::boss::BossEmployee> =
+                        state.retired_employees.iter().collect();
+                    retired.sort_by_key(|employee| {
+                        std::cmp::Reverse(employee.expired_at.unwrap_or(0))
+                    });
+                    rows.extend(
+                        retired
+                            .into_iter()
+                            .map(|employee| BossItem::Employee(employee.session_id)),
+                    );
+                }
+                rows
+            }
+            BossTab::Personas => {
+                let query = self.boss_ui.persona_query.trim().to_lowercase();
+                state
+                    .personas
+                    .iter()
+                    .filter(|persona| persona.id != state.persona_id)
+                    .filter(|persona| {
+                        query.is_empty() || persona.name.to_lowercase().contains(&query)
+                    })
+                    .map(|persona| BossItem::Persona(persona.id))
+                    .collect()
+            }
+            BossTab::Plans => {
+                let filter = self
+                    .boss_ui
+                    .plans_filter
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_default();
+                let mut plans: Vec<&waku_protocol::boss::BossPlan> = state
+                    .planning
+                    .iter()
+                    .filter(|plan| match filter {
+                        // A draft is active while its discussion is live —
+                        // the session still on record, not yet archived,
+                        // and never finalized.
+                        BossPlansFilter::Active => {
+                            plan.finalized_at.is_none()
+                                && self
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == plan.session_id)
+                                    .is_some_and(|session| session.archived_at.is_none())
+                        }
+                        BossPlansFilter::Approved => plan.finalized_at.is_some(),
+                        BossPlansFilter::Archived => {
+                            plan.finalized_at.is_none()
+                                && self
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == plan.session_id)
+                                    .is_none_or(|session| session.archived_at.is_some())
+                        }
+                    })
+                    .collect();
+                plans.sort_by_key(|plan| {
+                    std::cmp::Reverse(
+                        plan.finalized_at.unwrap_or_else(|| {
+                            self.state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == plan.session_id)
+                                .map(|session| session.created_at)
+                                .unwrap_or(0)
+                        }),
+                    )
+                });
+                plans
+                    .into_iter()
+                    .map(|plan| BossItem::Plan(plan.session_id))
+                    .collect()
+            }
+            BossTab::Deliverables => {
+                let filter = self
+                    .boss_ui
+                    .deliverables_filter
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_default();
+                let mut deliverables: Vec<&waku_protocol::boss::BossDeliverable> = state
+                    .deliverables
+                    .iter()
+                    .filter(|deliverable| {
+                        let pinned = deliverable.pinned_at.is_some();
+                        let dormant = deliverable.dormant_at.is_some() && !pinned;
+                        let archived = deliverable.archived_at.is_some();
+                        match filter {
+                            BossDeliverablesFilter::All => !dormant && !archived,
+                            BossDeliverablesFilter::Pinned => pinned && !archived,
+                            BossDeliverablesFilter::Dormant => dormant && !archived,
+                            BossDeliverablesFilter::Archived => archived,
+                        }
+                    })
+                    .collect();
+                // Pinned records lead the live list the way they lead the
+                // sidebar group; every filter then sorts by last publish.
+                deliverables.sort_by_key(|deliverable| {
+                    (
+                        !deliverable.pinned_at.is_some(),
+                        std::cmp::Reverse(deliverable.updated_at),
+                    )
+                });
+                deliverables
+                    .into_iter()
+                    .map(|deliverable| BossItem::Deliverable(deliverable.id))
+                    .collect()
+            }
+        }
+    }
+
+    /// Keep the virtualized list in step with the freshly computed rows —
+    /// the same prefix splice the Skills list uses, so filter keystrokes
+    /// and selection moves keep scroll position.
+    fn sync_boss_rows(&mut self, rows: Vec<BossItem>) {
+        if self.boss_ui.rows == rows {
+            return;
+        }
+        let prefix = self
+            .boss_ui
+            .rows
+            .iter()
+            .zip(rows.iter())
+            .take_while(|(cached, fresh)| cached == fresh)
+            .count();
+        let old_count = self.boss_ui.rows.len();
+        self.boss_ui.rows = rows;
+        if old_count == 0 {
+            self.boss_ui.list.reset(self.boss_ui.rows.len());
+        } else {
             self.boss_ui
                 .list
-                .reset_with_uniform_height(self.boss_ui.rows.len(), row_height);
+                .splice(prefix..old_count, self.boss_ui.rows.len() - prefix);
         }
+    }
+
+    fn sync_boss_page_rows(&mut self) {
+        let Some((key, tab)) = self.boss_ui.page else {
+            return;
+        };
+        let rows = self.boss_page_rows(key, tab);
+        self.sync_boss_rows(rows);
     }
 
     pub(super) fn open_boss_page(
@@ -1285,16 +1474,15 @@ impl Waku {
                                 if let (Some(editor), Some((values, _))) =
                                     (&mut this.boss_ui.editor, &saved)
                                 {
-                                    if matches!(editor.kind, BossEditorKind::Persona(id) if id.is_nil())
-                                    {
-                                        if let Some(persona) = state.personas.iter().rev().find(
+                                    if editor.persona.is_nil()
+                                        && let Some(persona) = state.personas.iter().rev().find(
                                             |persona| {
                                                 persona.name == values[0].trim()
                                                     && persona.markdown == values[1]
                                             },
-                                        ) {
-                                            editor.kind = BossEditorKind::Persona(persona.id);
-                                        }
+                                        )
+                                    {
+                                        editor.persona = persona.id;
                                     }
                                 }
                                 let _ = this.boss_tx.send((key, state));
@@ -1441,8 +1629,16 @@ impl Waku {
                                 editor.original = values;
                                 editor.original_permissions = permissions;
                             }
+                            let saved_persona = this
+                                .boss_ui
+                                .editor
+                                .as_ref()
+                                .map(|editor| editor.persona);
                             if !this.boss_editor_dirty(cx) {
                                 this.boss_ui.editor = None;
+                            }
+                            if let Some(persona) = saved_persona.filter(|id| !id.is_nil()) {
+                                this.boss_ui.personas_selected.insert(key, persona);
                             }
                             this.show_toast(tr!("boss.saved"));
                             this.boss_request(key, BossOperation::View, BossReply::List, cx);
@@ -2310,12 +2506,13 @@ impl Waku {
                 != serde_json::to_value(&editor.original_permissions).ok()
     }
 
-    fn edit_boss_document(
+    /// The persona form the detail pane's Edit action opens. `persona` is
+    /// `None` for a new role; every field the existing editor carried is
+    /// editable — name, instructions, pinned documents, bucket and
+    /// integration grants, delegation, computer use, and the icon.
+    fn edit_boss_persona(
         &mut self,
         key: DaemonKey,
-        kind: BossEditorKind,
-        name: String,
-        content: String,
         persona: Option<BossPersona>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2352,20 +2549,28 @@ impl Waku {
             .unwrap_or_default();
         let icon = persona.as_ref().and_then(|entry| entry.icon);
         let buckets = permissions.bucket_ids.join("\n");
+        let name_value = persona
+            .as_ref()
+            .map(|entry| entry.name.clone())
+            .unwrap_or_default();
+        let content = persona
+            .as_ref()
+            .map(|entry| entry.markdown.clone())
+            .unwrap_or_default();
         let original = vec![
-            name.clone(),
+            name_value.clone(),
             content.clone(),
             pinned.clone(),
             buckets.clone(),
         ];
-        let name = input(tr!("boss.name_path"), name, false, cx);
+        let name = input(tr!("boss.name_path"), name_value, false, cx);
         let content = input(tr!("boss.markdown"), content, true, cx);
         let pinned = input(tr!("boss.pinned_files"), pinned, true, cx);
-        let buckets = input("Granted memory bucket IDs".to_owned(), buckets, true, cx);
+        let buckets = input(tr!("boss.persona_buckets"), buckets, true, cx);
         let focus = name.read(cx).focus();
         self.boss_ui.editor = Some(BossEditor {
             key,
-            kind,
+            persona: persona.as_ref().map(|entry| entry.id).unwrap_or_default(),
             name,
             content,
             pinned,
@@ -2374,21 +2579,18 @@ impl Waku {
             original_permissions: permissions.clone(),
             icon,
             original_icon: icon,
-            integrations: if matches!(kind, BossEditorKind::Persona(_)) {
-                self.daemons
-                    .supervisor(key)
-                    .map(|supervisor| {
-                        supervisor
-                            .settings()
-                            .integrations
-                            .iter()
-                            .map(|setting| setting.id.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            },
+            integrations: self
+                .daemons
+                .supervisor(key)
+                .map(|supervisor| {
+                    supervisor
+                        .settings()
+                        .integrations
+                        .iter()
+                        .map(|setting| setting.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
             permissions,
         });
         window.focus(&focus, cx);
@@ -2402,26 +2604,25 @@ impl Waku {
         let key = editor.key;
         let name = editor.name.read(cx).content().trim().to_owned();
         let content = editor.content.read(cx).content().to_owned();
-        let operation = match editor.kind {
-            BossEditorKind::Persona(id) => {
-                let mut permissions = editor.permissions.clone();
-                permissions.bucket_ids = lines(editor.buckets.read(cx).content());
-                BossOperation::UpsertPersona {
-                    persona: BossPersonaUpsert {
-                        id,
-                        name,
-                        markdown: content,
-                        pinned_files: lines(editor.pinned.read(cx).content()),
-                        permissions,
-                        // The editor tracks the icon itself — always
-                        // replace rather than preserve.
-                        icon: Some(editor.icon),
-                    },
-                }
-            }
-            BossEditorKind::Name => BossOperation::Rename { name },
-        };
-        self.boss_request(key, operation, BossReply::Saved, cx);
+        let mut permissions = editor.permissions.clone();
+        permissions.bucket_ids = lines(editor.buckets.read(cx).content());
+        self.boss_request(
+            key,
+            BossOperation::UpsertPersona {
+                persona: BossPersonaUpsert {
+                    id: editor.persona,
+                    name,
+                    markdown: content,
+                    pinned_files: lines(editor.pinned.read(cx).content()),
+                    permissions,
+                    // The editor tracks the icon itself — always
+                    // replace rather than preserve.
+                    icon: Some(editor.icon),
+                },
+            },
+            BossReply::Saved,
+            cx,
+        );
     }
 
     /// The raster cached for `(seed, size bucket)`, queueing a render when
@@ -3557,7 +3758,11 @@ impl Waku {
         );
     }
 
-    pub(super) fn render_boss_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_boss_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some((key, tab)) = self.boss_ui.page else {
             return div().into_any_element();
         };
@@ -3567,172 +3772,348 @@ impl Waku {
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
         let theme = Theme::current(cx);
-        let name = self
-            .boss_ui
-            .states
-            .get(&key)
+        let rows = self.boss_page_rows(key, tab);
+        self.sync_boss_rows(rows);
+        let content = match tab {
+            BossTab::Memory => self.render_boss_memory_section(key, window, cx),
+            BossTab::Personas => self.render_boss_personas_section(key, window, cx),
+            BossTab::Employees => self.render_boss_employees_section(key, cx),
+            BossTab::Plans => self.render_boss_plans_section(key, cx),
+            BossTab::Deliverables => self.render_boss_deliverables_section(key, cx),
+        };
+        div()
+            .track_focus(&focus)
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(self.render_boss_page_header(key, cx))
+            .child(self.render_boss_section_strip(key, tab, &theme, cx))
+            .when(
+                boss_loading_label_visible(self.boss_ui.pending),
+                |element| {
+                    element.child(
+                        div()
+                            .px(px(20.0))
+                            .py(px(4.0))
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.loading")),
+                    )
+                },
+            )
+            .child(content)
+            .into_any_element()
+    }
+
+    /// The shared Brain header: the boss's face, name, and host on the
+    /// left — the name swaps to the shared rename field while a rename is
+    /// open — and the labeled Identity menu plus the Chat action on the
+    /// right.
+    fn render_boss_page_header(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let state = self.boss_ui.states.get(&key);
+        let name = state
             .map(|state| state.identity.name.clone())
             .unwrap_or_else(|| tr!("boss.group"));
         let host = match key {
             DaemonKey::Local => tr!("boss.local_host"),
-            DaemonKey::Remote(host) => self.remote_host_name(host).unwrap_or_else(|| tr!("boss.remote_host")),
+            DaemonKey::Remote(host) => self
+                .remote_host_name(host)
+                .unwrap_or_else(|| tr!("boss.remote_host")),
         };
-        let header = div()
+        let session_id = state.and_then(|state| state.session_id);
+        let renaming = session_id.is_some_and(|id| self.session_rename == Some(id));
+        let name_block: AnyElement = if renaming {
+            div()
+                .id("boss-header-rename")
+                .key_context(sidebar::SESSION_RENAME_PARENT_CONTEXT)
+                .on_action(
+                    cx.listener(|this, _: &sidebar::CancelSessionRename, window, cx| {
+                        this.cancel_session_rename(window, cx);
+                    }),
+                )
+                .h(px(22.0))
+                .w(px(220.0))
+                .px(px(4.0))
+                .rounded(px(4.0))
+                .border(hairline())
+                .border_color(theme.accent)
+                .bg(theme.inset)
+                .flex()
+                .items_center()
+                .text_size(sp(13.0))
+                .text_color(theme.text)
+                .child(self.session_rename_input.clone())
+                .into_any_element()
+        } else {
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(16.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(name)
+                .into_any_element()
+        };
+        let identity_handle = self.menu_handle("boss-identity", cx);
+        let weak = cx.entity().downgrade();
+        let identity_menu = dropdown_menu(
+            MenuChip::new("boss-identity-trigger")
+                .icon("icons/user-round.svg", theme.text_tertiary)
+                .label(tr!("boss.identity"))
+                .outlined()
+                .background(theme.raised)
+                .selected(identity_handle.is_open()),
+            "boss-identity-menu",
+            &identity_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let rename = weak.clone();
+                let face = weak.clone();
+                vec![
+                    MenuItem::new(tr!("common.rename"), move |window, cx| {
+                        let _ = rename.update(cx, |this, cx| {
+                            if let Some(session_id) = session_id {
+                                this.begin_session_rename(session_id, window, cx);
+                            }
+                        });
+                    })
+                    .icon("icons/pencil.svg")
+                    .disabled(session_id.is_none()),
+                    MenuItem::new(tr!("boss.new_face"), move |_, cx| {
+                        let _ = face.update(cx, |this, cx| {
+                            if let Some(session_id) = session_id {
+                                this.regenerate_managed_avatar(session_id, cx);
+                            }
+                        });
+                    })
+                    .icon("icons/rotate-cw.svg")
+                    .disabled(session_id.is_none()),
+                ]
+            },
+        );
+        div()
             .flex()
             .items_center()
-            .gap(px(8.0))
-            .p(px(16.0))
+            .gap(px(10.0))
+            .px(px(16.0))
+            .py(px(12.0))
             .border_b_1()
             .border_color(theme.border)
-            .child(div().flex_1().flex().flex_col()
-                .child(div().text_size(sp(16.0)).child(name.clone()))
-                .child(div().text_size(sp(11.0)).text_color(theme.text_tertiary).child(host)))
-            .child(boss_button("boss-identity", tr!("boss.identity"), &theme)
-                .child(tr!("boss.identity"))
-                .on_activation(cx, move |this, window, cx| this.edit_boss_document(
-                    key, BossEditorKind::Name, name.clone(), String::new(), None, window, cx)))
+            .when_some(state.map(|state| state.identity.clone()), |row, identity| {
+                row.child(self.boss_avatar(&identity, 24.0, cx))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(name_block)
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(host),
+                    ),
+            )
+            .child(identity_menu)
             .child(
                 boss_button("boss-chat", tr!("boss.chat"), &theme)
                     .child(icon("icons/message-square.svg", 14.0, theme.text_secondary))
                     .child(tr!("boss.chat"))
                     .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
             )
-            ;
-        let section_strip = div().flex().items_center().gap(px(2.0)).px(px(16.0)).py(px(6.0))
-            .border_b_1().border_color(theme.separator)
-            .children([
-                (BossTab::Memory, "boss.memory", "icons/brain.svg"),
-                (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
-                (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
-                (BossTab::Plans, "boss.plans", "icons/map.svg"),
-                (BossTab::Deliverables, "boss.deliverables", "icons/file-text.svg"),
-            ].into_iter().map(|(target, label, glyph)| {
-                boss_button(label, tr!(label), &theme)
-                    .when(tab == target, |button| button.bg(theme.overlay))
-                    .child(icon(glyph, 14.0, theme.text_secondary))
-                    .child(tr!(label))
-                    .on_activation(cx, move |this, window, cx| this.open_boss_page(key, target, window, cx))
-            }));
+            .into_any_element()
+    }
+
+    /// The fixed section navigation under the header — a strip of quiet
+    /// text items, not a row of bordered action buttons.
+    fn render_boss_section_strip(
+        &self,
+        key: DaemonKey,
+        tab: BossTab,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .px(px(16.0))
+            .py(px(6.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .children(
+                [
+                    (BossTab::Memory, "boss.memory", "icons/brain.svg"),
+                    (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
+                    (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
+                    (BossTab::Plans, "boss.plans", "icons/map.svg"),
+                    (
+                        BossTab::Deliverables,
+                        "boss.deliverables",
+                        "icons/file-text.svg",
+                    ),
+                ]
+                .into_iter()
+                .map(|(target, label, glyph)| {
+                    let selected = tab == target;
+                    div()
+                        .id(SharedString::from(format!("boss-section-{label}")))
+                        .tab_index(0)
+                        .h(px(26.0))
+                        .px(px(10.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_size(sp(12.5))
+                        .cursor_pointer()
+                        .when(selected, |element| {
+                            element.bg(theme.overlay).text_color(theme.text)
+                        })
+                        .when(!selected, |element| {
+                            element
+                                .text_color(theme.text_secondary)
+                                .hover(|style| style.bg(theme.overlay).text_color(theme.text))
+                        })
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .child(icon(
+                            glyph,
+                            13.0,
+                            if selected {
+                                theme.text_secondary
+                            } else {
+                                theme.text_tertiary
+                            },
+                        ))
+                        .child(tr!(label))
+                        .on_activation(cx, move |this, window, cx| {
+                            this.open_boss_page(key, target, window, cx)
+                        })
+                }),
+            )
+    }
+
+    /// A section's in-list view switch — the segmented control the
+    /// Projects/Git pages use: one inset track, one raised segment for the
+    /// current pick.
+    fn boss_segmented<T: Copy + Eq + 'static>(
+        &self,
+        id: &str,
+        options: Vec<(T, String)>,
+        current: T,
+        cx: &mut Context<Self>,
+        on_pick: impl Fn(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let on_pick = Rc::new(on_pick);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .rounded(px(6.0))
+            .p(px(2.0))
+            .bg(theme.inset)
+            .children(options.into_iter().enumerate().map(
+                move |(index, (value, label))| {
+                    let selected = value == current;
+                    let on_pick = on_pick.clone();
+                    div()
+                        .id(SharedString::from(format!("{id}-{index}")))
+                        .h(px(20.0))
+                        .px(px(10.0))
+                        .rounded(px(5.0))
+                        .flex()
+                        .items_center()
+                        .text_size(sp(12.5))
+                        .tab_index(0)
+                        .cursor_default()
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .when(selected, |element| {
+                            element.bg(theme.surface).text_color(theme.text)
+                        })
+                        .when(!selected, |element| {
+                            element
+                                .text_color(theme.text_secondary)
+                                .hover(|style| style.text_color(theme.text))
+                        })
+                        .child(SharedString::from(label))
+                        .on_activation(cx, move |this, window, cx| {
+                            on_pick(this, value, window, cx)
+                        })
+                },
+            ))
+    }
+
+    /// The section list — virtualized rows plus the shared scrollbar, sized
+    /// for whichever column width the caller wraps it in.
+    fn boss_item_list(&self, cx: &mut Context<Self>) -> Div {
+        let visible_rows = self.boss_ui.rows.clone();
+        let weak = cx.entity().downgrade();
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(
+                list(self.boss_ui.list.clone(), move |visible_index, _, cx| {
+                    let Some(item) = visible_rows.get(visible_index).cloned() else {
+                        return div().into_any_element();
+                    };
+                    weak.upgrade()
+                        .map(|entity| {
+                            entity.update(cx, |this, cx| this.render_boss_item(item, cx))
+                        })
+                        .unwrap_or_else(|| div().into_any_element())
+                })
+                .size_full(),
+            )
+            .child(scrollbar::vertical(
+                &self.boss_ui.list,
+                &self.boss_ui.scrollbar,
+            ))
+    }
+
+
+    // ── Memory ───────────────────────────────────────────────────────────
+
+    /// The Memory section: Documents/Records over the same list/detail
+    /// split as the other sections. Documents render the resizable `memory/`
+    /// tree with filename search; Records list the named bucket engine's
+    /// collections. Both keep their pane-local loading and error states.
+    fn render_boss_memory_section(
+        &mut self,
+        key: DaemonKey,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
         let memory_view = self
             .boss_ui
             .memory_view
             .get(&key)
             .copied()
             .unwrap_or(BossMemoryView::Documents);
-        let mut toolbar = div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(20.0))
-            .py(px(10.0));
-        match tab {
-            BossTab::Memory => {
-                let mut segment_chip = |view: BossMemoryView, label: String, id: &'static str| {
-                    let active = memory_view == view;
-                    div()
-                        .id(id)
-                        .h(px(24.0))
-                        .px(px(9.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.0))
-                        .text_color(if active {
-                            theme.text
-                        } else {
-                            theme.text_tertiary
-                        })
-                        .when(active, |element| element.bg(theme.overlay))
-                        .cursor_pointer()
-                        .tab_index(0)
-                        .focus_visible(|element| element.bg(theme.focus_highlight()))
-                        .hover(|element| element.bg(theme.overlay))
-                        .child(label)
-                        .on_activation(cx, move |this, _, cx| {
-                            this.boss_ui.memory_view.insert(key, view);
-                            this.sync_boss_page_rows();
-                            if view == BossMemoryView::Records {
-                                this.ensure_boss_memory_buckets(key, cx);
-                            }
-                            cx.notify();
-                        })
-                };
-                toolbar = toolbar
-                    .child(
-                        div()
-                            .h(px(26.0))
-                            .px(px(3.0))
-                            .rounded(px(7.0))
-                            .bg(theme.sidebar_item_background)
-                            .flex()
-                            .items_center()
-                            .gap(px(2.0))
-                            .child(segment_chip(
-                                BossMemoryView::Documents,
-                                tr!("boss.memory_documents"),
-                                "boss-memory-documents",
-                            ))
-                            .child(segment_chip(
-                                BossMemoryView::Records,
-                                tr!("boss.memory_records"),
-                                "boss-memory-records",
-                            )),
-                    )
-                    .when(memory_view == BossMemoryView::Documents, |bar| {
-                        bar.child(
-                            TextField::new("boss-memory-search", self.boss_memory_search.clone())
-                                .icon("icons/search.svg", 13.0)
-                                .w(px(190.0)),
-                        )
-                    })
-                    .child(div().flex_1());
-            }
-            BossTab::Employees => {
-                toolbar = toolbar
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_color(theme.text_secondary)
-                            .child(tr!("boss.history_hint")),
-                    );
-            }
-            BossTab::Plans => {
-                toolbar = toolbar.child(
-                    div()
-                        .flex_1()
-                        .text_color(theme.text_secondary)
-                        .child(tr!("boss.plans_hint")),
-                );
-            }
-            BossTab::Personas => {
-                toolbar = toolbar
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_color(theme.text_secondary)
-                            .child(tr!("boss.persona_hint")),
-                    )
-                    .child(
-                        boss_button("boss-new-persona", tr!("boss.new_persona"), &theme)
-                            .child(tr!("boss.new_persona"))
-                            .on_activation(cx, move |this, window, cx| {
-                                this.edit_boss_document(
-                                    key,
-                                    BossEditorKind::Persona(Uuid::nil()),
-                                    String::new(),
-                                    String::new(),
-                                    None,
-                                    window,
-                                    cx,
-                                )
-                            }),
-                    );
-            }
-            BossTab::Deliverables => {
-                toolbar = toolbar.child(div().flex_1().text_color(theme.text_secondary).child(tr!("boss.phase_later")));
-            }
-        }
-        let memory_documents = tab == BossTab::Memory && memory_view == BossMemoryView::Documents;
+        let view_switch = self.boss_segmented(
+            "boss-memory-view",
+            vec![
+                (BossMemoryView::Documents, tr!("boss.memory_documents")),
+                (BossMemoryView::Records, tr!("boss.memory_records")),
+            ],
+            memory_view,
+            cx,
+            move |this, view, _, cx| {
+                this.boss_ui.memory_view.insert(key, view);
+                this.sync_boss_page_rows();
+                if view == BossMemoryView::Records {
+                    this.ensure_boss_memory_buckets(key, cx);
+                }
+                cx.notify();
+            },
+        );
+        let memory_documents = memory_view == BossMemoryView::Documents;
         let query = if memory_documents {
             self.boss_memory_search
                 .read(cx)
@@ -3768,7 +4149,9 @@ impl Waku {
             .relative()
             .child(
                 list(self.boss_ui.list.clone(), move |visible_index, _, cx| {
-                    let Some(item) = visible_rows.get(visible_index).cloned() else { return div().into_any_element(); };
+                    let Some(item) = visible_rows.get(visible_index).cloned() else {
+                        return div().into_any_element();
+                    };
                     weak.upgrade()
                         .map(|entity| {
                             entity.update(cx, |this, cx| this.render_boss_item(item, cx))
@@ -3781,177 +4164,1870 @@ impl Waku {
                 &self.boss_ui.list,
                 &self.boss_ui.scrollbar,
             ));
-        let editor = self.render_boss_editor(cx);
-        div()
-            .track_focus(&focus)
-            .flex_1()
-            .min_h_0()
+        let pane_center = |theme: &Theme| {
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .text_color(theme.text_secondary)
+        };
+        let list_pane: AnyElement = if memory_documents {
+            if let Some((_, _, error)) = self.boss_ui.memory_error.as_ref().filter(
+                |(error_key, path, _)| *error_key == key && path == "memory",
+            ) {
+                pane_center(&theme)
+                    .gap(px(8.0))
+                    .child(div().text_color(theme.text_secondary).child(error.clone()))
+                    .child(
+                        boss_button("boss-memory-tree-retry", tr!("boss.retry"), &theme)
+                            .child(tr!("boss.retry"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.boss_request(
+                                    key,
+                                    BossOperation::ListFiles {
+                                        path: "memory".into(),
+                                    },
+                                    BossReply::List,
+                                    cx,
+                                );
+                            }),
+                    )
+                    .into_any_element()
+            } else if self.boss_ui.pending
+                && self.boss_ui.pending_reply == Some(BossReply::Search)
+            {
+                pane_center(&theme)
+                    .child(tr!("boss.loading"))
+                    .into_any_element()
+            } else if self.boss_ui.files.is_empty()
+                && self.boss_ui.pending
+                && self.boss_ui.pending_reply == Some(BossReply::List)
+            {
+                pane_center(&theme)
+                    .child(tr!("boss.loading"))
+                    .into_any_element()
+            } else if !has_search_matches {
+                pane_center(&theme)
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.search_no_matches"))
+                    .into_any_element()
+            } else {
+                list.into_any_element()
+            }
+        } else if let Some(error) = self.boss_ui.memory_buckets_error.get(&key) {
+            pane_center(&theme)
+                .gap(px(8.0))
+                .child(div().text_color(theme.text_secondary).child(error.clone()))
+                .child(
+                    boss_button("boss-memory-buckets-retry", tr!("boss.retry"), &theme)
+                        .child(tr!("boss.retry"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_ui.memory_buckets.remove(&key);
+                            this.ensure_boss_memory_buckets(key, cx);
+                        }),
+                )
+                .into_any_element()
+        } else if self.boss_ui.memory_buckets_loading.contains(&key) {
+            pane_center(&theme)
+                .child(tr!("boss.loading"))
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
+        let list_column = div()
+            .w(px(self.boss_ui.memory_tree_width))
             .flex()
             .flex_col()
-            .child(header)
-            .child(section_strip)
-            .child(toolbar.border_b_1().border_color(theme.separator))
-            .when(
-                tab != BossTab::Memory && boss_loading_label_visible(self.boss_ui.pending),
-                |element| element.child(div().px(px(20.0)).child(tr!("boss.loading"))),
+            .min_h_0()
+            .relative()
+            .border_r_1()
+            .border_color(theme.separator)
+            .child(list_pane)
+            .child(self.render_panel_resize_handle(
+                "boss-memory-tree-resize",
+                PanelResizeTarget::BossMemoryTree,
+                cx,
+            ));
+        let detail = match memory_view {
+            BossMemoryView::Documents => self.render_boss_memory_detail(key, cx),
+            BossMemoryView::Records => self.render_boss_records_detail(key, cx),
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .child(view_switch)
+                    .when(memory_documents, |bar| {
+                        bar.child(
+                            TextField::new("boss-memory-search", self.boss_memory_search.clone())
+                                .icon("icons/search.svg", 13.0)
+                                .w(px(190.0)),
+                        )
+                    })
+                    .child(div().flex_1()),
             )
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .child(
-                        div()
-                            .w(px(if tab == BossTab::Memory {
-                                self.boss_ui.memory_tree_width
-                            } else {
-                                300.0
-                            }))
-                            .flex()
-                            .flex_col()
-                            .min_h_0()
-                            .relative()
-                            .border_r_1()
-                            .border_color(theme.separator)
-                            .child(if memory_documents {
-                                if let Some((_, _, error)) =
-                                    self.boss_ui.memory_error.as_ref().filter(
-                                        |(error_key, path, _)| {
-                                            *error_key == key && path == "memory"
-                                        },
-                                    )
-                                {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .flex_col()
-                                        .items_center()
-                                        .justify_center()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_color(theme.text_secondary)
-                                                .child(error.clone()),
-                                        )
-                                        .child(
-                                            boss_button(
-                                                "boss-memory-tree-retry",
-                                                tr!("boss.retry"),
-                                                &theme,
-                                            )
-                                            .child(tr!("boss.retry"))
-                                            .on_activation(cx, move |this, _, cx| {
-                                                this.boss_request(
-                                                    key,
-                                                    BossOperation::ListFiles {
-                                                        path: "memory".into(),
-                                                    },
-                                                    BossReply::List,
-                                                    cx,
-                                                );
-                                            }),
-                                        )
-                                } else if self.boss_ui.pending
-                                    && self.boss_ui.pending_reply == Some(BossReply::Search)
-                                {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("boss.loading"))
-                                } else if self.boss_ui.files.is_empty()
-                                    && self.boss_ui.pending
-                                    && self.boss_ui.pending_reply == Some(BossReply::List)
-                                {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("boss.loading"))
-                                } else if !has_search_matches {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_color(theme.text_tertiary)
-                                        .child(tr!("boss.search_no_matches"))
-                                } else {
-                                    list
-                                }
-                            } else if tab == BossTab::Memory {
-                                if let Some(error) = self.boss_ui.memory_buckets_error.get(&key) {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .flex_col()
-                                        .items_center()
-                                        .justify_center()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_color(theme.text_secondary)
-                                                .child(error.clone()),
-                                        )
-                                        .child(
-                                            boss_button(
-                                                "boss-memory-buckets-retry",
-                                                tr!("boss.retry"),
-                                                &theme,
-                                            )
-                                            .child(tr!("boss.retry"))
-                                            .on_activation(cx, move |this, _, cx| {
-                                                this.boss_ui.memory_buckets.remove(&key);
-                                                this.ensure_boss_memory_buckets(key, cx);
-                                            }),
-                                        )
-                                } else if self.boss_ui.memory_buckets_loading.contains(&key) {
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("boss.loading"))
-                                } else {
-                                    list
-                                }
-                            } else {
-                                list
-                            })
-                            .when(tab == BossTab::Memory, |pane| {
-                                pane.child(self.render_panel_resize_handle(
-                                    "boss-memory-tree-resize",
-                                    PanelResizeTarget::BossMemoryTree,
-                                    cx,
-                                ))
-                            }),
-                    )
-                    .child(if tab == BossTab::Plans {
-                        self.render_boss_plan_detail(key, cx)
-                    } else if tab == BossTab::Memory {
-                        match memory_view {
-                            BossMemoryView::Documents => self.render_boss_memory_detail(key, cx),
-                            BossMemoryView::Records => self.render_boss_records_detail(key, cx),
-                        }
-                    } else if tab == BossTab::Deliverables {
-                        div().flex_1().flex().items_center().justify_center().text_color(theme.text_secondary).child(tr!("boss.phase_later")).into_any_element()
-                    } else {
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .id("boss-editor-scroll")
-                            .overflow_y_scroll()
-                            .p(px(20.0))
-                            .child(editor)
-                            .into_any_element()
-                    }),
+                    .child(list_column)
+                    .child(detail),
             )
             .into_any_element()
+    }
+
+    // ── Employees ────────────────────────────────────────────────────────
+
+    /// Active and History over the whole roster — running and queued work
+    /// together on one side, finished and retired records on the other. A
+    /// Capacity menu sits beside the switch for the queue's model limits.
+    fn render_boss_employees_section(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let view = self
+            .boss_ui
+            .employees_view
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let filter = self.boss_segmented(
+            "boss-employees-view",
+            vec![
+                (
+                    BossEmployeesView::Active,
+                    tr!("boss.employees_active"),
+                ),
+                (
+                    BossEmployeesView::History,
+                    tr!("boss.employees_history"),
+                ),
+            ],
+            view,
+            cx,
+            move |this, picked, _, cx| {
+                this.boss_ui.employees_view.insert(key, picked);
+                this.sync_boss_page_rows();
+                cx.notify();
+            },
+        );
+        let body: AnyElement = if self.boss_ui.rows.is_empty() {
+            let (title, hint) = match view {
+                BossEmployeesView::Active => (
+                    tr!("boss.employees_empty_active"),
+                    tr!("boss.employees_empty_active_hint"),
+                ),
+                BossEmployeesView::History => (
+                    tr!("boss.employees_empty_history"),
+                    tr!("boss.employees_empty_history_hint"),
+                ),
+            };
+            boss_empty_state(&theme, "icons/folder-clock.svg", title, hint).into_any_element()
+        } else {
+            self.boss_item_list(cx).into_any_element()
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .child(filter)
+                    .child(div().flex_1())
+                    .child(self.render_boss_capacity_menu(key, cx)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH + 48.0))
+                    .mx_auto()
+                    .px(px(16.0))
+                    .py(px(6.0))
+                    .flex()
+                    .flex_col()
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// The read-only Capacity menu — model limits and host resources with
+    /// live usage and queued waiters, no editing.
+    fn render_boss_capacity_menu(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let handle = self.menu_handle("boss-capacity", cx);
+        let mut lines = Vec::new();
+        let mut host_line = None;
+        if let Some(state) = self.boss_ui.states.get(&key) {
+            use waku_protocol::boss::EmployeeLifecycle;
+            for limit in &state.resource_policy.model_limits {
+                let name =
+                    self.model_display_name_on(key, limit.provider, Some(limit.model.as_str()));
+                let mut live = 0usize;
+                let mut queued = 0usize;
+                for employee in &state.employees {
+                    let Some(ticket) = &employee.ticket else {
+                        continue;
+                    };
+                    if ticket.provider != limit.provider || ticket.model != limit.model {
+                        continue;
+                    }
+                    match employee.lifecycle() {
+                        EmployeeLifecycle::Queued => queued += 1,
+                        EmployeeLifecycle::Dispatching
+                        | EmployeeLifecycle::Working
+                        | EmployeeLifecycle::Finishing => live += 1,
+                        EmployeeLifecycle::Expired => {}
+                    }
+                }
+                lines.push(if limit.live_limit == 0 && limit.hard_cap == 0 {
+                    tr!("boss.capacity_paused", model = name)
+                } else if queued > 0 {
+                    tr!(
+                        "boss.capacity_line_queued",
+                        model = name,
+                        used = live,
+                        limit = limit.live_limit,
+                        queued = queued
+                    )
+                } else {
+                    tr!(
+                        "boss.capacity_line",
+                        model = name,
+                        used = live,
+                        limit = limit.live_limit
+                    )
+                });
+            }
+            if let Some(host) = &state.resource_policy.host {
+                host_line = Some(tr!(
+                    "boss.capacity_host_line",
+                    devices = host.resident_devices,
+                    builds = host.native_builds,
+                    desktop = host.desktop_input
+                ));
+            }
+        }
+        dropdown_menu(
+            MenuChip::new("boss-capacity-trigger")
+                .icon("icons/gauge.svg", theme.text_tertiary)
+                .label(tr!("boss.capacity"))
+                .outlined()
+                .background(theme.raised)
+                .height(px(24.0))
+                .selected(handle.is_open()),
+            "boss-capacity-menu",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                let mut items = vec![MenuItem::Header(tr!("boss.capacity_models").into())];
+                if lines.is_empty() {
+                    items.push(MenuItem::new(tr!("boss.capacity_none"), |_, _| {}).disabled(true));
+                }
+                for line in &lines {
+                    items.push(MenuItem::new(line.clone(), |_, _| {}).disabled(true));
+                }
+                if let Some(host_line) = host_line.as_ref() {
+                    items.push(MenuItem::Separator);
+                    items.push(MenuItem::Header(tr!("boss.capacity_host").into()));
+                    items.push(MenuItem::new(host_line.clone(), |_, _| {}).disabled(true));
+                }
+                items
+            },
+        )
+    }
+
+    /// A full-width Employees row: avatar and name over job · project, with
+    /// model · effort, a readable status, and the summon or finish age on
+    /// the right — no Option reveal needed for the model. Queued rows
+    /// carry their wait reason inline after the status word.
+    fn render_boss_employee_page_row(
+        &self,
+        id: Uuid,
+        key: DaemonKey,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(identity) = self.boss_ui.identities.get(&id).cloned() else {
+            return div().into_any_element();
+        };
+        let state = self.boss_ui.states.get(&key);
+        let employee = state.and_then(|state| {
+            state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|employee| employee.session_id == id)
+        });
+        let session = self.state.sessions.iter().find(|session| session.id == id);
+        let job = self.boss_ui.job_titles.get(&id).cloned().unwrap_or_default();
+        let project = session
+            .and_then(|session| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+            })
+            .map(|project| project.display_name())
+            .or_else(|| {
+                employee
+                    .and_then(|employee| employee.ticket.as_ref())
+                    .map(|ticket| ticket.project.trim().to_owned())
+                    .filter(|project| !project.is_empty())
+            });
+        let mut detail = job.clone();
+        if let Some(project) = project.filter(|project| !project.is_empty()) {
+            detail = if detail.is_empty() {
+                project
+            } else {
+                format!("{detail} · {project}")
+            };
+        }
+        let blocker = employee.and_then(|employee| employee.blocker.clone());
+        let model_detail = if let Some((model_key, provider, model, effort)) =
+            self.boss_ui.queued_model_targets.get(&id)
+        {
+            let name = self.model_display_name_on(*model_key, *provider, Some(model));
+            Some(match effort.as_deref() {
+                Some(effort) => format!(
+                    "{name} · {}",
+                    self.reasoning_effort_label_on(*model_key, *provider, Some(model), effort)
+                ),
+                None => name,
+            })
+        } else {
+            session.map(|session| self.session_sidebar_model_detail(session))
+        };
+        let status = employee.map(|employee| {
+            self.boss_employee_status_label(employee, session, &theme)
+        });
+        let stamp = employee.and_then(|employee| {
+            if employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued {
+                employee.queued_at.or(employee.created_at)
+            } else if self.boss_ui.expired.contains(&id) {
+                employee.expired_at.or(employee.created_at)
+            } else {
+                employee.created_at
+            }
+        });
+        let job_icon = self
+            .boss_ui
+            .employee_icons
+            .get(&id)
+            .copied()
+            .flatten()
+            .map(crate::custom_commands::icon_path);
+        div()
+            .id(SharedString::from(format!("boss-employee-row-{id}")))
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.request_session_activation(id, SessionActivationTransition::Visit, cx)
+            })
+            .child(self.boss_avatar(&identity, 24.0, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_size(sp(14.0))
+                            .line_height(sp(17.0))
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(identity.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .min_w_0()
+                            .text_size(sp(13.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .when(
+                                !detail.is_empty(),
+                                |row| {
+                                    row.child(icon(
+                                        job_icon.unwrap_or_else(|| job_title_icon(&detail)),
+                                        12.0,
+                                        theme.text_tertiary,
+                                    ))
+                                },
+                            )
+                            .child(div().min_w_0().truncate().child(detail))
+                            .when_some(blocker, |row, blocker| {
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(theme.warning)
+                                        .truncate()
+                                        .child(format!("— {blocker}")),
+                                )
+                            }),
+                    ),
+            )
+            .when_some(model_detail, |row, model| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(model),
+                )
+            })
+            .when_some(status, |row, (label, color)| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .max_w(px(280.0))
+                        .truncate()
+                        .text_size(sp(12.0))
+                        .text_color(color)
+                        .child(label),
+                )
+            })
+            .when_some(stamp, |row, stamp| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .w(px(72.0))
+                        .text_right()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_ghost)
+                        .child(sidebar::format_time_ago(
+                            unix_time().saturating_sub(stamp),
+                        )),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The Employees row's readable status — lifecycle first, then the
+    /// live session's verdict. Finished, failed, cancelled, and expired
+    /// stay distinct: expiry describes the roster record, not the outcome.
+    fn boss_employee_status_label(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        session: Option<&AgentSession>,
+        theme: &Theme,
+    ) -> (String, Hsla) {
+        use waku_protocol::boss::EmployeeLifecycle;
+        match employee.lifecycle() {
+            EmployeeLifecycle::Queued => {
+                let detail = self
+                    .boss_ui
+                    .queued
+                    .get(&employee.session_id)
+                    .cloned()
+                    .unwrap_or_else(|| tr!("boss.goals_queue_admission"));
+                (
+                    format!("{} · {detail}", tr!("boss.goals_status_queued")),
+                    theme.text_secondary,
+                )
+            }
+            EmployeeLifecycle::Dispatching => {
+                (tr!("boss.goals_status_starting"), theme.text_secondary)
+            }
+            EmployeeLifecycle::Finishing => {
+                (tr!("boss.goals_status_finishing"), theme.text_secondary)
+            }
+            EmployeeLifecycle::Working => {
+                if employee.blocker.is_some() {
+                    (tr!("boss.goals_status_blocked"), theme.warning)
+                } else {
+                    match session.map(|session| session.status) {
+                        Some(SessionStatus::Working | SessionStatus::Connecting) => (
+                            tr!("sidebar.status_working"),
+                            status_color(theme, SessionStatus::Working),
+                        ),
+                        Some(SessionStatus::Waiting) => (
+                            tr!("sidebar.status_waiting"),
+                            status_color(theme, SessionStatus::Waiting),
+                        ),
+                        Some(SessionStatus::Background) => (
+                            tr!("sidebar.status_background"),
+                            status_color(theme, SessionStatus::Background),
+                        ),
+                        Some(SessionStatus::Failed) => {
+                            (tr!("sidebar.status_failed"), theme.danger)
+                        }
+                        Some(SessionStatus::Idle) => {
+                            (tr!("boss.status_idle"), theme.text_tertiary)
+                        }
+                        None => (tr!("boss.goals_status_starting"), theme.text_secondary),
+                    }
+                }
+            }
+            EmployeeLifecycle::Expired => {
+                if employee.cancelled {
+                    (tr!("boss.status_cancelled"), theme.text_tertiary)
+                } else if session.is_some_and(|session| session.status == SessionStatus::Failed) {
+                    (tr!("sidebar.status_failed"), theme.danger)
+                } else if employee.blocker.is_some() {
+                    (tr!("boss.goals_status_blocked"), theme.warning)
+                } else if session.is_none() {
+                    (tr!("boss.status_expired"), theme.text_tertiary)
+                } else {
+                    (tr!("boss.employee_finished"), theme.text_tertiary)
+                }
+            }
+        }
+    }
+
+    /// The collapsible assignment summary an employee's task page carries
+    /// above its transcript: collapsed to one line, expanding into the
+    /// brief, persona, model, workspace, access, and resource state the
+    /// summon recorded.
+    pub(super) fn render_employee_assignment_strip(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        if !self.session_is_employee(session) {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let employee = self
+            .boss_ui
+            .states
+            .values()
+            .find_map(|state| {
+                state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .find(|employee| employee.session_id == session_id)
+                    .map(|employee| (state, employee))
+            });
+        let Some((state, employee)) = employee else {
+            return None;
+        };
+        let expanded = self.boss_ui.assignment_expanded.contains(&session_id);
+        let (status, status_color) =
+            self.boss_employee_status_label(employee, Some(session), &theme);
+        let job = self
+            .boss_ui
+            .job_titles
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_else(|| employee.job_title.clone());
+        let model_detail = self
+            .boss_ui
+            .queued_model_targets
+            .get(&session_id)
+            .map(|(model_key, provider, model, effort)| {
+                let name = self.model_display_name_on(*model_key, *provider, Some(model));
+                match effort.as_deref() {
+                    Some(effort) => format!(
+                        "{name} · {}",
+                        self.reasoning_effort_label_on(
+                            *model_key,
+                            *provider,
+                            Some(model),
+                            effort,
+                        )
+                    ),
+                    None => name,
+                }
+            })
+            .or_else(|| Some(self.session_sidebar_model_detail(session)));
+        let header = div()
+            .id(SharedString::from(format!("assignment-strip-{session_id}")))
+            .tab_index(0)
+            .w_full()
+            .px(px(16.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                if !this.boss_ui.assignment_expanded.remove(&session_id) {
+                    this.boss_ui.assignment_expanded.insert(session_id);
+                }
+                cx.notify();
+            })
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(tr!("boss.assignment")),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(job),
+            )
+            .when_some(model_detail, |row, model| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .max_w(px(200.0))
+                        .truncate()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(model),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .text_color(status_color)
+                    .child(status),
+            );
+        let mut strip = div()
+            .flex_none()
+            .w_full()
+            .flex()
+            .flex_col()
+            .border_b_1()
+            .border_color(theme.separator)
+            .child(header);
+        if expanded {
+            strip = strip.child(self.render_assignment_detail(
+                session, state, employee, &theme,
+            ));
+        }
+        Some(strip.into_any_element())
+    }
+
+    /// The expanded half of the assignment strip — label/value rows under
+    /// the disclosure line.
+    fn render_assignment_detail(
+        &self,
+        session: &AgentSession,
+        state: &BossState,
+        employee: &waku_protocol::boss::BossEmployee,
+        theme: &Theme,
+    ) -> Div {
+        let persona_name = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == employee.persona_id)
+            .map(|persona| persona.name.clone());
+        let workspace = match &session.workspace {
+            SessionWorkspace::Local => tr!("boss.assignment_workspace_local"),
+            SessionWorkspace::NewWorktree { .. } => tr!("boss.assignment_workspace_new"),
+            SessionWorkspace::Worktree { name, path, .. } => {
+                if name.is_empty() {
+                    path.display().to_string()
+                } else {
+                    name.clone()
+                }
+            }
+        };
+        let permissions = &employee.permissions;
+        let mut access = Vec::new();
+        if !permissions.bucket_ids.is_empty() {
+            access.push(tr!(
+                "boss.assignment_buckets",
+                count = permissions.bucket_ids.len()
+            ));
+        }
+        if !permissions.integration_ids.is_empty() {
+            access.push(tr!(
+                "boss.assignment_integrations",
+                count = permissions.integration_ids.len()
+            ));
+        }
+        if permissions.summon_employees {
+            access.push(tr!("boss.delegate"));
+        }
+        if permissions.computer_use {
+            access.push(tr!("boss.computer"));
+        }
+        let resources = employee.ticket.as_ref().map(|ticket| {
+            let resources = &ticket.resources;
+            if resources.is_empty() {
+                tr!("boss.assignment_resources_none")
+            } else {
+                let mut parts = Vec::new();
+                if !resources.exclusive.is_empty() {
+                    parts.push(tr!(
+                        "boss.resource_exclusive",
+                        count = resources.exclusive.len()
+                    ));
+                }
+                if resources.resident_devices > 0 {
+                    parts.push(tr!(
+                        "boss.resource_devices",
+                        count = resources.resident_devices
+                    ));
+                }
+                if resources.native_builds > 0 {
+                    parts.push(tr!("boss.resource_builds", count = resources.native_builds));
+                }
+                if resources.desktop_input > 0 {
+                    parts.push(tr!("boss.resource_desktop"));
+                }
+                if ticket.reservation.is_some() {
+                    tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
+                } else {
+                    tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
+                }
+            }
+        });
+        let brief = employee
+            .ticket
+            .as_ref()
+            .map(|ticket| ticket.prompt.trim().to_owned())
+            .filter(|prompt| !prompt.is_empty());
+        let model = self.session_sidebar_model_detail(session);
+        let rows: Vec<(String, AnyElement)> = [
+            brief.map(|brief| (tr!("boss.assignment_brief"), brief)),
+            persona_name.map(|name| (tr!("boss.assignment_persona"), name)),
+            Some((tr!("boss.assignment_model"), model)),
+            Some((tr!("boss.assignment_workspace"), workspace)),
+            Some((
+                tr!("boss.assignment_access"),
+                if access.is_empty() {
+                    tr!("boss.assignment_access_none")
+                } else {
+                    access.join(" · ")
+                },
+            )),
+            resources.map(|line| (tr!("boss.assignment_resources"), line)),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|(label, value)| (label, boss_plain_value(theme, value)))
+        .collect();
+        let count = rows.len();
+        let mut info = div()
+            .px(px(16.0))
+            .pb(px(8.0))
+            .pt(px(2.0))
+            .flex()
+            .flex_col();
+        for (index, (label, value)) in rows.into_iter().enumerate() {
+            info = info.child(boss_info_row(theme, label, value, index + 1 == count));
+        }
+        info
+    }
+
+    // ── Personas ─────────────────────────────────────────────────────────
+
+    /// Personas read first: the boss's own persona sits above the reusable
+    /// roles in the list column, and the detail pane shows readable
+    /// instructions plus quiet grant metadata. Editing is a deliberate
+    /// mode behind the detail's Edit action and the list's New persona.
+    fn render_boss_personas_section(
+        &mut self,
+        key: DaemonKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        if self.boss_ui.persona_search.is_none() {
+            let input = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .tab_index(0)
+                    .accessibility_label(tr!("boss.persona_search"))
+            });
+            cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    this.boss_ui.persona_query = input.read(cx).content().to_owned();
+                    cx.notify();
+                }
+            })
+            .detach();
+            self.boss_ui.persona_search = Some(input);
+        }
+        let search = self.boss_ui.persona_search.clone();
+        let Some(state) = self.boss_ui.states.get(&key).cloned() else {
+            return boss_empty_state(
+                &theme,
+                "icons/user-round.svg",
+                tr!("boss.personas_empty"),
+                tr!("boss.personas_empty_hint"),
+            )
+            .into_any_element();
+        };
+        let query = self.boss_ui.persona_query.trim().to_lowercase();
+        let boss_persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == state.persona_id)
+            .filter(|persona| {
+                query.is_empty() || persona.name.to_lowercase().contains(&query)
+            })
+            .cloned();
+        // The detail pane never sits empty while roles exist: the stored
+        // selection wins when visible, the first visible row otherwise —
+        // the Skills page's rule.
+        let visible: Vec<Uuid> = self
+            .boss_ui
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                BossItem::Persona(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let selected = self
+            .boss_ui
+            .personas_selected
+            .get(&key)
+            .copied()
+            .filter(|id| {
+                visible.contains(id) || boss_persona.as_ref().is_some_and(|p| p.id == *id)
+            })
+            .or_else(|| {
+                visible
+                    .first()
+                    .copied()
+                    .or_else(|| boss_persona.as_ref().map(|persona| persona.id))
+            });
+        if let Some(id) = selected {
+            self.boss_ui.personas_selected.insert(key, id);
+        }
+        let mut list_column = div()
+            .w(px(300.0))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .border_r_1()
+            .border_color(theme.separator)
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(10.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .children(search.map(|input| {
+                        TextField::new("boss-persona-search", input)
+                            .icon("icons/search.svg", 13.0)
+                            .w_full()
+                    })),
+            );
+        let has_boss_persona = boss_persona.is_some();
+        if let Some(ref persona) = boss_persona {
+            list_column = list_column
+                .child(boss_section_label(&theme, tr!("boss.section_boss"), true))
+                .child(self.render_boss_persona_row(
+                    key,
+                    persona,
+                    true,
+                    selected,
+                    &theme,
+                    cx,
+                ));
+        }
+        if !visible.is_empty() || !has_boss_persona {
+            list_column = list_column.child(boss_section_label(
+                &theme,
+                tr!("boss.section_roles"),
+                has_boss_persona,
+            ));
+        }
+        if self.boss_ui.rows.is_empty() {
+            list_column = list_column.child(
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(if query.is_empty() {
+                        tr!("boss.roles_empty")
+                    } else {
+                        tr!("boss.roles_no_match")
+                    }),
+            );
+        } else {
+            list_column = list_column.child(self.boss_item_list(cx));
+        }
+        list_column = list_column.child(
+            div()
+                .flex_none()
+                .px(px(10.0))
+                .py(px(8.0))
+                .border_t_1()
+                .border_color(theme.separator)
+                .child(
+                    boss_button("boss-new-persona", tr!("boss.new_persona"), &theme)
+                        .child(icon("icons/plus.svg", 13.0, theme.text_secondary))
+                        .child(tr!("boss.new_persona"))
+                        .on_activation(cx, move |this, window, cx| {
+                            this.edit_boss_persona(key, None, window, cx)
+                        }),
+                ),
+        );
+        let detail = if self
+            .boss_ui
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.key == key)
+        {
+            self.render_boss_editor(cx)
+        } else {
+            match selected.and_then(|id| {
+                state
+                    .personas
+                    .iter()
+                    .find(|persona| persona.id == id)
+                    .cloned()
+            }) {
+                Some(persona) => {
+                    let is_boss = persona.id == state.persona_id;
+                    self.render_boss_persona_detail(key, &persona, is_boss, cx)
+                }
+                None => boss_detail_placeholder(
+                    &theme,
+                    "icons/user-round.svg",
+                    tr!("boss.persona_select"),
+                ),
+            }
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(list_column)
+            .child(div().flex_1().min_w_0().flex().flex_col().child(detail))
+            .into_any_element()
+    }
+
+    /// A persona row in the list column: icon, name, and the first line of
+    /// its instructions as the short purpose.
+    fn render_boss_persona_row(
+        &self,
+        key: DaemonKey,
+        persona: &BossPersona,
+        boss_role: bool,
+        selected: Option<Uuid>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = persona.id;
+        let selected = selected == Some(id);
+        let icon_path = persona
+            .icon
+            .map(crate::custom_commands::icon_path)
+            .unwrap_or("icons/user-round.svg");
+        let purpose = persona
+            .markdown
+            .lines()
+            .map(|line| line.trim().trim_start_matches('#').trim())
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+            .to_owned();
+        div()
+            .id(SharedString::from(format!("boss-persona-{id}")))
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .when(selected, |row| row.bg(theme.overlay))
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                if this.boss_editor_dirty(cx) {
+                    this.show_toast(tr!("boss.save_first"));
+                } else {
+                    if this
+                        .boss_ui
+                        .editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.key == key && editor.persona != id)
+                    {
+                        this.boss_ui.editor = None;
+                    }
+                    this.boss_ui.personas_selected.insert(key, id);
+                }
+                cx.notify();
+            })
+            .child(icon(icon_path, 15.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_size(sp(14.0))
+                            .line_height(sp(17.0))
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(persona.name.clone()),
+                    )
+                    .when(!purpose.is_empty(), |column| {
+                        column.child(
+                            div()
+                                .text_size(sp(12.0))
+                                .line_height(sp(15.0))
+                                .text_color(theme.text_tertiary)
+                                .truncate()
+                                .child(purpose),
+                        )
+                    }),
+            )
+            .when(boss_role, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("boss.role_boss")),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// The read-first persona detail: identity header, grant metadata as
+    /// label/value rows, a deliberate Edit action, then the rendered
+    /// instructions.
+    fn render_boss_persona_detail(
+        &mut self,
+        key: DaemonKey,
+        persona: &BossPersona,
+        boss_role: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let icon_path = persona
+            .icon
+            .map(crate::custom_commands::icon_path)
+            .unwrap_or("icons/user-round.svg");
+        let permissions = &persona.permissions;
+        let bucket_line = if permissions.bucket_ids.is_empty() {
+            tr!("boss.detail_none")
+        } else {
+            permissions.bucket_ids.join(", ")
+        };
+        let pinned_line = if persona.pinned_files.is_empty() {
+            tr!("boss.detail_none")
+        } else {
+            persona.pinned_files.join(", ")
+        };
+        let integration_line = if permissions.integration_ids.is_empty() {
+            tr!("boss.detail_none")
+        } else {
+            permissions.integration_ids.join(", ")
+        };
+        let yes_no = |yes: bool| {
+            if yes {
+                tr!("boss.detail_yes")
+            } else {
+                tr!("boss.detail_no")
+            }
+        };
+        let rows: Vec<(String, AnyElement)> = vec![
+            (
+                tr!("boss.detail_buckets"),
+                boss_plain_value(&theme, bucket_line),
+            ),
+            (
+                tr!("boss.detail_pinned"),
+                boss_plain_value(&theme, pinned_line),
+            ),
+            (
+                tr!("boss.detail_integrations"),
+                boss_plain_value(&theme, integration_line),
+            ),
+            (
+                tr!("boss.detail_summon"),
+                boss_plain_value(&theme, yes_no(permissions.summon_employees)),
+            ),
+            (
+                tr!("boss.detail_computer"),
+                boss_plain_value(&theme, yes_no(permissions.computer_use)),
+            ),
+        ];
+        let count = rows.len();
+        let mut info = div().mt(px(14.0)).flex().flex_col();
+        for (index, (label, value)) in rows.into_iter().enumerate() {
+            info = info.child(boss_info_row(&theme, label, value, index + 1 == count));
+        }
+        let palette = MarkdownPalette::from_theme(&theme);
+        let document: Option<AnyElement> = (!persona.markdown.trim().is_empty()).then(|| {
+            let mut cache = self.boss_ui.persona_markdown.borrow_mut();
+            if !matches!(cache.as_ref(), Some((cached, _)) if *cached == persona.id) {
+                *cache = Some((persona.id, MarkdownView::document()));
+            }
+            let (_, view) = cache.as_mut().expect("entry ensured above");
+            view.set_text(&persona.markdown, false);
+            let ctx = MarkdownCtx::new(
+                format!("persona-md-{}", persona.id),
+                &palette,
+                MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
+                self.boss_ui.persona_selection.clone(),
+            )
+            .with_families(crate::fonts::current(cx))
+            .with_math_enabled(self.state.render_math)
+            .with_guided_reading(self.guided_reading())
+            .with_link_items(self.markdown_link_menu_items.clone())
+            .with_link_handler(self.markdown_link_handler.clone())
+            .with_standalone_context_menu(self.menu_handle("persona-detail-math", cx));
+            div()
+                .mt(px(16.0))
+                .pt(px(14.0))
+                .border_t_1()
+                .border_color(theme.separator)
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("boss.instructions")),
+                )
+                .child(
+                    div()
+                        .mt(px(10.0))
+                        .text_color(theme.text)
+                        .children(md::render::markdown(view, &ctx)),
+                )
+                .into_any_element()
+        });
+        let selection_input = {
+            let selection = self.boss_ui.persona_selection.clone();
+            canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+                move |_, region, window, _| {
+                    md::render::install_selection_input(region, window, &selection, None)
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        };
+        let persona_for_edit = persona.clone();
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(
+                div()
+                    .id("boss-persona-detail-scroll")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.boss_ui.persona_scroll)
+                    .px(px(24.0))
+                    .pt(px(18.0))
+                    .pb(px(20.0))
+                    .child(md::render::frame_reset(
+                        self.boss_ui.persona_selection.clone(),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(12.0))
+                            .child(
+                                div()
+                                    .w(px(38.0))
+                                    .h(px(38.0))
+                                    .flex_none()
+                                    .rounded(px(11.0))
+                                    .bg(theme.overlay)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon(icon_path, 18.0, theme.text_secondary)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(sp(15.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(persona.name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(2.0))
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_tertiary)
+                                            .child(if boss_role {
+                                                tr!("boss.role_boss")
+                                            } else {
+                                                tr!("boss.role_employee")
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                boss_button("boss-edit-persona", tr!("boss.edit"), &theme)
+                                    .child(icon("icons/pencil.svg", 13.0, theme.text_secondary))
+                                    .child(tr!("boss.edit"))
+                                    .on_activation(cx, move |this, window, cx| {
+                                        this.edit_boss_persona(
+                                            key,
+                                            Some(persona_for_edit.clone()),
+                                            window,
+                                            cx,
+                                        )
+                                    }),
+                            ),
+                    )
+                    .child(info)
+                    .children(document),
+            )
+            .child(scrollbar::vertical(
+                &self.boss_ui.persona_scroll,
+                &self.boss_ui.persona_scrollbar,
+            ))
+            .child(selection_input)
+            .into_any_element()
+    }
+
+    // ── Plans ────────────────────────────────────────────────────────────
+
+    /// One plan library: the Active/Approved/Archived filter above the
+    /// same list/detail split Skills uses, with the document and its state
+    /// on the right.
+    fn render_boss_plans_section(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let filter = self
+            .boss_ui
+            .plans_filter
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let segmented = self.boss_segmented(
+            "boss-plans-filter",
+            vec![
+                (BossPlansFilter::Active, tr!("boss.plans_active")),
+                (BossPlansFilter::Approved, tr!("boss.plans_approved")),
+                (BossPlansFilter::Archived, tr!("boss.plans_archived")),
+            ],
+            filter,
+            cx,
+            move |this, picked, _, cx| {
+                this.boss_ui.plans_filter.insert(key, picked);
+                this.sync_boss_page_rows();
+                cx.notify();
+            },
+        );
+        let visible: Vec<Uuid> = self
+            .boss_ui
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                BossItem::Plan(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let selected = self
+            .boss_ui
+            .plans_selected
+            .get(&key)
+            .copied()
+            .filter(|id| visible.contains(id))
+            .or_else(|| visible.first().copied());
+        if let Some(id) = selected {
+            self.boss_ui.plans_selected.insert(key, id);
+        }
+        let list_column = div()
+            .w(px(300.0))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .border_r_1()
+            .border_color(theme.separator)
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(10.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .child(segmented),
+            )
+            .child(if self.boss_ui.rows.is_empty() {
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(match filter {
+                        BossPlansFilter::Active => tr!("boss.plans_empty_active"),
+                        BossPlansFilter::Approved => tr!("boss.plans_empty_approved"),
+                        BossPlansFilter::Archived => tr!("boss.plans_empty_archived"),
+                    })
+                    .into_any_element()
+            } else {
+                self.boss_item_list(cx).into_any_element()
+            });
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(list_column)
+            .child(self.render_boss_plan_detail(key, selected, cx))
+            .into_any_element()
+    }
+
+    /// The Plans detail — the document through the same read-only markdown
+    /// view the plan tab uses, headed by its state and a way back to the
+    /// discussion while it is still on record.
+    fn render_boss_plan_detail(
+        &mut self,
+        key: DaemonKey,
+        selected: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let empty = |label: String| {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(div().text_color(theme.text_secondary).child(label))
+                .into_any_element()
+        };
+        let Some(session_id) = selected else {
+            return boss_detail_placeholder(&theme, "icons/map.svg", tr!("boss.plan_select"));
+        };
+        let Some(plan) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .planning
+                    .iter()
+                    .find(|plan| plan.session_id == session_id)
+            })
+            .cloned()
+        else {
+            return empty(tr!("boss.plan_select"));
+        };
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let archived = session.is_none_or(|session| session.archived_at.is_some());
+        let (state_label, action) = if plan.finalized_at.is_some() {
+            (
+                tr!(
+                    "boss.plan_finalized_ago",
+                    ago = sidebar::format_time_ago(
+                        unix_time().saturating_sub(plan.finalized_at.unwrap_or(0))
+                    )
+                ),
+                session.map(|_| tr!("boss.plan_view_discussion")),
+            )
+        } else if archived {
+            (tr!("boss.plan_archived"), None)
+        } else {
+            (
+                tr!("boss.plan_in_discussion"),
+                session.map(|_| tr!("boss.plan_open_discussion")),
+            )
+        };
+        let header = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .py(px(10.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .child(icon("icons/map.svg", 14.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(plan.idea.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(state_label),
+                    ),
+            )
+            .when_some(action, |row, label| {
+                row.child(
+                    boss_button("boss-plan-discussion", label.clone(), &theme)
+                        .child(icon("icons/message-square.svg", 13.0, theme.text_secondary))
+                        .child(label)
+                        .on_activation(cx, move |this, _, cx| {
+                            this.request_session_activation(
+                                session_id,
+                                SessionActivationTransition::Visit,
+                                cx,
+                            )
+                        }),
+                )
+            });
+        self.ensure_plan_doc(key, session_id, &plan.plan_file, false, cx);
+        let body = match self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.content.as_ref())
+        {
+            Some(Ok(text)) => {
+                let text = text.clone();
+                self.plan_document_view(session_id, &text, false, None, cx)
+                    .into_any_element()
+            }
+            Some(Err(error)) => empty(format!("{}\n{error}", tr!("boss.plan_unavailable"))),
+            None => empty(tr!("boss.loading")),
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
+
+    // ── Deliverables ─────────────────────────────────────────────────────
+
+    /// The deliverable library — every published record, not just the
+    /// sidebar's 12-hour recents, behind All/Pinned/Dormant/Archived.
+    fn render_boss_deliverables_section(
+        &mut self,
+        key: DaemonKey,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let filter = self
+            .boss_ui
+            .deliverables_filter
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let segmented = self.boss_segmented(
+            "boss-deliverables-filter",
+            vec![
+                (BossDeliverablesFilter::All, tr!("boss.deliverables_all")),
+                (
+                    BossDeliverablesFilter::Pinned,
+                    tr!("boss.deliverables_pinned"),
+                ),
+                (
+                    BossDeliverablesFilter::Dormant,
+                    tr!("boss.deliverables_dormant"),
+                ),
+                (
+                    BossDeliverablesFilter::Archived,
+                    tr!("boss.deliverables_archived"),
+                ),
+            ],
+            filter,
+            cx,
+            move |this, picked, _, cx| {
+                this.boss_ui.deliverables_filter.insert(key, picked);
+                this.sync_boss_page_rows();
+                cx.notify();
+            },
+        );
+        let body: AnyElement = if self.boss_ui.rows.is_empty() {
+            let title = match filter {
+                BossDeliverablesFilter::All => tr!("boss.deliverables_empty_all"),
+                BossDeliverablesFilter::Pinned => tr!("boss.deliverables_empty_pinned"),
+                BossDeliverablesFilter::Dormant => tr!("boss.deliverables_empty_dormant"),
+                BossDeliverablesFilter::Archived => tr!("boss.deliverables_empty_archived"),
+            };
+            boss_empty_state(
+                &theme,
+                "icons/file-text.svg",
+                title,
+                tr!("boss.deliverables_empty_hint"),
+            )
+            .into_any_element()
+        } else {
+            self.boss_item_list(cx).into_any_element()
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .child(segmented)
+                    .child(div().flex_1()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH + 48.0))
+                    .mx_auto()
+                    .px(px(16.0))
+                    .py(px(6.0))
+                    .flex()
+                    .flex_col()
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    /// A library deliverable row — the sidebar row's name/type/age/unread
+    /// cues at task-row density, opening the same preview page on click.
+    /// Remote records keep their host in the detail line and offer no
+    /// local Finder actions.
+    fn render_boss_deliverable_row(
+        &self,
+        key: DaemonKey,
+        deliverable_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(deliverable) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == deliverable_id)
+            })
+            .cloned()
+        else {
+            return div().into_any_element();
+        };
+        let theme = Theme::current(cx);
+        let path = PathBuf::from(&deliverable.path);
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&deliverable.path)
+            .to_owned();
+        let detail_icon = if deliverable.directory {
+            "icons/folder.svg"
+        } else {
+            right_panel::file_icon_for_path(&deliverable.path)
+        };
+        let file_name = match key {
+            DaemonKey::Remote(host) => match self.remote_host_name(host) {
+                Some(host) => format!("{file_name} · {host}"),
+                None => file_name,
+            },
+            DaemonKey::Local => file_name,
+        };
+        let age = sidebar::format_time_ago(unix_time().saturating_sub(deliverable.updated_at));
+        let unread = deliverable
+            .viewed_at
+            .is_none_or(|viewed| viewed < deliverable.updated_at);
+        let pinned = deliverable.pinned_at.is_some();
+        let dormant = deliverable.dormant_at.is_some() && !pinned;
+        let archived = deliverable.archived_at.is_some();
+        let local = key == DaemonKey::Local;
+        let menu = self.menu_handle(format!("boss-deliverable-{key:?}-{deliverable_id}"), cx);
+        let keyboard_menu = menu.clone();
+        let row_focus = menu.trigger_focus_handle().clone();
+        let waku = cx.entity().downgrade();
+        let row = div()
+            .id(SharedString::from(format!(
+                "boss-deliverable-row-{key:?}-{deliverable_id}"
+            )))
+            .track_focus(&row_focus)
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .tooltip(Tooltip::text(deliverable.path.clone()))
+            .on_activation(cx, move |this, _, cx| {
+                this.open_deliverable_task(key, deliverable_id, cx)
+            })
+            .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key.as_str() == "f10" && event.keystroke.modifiers.shift {
+                    keyboard_menu.open_context_menu(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(icon(detail_icon, 15.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(sp(14.0))
+                                    .line_height(sp(17.0))
+                                    .text_color(theme.text)
+                                    .child(deliverable.name.clone()),
+                            )
+                            .when(unread, |row| {
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .size(px(7.0))
+                                        .rounded_full()
+                                        .bg(theme.info),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .min_w_0()
+                            .text_size(sp(12.5))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(div().min_w_0().truncate().child(file_name))
+                            .when(dormant, |row| {
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(theme.text_ghost)
+                                        .child(tr!("boss.deliverable_dormant")),
+                                )
+                            })
+                            .when(archived, |row| {
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(theme.text_ghost)
+                                        .child(tr!("boss.deliverable_archived_tag")),
+                                )
+                            }),
+                    ),
+            )
+            .when(pinned, |row| {
+                row.child(icon("icons/pin-filled.svg", 12.0, theme.text_tertiary))
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(72.0))
+                    .text_right()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_ghost)
+                    .child(age),
+            );
+        context_menu(
+            div().w_full().child(row),
+            SharedString::from(format!("boss-deliverable-menu-{key:?}-{deliverable_id}")),
+            &menu,
+            move |_cx| {
+                let mut items = Vec::new();
+                if local {
+                    items.push(
+                        MenuItem::new(tr!("deliverable.open"), {
+                            let path = path.clone();
+                            move |_, cx| crate::platform::open_with_default_app(&path, cx)
+                        })
+                        .icon("icons/external-link.svg"),
+                    );
+                    items.push(
+                        MenuItem::new(tr!("common.reveal_in_finder"), {
+                            let path = path.clone();
+                            move |_, cx| crate::platform::reveal_in_file_manager(&path, cx)
+                        })
+                        .icon("icons/folder-open.svg"),
+                    );
+                    items.push(MenuItem::Separator);
+                }
+                {
+                    let waku = waku.clone();
+                    items.push(
+                        MenuItem::new(
+                            if pinned {
+                                tr!("session.unpin")
+                            } else {
+                                tr!("session.pin")
+                            },
+                            move |_, cx| {
+                                let _ = waku.update(cx, |waku, cx| {
+                                    waku.set_deliverable_pinned(
+                                        key,
+                                        deliverable_id,
+                                        !pinned,
+                                        cx,
+                                    );
+                                });
+                            },
+                        )
+                        .icon(if pinned {
+                            "icons/pin-off.svg"
+                        } else {
+                            "icons/pin.svg"
+                        }),
+                    );
+                }
+                {
+                    let waku = waku.clone();
+                    items.push(
+                        MenuItem::new(
+                            if dormant {
+                                tr!("session.restore")
+                            } else {
+                                tr!("session.sweep")
+                            },
+                            move |_, cx| {
+                                let _ = waku.update(cx, |waku, cx| {
+                                    waku.set_deliverable_dormant(
+                                        key,
+                                        deliverable_id,
+                                        !dormant,
+                                        cx,
+                                    );
+                                });
+                            },
+                        )
+                        .icon(if dormant {
+                            "icons/rotate-cw.svg"
+                        } else {
+                            "icons/broom.svg"
+                        }),
+                    );
+                }
+                {
+                    let waku = waku.clone();
+                    items.push(
+                        MenuItem::new(
+                            if archived {
+                                tr!("common.unarchive")
+                            } else {
+                                tr!("session.archive")
+                            },
+                            move |_, cx| {
+                                let _ = waku.update(cx, |waku, cx| {
+                                    waku.set_deliverable_archived(
+                                        key,
+                                        deliverable_id,
+                                        !archived,
+                                        cx,
+                                    );
+                                });
+                            },
+                        )
+                        .icon("icons/archive.svg"),
+                    );
+                }
+                items.push(MenuItem::Separator);
+                let dismiss_waku = waku.clone();
+                items.push(
+                    MenuItem::new(tr!("deliverable.dismiss"), move |_, cx| {
+                        let _ = dismiss_waku.update(cx, |waku, cx| {
+                            waku.boss_request(
+                                key,
+                                BossOperation::DismissDeliverable {
+                                    id: deliverable_id,
+                                },
+                                BossReply::List,
+                                cx,
+                            );
+                        });
+                    })
+                    .icon("icons/trash.svg"),
+                );
+                items
+            },
+        )
+        .into_any_element()
     }
 
     fn render_boss_item(&self, item: BossItem, cx: &mut Context<Self>) -> AnyElement {
@@ -3960,7 +6036,8 @@ impl Waku {
         };
         let theme = Theme::current(cx);
         match item {
-            BossItem::Employee(id) => self.render_boss_employee_row(id, cx),
+            BossItem::Employee(id) => self.render_boss_employee_page_row(id, key, cx),
+            BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
             BossItem::MemoryStatus(path, depth, failed) => {
                 let label = if failed {
                     self.boss_ui
@@ -4162,122 +6239,80 @@ impl Waku {
                 else {
                     return div().into_any_element();
                 };
-                let selected = self.boss_ui.plans_selected == Some(session_id);
-                let detail = plan.finalized_at.map(|finalized_at| {
+                let selected = self.boss_ui.plans_selected.get(&key) == Some(&session_id);
+                let session = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id);
+                let archived = session.is_none_or(|session| session.archived_at.is_some());
+                let detail = if let Some(finalized_at) = plan.finalized_at {
                     tr!(
                         "boss.plan_finalized_ago",
                         ago = sidebar::format_time_ago(unix_time().saturating_sub(finalized_at))
                     )
-                });
-                boss_button(format!("boss-plan-{session_id}"), plan.idea.clone(), &theme)
+                } else if archived {
+                    tr!("boss.plan_archived")
+                } else {
+                    tr!("boss.plan_in_discussion")
+                };
+                div()
+                    .id(SharedString::from(format!("boss-plan-{session_id}")))
+                    .tab_index(0)
                     .h(px(42.0))
                     .w_full()
-                    .when(selected, |button| button.bg(theme.overlay))
-                    .child(icon("icons/file-text.svg", 16.0, theme.text_secondary))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_pointer()
+                    .when(selected, |row| row.bg(theme.overlay))
+                    .hover(|style| style.bg(theme.overlay))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.boss_ui.plans_selected.insert(key, session_id);
+                        cx.notify();
+                    })
+                    .child(icon("icons/compass.svg", 15.0, theme.text_secondary))
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .min_w_0()
-                            .child(div().truncate().child(plan.idea.clone()))
-                            .when_some(detail, |element, detail| {
-                                element.child(
-                                    div()
-                                        .text_size(sp(11.0))
-                                        .text_color(theme.text_tertiary)
-                                        .truncate()
-                                        .child(detail),
-                                )
-                            }),
+                            .flex_1()
+                            .child(
+                                div().truncate().text_color(theme.text).child(plan.idea.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .truncate()
+                                    .child(detail),
+                            ),
                     )
-                    .on_activation(cx, move |this, _, cx| {
-                        this.boss_ui.plans_selected = Some(session_id);
-                        cx.notify();
-                    })
                     .into_any_element()
             }
             BossItem::Persona(id) => {
-                let Some(persona) = self
-                    .boss_ui
-                    .states
-                    .get(&key)
-                    .and_then(|state| state.personas.iter().find(|persona| persona.id == id))
-                    .cloned()
+                let Some(state) = self.boss_ui.states.get(&key).cloned() else {
+                    return div().into_any_element();
+                };
+                let Some(persona) = state.personas.iter().find(|persona| persona.id == id).cloned()
                 else {
                     return div().into_any_element();
                 };
-                boss_button(format!("persona-{id}"), persona.name.clone(), &theme)
-                    .h(px(42.0))
-                    .w_full()
-                    .child(persona.name.clone())
-                    .on_activation(cx, move |this, window, cx| {
-                        this.edit_boss_document(
-                            key,
-                            BossEditorKind::Persona(id),
-                            persona.name.clone(),
-                            persona.markdown.clone(),
-                            Some(persona.clone()),
-                            window,
-                            cx,
-                        )
-                    })
-                    .into_any_element()
+                self.render_boss_persona_row(
+                    key,
+                    &persona,
+                    false,
+                    self.boss_ui.personas_selected.get(&key).copied(),
+                    &theme,
+                    cx,
+                )
             }
-
         }
     }
 
-    /// The Plans tab's reading pane — the selected frozen document through
-    /// the same boss-file read the session's plan tab uses.
-    fn render_boss_plan_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
-        let theme = Theme::current(cx);
-        let empty = |label: String| {
-            div()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(div().text_color(theme.text_secondary).child(label))
-                .into_any_element()
-        };
-        let Some(session_id) = self.boss_ui.plans_selected else {
-            return empty(tr!("boss.plan_select"));
-        };
-        let Some(plan) = self
-            .boss_ui
-            .states
-            .get(&key)
-            .and_then(|state| {
-                state
-                    .planning
-                    .iter()
-                    .find(|plan| plan.session_id == session_id)
-            })
-            .cloned()
-        else {
-            return empty(tr!("boss.plan_select"));
-        };
-        self.ensure_plan_doc(key, session_id, &plan.plan_file, false, cx);
-        match self
-            .plan_docs
-            .get(&session_id)
-            .and_then(|doc| doc.content.as_ref())
-        {
-            Some(Ok(text)) => {
-                let text = text.clone();
-                self.plan_document_view(session_id, &text, false, None, cx)
-                    .into_any_element()
-            }
-            Some(Err(error)) => empty(format!("{}\n{error}", tr!("boss.plan_unavailable"))),
-            None => empty(tr!("boss.loading")),
-        }
-    }
-
-    /// The Memory section's reading pane for documents: the selected file's
-    /// rendered Markdown under a quiet path header, with the correction
-    /// request that arms the boss chat's composer. Failures stay in this
-    /// pane — the tree keeps its expansion and selection.
     fn render_boss_memory_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         if let Some((error_key, path, error)) = self.boss_ui.memory_error.as_ref()
@@ -4661,161 +6696,279 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The persona form behind the detail pane's Edit action. Saving names
+    /// its scope beside the controls — the defaults reach employees
+    /// summoned after the save; existing grants change through the boss.
     fn render_boss_editor(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(editor) = &self.boss_ui.editor else {
-            return div()
-                .text_color(theme.text_secondary)
-                .child(tr!("boss.select_document"))
-                .into_any_element();
+            return boss_detail_placeholder(
+                &theme,
+                "icons/user-round.svg",
+                tr!("boss.persona_select"),
+            );
         };
-        let editor_tab = match editor.kind {
-            BossEditorKind::Persona(_) => BossTab::Personas,
-            BossEditorKind::Name => BossTab::Employees,
-        };
-        if self.boss_ui.page != Some((editor.key, editor_tab)) {
-            return div()
-                .text_color(theme.text_secondary)
-                .child(tr!("boss.select_document"))
-                .into_any_element();
+        if self.boss_ui.page != Some((editor.key, BossTab::Personas)) {
+            return boss_detail_placeholder(
+                &theme,
+                "icons/user-round.svg",
+                tr!("boss.persona_select"),
+            );
         }
-        let is_persona = matches!(editor.kind, BossEditorKind::Persona(_));
         let mut form = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(tr!("boss.name_path"))
-            .child(boss_input(editor.name.clone(), &theme));
-        if matches!(editor.kind, BossEditorKind::Persona(_)) {
-            form = form
-                .child(tr!("boss.markdown"))
-                .child(boss_input(editor.content.clone(), &theme));
-        }
-        if is_persona {
-            form = form
-                .child("Granted memory bucket IDs")
-                .child(boss_input(editor.buckets.clone(), &theme))
-                .child(tr!("boss.pinned_files"))
-                .child(boss_input(editor.pinned.clone(), &theme))
-                .child("Persona icon (employees inherit this unless overridden)")
-                .child(
-                    div().flex().flex_wrap().gap(px(4.0)).children(
-                        std::iter::once(None)
-                            .chain(CustomCommandIcon::EMPLOYEE.into_iter().map(Some))
-                            .map(|choice| {
-                                let selected = editor.icon == choice;
-                                let label = choice.map_or("None", CustomCommandIcon::label);
-                                let icon_path = choice.map(crate::custom_commands::icon_path);
-                                boss_button(format!("persona-icon-{label}"), label, &theme)
-                                    .child(if let Some(path) = icon_path {
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .child(icon(path, 14.0, theme.text_secondary))
-                                            .child(label)
-                                    } else {
-                                        div().child(label)
-                                    })
-                                    .when(selected, |button| button.bg(theme.overlay_strong))
-                                    .on_activation(cx, move |this, _, cx| {
-                                        if let Some(editor) = &mut this.boss_ui.editor {
-                                            editor.icon = choice;
-                                        }
-                                        cx.notify();
-                                    })
-                            }),
-                    ),
-                )
-                .child(tr!("boss.permissions_hint"));
-            for (label, enabled) in [
-                ("boss.delegate", editor.permissions.summon_employees),
-                ("boss.computer", editor.permissions.computer_use),
-            ] {
-                form = form.child(
-                    boss_button(label, tr!(label), &theme)
-                        .child(icon(
-                            if enabled {
-                                "icons/check.svg"
-                            } else {
-                                "icons/x.svg"
-                            },
-                            13.0,
-                            theme.text_secondary,
-                        ))
-                        .child(tr!(label))
-                        .on_activation(cx, move |this, _, cx| {
-                            if let Some(editor) = &mut this.boss_ui.editor {
-                                match label {
-                                    "boss.delegate" => {
-                                        editor.permissions.summon_employees =
-                                            !editor.permissions.summon_employees;
-                                    }
-                                    _ => {
-                                        editor.permissions.computer_use =
-                                            !editor.permissions.computer_use;
-                                    }
-                                }
-                            }
-                            cx.notify();
-                        }),
-                );
-            }
-            {
-                for integration in &editor.integrations {
-                    let id = integration.clone();
-                    let enabled = editor.permissions.integration_ids.contains(&id);
-                    form = form.child(
-                        boss_button(format!("boss-integration-{id}"), id.clone(), &theme)
-                            .child(icon(
-                                if enabled {
-                                    "icons/check.svg"
+            .child(boss_input(editor.name.clone(), &theme))
+            .child(tr!("boss.markdown"))
+            .child(boss_input(editor.content.clone(), &theme))
+            .child(tr!("boss.persona_buckets"))
+            .child(boss_input(editor.buckets.clone(), &theme))
+            .child(tr!("boss.pinned_files"))
+            .child(boss_input(editor.pinned.clone(), &theme))
+            .child(tr!("boss.persona_icon_hint"))
+            .child(
+                div().flex().flex_wrap().gap(px(4.0)).children(
+                    std::iter::once(None)
+                        .chain(CustomCommandIcon::EMPLOYEE.into_iter().map(Some))
+                        .map(|choice| {
+                            let selected = editor.icon == choice;
+                            let label = choice.map_or("None", CustomCommandIcon::label);
+                            let icon_path = choice.map(crate::custom_commands::icon_path);
+                            boss_button(format!("persona-icon-{label}"), label, &theme)
+                                .child(if let Some(path) = icon_path {
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .child(icon(path, 14.0, theme.text_secondary))
+                                        .child(label)
                                 } else {
-                                    "icons/x.svg"
-                                },
-                                13.0,
-                                theme.text_secondary,
-                            ))
-                            .child(id.clone())
-                            .on_activation(cx, move |this, _, cx| {
-                                if let Some(editor) = &mut this.boss_ui.editor {
-                                    if editor.permissions.integration_ids.contains(&id) {
-                                        editor
-                                            .permissions
-                                            .integration_ids
-                                            .retain(|value| value != &id);
-                                    } else {
-                                        editor.permissions.integration_ids.push(id.clone());
+                                    div().child(label)
+                                })
+                                .when(selected, |button| button.bg(theme.overlay_strong))
+                                .on_activation(cx, move |this, _, cx| {
+                                    if let Some(editor) = &mut this.boss_ui.editor {
+                                        editor.icon = choice;
                                     }
-                                }
-                                cx.notify();
-                            }),
-                    );
-                }
-            }
-        }
-        form.child(
-            div()
-                .flex()
-                .gap(px(8.0))
-                .child(
-                    boss_button("boss-save", tr!("boss.save"), &theme)
-                        .child(icon("icons/check.svg", 14.0, theme.text_secondary))
-                        .child(tr!("boss.save"))
-                        .on_activation(cx, |this, _, cx| this.save_boss_document(cx)),
-                )
-                .child(
-                    boss_button("boss-discard", tr!("boss.discard"), &theme)
-                        .child(icon("icons/x.svg", 14.0, theme.text_secondary))
-                        .child(tr!("boss.discard"))
-                        .on_activation(cx, |this, _, cx| {
-                            this.boss_ui.editor = None;
-                            cx.notify();
+                                    cx.notify();
+                                })
                         }),
                 ),
+            )
+            .child(tr!("boss.permissions_hint"));
+        for (label, enabled) in [
+            ("boss.delegate", editor.permissions.summon_employees),
+            ("boss.computer", editor.permissions.computer_use),
+        ] {
+            form = form.child(
+                boss_button(label, tr!(label), &theme)
+                    .child(icon(
+                        if enabled {
+                            "icons/check.svg"
+                        } else {
+                            "icons/x.svg"
+                        },
+                        13.0,
+                        theme.text_secondary,
+                    ))
+                    .child(tr!(label))
+                    .on_activation(cx, move |this, _, cx| {
+                        if let Some(editor) = &mut this.boss_ui.editor {
+                            match label {
+                                "boss.delegate" => {
+                                    editor.permissions.summon_employees =
+                                        !editor.permissions.summon_employees;
+                                }
+                                _ => {
+                                    editor.permissions.computer_use =
+                                        !editor.permissions.computer_use;
+                                }
+                            }
+                        }
+                        cx.notify();
+                    }),
+            );
+        }
+        for integration in &editor.integrations {
+            let id = integration.clone();
+            let enabled = editor.permissions.integration_ids.contains(&id);
+            form = form.child(
+                boss_button(format!("boss-integration-{id}"), id.clone(), &theme)
+                    .child(icon(
+                        if enabled {
+                            "icons/check.svg"
+                        } else {
+                            "icons/x.svg"
+                        },
+                        13.0,
+                        theme.text_secondary,
+                    ))
+                    .child(id.clone())
+                    .on_activation(cx, move |this, _, cx| {
+                        if let Some(editor) = &mut this.boss_ui.editor {
+                            if editor.permissions.integration_ids.contains(&id) {
+                                editor
+                                    .permissions
+                                    .integration_ids
+                                    .retain(|value| value != &id);
+                            } else {
+                                editor.permissions.integration_ids.push(id.clone());
+                            }
+                        }
+                        cx.notify();
+                    }),
+            );
+        }
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .id("boss-editor-scroll")
+            .overflow_y_scroll()
+            .p(px(20.0))
+            .child(
+                form.child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("boss.persona_scope_hint")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            boss_button("boss-save", tr!("boss.save"), &theme)
+                                .child(icon("icons/check.svg", 14.0, theme.text_secondary))
+                                .child(tr!("boss.save"))
+                                .on_activation(cx, |this, _, cx| this.save_boss_document(cx)),
+                        )
+                        .child(
+                            boss_button("boss-discard", tr!("boss.discard"), &theme)
+                                .child(icon("icons/x.svg", 14.0, theme.text_secondary))
+                                .child(tr!("boss.discard"))
+                                .on_activation(cx, |this, _, cx| {
+                                    this.boss_ui.editor = None;
+                                    cx.notify();
+                                }),
+                        ),
+                ),
+            );
+        body.into_any_element()
+    }
+}
+
+/// One label/value line of a detail pane's info table — the Skills
+/// detail's pattern.
+fn boss_info_row(theme: &Theme, label: String, value: AnyElement, last: bool) -> Div {
+    div()
+        .py(px(8.0))
+        .when(!last, |element| {
+            element.border_b_1().border_color(theme.separator)
+        })
+        .flex()
+        .items_baseline()
+        .gap(px(12.0))
+        .child(
+            div()
+                .w(px(110.0))
+                .flex_none()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(label)),
+        )
+        .child(div().flex_1().min_w_0().flex().child(value))
+}
+
+fn boss_plain_value(theme: &Theme, value: String) -> AnyElement {
+    div()
+        .text_size(sp(12.5))
+        .text_color(theme.text_secondary)
+        .child(SharedString::from(value))
+        .into_any_element()
+}
+
+/// A section list's small group label — the Skills list's section
+/// headers without the count.
+fn boss_section_label(theme: &Theme, label: String, first: bool) -> Div {
+    div()
+        .w_full()
+        .pt(px(if first { 6.0 } else { 14.0 }))
+        .pb(px(4.0))
+        .px(px(10.0))
+        .flex()
+        .items_baseline()
+        .child(
+            div()
+                .text_size(sp(11.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(label.to_uppercase())),
+        )
+}
+
+/// The quiet whole-section empty state — centered icon tile, title, and a
+/// line of explanation, the Skills page's version.
+fn boss_empty_state(theme: &Theme, icon_path: &'static str, title: String, hint: String) -> Div {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(10.0))
+        .px(px(40.0))
+        .py(px(40.0))
+        .child(
+            div()
+                .w(px(44.0))
+                .h(px(44.0))
+                .rounded(px(13.0))
+                .bg(theme.overlay)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(icon_path, 21.0, theme.text_tertiary)),
+        )
+        .child(
+            div()
+                .text_size(sp(13.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .text_center()
+                .child(title),
+        )
+        .child(
+            div()
+                .max_w(px(420.0))
+                .text_size(sp(12.5))
+                .line_height(sp(17.0))
+                .text_color(theme.text_secondary)
+                .text_center()
+                .child(hint),
+        )
+}
+
+/// The quiet right-pane placeholder for a list/detail section with no
+/// selection — centered glyph and one line.
+fn boss_detail_placeholder(theme: &Theme, icon_path: &'static str, label: String) -> AnyElement {
+    div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(8.0))
+        .child(icon(icon_path, 22.0, theme.text_ghost))
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .text_color(theme.text_ghost)
+                .child(label),
         )
         .into_any_element()
-    }
 }
 
 fn boss_loading_label_visible(pending: bool) -> bool {

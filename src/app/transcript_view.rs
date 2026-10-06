@@ -479,9 +479,10 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The queued shell has no provider transcript yet. Keep the ticket's
-    /// immutable assignment visible above it until dispatch replaces this
-    /// surface with the live employee transcript.
+    /// The pre-launch shell has no provider transcript yet. Keep the
+    /// ticket's immutable assignment visible above it — brief, wait reason
+    /// or launch state, resolved model, and resource claims — until
+    /// dispatch replaces this surface with the live employee transcript.
     fn render_queued_employee_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session_id = self.state.selected_session?;
         let employee = self
@@ -491,11 +492,66 @@ impl Waku {
             .flat_map(|state| &state.employees)
             .find(|employee| {
                 employee.session_id == session_id
-                    && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+                    && matches!(
+                        employee.lifecycle(),
+                        waku_protocol::boss::EmployeeLifecycle::Queued
+                            | waku_protocol::boss::EmployeeLifecycle::Dispatching
+                    )
             })?;
         let ticket = employee.ticket.as_ref()?;
-        let detail = self.boss_ui.queued.get(&session_id)?;
+        let queued =
+            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
+        let detail = if queued {
+            self.boss_ui
+                .queued
+                .get(&session_id)
+                .cloned()
+                .unwrap_or_else(|| tr!("boss.goals_queue_admission"))
+        } else {
+            tr!("boss.dispatching_detail")
+        };
         let theme = Theme::current(cx);
+        let model_detail = self.boss_ui.queued_model_targets.get(&session_id).map(
+            |(key, provider, model, effort)| {
+                let name = self.model_display_name_on(*key, *provider, Some(model));
+                match effort.as_deref() {
+                    Some(effort) => format!(
+                        "{name} · {}",
+                        self.reasoning_effort_label_on(*key, *provider, Some(model), effort)
+                    ),
+                    None => name,
+                }
+            },
+        );
+        let resources = (!ticket.resources.is_empty()).then(|| {
+            let mut parts = Vec::new();
+            if !ticket.resources.exclusive.is_empty() {
+                parts.push(tr!(
+                    "boss.resource_exclusive",
+                    count = ticket.resources.exclusive.len()
+                ));
+            }
+            if ticket.resources.resident_devices > 0 {
+                parts.push(tr!(
+                    "boss.resource_devices",
+                    count = ticket.resources.resident_devices
+                ));
+            }
+            if ticket.resources.native_builds > 0 {
+                parts.push(tr!(
+                    "boss.resource_builds",
+                    count = ticket.resources.native_builds
+                ));
+            }
+            if ticket.resources.desktop_input > 0 {
+                parts.push(tr!("boss.resource_desktop"));
+            }
+            if ticket.reservation.is_some() {
+                tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
+            } else {
+                tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
+            }
+        });
         Some(
             div()
                 .id("queued-employee-prompt-layer")
@@ -523,13 +579,25 @@ impl Waku {
                                 .flex()
                                 .items_center()
                                 .gap(px(7.0))
-                                .child(icon("icons/hourglass.svg", 13.0, theme.text_secondary))
+                                .child(icon(
+                                    if queued {
+                                        "icons/hourglass.svg"
+                                    } else {
+                                        "icons/loader-circle.svg"
+                                    },
+                                    13.0,
+                                    theme.text_secondary,
+                                ))
                                 .child(
                                     div()
                                         .text_size(sp(12.5))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(theme.text)
-                                        .child(tr!("boss.goals_status_queued")),
+                                        .child(if queued {
+                                            tr!("boss.goals_status_queued")
+                                        } else {
+                                            tr!("boss.goals_status_starting")
+                                        }),
                                 )
                                 .child(
                                     div()
@@ -537,9 +605,26 @@ impl Waku {
                                         .min_w_0()
                                         .text_size(sp(12.0))
                                         .text_color(theme.text_secondary)
-                                        .child(detail.clone()),
-                                ),
+                                        .child(detail),
+                                )
+                                .when_some(model_detail, |row, model| {
+                                    row.child(
+                                        div()
+                                            .flex_none()
+                                            .text_size(sp(12.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(model),
+                                    )
+                                }),
                         )
+                        .when_some(resources, |card, resources| {
+                            card.child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(resources),
+                            )
+                        })
                         .child(
                             div()
                                 .id("queued-employee-prompt-content")

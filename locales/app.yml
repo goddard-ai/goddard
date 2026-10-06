@@ -6272,6 +6272,168 @@ boss.plans:
   en: Plans
 boss.plans_hint:
   en: Finalized design docs stay readable here after their planning session archives.
+boss.status_idle:
+  en: Idle
+boss.status_cancelled:
+  en: Cancelled
+boss.status_expired:
+  en: Expired
+boss.employees_active:
+  en: Active
+boss.employees_history:
+  en: History
+boss.employees_empty_active:
+  en: No active employees
+boss.employees_empty_active_hint:
+  en: The boss's running and queued work appears here.
+boss.employees_empty_history:
+  en: No finished employees
+boss.employees_empty_history_hint:
+  en: Finished, failed, and cancelled work moves here when it ends.
+boss.capacity:
+  en: Capacity
+boss.capacity_models:
+  en: Model capacity
+boss.capacity_none:
+  en: No model limits set
+boss.capacity_line:
+  en: "%{model} — %{used}/%{limit} slots in use"
+boss.capacity_line_queued:
+  en: "%{model} — %{used}/%{limit} in use · %{queued} queued"
+boss.capacity_paused:
+  en: "%{model} — queue paused"
+boss.capacity_host:
+  en: Host resources
+boss.capacity_host_line:
+  en: "Resident devices %{devices} · native builds %{builds} · desktop input %{desktop}"
+boss.dispatching_detail:
+  en: Slot reserved — the provider is starting.
+boss.assignment:
+  en: Assignment
+boss.assignment_brief:
+  en: Brief
+boss.assignment_persona:
+  en: Persona
+boss.assignment_model:
+  en: Model
+boss.assignment_workspace:
+  en: Workspace
+boss.assignment_workspace_local:
+  en: Project checkout
+boss.assignment_workspace_new:
+  en: New worktree
+boss.assignment_access:
+  en: Access
+boss.assignment_access_none:
+  en: None beyond task defaults
+boss.assignment_buckets:
+  en: "Memory buckets: %{count}"
+boss.assignment_integrations:
+  en: "Integrations: %{count}"
+boss.assignment_resources:
+  en: Resources
+boss.assignment_resources_none:
+  en: Model slot only
+boss.assignment_resources_requested:
+  en: "Requested: %{detail}"
+boss.assignment_resources_reserved:
+  en: "Reserved: %{detail}"
+boss.resource_exclusive:
+  en: "exclusive: %{count}"
+boss.resource_devices:
+  en: "devices: %{count}"
+boss.resource_builds:
+  en: "builds: %{count}"
+boss.resource_desktop:
+  en: desktop input
+boss.edit:
+  en: Edit
+boss.instructions:
+  en: Instructions
+boss.detail_none:
+  en: None
+boss.detail_yes:
+  en: Yes
+boss.detail_no:
+  en: No
+boss.detail_buckets:
+  en: Memory buckets
+boss.detail_pinned:
+  en: Pinned documents
+boss.detail_integrations:
+  en: Integrations
+boss.detail_summon:
+  en: Summon employees
+boss.detail_computer:
+  en: Computer use
+boss.role_boss:
+  en: Boss persona
+boss.role_employee:
+  en: Employee role
+boss.section_boss:
+  en: Boss
+boss.section_roles:
+  en: Roles
+boss.roles_empty:
+  en: No employee roles yet.
+boss.roles_no_match:
+  en: No personas match.
+boss.persona_select:
+  en: Select a persona to read its instructions.
+boss.persona_search:
+  en: Search personas
+boss.persona_buckets:
+  en: Granted memory bucket IDs
+boss.persona_icon_hint:
+  en: Persona icon (employees inherit this unless overridden)
+boss.persona_scope_hint:
+  en: Changes apply to employees summoned later. Existing employees keep their grants — ask the boss to update them.
+boss.personas_empty:
+  en: No personas
+boss.personas_empty_hint:
+  en: Personas are reusable roles the boss assigns to employees.
+boss.plans_active:
+  en: Active
+boss.plans_approved:
+  en: Approved
+boss.plans_archived:
+  en: Archived
+boss.plan_in_discussion:
+  en: In discussion
+boss.plan_archived:
+  en: Archived
+boss.plan_open_discussion:
+  en: Open discussion
+boss.plan_view_discussion:
+  en: View discussion
+boss.plans_empty_active:
+  en: No plans in discussion.
+boss.plans_empty_approved:
+  en: No approved plans yet.
+boss.plans_empty_archived:
+  en: No archived plans.
+boss.deliverables_all:
+  en: All
+boss.deliverables_pinned:
+  en: Pinned
+boss.deliverables_dormant:
+  en: Dormant
+boss.deliverables_archived:
+  en: Archived
+boss.deliverables_empty_all:
+  en: No deliverables yet
+boss.deliverables_empty_pinned:
+  en: No pinned deliverables
+boss.deliverables_empty_dormant:
+  en: No dormant deliverables
+boss.deliverables_empty_archived:
+  en: No archived deliverables
+boss.deliverables_empty_hint:
+  en: The boss publishes results here.
+boss.deliverable_dormant:
+  en: dormant
+boss.deliverable_archived_tag:
+  en: archived
 voice_scratchpad.title:
   en: "Voice\nScratchpad"
 voice_scratchpad.start:

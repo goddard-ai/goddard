@@ -899,7 +899,7 @@ impl Render for Waku {
                                 cx,
                             )
                         } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some() {
-                            self.render_boss_page(cx)
+                            self.render_boss_page(window, cx)
                         } else if let Some(deliverable_page) = deliverable_page {
                             deliverable_page
                         } else if self.drafts_page {
@@ -919,13 +919,43 @@ impl Render for Waku {
                             self.render_voice_scratchpad(window, cx)
                         } else if empty && self.boss_chat_key().is_some() {
                             self.render_boss_chat_empty_state(cx).into_any_element()
-                        } else if empty {
+                        // A queued or dispatching employee's shell hydrates
+                        // empty — the transcript surface carries its brief
+                        // and wait state, not the new-task hero.
+                        } else if empty
+                            && !self
+                                .selected_session()
+                                .is_some_and(|session| self.session_is_employee(session))
+                        {
                             self.render_empty_state(cx).into_any_element()
                         } else {
-                            self.transcript_pane
+                            let transcript = self
+                                .transcript_pane
                                 .clone()
-                                .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
-                                .into_any_element()
+                                .cached(
+                                    StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                )
+                                .into_any_element();
+                            // An employee task carries its collapsible
+                            // assignment summary above the transcript — the
+                            // brief, persona, model, and resource state the
+                            // summon recorded stay one disclosure away.
+                            match self
+                                .state
+                                .selected_session
+                                .and_then(|id| self.render_employee_assignment_strip(id, cx))
+                            {
+                                Some(strip) => div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .child(strip)
+                                    .child(transcript)
+                                    .into_any_element(),
+                                None => transcript,
+                            }
                         },
                     )
                     .children(permission)
