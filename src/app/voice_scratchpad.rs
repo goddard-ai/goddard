@@ -116,6 +116,9 @@ const VP_PILL_RADIUS: f32 = 11.5;
 const BULLET_SIZE: f32 = 6.0;
 const RECORDING_RED: u32 = 0xF0344E;
 const RECORDING_GLOW: u32 = 0xFF85B6;
+/// The live record dot's breathing cycle — one full opacity sweep,
+/// ~70% to 100% and back.
+const RECORDING_DOT_PERIOD: Duration = Duration::from_millis(1500);
 /// The text model that scrubs finished dictation — reached through the
 /// same Vercel AI Gateway credential the transcription socket uses.
 const CLEANUP_MODEL_ID: &str = "alibaba/qwen3.8-27b";
@@ -160,13 +163,15 @@ pub(super) enum ScratchpadEvent {
     /// `SILENCE_AUTO_STOP`. The worker closed its socket and exited on
     /// its own; the session lands muted, and unmuting reconnects it.
     Stopped,
-    /// The cleanup model's rewrite of a dictated span — carried with the
-    /// raw text it answered for so a late answer verifies before it lands.
+    /// The cleanup model settled on a dictated span — `cleaned` is its
+    /// rewrite, `None` when the call failed and the raw text keeps
+    /// standing. Either way the span's in-flight marker clears; a late
+    /// answer still verifies against the raw text before it lands.
     Cleaned {
         target: CleanTarget,
         start: usize,
         raw: String,
-        cleaned: String,
+        cleaned: Option<String>,
     },
 }
 
@@ -181,6 +186,7 @@ pub(super) enum CleanTarget {
 /// A completed dictated span queued for the cleanup model — the byte
 /// offset it occupied when it closed plus its raw text; both verify again
 /// when the answer lands, so a shifted or edited span is left alone.
+#[derive(Clone)]
 pub(super) struct CleanupRequest {
     pub target: CleanTarget,
     pub start: usize,
@@ -388,6 +394,10 @@ pub(super) struct ScratchpadTranscript {
     /// Finished spans waiting for the cleanup model — drained by the
     /// event pump into background gateway calls.
     cleanup_requests: Vec<CleanupRequest>,
+    /// Spans whose cleanup call has gone out — each clears when its
+    /// `Cleaned` event lands, answer or failure. The spinner at a
+    /// cleaning node's tail reads this.
+    cleanup_inflight: Vec<CleanupRequest>,
 }
 
 impl ScratchpadTranscript {
@@ -964,6 +974,15 @@ impl ScratchpadTranscript {
                 }
             }
         }
+    }
+
+    /// Whether `target` has a cleanup call queued or in flight — the
+    /// spinner marker at the node's tail.
+    fn is_cleaning(&self, target: CleanTarget) -> bool {
+        self.cleanup_requests
+            .iter()
+            .chain(&self.cleanup_inflight)
+            .any(|request| request.target == target)
     }
 
     /// One node's committed text — `""` for anything not currently painted.
@@ -2879,7 +2898,12 @@ impl Waku {
             .voice_scratchpads
             .iter_mut()
             .flat_map(|(session_id, scratchpad)| {
-                std::mem::take(&mut scratchpad.transcript.cleanup_requests)
+                let requests = std::mem::take(&mut scratchpad.transcript.cleanup_requests);
+                scratchpad
+                    .transcript
+                    .cleanup_inflight
+                    .extend(requests.iter().cloned());
+                requests
                     .into_iter()
                     .map(move |request| (*session_id, request))
             })
@@ -2892,7 +2916,9 @@ impl Waku {
     /// One cleanup call: fetch the gateway key from the daemon like the
     /// transcription worker does, post the finished span, and send the
     /// answer through the event channel. Every failure — no credential,
-    /// a timeout, an empty or unchanged answer — keeps the raw text.
+    /// a timeout, an empty or unchanged answer — keeps the raw text and
+    /// reports `cleaned: None` so the span's in-flight marker still
+    /// clears.
     fn spawn_dictation_cleanup(
         &mut self,
         session_id: Uuid,
@@ -2922,40 +2948,39 @@ impl Waku {
                         _ => None,
                     })
                     .filter(|key| !key.trim().is_empty());
-                let Some(key) = key else {
-                    return;
-                };
-                let body = serde_json::json!({
-                    "model": CLEANUP_MODEL_ID,
-                    "messages": [
-                        {"role": "system", "content": CLEANUP_INSTRUCTIONS},
-                        {"role": "user", "content": request.raw},
-                    ],
-                });
-                let parsed = super::voice_briefing::post_json(
-                    &http,
-                    &executor,
-                    super::voice_briefing::CHAT_COMPLETIONS_URL,
-                    &key,
-                    InferenceProvider::VercelGateway,
-                    None,
-                    &body,
-                )
-                .await;
-                let cleaned = match parsed {
-                    Ok(parsed) => parsed
-                        .pointer("/choices/0/message/content")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|text| !text.is_empty() && *text != request.raw.trim())
-                        .map(str::to_owned),
-                    Err(error) => {
-                        eprintln!("Goddard: voice scratchpad cleanup failed: {error:#}");
-                        return;
+                let cleaned = match key {
+                    Some(key) => {
+                        let body = serde_json::json!({
+                            "model": CLEANUP_MODEL_ID,
+                            "messages": [
+                                {"role": "system", "content": CLEANUP_INSTRUCTIONS},
+                                {"role": "user", "content": request.raw},
+                            ],
+                        });
+                        match super::voice_briefing::post_json(
+                            &http,
+                            &executor,
+                            super::voice_briefing::CHAT_COMPLETIONS_URL,
+                            &key,
+                            InferenceProvider::VercelGateway,
+                            None,
+                            &body,
+                        )
+                        .await
+                        {
+                            Ok(parsed) => parsed
+                                .pointer("/choices/0/message/content")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|text| !text.is_empty() && *text != request.raw.trim())
+                                .map(str::to_owned),
+                            Err(error) => {
+                                eprintln!("Goddard: voice scratchpad cleanup failed: {error:#}");
+                                None
+                            }
+                        }
                     }
-                };
-                let Some(cleaned) = cleaned else {
-                    return;
+                    None => None,
                 };
                 let _ = events.send((
                     session_id,
@@ -3004,9 +3029,20 @@ impl Waku {
             } = event
             {
                 if let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) {
-                    changed |= scratchpad
-                        .transcript
-                        .apply_cleanup(target, start, &raw, &cleaned);
+                    // The call settled — its tail spinner clears whether
+                    // the answer lands or the failure kept the raw text.
+                    let inflight = &mut scratchpad.transcript.cleanup_inflight;
+                    if let Some(at) = inflight.iter().position(|request| {
+                        request.target == target && request.start == start && request.raw == raw
+                    }) {
+                        inflight.remove(at);
+                        changed = true;
+                    }
+                    if let Some(cleaned) = cleaned {
+                        changed |= scratchpad
+                            .transcript
+                            .apply_cleanup(target, start, &raw, &cleaned);
+                    }
                 }
                 continue;
             }
@@ -3211,6 +3247,8 @@ impl Waku {
                     .child({
                         let prefix = tr!("voice_scratchpad.hint_prefix");
                         let command = tr!("voice_scratchpad.hint_command");
+                        let middle = tr!("voice_scratchpad.hint_middle");
+                        let enter = tr!("voice_scratchpad.hint_enter");
                         let suffix = tr!("voice_scratchpad.hint_suffix");
                         let ui_family = crate::fonts::current(cx).ui;
                         let mut bold = font(ui_family.clone());
@@ -3229,12 +3267,16 @@ impl Waku {
                             .bottom(px(overlap + HINT_CLEARANCE))
                             .text_size(sp(12.0))
                             .child(
-                                gpui::StyledText::new(format!("{prefix}{command}{suffix}"))
-                                    .with_runs(vec![
-                                        run(prefix.len(), font(ui_family.clone())),
-                                        run(command.len(), bold),
-                                        run(suffix.len(), font(ui_family)),
-                                    ]),
+                                gpui::StyledText::new(format!(
+                                    "{prefix}{command}{middle}{enter}{suffix}"
+                                ))
+                                .with_runs(vec![
+                                    run(prefix.len(), font(ui_family.clone())),
+                                    run(command.len(), bold.clone()),
+                                    run(middle.len(), font(ui_family.clone())),
+                                    run(enter.len(), bold),
+                                    run(suffix.len(), font(ui_family)),
+                                ]),
                             )
                     })
                     .child(
@@ -3325,6 +3367,9 @@ impl Waku {
                 } else {
                     tr!("voice_scratchpad.mute")
                 },
+                // "Unmute" is the wider label — the pill holds its width
+                // across the toggle.
+                Some(tr!("voice_scratchpad.unmute")),
                 24.0,
                 true,
                 theme,
@@ -3340,6 +3385,7 @@ impl Waku {
                 "vs-hide",
                 &scratchpad.hide_focus,
                 tr!("voice_scratchpad.hide"),
+                None,
                 18.0,
                 false,
                 theme,
@@ -3357,6 +3403,7 @@ impl Waku {
                 "vs-cancel",
                 &scratchpad.cancel_focus,
                 tr!("voice_scratchpad.cancel"),
+                None,
                 18.0,
                 false,
                 theme,
@@ -3373,6 +3420,7 @@ impl Waku {
         id: &'static str,
         focus: &FocusHandle,
         label: String,
+        size_to: Option<String>,
         h_pad: f32,
         primary: bool,
         theme: &Theme,
@@ -3409,7 +3457,25 @@ impl Waku {
             .focus_visible(|pill| pill.border(hairline()).border_color(theme.accent))
             .hover(|pill| pill.opacity(0.88))
             .active(|pill| pill.opacity(0.75))
-            .child(label)
+            .child(match size_to {
+                // The wider label rides invisibly under the real one so
+                // the pill's width never moves between states.
+                Some(wide) if wide != label => div()
+                    .relative()
+                    .flex_none()
+                    .child(div().invisible().child(wide))
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(label),
+                    )
+                    .into_any_element(),
+                _ => label.into_any_element(),
+            })
             .on_click({
                 let weak = weak.clone();
                 move |_, window, cx| {
@@ -3531,6 +3597,8 @@ impl Waku {
             // The dot marks the point speech actually lands: the live row
             // while no annotation bubble is open, the bubble while one is.
             let show_dot = is_current && annotation_target.is_none();
+            let cleaning =
+                transcript.is_cleaning(CleanTarget::Node(ScratchpadNode::Paragraph(index)));
             let flat = scratchpad_paragraph_text(
                 paragraph,
                 is_current && !annotating,
@@ -3566,6 +3634,9 @@ impl Waku {
                             theme.selection,
                             false,
                         ))
+                        .when(cleaning, |row| {
+                            row.child(scratchpad_cleanup_spinner(14.0, theme))
+                        })
                         .when(show_dot, |row| {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         }),
@@ -3656,6 +3727,13 @@ impl Waku {
                         theme.selection,
                         false,
                     ))
+                    .when(
+                        transcript.is_cleaning(CleanTarget::Node(ScratchpadNode::Bullet(
+                            index,
+                            bullet_index,
+                        ))),
+                        |row| row.child(scratchpad_cleanup_spinner(14.0, theme)),
+                    )
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                             && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -3911,7 +3989,20 @@ impl Waku {
                 scratchpad.status,
                 theme,
             ))
-            .child(div().min_w_0().flex_1().child(text));
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap(px(4.0))
+                    .child(text)
+                    .when(
+                        scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
+                        |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
+                    ),
+            );
         deferred(FloatingSurface::anchored_to_parent(
             box_content.into_any_element(),
             MenuAlign::BelowLeft,
@@ -4163,8 +4254,11 @@ fn scratchpad_paragraph_text(
 }
 
 /// The glowing record dot: the frame's solid core and hairline, with its
-/// pink glow painted as the design's inner shadow.
-fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> Div {
+/// pink glow painted as the design's inner shadow. While live it breathes
+/// — the shared pulse clock sweeps its opacity between ~70% and 100% over
+/// a second and a half; muted and dead states keep their dim look and
+/// stay still.
+fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> AnyElement {
     let live = !muted
         && !matches!(
             status,
@@ -4180,18 +4274,31 @@ fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> Div {
     } else {
         theme.text_tertiary.opacity(0.5)
     };
-    div()
-        .flex_none()
-        .size(px(15.0))
-        .rounded_full()
-        .bg(core)
-        .border(px(1.0))
-        .border_color(gpui::black().opacity(0.10))
-        .shadow(vec![
-            gpui::BoxShadow::new(px(0.0), px(2.0), glow)
-                .blur_radius(px(4.0))
-                .inset(),
-        ])
+    let dot = move || {
+        div()
+            .flex_none()
+            .size(px(15.0))
+            .rounded_full()
+            .bg(core)
+            .border(px(1.0))
+            .border_color(gpui::black().opacity(0.10))
+            .shadow(vec![
+                gpui::BoxShadow::new(px(0.0), px(2.0), glow)
+                    .blur_radius(px(4.0))
+                    .inset(),
+            ])
+    };
+    if !live {
+        return dot().into_any_element();
+    }
+    // Phase 0 sits at full opacity — reduce-motion's constant first frame
+    // keeps the dot's original solid look.
+    motion::pulse(RECORDING_DOT_PERIOD, move |phase| {
+        dot()
+            .opacity(0.85 + 0.15 * (phase * std::f32::consts::TAU).cos())
+            .into_any_element()
+    })
+    .into_any_element()
 }
 
 /// The dot's offset centers it on the first text line — GPUI's default phi
@@ -4206,6 +4313,20 @@ fn scratchpad_dot_on_line(
         .flex_none()
         .mt(px((text_size * 1.618_034 - 15.0).max(0.0) / 2.0))
         .child(scratchpad_dot(muted, status, theme))
+}
+
+/// The cleanup spinner at a cleaning node's tail — the same shared-clock
+/// loader every spinner rides, offset to sit on the first text line the
+/// way the record dot does.
+fn scratchpad_cleanup_spinner(text_size: f32, theme: &Theme) -> Div {
+    div()
+        .flex_none()
+        .mt(px((text_size * 1.618_034 - 12.0).max(0.0) / 2.0))
+        .child(motion::spin(icon(
+            "icons/loader-circle.svg",
+            12.0,
+            theme.text_tertiary,
+        )))
 }
 
 #[cfg(test)]

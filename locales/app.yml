@@ -6466,8 +6466,12 @@ voice_scratchpad.hint_prefix:
   en: "Say “"
 voice_scratchpad.hint_command:
   en: Ok, next
+voice_scratchpad.hint_middle:
+  en: "” to go to next paragraph • Press "
+voice_scratchpad.hint_enter:
+  en: enter
 voice_scratchpad.hint_suffix:
-  en: "” to go to next paragraph • Press enter to send"
+  en: " to send"
 voice_scratchpad.annotation_hint:
   en: Dictating an annotation…
 voice_scratchpad.discard_title:
