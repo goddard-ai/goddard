@@ -4,6 +4,8 @@ import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
 import { startDevServe, type DevServe } from "./dev-serve";
 import {
+  chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -11,6 +13,7 @@ import {
   readlinkSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   watch,
   writeFileSync,
@@ -51,13 +54,30 @@ const appExecutablePath = isMacOS
 // fallback lane when a build starts tearing the newest, then to the new build
 // once bundling succeeds. A lane carries a .complete marker so a watcher
 // killed mid-bundle doesn't leave a half-written app looking launchable.
-type AppLane = "a" | "b";
+// The daemon binary gets the same treatment for the same reason: macOS kills
+// a signed process whose executable is replaced under it, so the running
+// daemon executes a lane copy and cargo's output at daemonPath is never run
+// directly. daemonLinkPath mirrors appPath — a stable symlink to the newest
+// completed lane that the app watches for rebuild swaps.
+type Lane = "a" | "b";
 const laned = isMacOS && !serveMode;
 const laneRoot = join(targetDir, profile, "lanes");
-const laneAppPath = (lane: AppLane) => join(laneRoot, lane, `${appName}.app`);
-const laneLinkTarget = (lane: AppLane) =>
+const laneAppPath = (lane: Lane) => join(laneRoot, lane, `${appName}.app`);
+const laneLinkTarget = (lane: Lane) =>
   join("lanes", lane, `${appName}.app`);
-const laneMarkerPath = (lane: AppLane) => join(laneRoot, lane, ".complete");
+const laneMarkerPath = (lane: Lane) => join(laneRoot, lane, ".complete");
+const daemonLaneRoot = join(targetDir, "debug", "daemon-lanes");
+const laneDaemonPath = (lane: Lane) =>
+  join(daemonLaneRoot, lane, basename(daemonPath));
+const laneDaemonLinkTarget = (lane: Lane) =>
+  join("daemon-lanes", lane, basename(daemonPath));
+const laneDaemonMarkerPath = (lane: Lane) =>
+  join(daemonLaneRoot, lane, ".complete");
+const daemonLinkPath = join(
+  targetDir,
+  "debug",
+  `${basename(daemonPath)}-latest`,
+);
 // The app's "auto-restart" command palette toggle lands here; the app only
 // offers it when the watcher hands it this path.
 const devStatePath = join(targetDir, "debug", "goddard-dev.json");
@@ -189,10 +209,15 @@ let debouncedBuild: BuildTarget | undefined;
 // Lane state is rebuilt from disk on startup; completeLanes lists only lanes
 // whose .complete marker survived, latestLane is the newest of those, and
 // runningLane/appBundlePath describe the live app instance (never torn).
-let completeLanes: AppLane[] = [];
-let latestLane: AppLane | undefined;
-let runningLane: AppLane | undefined;
+let completeLanes: Lane[] = [];
+let latestLane: Lane | undefined;
+let runningLane: Lane | undefined;
 let appBundlePath: string | undefined;
+// Same invariants as the app lanes, for the daemon binary: runningDaemonLane
+// is the copy the live daemon executes and is never a build target.
+let completeDaemonLanes: Lane[] = [];
+let latestDaemonLane: Lane | undefined;
+let runningDaemonLane: Lane | undefined;
 let appChangeRevision = 0;
 let daemonChangeRevision = 0;
 let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
@@ -667,13 +692,13 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   return true;
 }
 
-function otherLane(lane: AppLane): AppLane {
+function otherLane(lane: Lane): Lane {
   return lane === "a" ? "b" : "a";
 }
 
 // appPath is the stable launch path; keep it aimed at a complete bundle or
 // remove it so nothing can open a half-written app through it.
-function linkAppPath(lane: AppLane | undefined): void {
+function linkAppPath(lane: Lane | undefined): void {
   try {
     rmSync(appPath, { force: true });
     if (lane !== undefined) symlinkSync(laneLinkTarget(lane), appPath);
@@ -740,14 +765,14 @@ function adoptAppLanes(): void {
 
 // Builds go into whichever lane preserves a usable app: never the lane the
 // running instance came from, and otherwise never the newest complete build.
-function buildLane(): AppLane {
+function appBuildLane(): Lane {
   const pinned = runningLane ?? latestLane;
   return pinned === undefined ? "a" : otherLane(pinned);
 }
 
 // Retire a lane the moment bundling starts tearing it so nothing — including
 // the appPath link — can still reach it.
-function retireLane(lane: AppLane): void {
+function retireLane(lane: Lane): void {
   completeLanes = completeLanes.filter((entry) => entry !== lane);
   rmSync(laneMarkerPath(lane), { force: true });
   if (latestLane === lane) {
@@ -756,7 +781,7 @@ function retireLane(lane: AppLane): void {
   }
 }
 
-function publishLane(lane: AppLane): void {
+function publishLane(lane: Lane): void {
   if (!completeLanes.includes(lane)) completeLanes.push(lane);
   latestLane = lane;
   try {
@@ -766,6 +791,96 @@ function publishLane(lane: AppLane): void {
     // carries correctness until then.
   }
   linkAppPath(lane);
+}
+
+// daemonLinkPath is the stable path the app is handed for its daemon — the
+// supervisor watches it and swaps when a rebuild changes it — so keep it
+// aimed at a complete lane or absent, exactly like appPath.
+function linkDaemonPath(lane: Lane | undefined): void {
+  try {
+    rmSync(daemonLinkPath, { force: true });
+    if (lane !== undefined) {
+      symlinkSync(laneDaemonLinkTarget(lane), daemonLinkPath);
+    }
+  } catch (error) {
+    console.error(
+      "[goddard-dev] Could not repoint the daemon binary link:",
+      error,
+    );
+  }
+}
+
+// Rebuild daemon lane state from disk after a watcher restart. A lane without
+// its marker was torn mid-copy so it is reclaimed, not trusted; the newest
+// surviving marker names the newest build. A leftover daemonPath only counts
+// when no lane survived — it was the pre-lanes binary then — because after
+// this change it is cargo's scratch output and may hold a half-linked file.
+function adoptDaemonLanes(): void {
+  for (const lane of ["a", "b"] as const) {
+    const complete =
+      existsSync(laneDaemonPath(lane)) && existsSync(laneDaemonMarkerPath(lane));
+    if (complete) completeDaemonLanes.push(lane);
+    else rmSync(join(daemonLaneRoot, lane), { recursive: true, force: true });
+  }
+  if (completeDaemonLanes.length === 0 && existsSync(daemonPath)) {
+    try {
+      mkdirSync(join(daemonLaneRoot, "a"), { recursive: true });
+      renameSync(daemonPath, laneDaemonPath("a"));
+      writeFileSync(laneDaemonMarkerPath("a"), "adopted\n");
+      completeDaemonLanes.push("a");
+      console.log(
+        "[goddard-dev] Moved the existing daemon binary into lane a.",
+      );
+    } catch (error) {
+      console.error(
+        "[goddard-dev] Could not adopt the existing daemon binary:",
+        error,
+      );
+    }
+  }
+  completeDaemonLanes.sort(
+    (x, y) =>
+      statSync(laneDaemonMarkerPath(x)).mtimeMs -
+      statSync(laneDaemonMarkerPath(y)).mtimeMs,
+  );
+  latestDaemonLane = completeDaemonLanes.at(-1);
+  linkDaemonPath(latestDaemonLane);
+}
+
+// The build's lane is whichever one keeps a runnable daemon: never the lane
+// the running daemon executes, and otherwise never the newest complete build.
+function daemonBuildLane(): Lane {
+  const pinned = runningDaemonLane ?? latestDaemonLane;
+  return pinned === undefined ? "a" : otherLane(pinned);
+}
+
+// Retire a lane the moment it becomes the copy target so nothing — including
+// the daemonLinkPath link — can spawn a half-written binary.
+function retireDaemonLane(lane: Lane): void {
+  completeDaemonLanes = completeDaemonLanes.filter((entry) => entry !== lane);
+  rmSync(laneDaemonMarkerPath(lane), { force: true });
+  if (latestDaemonLane === lane) {
+    latestDaemonLane = completeDaemonLanes.at(-1);
+    linkDaemonPath(latestDaemonLane);
+  }
+}
+
+function publishDaemonLane(lane: Lane): void {
+  if (!completeDaemonLanes.includes(lane)) completeDaemonLanes.push(lane);
+  latestDaemonLane = lane;
+  try {
+    writeFileSync(laneDaemonMarkerPath(lane), `${new Date().toISOString()}\n`);
+  } catch {
+    // The marker only matters after a crashed watcher; the in-memory state
+    // carries correctness until then.
+  }
+  linkDaemonPath(lane);
+}
+
+// Where the app should look for the daemon: the stable link on macOS so its
+// supervisor sees every rebuild, cargo's output where lanes are off.
+function daemonEnvironmentPath(): string {
+  return laned && latestDaemonLane !== undefined ? daemonLinkPath : daemonPath;
 }
 
 async function build(target: BuildTarget): Promise<boolean> {
@@ -819,7 +934,7 @@ async function build(target: BuildTarget): Promise<boolean> {
     return false;
   }
   if (isMacOS) {
-    const lane = laned ? buildLane() : undefined;
+    const lane = laned ? appBuildLane() : undefined;
     if (lane !== undefined) retireLane(lane);
     // The watcher already ran cargo itself so it could draw progress;
     // bundle.sh only packages and signs the binaries it just produced.
@@ -873,6 +988,25 @@ async function buildDaemon(): Promise<boolean> {
     );
     return false;
   }
+  if (laned) {
+    // Cargo's output at daemonPath is scratch space nobody executes; the
+    // runnable copy lands in the lane the running daemon is not using, so a
+    // compile can never overwrite a live daemon's binary.
+    const lane = daemonBuildLane();
+    retireDaemonLane(lane);
+    try {
+      mkdirSync(join(daemonLaneRoot, lane), { recursive: true });
+      copyFileSync(daemonPath, laneDaemonPath(lane));
+      chmodSync(laneDaemonPath(lane), 0o755);
+    } catch (error) {
+      console.error(
+        "[goddard-dev] Could not stage the rebuilt daemon:",
+        error,
+      );
+      return false;
+    }
+    publishDaemonLane(lane);
+  }
   daemonBuildDirty = true;
   return true;
 }
@@ -898,8 +1032,9 @@ function writeDaemonInfo(): void {
 }
 
 async function spawnDaemon(bind: string): Promise<void> {
+  const lane = laned ? latestDaemonLane : undefined;
   const command = [
-    daemonPath,
+    lane === undefined ? daemonPath : laneDaemonPath(lane),
     "--bind",
     bind,
     "--parent-pid",
@@ -925,6 +1060,7 @@ async function spawnDaemon(bind: string): Promise<void> {
     throw error;
   }
   daemon = child;
+  runningDaemonLane = lane;
   daemonBind = bind;
   daemonAddress = ready.address;
   writeDaemonInfo();
@@ -982,6 +1118,7 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
   void child.exited.then(async (code) => {
     if (daemon !== child || stopping) return;
     daemon = undefined;
+    runningDaemonLane = undefined;
     console.error(`[goddard-dev] Daemon exited unexpectedly (${code}).`);
     if (Date.now() - lastDaemonSpawnAt > 30_000) {
       await restartDaemon("unexpected exit");
@@ -1077,7 +1214,10 @@ async function ensureDaemon(): Promise<void> {
 async function stopDaemon(): Promise<void> {
   const child = daemon;
   daemon = undefined;
-  if (child === undefined || child.exitCode !== null) return;
+  if (child === undefined || child.exitCode !== null) {
+    runningDaemonLane = undefined;
+    return;
+  }
   try {
     if (controlClient?.connected) controlClient.shutdownDaemon();
   } catch {
@@ -1089,6 +1229,9 @@ async function stopDaemon(): Promise<void> {
   ]);
   if (!finished) child.kill();
   await child.exited.catch(() => {});
+  // Clear the lane only once the process is gone: until then it still holds
+  // the lane's binary open and a build must not pick it as the copy target.
+  runningDaemonLane = undefined;
   controlClient?.disconnect();
   controlClient = undefined;
 }
@@ -1277,7 +1420,7 @@ function printShortcuts(): void {
 function printBanner(): void {
   const daemonDetail =
     externalDaemonAddress === undefined
-      ? "survives app relaunches and quits"
+      ? `survives app relaunches and quits${laned ? ` · lane ${latestDaemonLane ?? "none yet"}` : ""}`
       : "external — not restarted by the watcher";
   console.log(
     `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
@@ -1360,9 +1503,23 @@ async function handleCommand(command: string): Promise<void> {
       ) {
         forceDaemonRestart = true;
         relaunchAfterBuild = true;
-        console.log(
-          "[goddard-dev] Will restart the daemon and relaunch the app once the current build finishes.",
-        );
+        // Daemon lanes keep the newest completed build runnable while a
+        // compile is in flight — the same way 'a' relaunches the last
+        // completed app lane — so swap now instead of queuing the restart.
+        // The queued flags then swap onto the build's fresh lane and relaunch
+        // the app once it lands.
+        if (laned) {
+          await restartDaemon("requested");
+          console.log(
+            daemonBind === undefined
+              ? "[goddard-dev] Will relaunch the app once the current build finishes."
+              : "[goddard-dev] Will restart the daemon on the new build and relaunch the app once it finishes.",
+          );
+        } else {
+          console.log(
+            "[goddard-dev] Will restart the daemon and relaunch the app once the current build finishes.",
+          );
+        }
         return;
       }
       await restartDaemon("requested");
@@ -1468,7 +1625,7 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     env: {
       ...process.env,
       ...(serveMode ? { GODDARD_DEV_DATA_DIR: developmentDataDir } : {}),
-      GODDARD_DAEMON_PATH: daemonPath,
+      GODDARD_DAEMON_PATH: daemonEnvironmentPath(),
       GODDARD_DAEMON_ADDRESS: daemonAddress,
       GODDARD_DAEMON_TOKEN: daemonToken,
       // Marks this launch as watcher-owned; the app writes its auto-restart
@@ -1748,12 +1905,20 @@ if (serveMode) {
     process.exit(1);
   }
 }
-if (laned) adoptAppLanes();
+if (laned) {
+  adoptAppLanes();
+  adoptDaemonLanes();
+}
 building = true;
 // A previous session's completed bundle is usable during the very first
-// rebuild too. Start its daemon before cargo replaces the daemon executable,
-// and accept commands while the initial build is running.
-if (latestLane !== undefined && (externalDaemonAddress || existsSync(daemonPath))) {
+// rebuild too. Start its daemon and accept commands while the initial build
+// is running — lane copies mean the compile can't touch either binary.
+if (
+  latestLane !== undefined &&
+  (externalDaemonAddress ||
+    latestDaemonLane !== undefined ||
+    existsSync(daemonPath))
+) {
   try {
     await ensureDaemon();
   } catch (error) {
