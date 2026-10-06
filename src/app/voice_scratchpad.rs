@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicBool;
 use std::thread;
 
 use anyhow::Context as _;
+use gpui::DispatchPhase;
 use serde_json::Value;
 use tungstenite::handshake::client::Request;
 use tungstenite::protocol::WebSocketConfig;
@@ -144,6 +145,13 @@ pub(super) struct VoiceScratchpad {
     pub(super) selection: TranscriptSelection,
     /// Auto-scroll follows the append point until the user scrolls up.
     follow_tail: bool,
+    /// The transcript surface's handle — a settled selection or a Tab
+    /// landing moves typing here so edits reach the transcript.
+    edit_focus: FocusHandle,
+    /// Per-row handles for the annotate affordance — `p{index}` for a
+    /// paragraph, `b{index}-{bullet}` for a bullet — created lazily the
+    /// way the sidebar's group rows are.
+    row_focuses: HashMap<String, FocusHandle>,
     mute_focus: FocusHandle,
     hide_focus: FocusHandle,
     cancel_focus: FocusHandle,
@@ -169,6 +177,8 @@ impl VoiceScratchpad {
             scrollbar: ScrollbarState::new(),
             selection: TranscriptSelection::default(),
             follow_tail: true,
+            edit_focus: cx.focus_handle(),
+            row_focuses: HashMap::new(),
             mute_focus: cx.focus_handle(),
             hide_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -185,6 +195,35 @@ struct ScratchpadParagraph {
     bullets: Vec<String>,
 }
 
+/// Where an open annotation box writes: a paragraph's bullet list as a
+/// whole, or — after a bullet click — the slot right after that bullet,
+/// advancing once per commit so consecutive "okay next" bullets land in
+/// order under it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AnnotationTarget {
+    Paragraph(usize),
+    Bullet {
+        paragraph: usize,
+        bullet: usize,
+        insert: usize,
+    },
+}
+
+/// A transcript buffer a caret or edit addresses — a paragraph's body or
+/// one of its bullets. Painted element keys map back onto these.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScratchpadNode {
+    Paragraph(usize),
+    Bullet(usize, usize),
+}
+
+/// A byte offset into one node's committed text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CaretPos {
+    node: ScratchpadNode,
+    offset: usize,
+}
+
 /// Rolling cap on `finalized_tail` — dedup only needs the stream's recent
 /// end.
 const FINALIZED_TAIL_CAP: usize = 16 * 1024;
@@ -194,14 +233,20 @@ const FINALIZED_TAIL_CAP: usize = 16 * 1024;
 #[derive(Default)]
 pub(super) struct ScratchpadTranscript {
     paragraphs: Vec<ScratchpadParagraph>,
-    /// The paragraph an open annotation box writes into.
-    annotation_target: Option<usize>,
+    /// The node an open annotation box writes into.
+    annotation_target: Option<AnnotationTarget>,
     /// Finalized speech currently inside the open annotation box.
     annotation_text: String,
     /// Interim speech while annotating — provisional until it settles.
     annotation_interim: String,
     /// Interim speech at the main append point.
     interim: String,
+    /// Where typed text and deletes land while the transcript surface holds
+    /// focus — set by a selection edit or arrow press.
+    caret: Option<CaretPos>,
+    /// The fixed end of a shift-grown selection; `None` for mouse drags,
+    /// which the `Selection` anchors itself.
+    caret_anchor: Option<CaretPos>,
     /// The raw finalized stream's recent tail. `transcript-final` dedup
     /// compares against it — the folded text can't serve, since the
     /// command filter removes "okay next" spans before they land.
@@ -482,23 +527,45 @@ impl ScratchpadTranscript {
     }
 
     /// "Okay next": inside an annotation box it commits the box's content
-    /// as a bullet under its paragraph and the box reopens empty; otherwise
-    /// it closes the current paragraph — a redundant command on an empty
-    /// one moves nothing. The provisional suffix survives: it sits past
-    /// the consumed command and belongs to the new append point.
+    /// as a bullet at the box's slot — under its paragraph, or right after
+    /// its bullet — and the box reopens empty; otherwise it closes the
+    /// current paragraph — a redundant command on an empty one moves
+    /// nothing. The provisional suffix survives: it sits past the
+    /// consumed command and belongs to the new append point.
     fn commit_next(&mut self) {
-        if let Some(target) = self.annotation_target {
-            let bullet = std::mem::take(&mut self.annotation_text).trim().to_owned();
-            if !bullet.is_empty()
-                && let Some(paragraph) = self.paragraphs.get_mut(target)
-            {
-                paragraph.bullets.push(bullet);
+        match self.annotation_target {
+            Some(AnnotationTarget::Paragraph(target)) => {
+                let bullet = std::mem::take(&mut self.annotation_text).trim().to_owned();
+                if !bullet.is_empty()
+                    && let Some(paragraph) = self.paragraphs.get_mut(target)
+                {
+                    paragraph.bullets.push(bullet);
+                }
             }
-            return;
-        }
-        let current = self.current();
-        if !current.text.is_empty() || !current.bullets.is_empty() {
-            self.paragraphs.push(ScratchpadParagraph::default());
+            Some(AnnotationTarget::Bullet {
+                paragraph,
+                bullet,
+                insert,
+            }) => {
+                let text = std::mem::take(&mut self.annotation_text).trim().to_owned();
+                if !text.is_empty()
+                    && let Some(target) = self.paragraphs.get_mut(paragraph)
+                {
+                    let at = insert.min(target.bullets.len());
+                    target.bullets.insert(at, text);
+                    self.annotation_target = Some(AnnotationTarget::Bullet {
+                        paragraph,
+                        bullet,
+                        insert: at + 1,
+                    });
+                }
+            }
+            None => {
+                let current = self.current();
+                if !current.text.is_empty() || !current.bullets.is_empty() {
+                    self.paragraphs.push(ScratchpadParagraph::default());
+                }
+            }
         }
     }
 
@@ -507,8 +574,31 @@ impl ScratchpadTranscript {
     /// behind would pin stale dimmed text on the last row.
     fn annotate(&mut self, index: usize) {
         if index < self.paragraphs.len() {
-            self.annotation_target = Some(index);
+            self.annotation_target = Some(AnnotationTarget::Paragraph(index));
             self.annotation_interim = std::mem::take(&mut self.interim);
+            self.caret = None;
+            self.caret_anchor = None;
+        }
+    }
+
+    /// Open the annotation box on a bullet — its commits land as sibling
+    /// bullets right after it, matching how paragraphs nest theirs. The
+    /// provisional suffix retargets with the append point, same as a
+    /// paragraph box.
+    fn annotate_bullet(&mut self, paragraph: usize, bullet: usize) {
+        if self
+            .paragraphs
+            .get(paragraph)
+            .is_some_and(|target| bullet < target.bullets.len())
+        {
+            self.annotation_target = Some(AnnotationTarget::Bullet {
+                paragraph,
+                bullet,
+                insert: bullet + 1,
+            });
+            self.annotation_interim = std::mem::take(&mut self.interim);
+            self.caret = None;
+            self.caret_anchor = None;
         }
     }
 
@@ -517,6 +607,382 @@ impl ScratchpadTranscript {
     fn exit_annotation(&mut self) {
         self.annotation_target = None;
         self.annotation_interim.clear();
+    }
+
+    /// One node's committed text — `""` for anything not currently painted.
+    fn node_text(&self, node: ScratchpadNode) -> &str {
+        match node {
+            ScratchpadNode::Paragraph(index) => self
+                .paragraphs
+                .get(index)
+                .map(|paragraph| paragraph.text.as_str())
+                .unwrap_or_default(),
+            ScratchpadNode::Bullet(paragraph, bullet) => self
+                .paragraphs
+                .get(paragraph)
+                .and_then(|paragraph| paragraph.bullets.get(bullet))
+                .map(|bullet| bullet.as_str())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// The mutable buffer for `node`. `Paragraph(0)` on an empty transcript
+    /// lazily becomes the first paragraph — the live row's caret position.
+    fn node_text_mut(&mut self, node: ScratchpadNode) -> Option<&mut String> {
+        match node {
+            ScratchpadNode::Paragraph(index) => {
+                if self.paragraphs.is_empty() && index == 0 {
+                    self.paragraphs.push(ScratchpadParagraph::default());
+                }
+                self.paragraphs
+                    .get_mut(index)
+                    .map(|paragraph| &mut paragraph.text)
+            }
+            ScratchpadNode::Bullet(paragraph, bullet) => self
+                .paragraphs
+                .get_mut(paragraph)
+                .and_then(|paragraph| paragraph.bullets.get_mut(bullet)),
+        }
+    }
+
+    /// The append point as a caret: the last paragraph's end, or the empty
+    /// session's live row.
+    fn append_point_caret(&self) -> CaretPos {
+        CaretPos {
+            node: ScratchpadNode::Paragraph(self.paragraphs.len().saturating_sub(1)),
+            offset: self.paragraphs.last().map_or(0, |paragraph| paragraph.text.len()),
+        }
+    }
+
+    /// Editable nodes in paint order — paragraph text first, then its
+    /// bullets — with each node's committed length.
+    fn caret_nodes(&self) -> Vec<(ScratchpadNode, usize)> {
+        let mut nodes = Vec::new();
+        for (index, paragraph) in self.paragraphs.iter().enumerate() {
+            nodes.push((ScratchpadNode::Paragraph(index), paragraph.text.len()));
+            for (bullet, text) in paragraph.bullets.iter().enumerate() {
+                nodes.push((ScratchpadNode::Bullet(index, bullet), text.len()));
+            }
+        }
+        if nodes.is_empty() {
+            nodes.push((ScratchpadNode::Paragraph(0), 0));
+        }
+        nodes
+    }
+
+    /// The node before or after `node` in paint order.
+    fn neighbor_node(&self, node: ScratchpadNode, forward: bool) -> Option<ScratchpadNode> {
+        let nodes = self.caret_nodes();
+        let index = nodes.iter().position(|(entry, _)| *entry == node)?;
+        if forward {
+            nodes.get(index + 1).map(|(entry, _)| *entry)
+        } else {
+            index.checked_sub(1).map(|index| nodes[index].0)
+        }
+    }
+
+    /// The selection key `node` paints under — `vs-p-{i}` for a paragraph,
+    /// `vs-b-{i}` at index j for a bullet, `vs-p-live` for the empty
+    /// session's live row.
+    fn node_key(&self, node: ScratchpadNode) -> md::selection::TextKey {
+        match node {
+            ScratchpadNode::Paragraph(index) => {
+                if index < self.paragraphs.len() {
+                    md::selection::TextKey::new(format!("vs-p-{index}"), 0)
+                } else {
+                    md::selection::TextKey::new("vs-p-live", 0)
+                }
+            }
+            ScratchpadNode::Bullet(paragraph, bullet) => {
+                md::selection::TextKey::new(format!("vs-b-{paragraph}"), bullet)
+            }
+        }
+    }
+
+    /// The node a painted element's key addresses — the live row reads as
+    /// paragraph zero.
+    fn node_for_key(&self, key: &md::selection::TextKey) -> Option<ScratchpadNode> {
+        let row = key.row.as_ref();
+        if let Some(rest) = row.strip_prefix("vs-p-") {
+            if rest == "live" {
+                return Some(ScratchpadNode::Paragraph(0));
+            }
+            return rest.parse().ok().map(ScratchpadNode::Paragraph);
+        }
+        row.strip_prefix("vs-b-")
+            .and_then(|rest| rest.parse().ok())
+            .map(|paragraph| ScratchpadNode::Bullet(paragraph, key.index))
+    }
+
+    /// Move the caret within its node — by grapheme, or by word — crossing
+    /// into the neighbor node's edge at the boundary.
+    fn move_caret(&self, caret: CaretPos, forward: bool, word: bool) -> CaretPos {
+        let text = self.node_text(caret.node);
+        let offset = caret.offset.min(text.len());
+        let next = if word {
+            if forward {
+                next_word_boundary(text, offset)
+            } else {
+                previous_word_boundary(text, offset)
+            }
+        } else if forward {
+            text[offset..]
+                .grapheme_indices(true)
+                .nth(1)
+                .map_or(text.len(), |(index, _)| offset + index)
+        } else {
+            text[..offset]
+                .grapheme_indices(true)
+                .next_back()
+                .map_or(0, |(index, _)| index)
+        };
+        if next != offset {
+            return CaretPos {
+                offset: next,
+                ..caret
+            };
+        }
+        self.neighbor_node(caret.node, forward)
+            .map(|node| CaretPos {
+                node,
+                offset: if forward { 0 } else { self.node_text(node).len() },
+            })
+            .unwrap_or(caret)
+    }
+
+    /// Up/down: step to the adjacent node at roughly the same offset.
+    fn step_node(&self, caret: CaretPos, down: bool) -> CaretPos {
+        self.neighbor_node(caret.node, down)
+            .map(|node| CaretPos {
+                node,
+                offset: caret.offset.min(self.node_text(node).len()),
+            })
+            .unwrap_or(caret)
+    }
+
+    /// Splice `text` in at the caret, leaving it just past what landed.
+    fn insert_at(&mut self, caret: &mut CaretPos, text: &str) {
+        if let Some(buffer) = self.node_text_mut(caret.node) {
+            caret.offset = caret.offset.min(buffer.len());
+            buffer.insert_str(caret.offset, text);
+            caret.offset += text.len();
+        }
+    }
+
+    /// Delete at the caret — a grapheme, or a word with `word` — before or
+    /// after it. At a node's edge the delete reaches into the neighbor's
+    /// edge run the way a field would join lines, and the caret rides the
+    /// cut.
+    fn delete_at(&mut self, caret: &mut CaretPos, forward: bool, word: bool) {
+        let offset = caret.offset.min(self.node_text(caret.node).len());
+        let (node, range, landing) = if forward {
+            let text = self.node_text(caret.node);
+            if offset < text.len() {
+                let end = if word {
+                    next_word_boundary(text, offset)
+                } else {
+                    text[offset..]
+                        .grapheme_indices(true)
+                        .nth(1)
+                        .map_or(text.len(), |(index, _)| offset + index)
+                };
+                (
+                    caret.node,
+                    offset..end,
+                    CaretPos {
+                        node: caret.node,
+                        offset,
+                    },
+                )
+            } else {
+                let Some(node) = self.neighbor_node(caret.node, true) else {
+                    return;
+                };
+                let text = self.node_text(node);
+                if text.is_empty() {
+                    return;
+                }
+                let end = if word {
+                    next_word_boundary(text, 0)
+                } else {
+                    text.grapheme_indices(true)
+                        .nth(1)
+                        .map_or(text.len(), |(index, _)| index)
+                };
+                (node, 0..end, *caret)
+            }
+        } else if offset > 0 {
+            let text = self.node_text(caret.node);
+            let start = if word {
+                previous_word_boundary(text, offset)
+            } else {
+                text[..offset]
+                    .grapheme_indices(true)
+                    .next_back()
+                    .map_or(0, |(index, _)| index)
+            };
+            (
+                caret.node,
+                start..offset,
+                CaretPos {
+                    node: caret.node,
+                    offset: start,
+                },
+            )
+        } else {
+            let Some(node) = self.neighbor_node(caret.node, false) else {
+                return;
+            };
+            let len = self.node_text(node).len();
+            if len == 0 {
+                return;
+            }
+            let text = self.node_text(node);
+            let start = if word {
+                previous_word_boundary(text, len)
+            } else {
+                text[..len]
+                    .grapheme_indices(true)
+                    .next_back()
+                    .map_or(0, |(index, _)| index)
+            };
+            (node, start..len, CaretPos { node, offset: start })
+        };
+        let len = self.node_text(node).len();
+        let range = range.start.min(len)..range.end.min(len);
+        if !range.is_empty()
+            && let Some(text) = self.node_text_mut(node)
+        {
+            text.replace_range(range, "");
+        }
+        *caret = landing;
+        self.collapse_emptied(caret);
+    }
+
+    /// The model positions at the selection's painted edges — document
+    /// start and end — so arrow presses can collapse or extend it.
+    fn spans_endpoints(&self, spans: &[md::selection::Span]) -> Option<(CaretPos, CaretPos)> {
+        let first = spans.iter().find(|span| !span.range.is_empty())?;
+        let last = spans.iter().rfind(|span| !span.range.is_empty())?;
+        let start_node = self.node_for_key(&first.key)?;
+        let end_node = self.node_for_key(&last.key)?;
+        Some((
+            CaretPos {
+                node: start_node,
+                offset: first.range.start.min(self.node_text(start_node).len()),
+            },
+            CaretPos {
+                node: end_node,
+                offset: last.range.end.min(self.node_text(end_node).len()),
+            },
+        ))
+    }
+
+    /// Splice `insert` over the selection's painted `spans`: every covered
+    /// committed range is cut and `insert` lands where the grab began. A
+    /// span reaching past a paragraph's committed text covers painted
+    /// interim — the provisional tail drops rather than survive as ghost
+    /// bytes. Returns the caret the edit leaves.
+    fn apply_selection_edit(
+        &mut self,
+        spans: &[md::selection::Span],
+        insert: &str,
+    ) -> Option<CaretPos> {
+        if spans.is_empty() {
+            return None;
+        }
+        self.interim.clear();
+        self.annotation_interim.clear();
+        let mut caret = None;
+        for span in spans {
+            let Some(node) = self.node_for_key(&span.key) else {
+                continue;
+            };
+            let len = self.node_text(node).len();
+            let range = span.range.start.min(len)..span.range.end.min(len);
+            if caret.is_none() {
+                caret = Some(CaretPos {
+                    node,
+                    offset: range.start,
+                });
+            }
+            if !range.is_empty()
+                && let Some(text) = self.node_text_mut(node)
+            {
+                text.replace_range(range, "");
+            }
+        }
+        // A grab of nothing but interim still earns its caret at the point
+        // it painted — the live append point.
+        let mut caret = caret.unwrap_or_else(|| self.append_point_caret());
+        if !insert.is_empty()
+            && let Some(text) = self.node_text_mut(caret.node)
+        {
+            caret.offset = caret.offset.min(text.len());
+            text.insert_str(caret.offset, insert);
+            caret.offset += insert.len();
+        }
+        self.collapse_emptied(&mut caret);
+        Some(caret)
+    }
+
+    /// Drop bullets and paragraphs an edit emptied outright — the last
+    /// paragraph always stays as the live append point — re-anchoring the
+    /// caret to the position that followed whatever was cut.
+    fn collapse_emptied(&mut self, caret: &mut CaretPos) {
+        // Bottom-up so removals only renumber what came after them.
+        for paragraph in (0..self.paragraphs.len()).rev() {
+            for bullet in (0..self.paragraphs[paragraph].bullets.len()).rev() {
+                if !self.paragraphs[paragraph].bullets[bullet].is_empty() {
+                    continue;
+                }
+                self.paragraphs[paragraph].bullets.remove(bullet);
+                if let ScratchpadNode::Bullet(p, b) = caret.node
+                    && p == paragraph
+                {
+                    if b == bullet {
+                        caret.node = if b < self.paragraphs[paragraph].bullets.len() {
+                            ScratchpadNode::Bullet(paragraph, b)
+                        } else if paragraph + 1 < self.paragraphs.len() {
+                            ScratchpadNode::Paragraph(paragraph + 1)
+                        } else {
+                            ScratchpadNode::Paragraph(paragraph)
+                        };
+                        caret.offset = match caret.node {
+                            ScratchpadNode::Paragraph(p) if p == paragraph => {
+                                self.paragraphs[paragraph].text.len()
+                            }
+                            _ => 0,
+                        };
+                    } else if b > bullet {
+                        caret.node = ScratchpadNode::Bullet(paragraph, b - 1);
+                    }
+                }
+            }
+            if self.paragraphs[paragraph].text.is_empty()
+                && self.paragraphs[paragraph].bullets.is_empty()
+                && paragraph + 1 < self.paragraphs.len()
+            {
+                self.paragraphs.remove(paragraph);
+                match caret.node {
+                    ScratchpadNode::Paragraph(index) if index == paragraph => {
+                        // The paragraph that followed slides into its slot.
+                        caret.offset = 0;
+                    }
+                    ScratchpadNode::Bullet(p, _) if p == paragraph => {
+                        caret.node = ScratchpadNode::Paragraph(paragraph);
+                        caret.offset = 0;
+                    }
+                    ScratchpadNode::Paragraph(index) if index > paragraph => {
+                        caret.node = ScratchpadNode::Paragraph(index - 1);
+                    }
+                    ScratchpadNode::Bullet(p, b) if p > paragraph => {
+                        caret.node = ScratchpadNode::Bullet(p - 1, b);
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     /// The whole transcript as one chat message: paragraphs separated by a
@@ -528,11 +994,22 @@ impl ScratchpadTranscript {
         for (index, paragraph) in self.paragraphs.iter().enumerate() {
             let mut text = paragraph.text.trim().to_owned();
             let mut bullets = paragraph.bullets.clone();
-            if Some(index) == self.annotation_target {
+            let pending_slot = match self.annotation_target {
+                Some(AnnotationTarget::Paragraph(target)) if target == index => {
+                    Some(bullets.len())
+                }
+                Some(AnnotationTarget::Bullet {
+                    paragraph: target,
+                    insert,
+                    ..
+                }) if target == index => Some(insert.min(bullets.len())),
+                _ => None,
+            };
+            if let Some(slot) = pending_slot {
                 let mut pending = self.annotation_text.trim().to_owned();
                 append_word_text(&mut pending, self.annotation_interim.trim());
                 if !pending.is_empty() {
-                    bullets.push(pending);
+                    bullets.insert(slot, pending);
                 }
             }
             if self.annotation_target.is_none() && index + 1 == self.paragraphs.len() {
@@ -565,6 +1042,27 @@ impl ScratchpadTranscript {
         written >= CANCEL_CONFIRM_PARAGRAPHS
             || self.to_message().chars().count() >= CANCEL_CONFIRM_CHARS
     }
+}
+
+/// The end of the next word after `offset` — TextInput's rule, kept local
+/// so the scratchpad doesn't reach into the field's internals.
+fn next_word_boundary(text: &str, offset: usize) -> usize {
+    text[offset..]
+        .split_word_bound_indices()
+        .find(|(_, segment)| !segment.chars().all(char::is_whitespace))
+        .map(|(index, segment)| offset + index + segment.len())
+        .unwrap_or(text.len())
+}
+
+/// The start of the word ending at `offset` — the mirror of
+/// [`next_word_boundary`].
+fn previous_word_boundary(text: &str, offset: usize) -> usize {
+    text[..offset]
+        .split_word_bound_indices()
+        .rev()
+        .find(|(_, segment)| !segment.chars().all(char::is_whitespace))
+        .map(|(index, _)| index)
+        .unwrap_or(0)
 }
 
 /// Append a word run to `text` with a single separating space. A run
@@ -1063,7 +1561,7 @@ impl Waku {
     /// Start a session on the composer's chat. The panel opens immediately —
     /// permission and connection failures become its inline error state —
     /// and capture begins behind it.
-    fn start_voice_scratchpad(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn start_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.state.voice_scratchpad_enabled || self.voice_scratchpad.is_some() {
             return;
         }
@@ -1071,6 +1569,28 @@ impl Waku {
             return;
         };
         self.voice_scratchpad = Some(VoiceScratchpad::new(session_id, cx));
+        let edit_focus = self
+            .voice_scratchpad
+            .as_ref()
+            .expect("the session was just created")
+            .edit_focus
+            .clone();
+        cx.on_focus(&edit_focus, window, |this, window, cx| {
+            // Keyboard focus lands the caret on the append point — the
+            // surface's visible focus treatment. Pointer focus arrives with
+            // a settled selection and leaves the caret alone.
+            if !window.last_input_was_keyboard() {
+                return;
+            }
+            if let Some(scratchpad) = &mut this.voice_scratchpad
+                && scratchpad.transcript.caret.is_none()
+            {
+                scratchpad.transcript.caret =
+                    Some(scratchpad.transcript.append_point_caret());
+                cx.notify();
+            }
+        })
+        .detach();
         match crate::platform::microphone_access() {
             crate::platform::CaptureAccess::Granted => self.begin_voice_capture(cx),
             crate::platform::CaptureAccess::Undetermined => {
@@ -1205,9 +1725,9 @@ impl Waku {
         }
     }
 
-    /// Escape inside the scratchpad: an armed discard dismisses first, an
-    /// annotation box closes next, then Esc means Cancel — the same
-    /// confirm rule as the button.
+    /// Escape inside the scratchpad: an armed discard dismisses first, a
+    /// text selection or caret peels off next, then an annotation box
+    /// closes, then Esc means Cancel — the same confirm rule as the button.
     pub(super) fn voice_scratchpad_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(scratchpad) = &mut self.voice_scratchpad else {
             return;
@@ -1217,12 +1737,223 @@ impl Waku {
             cx.notify();
             return;
         }
+        if !scratchpad.selection.selection.borrow().is_empty()
+            || scratchpad.transcript.caret.is_some()
+        {
+            scratchpad.selection.selection.borrow_mut().clear();
+            scratchpad.transcript.caret = None;
+            scratchpad.transcript.caret_anchor = None;
+            // Typing goes home to the composer once the edit is dropped.
+            let focus = self.composer_focus(cx);
+            window.focus(&focus, cx);
+            cx.notify();
+            return;
+        }
         if scratchpad.transcript.annotation_target.is_some() {
             scratchpad.transcript.exit_annotation();
             cx.notify();
             return;
         }
         self.request_cancel_voice_scratchpad(window, cx);
+    }
+
+    /// Keystrokes on the scratchpad's transcript surface — typed text
+    /// replaces the selection or lands at the caret an earlier edit left,
+    /// Backspace/Delete cut the same, arrows walk or extend the caret
+    /// through paragraphs and bullets, and ⌘A selects all. Anything else
+    /// propagates, so with nothing to edit a character keeps its
+    /// type-to-focus trip to the composer.
+    fn voice_scratchpad_edit_key(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(scratchpad) = &mut self.voice_scratchpad else {
+            return;
+        };
+        // An open annotation box owns the stream; typed text keeps its
+        // composer meaning while it's up.
+        if scratchpad.transcript.annotation_target.is_some() {
+            return;
+        }
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if modifiers.platform || modifiers.control || modifiers.function {
+            // The one chord this surface claims — Select All is bound only
+            // under the text-input context, which the rows don't carry.
+            if modifiers == Modifiers::secondary_key() && keystroke.key == "a" {
+                self.voice_scratchpad_select_all(cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        let spans = scratchpad.selection.selection.borrow().spans().to_vec();
+        let has_selection = spans.iter().any(|span| !span.range.is_empty());
+        if let Some(text) = sessions::type_to_focus_text(keystroke) {
+            let text = text.to_owned();
+            if has_selection {
+                scratchpad.transcript.caret =
+                    scratchpad.transcript.apply_selection_edit(&spans, &text);
+            } else if let Some(mut caret) = scratchpad.transcript.caret {
+                scratchpad.transcript.insert_at(&mut caret, &text);
+                scratchpad.transcript.caret = Some(caret);
+            } else {
+                // No edit target — the composer field takes the keystroke.
+                return;
+            }
+            scratchpad.transcript.caret_anchor = None;
+            scratchpad.selection.selection.borrow_mut().clear();
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        match keystroke.key.as_str() {
+            "backspace" | "delete" => {
+                if has_selection {
+                    scratchpad.transcript.caret =
+                        scratchpad.transcript.apply_selection_edit(&spans, "");
+                    scratchpad.selection.selection.borrow_mut().clear();
+                    scratchpad.transcript.caret_anchor = None;
+                } else if let Some(mut caret) = scratchpad.transcript.caret {
+                    scratchpad.transcript.delete_at(
+                        &mut caret,
+                        keystroke.key == "delete",
+                        modifiers.alt,
+                    );
+                    scratchpad.transcript.caret = Some(caret);
+                } else {
+                    return;
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "left" | "right" | "up" | "down" | "home" | "end" => {
+                self.voice_scratchpad_move_caret(keystroke, has_selection, &spans, cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// An arrow/Home/End on the edit surface: plain moves walk the caret —
+    /// collapsing a selection to its edge first — and shift grows the grab
+    /// from its anchor, repainting the wash from the registry.
+    fn voice_scratchpad_move_caret(
+        &mut self,
+        keystroke: &gpui::Keystroke,
+        has_selection: bool,
+        spans: &[md::selection::Span],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(scratchpad) = &mut self.voice_scratchpad else {
+            return;
+        };
+        let backward = matches!(keystroke.key.as_str(), "left" | "up" | "home");
+        let shift = keystroke.modifiers.shift;
+        let word = keystroke.modifiers.alt;
+        let node_edge = matches!(keystroke.key.as_str(), "home" | "end");
+        let vertical = matches!(keystroke.key.as_str(), "up" | "down");
+        let step = |caret: CaretPos| -> CaretPos {
+            if node_edge {
+                CaretPos {
+                    node: caret.node,
+                    offset: if backward {
+                        0
+                    } else {
+                        scratchpad.transcript.node_text(caret.node).len()
+                    },
+                }
+            } else if vertical {
+                scratchpad.transcript.step_node(caret, !backward)
+            } else {
+                scratchpad
+                    .transcript
+                    .move_caret(caret, !backward, word)
+            }
+        };
+        if shift {
+            let (anchor, head) = if let Some(anchor) = scratchpad.transcript.caret_anchor {
+                (
+                    anchor,
+                    scratchpad.transcript.caret.unwrap_or(anchor),
+                )
+            } else if let Some((start, end)) = scratchpad.transcript.spans_endpoints(spans) {
+                (start, end)
+            } else {
+                let base = scratchpad
+                    .transcript
+                    .caret
+                    .unwrap_or_else(|| scratchpad.transcript.append_point_caret());
+                (base, base)
+            };
+            let head = step(head);
+            scratchpad.transcript.caret = Some(head);
+            scratchpad.transcript.caret_anchor = Some(anchor);
+            // Repaint the wash from the model range — the registry maps
+            // each node back to its painted element.
+            let spans = {
+                let registry = scratchpad.selection.registry.borrow();
+                let from = registry.position(&scratchpad.transcript.node_key(anchor.node));
+                let to = registry.position(&scratchpad.transcript.node_key(head.node));
+                match (from, to) {
+                    (Some(from), Some(to)) => {
+                        registry.resolve((from, anchor.offset), (to, head.offset))
+                    }
+                    _ => Vec::new(),
+                }
+            };
+            scratchpad
+                .selection
+                .selection
+                .borrow_mut()
+                .set_spans(spans);
+        } else {
+            let next = if has_selection {
+                // A bare arrow collapses the grab to its edge — it doesn't
+                // also step.
+                scratchpad
+                    .transcript
+                    .spans_endpoints(spans)
+                    .map(|(start, end)| if backward { start } else { end })
+                    .unwrap_or_else(|| scratchpad.transcript.append_point_caret())
+            } else {
+                step(scratchpad
+                    .transcript
+                    .caret
+                    .unwrap_or_else(|| scratchpad.transcript.append_point_caret()))
+            };
+            scratchpad.transcript.caret = Some(next);
+            scratchpad.transcript.caret_anchor = None;
+            scratchpad.selection.selection.borrow_mut().clear();
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    /// ⌘A on the edit surface: every painted text element selected, with
+    /// the model endpoints recorded so a shift-arrow can trim the grab.
+    fn voice_scratchpad_select_all(&mut self, cx: &mut Context<Self>) {
+        let Some(scratchpad) = &mut self.voice_scratchpad else {
+            return;
+        };
+        let spans = {
+            let registry = scratchpad.selection.registry.borrow();
+            let Some(last) = registry.entries().len().checked_sub(1) else {
+                return;
+            };
+            registry.resolve((0, 0), (last, usize::MAX))
+        };
+        scratchpad
+            .selection
+            .selection
+            .borrow_mut()
+            .set_spans(spans);
+        let spans = scratchpad.selection.selection.borrow().spans().to_vec();
+        if let Some((start, end)) = scratchpad.transcript.spans_endpoints(&spans) {
+            scratchpad.transcript.caret_anchor = Some(start);
+            scratchpad.transcript.caret = Some(end);
+        }
+        cx.notify();
     }
 
     /// Enter while the panel is up sends the whole transcript as one
@@ -1337,6 +2068,19 @@ impl Waku {
         let scroll = scratchpad.scroll.clone();
         let scrollbar = scratchpad.scrollbar.clone();
         let selection = scratchpad.selection.clone();
+        let edit_focus = scratchpad.edit_focus.clone();
+        // The caret paints while the surface holds focus and no selection
+        // or annotation box is standing in for it.
+        let caret_glyph = (edit_focus.is_focused(window)
+            && scratchpad.transcript.annotation_target.is_none()
+            && selection.selection.borrow().is_empty())
+        .then(|| {
+            scratchpad
+                .transcript
+                .caret
+                .map(|caret| (scratchpad.transcript.node_key(caret.node), caret.offset))
+        })
+        .flatten();
         let weak = cx.entity().downgrade();
         // The card underlaps the composer lane only as far as the composer
         // card's own bottom edge — the footer's strip stays outside it.
@@ -1457,10 +2201,35 @@ impl Waku {
                             |bounds, window, _| {
                                 window.insert_hitbox(bounds, HitboxBehavior::Normal).id
                             },
-                            move |_, region, window, _| {
+                            move |_, region, window, _cx| {
+                                // Registered ahead of install's listeners:
+                                // bubble order is reverse registration, so
+                                // the drag's release() settles the spans
+                                // before this observes them. A selection
+                                // that lands takes keyboard focus — typing
+                                // then edits the transcript, not the draft.
+                                window.on_mouse_event({
+                                    let selection = selection.clone();
+                                    let focus = edit_focus.clone();
+                                    move |_: &MouseUpEvent, phase, window, cx| {
+                                        if phase != DispatchPhase::Bubble {
+                                            return;
+                                        }
+                                        if selection.selection.borrow().is_empty() {
+                                            return;
+                                        }
+                                        window.focus(&focus, cx);
+                                    }
+                                });
                                 md::render::install_selection_input(
                                     region, window, &selection, None,
-                                )
+                                );
+                                if let Some((key, offset)) = &caret_glyph
+                                    && let Some(rect) =
+                                        scratchpad_caret_rect(&selection, key, *offset)
+                                {
+                                    window.paint_quad(fill(rect, theme.accent));
+                                }
                             },
                         )
                         .absolute()
@@ -1615,13 +2384,39 @@ impl Waku {
 
     /// The transcript rows: paragraphs separated by hairlines, bullets under
     /// their paragraph, the recording dot at the live append point, and an
-    /// annotation box hanging off its paragraph while one is open.
+    /// annotation box hanging off its target while one is open. The whole
+    /// column is the edit surface — a settled selection or a Tab landing
+    /// puts its focus here so typing edits the transcript.
     fn render_scratchpad_rows(
         &mut self,
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(scratchpad) = &mut self.voice_scratchpad else {
+            return div().into_any_element();
+        };
+        // Every row's focus handle exists before the paint loop — it then
+        // works off a shared borrow so the status row and an open
+        // annotation box can render through `self` beside it.
+        let mut row_focuses = Vec::with_capacity(scratchpad.transcript.paragraphs.len());
+        for (index, paragraph) in scratchpad.transcript.paragraphs.iter().enumerate() {
+            let paragraph_focus = scratchpad
+                .row_focuses
+                .entry(format!("p{index}"))
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            let bullet_focuses: Vec<FocusHandle> = (0..paragraph.bullets.len())
+                .map(|bullet| {
+                    scratchpad
+                        .row_focuses
+                        .entry(format!("b{index}-{bullet}"))
+                        .or_insert_with(|| cx.focus_handle())
+                        .clone()
+                })
+                .collect();
+            row_focuses.push((paragraph_focus, bullet_focuses));
+        }
         let Some(scratchpad) = &self.voice_scratchpad else {
             return div().into_any_element();
         };
@@ -1629,25 +2424,44 @@ impl Waku {
         let muted = scratchpad.muted;
         let status = scratchpad.status;
         let annotation_target = transcript.annotation_target;
+        let annotating = annotation_target.is_some();
         let selection = scratchpad.selection.clone();
+        let edit_focus = scratchpad.edit_focus.clone();
         let ui_family = crate::fonts::current(cx).ui;
+        let status_row = self.render_scratchpad_status(theme, cx);
         let mut blocks = div()
             .id("vs-rows")
             .w_full()
+            .track_focus(&edit_focus)
+            .tab_index(0)
             .px(px(24.0))
             .pt(px(18.0))
             // Room for the hint line plus the composer overlap.
             .pb(px(lane_padding(self.composer_lane_height.get())))
             .text_size(sp(14.0))
             .text_color(theme.text)
+            .on_key_down(cx.listener(Self::voice_scratchpad_edit_key))
+            // A fresh press retires the caret — the drag re-selects and the
+            // click handlers sort out annotation.
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if let Some(scratchpad) = &mut this.voice_scratchpad
+                    && scratchpad.transcript.caret.take().is_some()
+                {
+                    scratchpad.transcript.caret_anchor = None;
+                    cx.notify();
+                }
+            }))
             // Painted before any row, so the frame's selection registry
             // holds exactly the text elements this frame put on screen.
             .child(md::render::frame_reset(selection.clone()))
-            .children(self.render_scratchpad_status(theme, cx));
+            .children(status_row);
         let mut first_drawn = true;
         for (index, paragraph) in transcript.paragraphs.iter().enumerate() {
             let is_current = index + 1 == transcript.paragraphs.len();
-            let annotated = annotation_target == Some(index);
+            let annotated = matches!(
+                annotation_target,
+                Some(AnnotationTarget::Paragraph(target)) if target == index
+            );
             if !first_drawn {
                 blocks = blocks.child(
                     div()
@@ -1663,11 +2477,12 @@ impl Waku {
             let show_dot = is_current && annotation_target.is_none();
             let flat = scratchpad_paragraph_text(
                 paragraph,
-                is_current && !annotated,
+                is_current && !annotating,
                 &transcript.interim,
                 &ui_family,
                 theme,
             );
+            let paragraph_focus = row_focuses[index].0.clone();
             let paragraph_div = div()
                 .id(SharedString::from(format!("vs-paragraph-{index}")))
                 .w_full()
@@ -1675,9 +2490,12 @@ impl Waku {
                 .rounded(px(4.0))
                 .py(px(2.0))
                 .cursor_default()
+                .track_focus(&paragraph_focus)
+                .tab_index(0)
                 .when(annotated, |row| {
                     row.bg(MarkdownPalette::from_theme(theme).annotation)
                 })
+                .focus_visible(|row| row.bg(theme.focus_highlight()))
                 .child(
                     div()
                         .flex()
@@ -1702,11 +2520,28 @@ impl Waku {
                     }
                     cx.stop_propagation();
                     cx.notify();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                            scratchpad.transcript.annotate(index);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
                 }));
             blocks = blocks.child(paragraph_div.when(annotated, |row| {
                 row.child(self.render_annotation_box(index, theme, window, cx))
             }));
             for (bullet_index, bullet) in paragraph.bullets.iter().enumerate() {
+                let bullet_annotated = matches!(
+                    annotation_target,
+                    Some(AnnotationTarget::Bullet { paragraph: p, bullet: b, .. })
+                        if p == index && b == bullet_index
+                );
+                let bullet_focus = row_focuses[index].1[bullet_index].clone();
                 let flat = md::render::FlatText {
                     text: bullet.clone().into(),
                     runs: vec![TextRun {
@@ -1726,23 +2561,52 @@ impl Waku {
                     math: None,
                     copy: Rc::default(),
                 };
-                blocks = blocks.child(
-                    div()
-                        .w_full()
-                        .pl(px(18.0))
-                        .py(px(2.0))
-                        .flex()
-                        .gap(px(8.0))
-                        .child(div().flex_none().text_color(theme.text_tertiary).child("•"))
-                        .child(md::render::selectable_flat_text(
-                            &flat,
-                            md::selection::TextKey::new(format!("vs-b-{index}"), bullet_index),
-                            selection.clone(),
-                            theme.code_wash,
-                            theme.selection,
-                            false,
-                        )),
-                );
+                let bullet_row = div()
+                    .id(SharedString::from(format!("vs-bullet-{index}-{bullet_index}")))
+                    .w_full()
+                    .relative()
+                    .rounded(px(4.0))
+                    .pl(px(18.0))
+                    .py(px(2.0))
+                    .flex()
+                    .gap(px(8.0))
+                    .cursor_default()
+                    .track_focus(&bullet_focus)
+                    .tab_index(0)
+                    .when(bullet_annotated, |row| {
+                        row.bg(MarkdownPalette::from_theme(theme).annotation)
+                    })
+                    .focus_visible(|row| row.bg(theme.focus_highlight()))
+                    .child(div().flex_none().text_color(theme.text_tertiary).child("•"))
+                    .child(md::render::selectable_flat_text(
+                        &flat,
+                        md::selection::TextKey::new(format!("vs-b-{index}"), bullet_index),
+                        selection.clone(),
+                        theme.code_wash,
+                        theme.selection,
+                        false,
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                            scratchpad.transcript.annotate_bullet(index, bullet_index);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            if let Some(scratchpad) = &mut this.voice_scratchpad {
+                                scratchpad.transcript.annotate_bullet(index, bullet_index);
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }));
+                blocks = blocks.child(bullet_row.when(bullet_annotated, |row| {
+                    row.child(self.render_annotation_box(index, theme, window, cx))
+                }));
             }
         }
         // A fresh session's empty scratchpad still shows its live row —
@@ -1779,13 +2643,27 @@ impl Waku {
             );
         }
         blocks
-            // Clicking open space leaves annotation mode.
-            .on_click(cx.listener(|this, _, _, cx| {
-                if let Some(scratchpad) = &mut this.voice_scratchpad
-                    && scratchpad.transcript.annotation_target.is_some()
-                {
-                    scratchpad.transcript.exit_annotation();
-                    cx.notify();
+            // Clicking open space leaves annotation mode and editing —
+            // focus goes home to the composer so typing resumes the draft.
+            .on_click(cx.listener(|this, _, window, cx| {
+                if let Some(scratchpad) = &mut this.voice_scratchpad {
+                    let mut changed = false;
+                    if scratchpad.transcript.annotation_target.is_some() {
+                        scratchpad.transcript.exit_annotation();
+                        changed = true;
+                    }
+                    if scratchpad.transcript.caret.take().is_some() {
+                        scratchpad.transcript.caret_anchor = None;
+                        changed = true;
+                    }
+                    if scratchpad.edit_focus.is_focused(window) {
+                        let focus = this.composer_focus(cx);
+                        window.focus(&focus, cx);
+                        changed = true;
+                    }
+                    if changed {
+                        cx.notify();
+                    }
                 }
             }))
             .into_any_element()
@@ -2100,6 +2978,25 @@ impl Waku {
 /// air.
 fn lane_padding(lane: f32) -> f32 {
     lane - FOOTER_STRIP + GRADIENT_SOLID + 16.0
+}
+
+/// The caret quad for `offset` in the registered element `key` — an accent
+/// sliver on its glyph row, the same 1.5px the composer's caret paints.
+fn scratchpad_caret_rect(
+    selection: &TranscriptSelection,
+    key: &md::selection::TextKey,
+    offset: usize,
+) -> Option<Bounds<Pixels>> {
+    let registry = selection.registry.borrow();
+    let entry = registry.entries().iter().find(|entry| entry.key == *key)?;
+    if entry.geometry.is_missing() {
+        return None;
+    }
+    let md::render::TextGeometry::Text(layout) = &entry.geometry else {
+        return None;
+    };
+    let origin = layout.position_for_index(offset.min(entry.text.len()))?;
+    Some(Bounds::new(origin, size(px(1.5), layout.line_height())))
 }
 
 /// A paragraph's FlatText: finalized speech in ink, the interim suffix
@@ -2435,6 +3332,103 @@ mod tests {
         transcript.set_interim("old guess".to_owned());
         transcript.append_finalized("new words");
         assert!(transcript.interim.is_empty());
+    }
+
+    #[test]
+    fn bullet_annotation_commits_at_the_slot_in_order() {
+        // A bullet-targeted box inserts right after its bullet and the
+        // slot advances per commit — consecutive "okay next" bullets keep
+        // speech order under it.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("first okay next");
+        transcript.append_finalized("second okay next");
+        transcript.annotate_bullet(0, 0);
+        transcript.append_finalized("inserted one okay next");
+        transcript.append_finalized("inserted two okay next");
+        assert_eq!(
+            transcript.paragraphs[0].bullets,
+            vec!["first", "inserted one", "inserted two", "second"]
+        );
+    }
+
+    #[test]
+    fn open_bullet_box_sends_pending_text_at_the_slot() {
+        // Enter sends what the user sees — an open box's uncommitted text
+        // commits at its insert slot, not at the list's end.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("first okay next");
+        transcript.append_finalized("second okay next");
+        transcript.annotate_bullet(0, 0);
+        transcript.append_finalized("still talking");
+        assert_eq!(
+            transcript.to_message(),
+            "the plan\n- first\n- still talking\n- second"
+        );
+    }
+
+    #[test]
+    fn selection_edit_replaces_across_paragraph_and_bullet() {
+        // A drag over a paragraph's tail into a bullet cuts both painted
+        // spans; the typed text lands where the grab began.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("alpha beta okay next");
+        transcript.annotate(1);
+        transcript.append_finalized("gamma delta okay next");
+        transcript.exit_annotation();
+        let spans = vec![
+            md::selection::Span {
+                key: md::selection::TextKey::new("vs-p-0", 0),
+                range: 6..10,
+                text: "alpha beta".into(),
+                block_break: false,
+                copy: Rc::default(),
+            },
+            md::selection::Span {
+                key: md::selection::TextKey::new("vs-b-1", 0),
+                range: 0..5,
+                text: "gamma delta".into(),
+                block_break: false,
+                copy: Rc::default(),
+            },
+        ];
+        let caret = transcript.apply_selection_edit(&spans, "omega");
+        assert_eq!(transcript.paragraphs[0].text, "alpha omega");
+        assert_eq!(transcript.paragraphs[1].bullets[0], " delta");
+        assert!(matches!(
+            caret,
+            Some(CaretPos {
+                node: ScratchpadNode::Paragraph(0),
+                offset
+            }) if offset == "alpha omega".len()
+        ));
+    }
+
+    #[test]
+    fn delete_empties_a_bullet_and_reanchors_the_caret() {
+        // Cutting a bullet's last word removes its row outright — the
+        // caret lands on the paragraph the row hung under.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("keep me okay next");
+        transcript.annotate(1);
+        transcript.append_finalized("gone okay next");
+        transcript.exit_annotation();
+        let mut caret = CaretPos {
+            node: ScratchpadNode::Bullet(1, 0),
+            offset: 0,
+        };
+        transcript.delete_at(&mut caret, true, true);
+        assert!(transcript.paragraphs[1].bullets.is_empty());
+        assert!(matches!(
+            caret,
+            CaretPos {
+                node: ScratchpadNode::Paragraph(1),
+                offset: 0
+            }
+        ));
     }
 
     #[test]
