@@ -148,7 +148,10 @@ impl Waku {
                 .bg(theme.raised)
                 .cursor_default()
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .hover(|element| element.bg(theme.overlay_strong))
+                // The wash composites over `raised` — painting the
+                // translucent token alone would let the transcript ghost
+                // through.
+                .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
                 .child(icon(icon_path, 11.0, theme.text_secondary))
                 .child(label)
                 .when_some(shortcut_label, |chip, label| {
