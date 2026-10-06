@@ -678,7 +678,10 @@ pub enum BossOperation {
     /// `prompt` (the user request that prompted planning) plus a canned
     /// opener. `plan_file` names the plan document under `plans/` in the
     /// Boss files root; `title` is the idea the sidebar row displays.
-    /// Boss-only; the user never creates one directly.
+    /// Boss-only; the user never creates one directly. Omitted
+    /// provider/model/effort fields take the daemon's planning default
+    /// (codex `gpt-6.1-sol` at medium effort) rather than inheriting the
+    /// boss chat's own pick.
     CreatePlan {
         title: String,
         plan_file: String,
@@ -687,6 +690,8 @@ pub enum BossOperation {
         provider: Option<ProviderKind>,
         #[serde(default)]
         model: Option<String>,
+        #[serde(default)]
+        reasoning_effort: Option<String>,
     },
     /// Open a web page in the boss chat's right panel. Boss principals only.
     Browse {
@@ -1356,15 +1361,19 @@ mod tests {
             "type": "createPlan",
             "title": "Auth migration",
             "planFile": "auth.md",
-            "prompt": "Plan the auth migration"
+            "prompt": "Plan the auth migration",
+            "reasoningEffort": "medium"
         }))
         .unwrap();
         assert!(matches!(
             create,
-            super::BossOperation::CreatePlan { title, plan_file, prompt, provider, model }
+            super::BossOperation::CreatePlan {
+                title, plan_file, prompt, provider, model, reasoning_effort
+            }
                 if title == "Auth migration" && plan_file == "auth.md"
                     && prompt == "Plan the auth migration"
                     && provider.is_none() && model.is_none()
+                    && reasoning_effort.as_deref() == Some("medium")
         ));
         let terminal: super::BossOperation = serde_json::from_value(serde_json::json!({
             "type": "terminal",

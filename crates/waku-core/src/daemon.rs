@@ -440,6 +440,13 @@ impl AgentTaskPrompt {
     }
 }
 
+/// The model pick `createPlan` lands on when the op leaves provider,
+/// model, or effort unset: planning sessions are design/drafting work
+/// and run Codex's sol model at medium effort.
+const PLANNING_PROVIDER: ProviderKind = ProviderKind::Codex;
+const PLANNING_MODEL: &str = "gpt-6.1-sol";
+const PLANNING_EFFORT: &str = "medium";
+
 /// Resolve one `agent create` trait field. An explicit value wins as sent —
 /// `"default"` (or empty) selects the provider's own default, and an unknown
 /// id passes through untouched, matching how `model` is handled. An omitted
@@ -5160,6 +5167,7 @@ impl WakuBackend {
         prompt: String,
         provider: Option<ProviderKind>,
         model: Option<String>,
+        reasoning_effort: Option<String>,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::BossResult;
@@ -5217,11 +5225,20 @@ impl WakuBackend {
             };
             let (opener, _) = localized!("boss.plan_seed_opener", path = plan_file.clone());
             let seed = format!("{}\n\n{}", prompt.trim(), opener);
+            // Planning is design/drafting work: it defaults to Codex's sol
+            // model at medium effort rather than inheriting the boss
+            // chat's own pick. Each field the caller supplies still wins —
+            // a `provider` override without a `model` keeps that
+            // provider's own default model.
+            let provider = provider.or(Some(PLANNING_PROVIDER));
+            let model = model.or_else(|| {
+                (provider == Some(PLANNING_PROVIDER)).then(|| PLANNING_MODEL.to_owned())
+            });
             let selection = AgentCreateSelection {
                 provider,
                 model,
                 title: Some(title),
-                reasoning_effort: None,
+                reasoning_effort: reasoning_effort.or_else(|| Some(PLANNING_EFFORT.to_owned())),
                 service_tier: None,
                 context_window: None,
             };
@@ -6848,7 +6865,17 @@ impl WakuBackend {
                 prompt,
                 provider,
                 model,
-            } => self.create_plan(caller, title, plan_file, prompt, provider, model, events),
+                reasoning_effort,
+            } => self.create_plan(
+                caller,
+                title,
+                plan_file,
+                prompt,
+                provider,
+                model,
+                reasoning_effort,
+                events,
+            ),
             BossOperation::Browse { url, title } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can open browser tabs for the user");
@@ -18593,24 +18620,37 @@ mod tests {
         );
         backend.settings.replace(daemon_settings).unwrap();
         let events = EventSink::detached();
-        let create = |caller, title: &str, plan_file: &str, prompt: &str| {
+        let create = |caller,
+                      title: &str,
+                      plan_file: &str,
+                      prompt: &str,
+                      provider: Option<ProviderKind>,
+                      model: Option<&str>,
+                      reasoning_effort: Option<&str>| {
             backend.handle_boss_operation(
                 caller,
                 BossOperation::CreatePlan {
                     title: title.into(),
                     plan_file: plan_file.into(),
                     prompt: prompt.into(),
-                    provider: Some(ProviderKind::Codex),
-                    model: None,
+                    provider,
+                    model: model.map(str::to_owned),
+                    reasoning_effort: reasoning_effort.map(str::to_owned),
                 },
                 &events,
             )
         };
         // Only a boss principal or a human may open a plan.
-        assert!(create(Some(Uuid::new_v4()), "Auth", "auth.md", "plan it").is_err());
+        assert!(
+            create(Some(Uuid::new_v4()), "Auth", "auth.md", "plan it", None, None, None)
+                .is_err()
+        );
         // The launch fails on the missing binary; the session and its
         // registry record still landed.
-        assert!(create(None, "Auth", "auth.md", "plan the auth migration").is_err());
+        assert!(
+            create(None, "Auth", "auth.md", "plan the auth migration", None, None, None)
+                .is_err()
+        );
         let plan = backend.boss.plan_for_file("plans/auth.md").unwrap();
         assert_eq!(plan.idea, "Auth");
         assert_eq!(plan.finalized_at, None);
@@ -18631,6 +18671,11 @@ mod tests {
         assert!(session.is_planning());
         assert_eq!(session.title, "Auth");
         assert_eq!(session.project_id, backend.boss.document().identity.id);
+        // An op that names no model lands on the planning pick — Codex's
+        // sol model at medium effort — not the sending session's config.
+        assert_eq!(session.provider, ProviderKind::Codex);
+        assert_eq!(session.model.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
         let planning = session.planning.clone().unwrap();
         assert_eq!(planning.plan_file, "plans/auth.md");
         assert_eq!(planning.idea, "Auth");
@@ -18640,10 +18685,47 @@ mod tests {
         assert!(seed.contains("plan the auth migration"));
         assert!(seed.contains("plans/auth.md"));
         // A second plan on the same document is refused; a different idea
-        // runs alongside it.
-        assert!(create(None, "Auth again", "memory/plans/auth.md", "dup").is_err());
-        assert!(create(None, "Billing", "billing.md", "plan billing").is_err());
-        assert!(backend.boss.plan_for_file("plans/billing.md").is_some());
+        // runs alongside it, and an explicit model/effort still wins.
+        assert!(
+            create(
+                None,
+                "Auth again",
+                "memory/plans/auth.md",
+                "dup",
+                None,
+                None,
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            create(
+                None,
+                "Billing",
+                "billing.md",
+                "plan billing",
+                Some(ProviderKind::Codex),
+                Some("gpt-5.5"),
+                Some("high")
+            )
+            .is_err()
+        );
+        let billing_plan = backend.boss.plan_for_file("plans/billing.md").unwrap();
+        {
+            let mut state = backend.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == billing_plan.session_id)
+                .unwrap();
+            backend
+                .task_store
+                .hydrate(&mut state.sessions[index])
+                .unwrap();
+            let billing = &state.sessions[index];
+            assert_eq!(billing.model.as_deref(), Some("gpt-5.5"));
+            assert_eq!(billing.reasoning_effort.as_deref(), Some("high"));
+        }
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -18681,6 +18763,7 @@ mod tests {
                         prompt: "plan the auth migration".into(),
                         provider: Some(ProviderKind::Codex),
                         model: None,
+                        reasoning_effort: None,
                     },
                     &events,
                 )
@@ -18864,6 +18947,7 @@ mod tests {
                             prompt: format!("plan {plan_file}"),
                             provider: Some(ProviderKind::Codex),
                             model: None,
+                            reasoning_effort: None,
                         },
                         &events,
                     )
