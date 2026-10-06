@@ -25,8 +25,8 @@ use crate::git_commit::{
 /// The notes ref review records live under — pushed to `origin` on every
 /// decision. Deliberately not derived from the configured branch: the
 /// `qa` namespace names the review function, so renaming the branch keeps
-/// the records. `pub(crate)` so the daemon can name it in friend notices.
-pub(crate) const NOTES_REF: &str = "refs/notes/qa";
+/// the records. Public so the daemon can name it in friend notices.
+pub const NOTES_REF: &str = "refs/notes/qa";
 /// Scratch ref a losing notes push fetches into before union-merging.
 const NOTES_REMOTE_TMP: &str = "refs/notes/qa-remote";
 /// How far back the queue reads `origin/<qa branch>`.
@@ -37,9 +37,9 @@ const PUSH_ATTEMPTS: usize = 3;
 const REVERT_ATTEMPTS: usize = 2;
 
 /// The configured QA branch name — trimmed, falling back to `dev` when
-/// unset. `pub(crate)` so the daemon can name the branch in friend
+/// unset. Public so the daemon can name the branch in friend
 /// notices without re-resolving the setting.
-pub(crate) fn qa_branch_name(configured: &str) -> String {
+pub fn qa_branch_name(configured: &str) -> String {
     let branch = configured.trim();
     if branch.is_empty() {
         DEFAULT_QA_BRANCH.to_owned()
@@ -52,7 +52,7 @@ pub(crate) fn qa_branch_name(configured: &str) -> String {
 /// git can't treat as a branch — the value lands inside refspecs and a
 /// bare `git fetch origin <name>` argument, where a leading `-` would be
 /// a flag.
-pub(crate) fn qa_branch_checked(configured: &str) -> anyhow::Result<String> {
+pub fn qa_branch_checked(configured: &str) -> anyhow::Result<String> {
     let branch = qa_branch_name(configured);
     let valid = !branch.starts_with('-')
         && !branch.contains("..")

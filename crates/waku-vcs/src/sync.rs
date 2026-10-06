@@ -25,7 +25,7 @@ use crate::git_panel::{conflicted_paths, sync_in_progress};
 
 /// How one branch's integrate attempt ended.
 #[derive(Debug)]
-pub(crate) enum IntegrateOutcome {
+pub enum IntegrateOutcome {
     /// Local and remote tips agree, or the remote has no such branch.
     UpToDate,
     /// We were behind and fast-forwarded — includes tracking a branch
@@ -100,7 +100,7 @@ fn branch_worktree(repo: &Path, branch: &str) -> anyhow::Result<Option<PathBuf>>
 }
 
 /// All local branch names, for the link config UI.
-pub(crate) fn local_branches(repo: &Path) -> anyhow::Result<Vec<String>> {
+pub fn local_branches(repo: &Path) -> anyhow::Result<Vec<String>> {
     let out = git_stdout(
         repo,
         &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
@@ -114,7 +114,7 @@ pub(crate) fn local_branches(repo: &Path) -> anyhow::Result<Vec<String>> {
 
 /// The repo's default branch: `origin/HEAD`'s target, else the checked-
 /// out branch, else `main`/`master` when present.
-pub(crate) fn default_branch(repo: &Path) -> anyhow::Result<Option<String>> {
+pub fn default_branch(repo: &Path) -> anyhow::Result<Option<String>> {
     if let Some(remote_default) = git_optional_stdout(
         repo,
         &[
@@ -140,7 +140,7 @@ pub(crate) fn default_branch(repo: &Path) -> anyhow::Result<Option<String>> {
 }
 
 /// `git fetch origin` — refresh remote-tracking refs for a sync pass.
-pub(crate) fn fetch(repo: &Path) -> anyhow::Result<()> {
+pub fn fetch(repo: &Path) -> anyhow::Result<()> {
     ensure_repository(repo)?;
     git_success(repo, &["fetch", "origin"])?;
     Ok(())
@@ -177,7 +177,7 @@ pub(crate) fn remove_worktree(repo: &Path, path: &Path) -> anyhow::Result<()> {
 
 /// Integrate `origin/<branch>` into `branch` of `repo`. `scratch_root`
 /// roots temp worktrees for branches checked out nowhere.
-pub(crate) fn integrate(
+pub fn integrate(
     repo: &Path,
     scratch_root: &Path,
     link_id: &str,
@@ -287,7 +287,7 @@ pub(crate) fn integrate(
 
 /// Abort a stopped integration in `worktree`, then drop the temp
 /// worktree registration when `temp_worktree`.
-pub(crate) fn abort(repo: &Path, worktree: &Path, temp_worktree: bool) -> anyhow::Result<()> {
+pub fn abort(repo: &Path, worktree: &Path, temp_worktree: bool) -> anyhow::Result<()> {
     if worktree.exists() {
         match sync_in_progress(worktree)? {
             Some(SyncInProgress::Rebase) => {
@@ -311,7 +311,7 @@ pub(crate) fn abort(repo: &Path, worktree: &Path, temp_worktree: bool) -> anyhow
 /// "Merge instead": abort the stopped rebase in `worktree` and merge
 /// `origin/<branch>` instead. Returns the new outcome — still conflicted
 /// (now a merge) or integrated.
-pub(crate) fn merge_instead(
+pub fn merge_instead(
     repo: &Path,
     worktree: &Path,
     branch: &str,
@@ -353,7 +353,7 @@ pub(crate) fn merge_instead(
 /// is what distinguishes "our push completed" (notify) from "someone
 /// else's fetch moved the ref" (stay quiet).
 #[derive(Debug, Default)]
-pub(crate) struct BranchTips {
+pub struct BranchTips {
     local: Option<String>,
     remote: Option<String>,
     pending_push: bool,
@@ -362,7 +362,7 @@ pub(crate) struct BranchTips {
 /// What a poll pass wants the runtime to do: push notices to send the
 /// link's peer.
 #[derive(Debug, Default)]
-pub(crate) struct PollReport {
+pub struct PollReport {
     /// Branches we auto-pushed this cycle.
     pub pushed: Vec<String>,
     /// Branches whose earlier local commits reached the remote by a push
@@ -373,7 +373,7 @@ pub(crate) struct PollReport {
 /// Detect commits landing on synced branches (auto-push) and manual
 /// pushes completing (notify). Pure local ref reads plus the push — no
 /// fetch; freshness comes from notices and the periodic fetch job.
-pub(crate) fn poll(
+pub fn poll(
     repo: &Path,
     link: &SyncLink,
     states: &mut HashMap<String, BranchTips>,
@@ -451,7 +451,7 @@ pub(crate) fn poll(
 /// the alert still stands (not a conflict, or still stopped). `Some(true)`
 /// means it ended in an external abort — pause the branch exactly as if
 /// we had aborted it. `Some(false)` means it resolved — drop the alert.
-pub(crate) fn reconcile_alert(repo: &Path, alert: &SyncAlert) -> anyhow::Result<Option<bool>> {
+pub fn reconcile_alert(repo: &Path, alert: &SyncAlert) -> anyhow::Result<Option<bool>> {
     if alert.kind != SyncAlertKind::Conflict {
         return Ok(None);
     }
@@ -474,7 +474,7 @@ pub(crate) fn reconcile_alert(repo: &Path, alert: &SyncAlert) -> anyhow::Result<
 
 /// Create an alert record for an integrate outcome. Caller inserts into
 /// the store and publishes.
-pub(crate) fn conflict_alert(
+pub fn conflict_alert(
     link: &SyncLink,
     branch: &str,
     in_progress: Integration,
@@ -495,7 +495,7 @@ pub(crate) fn conflict_alert(
     }
 }
 
-pub(crate) fn refused_alert(link: &SyncLink, branch: &str, worktree: PathBuf) -> SyncAlert {
+pub fn refused_alert(link: &SyncLink, branch: &str, worktree: PathBuf) -> SyncAlert {
     SyncAlert {
         id: uuid::Uuid::new_v4().to_string(),
         link_id: link.id.clone(),

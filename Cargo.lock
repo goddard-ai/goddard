@@ -11527,6 +11527,7 @@ dependencies = [
  "waku-sessions",
  "waku-share",
  "waku-store",
+ "waku-vcs",
  "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
@@ -11730,6 +11731,23 @@ dependencies = [
  "waku-boss",
  "waku-git",
  "waku-protocol",
+]
+
+[[package]]
+name = "waku-vcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dunce",
+ "serde",
+ "serde_json",
+ "uuid",
+ "waku-exec",
+ "waku-git",
+ "waku-protocol",
+ "waku-sessions",
+ "waku-share",
 ]
 
 [[package]]
