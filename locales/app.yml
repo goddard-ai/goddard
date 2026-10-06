@@ -979,6 +979,10 @@ experiments.voice_briefing_time_remaining:
   en: "%{time} remaining"
 experiments.voice_briefing_gate_needs_eval:
   en: No eval backend is configured — the gate never runs, so every briefing generates. Set one up on the Jev page.
+experiments.voice_scratchpad_title:
+  en: Voice scratchpad
+experiments.voice_scratchpad_description:
+  en: A VS button beside send opens a dictation scratchpad that transcribes your mic into a message — Enter sends the transcript, Esc discards it. Uses the Vercel AI Gateway credential under Inference providers.
 experiments.memory_title:
   en: Project memory
 experiments.composer_drafts_title:

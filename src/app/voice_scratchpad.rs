@@ -760,8 +760,12 @@ fn run_transcription_worker(
 impl Waku {
     /// Whether the scratchpad panel is the chat column's content right now:
     /// a live session, not hidden, on its own chat, under the surfaces a
-    /// mounted composer implies.
+    /// mounted composer implies. The experiment flag gates the whole
+    /// surface — a session only exists while it is on.
     pub(super) fn voice_scratchpad_visible(&self) -> bool {
+        if !self.state.voice_scratchpad_enabled {
+            return false;
+        }
         let Some(scratchpad) = &self.voice_scratchpad else {
             return false;
         };
@@ -800,6 +804,9 @@ impl Waku {
         session_id: Option<Uuid>,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
+        if !self.state.voice_scratchpad_enabled {
+            return None;
+        }
         let state = self.voice_scratchpad_button_state(session_id);
         let theme = Theme::current(cx);
         let enabled = state != ScratchpadButtonState::Elsewhere && session_id.is_some();
@@ -879,7 +886,7 @@ impl Waku {
     /// permission and connection failures become its inline error state —
     /// and capture begins behind it.
     fn start_voice_scratchpad(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.voice_scratchpad.is_some() {
+        if !self.state.voice_scratchpad_enabled || self.voice_scratchpad.is_some() {
             return;
         }
         let Some(session_id) = self.composer_session_id() else {
@@ -1067,7 +1074,7 @@ impl Waku {
     }
 
     /// End the session and discard the transcript.
-    fn end_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn end_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
         let Some(scratchpad) = self.voice_scratchpad.take() else {
             return;
         };

@@ -5382,6 +5382,17 @@ impl Waku {
                 tuning: Some(Self::voice_briefing_tuning),
             },
             ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "voice-scratchpad-experiment-toggle",
+                icon: "icons/mic.svg",
+                title_key: "experiments.voice_scratchpad_title",
+                description_key: "experiments.voice_scratchpad_description",
+                enabled: self.state.voice_scratchpad_enabled,
+                set: Self::set_voice_scratchpad_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "git-panel-experiment-toggle",
                 icon: "icons/panel-right.svg",
@@ -7821,6 +7832,18 @@ impl Waku {
 
     fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_scratchpad_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !enabled {
+            // A live dictation session ends with its surface — the mic tap
+            // detaches rather than recording into a panel that no longer
+            // renders.
+            self.end_voice_scratchpad(cx);
+        }
+        self.state.voice_scratchpad_enabled = enabled;
         self.save();
         cx.notify();
     }

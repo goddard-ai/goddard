@@ -1386,6 +1386,10 @@ pub struct AppSettings {
     /// ~45-second "what happened / what you decide" briefing aloud.
     /// Defaults on in debug builds.
     pub voice_briefing_enabled: bool,
+    /// Experimental: the composer's VS button opens a dictation scratchpad
+    /// that transcribes mic audio into a sendable message. Off by default,
+    /// including debug builds.
+    pub voice_scratchpad_enabled: bool,
     /// Legacy briefing credential — moved into the daemon's inference
     /// secret store under the Vercel provider at launch. Kept only so
     /// documents written before the move still carry it into migration.
@@ -1508,6 +1512,7 @@ impl Default for AppSettings {
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
+            voice_scratchpad_enabled: false,
             voice_briefing_gateway_key: String::new(),
             voice_briefing_provider: default_voice_briefing_provider(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
@@ -2055,6 +2060,12 @@ pub struct PersistedState {
     /// credential below, so the daemon never sees either.
     #[serde(default = "default_experiment_enabled")]
     pub voice_briefing_enabled: bool,
+    /// Experimental: the composer's VS button opens a dictation scratchpad
+    /// that transcribes mic audio into a sendable message. App-owned like
+    /// the briefing — capture and playback never reach the daemon. Off by
+    /// default, including debug builds.
+    #[serde(default)]
+    pub voice_scratchpad_enabled: bool,
     /// AI Gateway bearer the briefing's summarize and speech calls share.
     /// App-local like the remote-host tokens.
     /// Legacy briefing credential — migrates into the daemon's inference
@@ -2472,6 +2483,7 @@ impl PersistedState {
             guided_reading_saccade: default_guided_reading_saccade(),
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
+            voice_scratchpad_enabled: false,
             voice_briefing_gateway_key: String::new(),
             voice_briefing_provider: default_voice_briefing_provider(),
             voice_briefing_summary_model: default_voice_briefing_summary_model(),
@@ -2914,6 +2926,7 @@ impl PersistedState {
             guided_reading_saccade: self.guided_reading_saccade,
             guided_reading_opacity: self.guided_reading_opacity,
             voice_briefing_enabled: self.voice_briefing_enabled,
+            voice_scratchpad_enabled: self.voice_scratchpad_enabled,
             voice_briefing_gateway_key: self.voice_briefing_gateway_key.clone(),
             voice_briefing_provider: self.voice_briefing_provider,
             voice_briefing_summary_model: self.voice_briefing_summary_model.clone(),
@@ -3071,6 +3084,7 @@ impl PersistedState {
             (settings.guided_reading_saccade.saturating_add(5) / 10 * 10).clamp(10, 50);
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
         self.voice_briefing_enabled = settings.voice_briefing_enabled;
+        self.voice_scratchpad_enabled = settings.voice_scratchpad_enabled;
         self.voice_briefing_gateway_key = settings.voice_briefing_gateway_key;
         self.voice_briefing_provider = settings.voice_briefing_provider;
         self.voice_briefing_summary_model = settings.voice_briefing_summary_model;
