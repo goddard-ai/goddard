@@ -153,12 +153,23 @@ impl BucketStore {
             Err(error) => return Err(error.into()),
         };
         for entry in entries {
-            let path = entry?.path().join("BUCKET.json");
+            let entry = entry?;
+            // Stray files land beside bucket dirs — Finder's .DS_Store is the
+            // common one — and a non-directory entry has no BUCKET.json.
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let path = entry.path().join("BUCKET.json");
             match fs::read(&path) {
                 Ok(bytes) => {
                     buckets.push(serde_json::from_slice(&bytes).context("invalid bucket metadata")?)
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        || error.kind() == std::io::ErrorKind::NotADirectory =>
+                {
+                    continue;
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -560,6 +571,19 @@ mod tests {
             boss: false,
         };
         (root, store, access)
+    }
+
+    /// Finder drops .DS_Store files into browsed directories; a stray file
+    /// beside bucket dirs must not fail the whole listing with ENOTDIR.
+    #[test]
+    fn list_buckets_skips_stray_files() {
+        let (root, store, _access) = fixture();
+        fs::write(root.join("buckets/.DS_Store"), b"junk").unwrap();
+        fs::write(root.join("buckets/notes.txt"), b"junk").unwrap();
+        let buckets = store.list_buckets().unwrap();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].id, "project-demo");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
