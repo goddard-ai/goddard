@@ -1883,14 +1883,22 @@ impl Waku {
             .session_id
             .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
             .and_then(|session| self.session_status_indicator(session, &theme));
-        let selected = state.session_id.is_some_and(|id| {
-            sidebar::sidebar_session_selected(
-                self.state.selected_session,
-                self.pending_session_activation
-                    .map(|pending| pending.session_id),
-                id,
-            )
-        });
+        // A live deliverable preview page owns the selection — its sidebar
+        // row already wears the armed highlight — so the boss chat it covers
+        // renders unselected even though its session is still the landing
+        // underneath the page.
+        let covered = self
+            .live_deliverable_page()
+            .is_some_and(|(page_key, _)| page_key == key);
+        let selected = !covered
+            && state.session_id.is_some_and(|id| {
+                sidebar::sidebar_session_selected(
+                    self.state.selected_session,
+                    self.pending_session_activation
+                        .map(|pending| pending.session_id),
+                    id,
+                )
+            });
         let speech_visible = self.last_speech_key == Some(key)
             && (!self.last_speech_clips.is_empty()
                 || self.speech_playback_key == Some(key)
