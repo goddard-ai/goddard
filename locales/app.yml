@@ -1024,7 +1024,7 @@ experiments.sandbox_description:
 experiments.wireframes_title:
   en: Wireframes
 experiments.wireframes_description:
-  en: Let planning sessions emit low-fidelity screen wireframes beside the plan document — an in-app preview and Figma export arrive with the feature. Turning it off hides those affordances without deleting emitted files.
+  en: Let planning sessions emit low-fidelity screen wireframes beside the plan document — the file viewer previews them as themed elements, like real UI. Turning it off hides those affordances without deleting emitted files.
 experiments.group_sessions:
   en: Sessions & agents
 experiments.group_git:
@@ -4223,6 +4223,10 @@ files.preview_markdown:
   en: Preview markdown
 files.preview_image:
   en: Preview image
+files.preview_wireframe:
+  en: Preview wireframe
+files.wireframe_empty:
+  en: This wireframe has no screens
 files.edit_markdown_source:
   en: Edit source
 files.open_on_github:

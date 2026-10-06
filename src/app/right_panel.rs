@@ -1165,6 +1165,26 @@ fn file_shows_image(editor: &RightPanelFileEditor, relative_path: &str) -> bool 
     !editor.show_source && image_preview::image_format_for_name(relative_path).is_some()
 }
 
+/// Whether `relative_path` names a `.wireframe.json` document — the file
+/// viewer's preview surface for planning-session wireframes.
+fn is_wireframe_document(relative_path: &str) -> bool {
+    Path::new(relative_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".wireframe.json"))
+}
+
+/// Whether the pane draws this `.wireframe.json` as themed elements
+/// rather than text — the experiment flag and the per-file source toggle
+/// both decide.
+fn file_shows_wireframe(
+    editor: &RightPanelFileEditor,
+    relative_path: &str,
+    enabled: bool,
+) -> bool {
+    enabled && !editor.show_source && is_wireframe_document(relative_path)
+}
+
 impl RightPanelSurface {
     fn new_browser() -> Self {
         Self::Browser(Uuid::new_v4())
@@ -6599,17 +6619,29 @@ impl Waku {
         // Markdown files carry the global source/preview toggle; every other
         // language always shows source. Image files render pixels instead of
         // text — SVGs alone keep a source view behind the toggle, since
-        // their text stays editable.
+        // their text stays editable. `.wireframe.json` previews as themed
+        // elements behind the wireframes experiment; with the flag off, or
+        // flipped to source, it is just a JSON file in the editor.
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";
         let is_svg =
             image_preview::image_format_for_name(&relative_path) == Some(gpui::ImageFormat::Svg);
+        let is_wireframe =
+            self.state.wireframes_experiment_enabled && is_wireframe_document(&relative_path);
         let image_mode = self
             .right_panel_file_editors
             .get(&relative_path)
             .is_some_and(|editor| file_shows_image(editor, &relative_path));
-        let preview = !image_mode && is_markdown && self.state.markdown_preview;
+        let wireframe_mode = is_wireframe
+            && self
+                .right_panel_file_editors
+                .get(&relative_path)
+                .is_none_or(|editor| !editor.show_source);
+        let preview =
+            !image_mode && !wireframe_mode && is_markdown && self.state.markdown_preview;
         let body = if image_mode {
             self.render_file_image_preview(&relative_path, cx)
+        } else if wireframe_mode {
+            self.render_file_wireframe_preview(&relative_path, &editor_state, cx)
         } else if preview {
             self.render_file_markdown_preview(
                 &relative_path,
@@ -6714,12 +6746,14 @@ impl Waku {
                     }
                 }))
         });
-        let preview_toggle = (is_markdown || is_svg).then(|| {
+        let preview_toggle = (is_markdown || is_svg || is_wireframe).then(|| {
             let focus = self.transcript_control_focus("file-preview-toggle", cx);
-            let (icon_path, label) = if preview || image_mode {
+            let (icon_path, label) = if preview || image_mode || wireframe_mode {
                 ("icons/pencil.svg", tr!("files.edit_markdown_source"))
             } else if is_svg {
                 ("icons/eye.svg", tr!("files.preview_image"))
+            } else if is_wireframe {
+                ("icons/eye.svg", tr!("files.preview_wireframe"))
             } else {
                 ("icons/eye.svg", tr!("files.preview_markdown"))
             };
@@ -6741,7 +6775,7 @@ impl Waku {
                 .on_click(cx.listener({
                     let relative_path = relative_path.clone();
                     move |this, _, _, cx| {
-                        if is_svg {
+                        if is_svg || is_wireframe {
                             this.toggle_file_source_view(&relative_path, cx);
                         } else {
                             this.toggle_markdown_preview(cx);
@@ -6752,7 +6786,7 @@ impl Waku {
                     let relative_path = relative_path.clone();
                     move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            if is_svg {
+                            if is_svg || is_wireframe {
                                 this.toggle_file_source_view(&relative_path, cx);
                             } else {
                                 this.toggle_markdown_preview(cx);
@@ -7106,9 +7140,16 @@ impl Waku {
             if heading_pending.is_some() {
                 editor.pending_heading = heading_pending;
             }
-            // An image preview has no editor to focus — the TextInput is not
-            // rendered while the pane shows pixels.
-            if focus_pending && !file_shows_image(editor, relative_path) {
+            // An image or wireframe preview has no editor to focus — the
+            // TextInput is not rendered while the pane shows the visual.
+            if focus_pending
+                && !file_shows_image(editor, relative_path)
+                && !file_shows_wireframe(
+                    editor,
+                    relative_path,
+                    self.state.wireframes_experiment_enabled,
+                )
+            {
                 let focus = editor.state.read(cx).focus();
                 window.on_next_frame(move |window, cx| window.focus(&focus, cx));
             }
@@ -7153,6 +7194,7 @@ impl Waku {
                 image_viewport: None,
                 image_natural: None,
                 show_source: false,
+                wireframe: None,
                 reading: false,
                 read_epoch: 0,
                 pending_position: position_pending,
@@ -7199,7 +7241,13 @@ impl Waku {
 
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
         self.apply_pending_file_position(relative_path, window, cx);
-        if focus_pending && image_preview::image_format_for_name(relative_path).is_none() {
+        // A fresh editor defaults to preview mode, so an image or a
+        // wireframe never renders the TextInput the focus would land on.
+        if focus_pending
+            && image_preview::image_format_for_name(relative_path).is_none()
+            && !(self.state.wireframes_experiment_enabled
+                && is_wireframe_document(relative_path))
+        {
             let focus = state.read(cx).focus();
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         }
@@ -7608,9 +7656,10 @@ impl Waku {
         self.set_markdown_preview(!self.state.markdown_preview, cx);
     }
 
-    /// Flips one SVG between rendered preview and editable source — per file,
-    /// unlike markdown's global toggle, because an image's bytes are only
-    /// loaded as text once the source view asks for them.
+    /// Flips one file between rendered preview and editable source — per
+    /// file, unlike markdown's global toggle. SVGs reload because their
+    /// bytes are only read once source is asked for; `.wireframe.json`
+    /// already holds its text, so the reload is a no-op there.
     fn toggle_file_source_view(&mut self, relative_path: &str, cx: &mut Context<Self>) {
         let Some(editor) = self.right_panel_file_editors.get_mut(relative_path) else {
             return;
@@ -7618,6 +7667,121 @@ impl Waku {
         editor.show_source = !editor.show_source;
         cx.notify();
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
+    }
+
+    /// The `.wireframe.json` alternative to the editor body: each screen
+    /// drawn as themed flex elements by [`wireframe::wireframe_screen_element`]
+    /// — HTML/CSS semantics in the element tree, so the preview follows the
+    /// selected theme like real UI. The parse is memoized on the editor by
+    /// content hash, keeping the frame's work proportional to the visible
+    /// screens rather than the file's size.
+    fn render_file_wireframe_preview(
+        &mut self,
+        relative_path: &str,
+        editor_state: &Entity<TextInput>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        // `text_loaded` separates "still reading" from "empty file" — the
+        // parse runs only on real content, never on the pre-read blank.
+        let text_loaded = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .is_some_and(|editor| editor.text_loaded);
+        let parsed = if !text_loaded {
+            None
+        } else {
+            let content = editor_state.read(cx).content().to_owned();
+            let fingerprint = {
+                let mut hasher = DefaultHasher::new();
+                content.hash(&mut hasher);
+                hasher.finish()
+            };
+            self.right_panel_file_editors
+                .get_mut(relative_path)
+                .and_then(|editor| {
+                    if !matches!(&editor.wireframe, Some((cached, _)) if *cached == fingerprint) {
+                        editor.wireframe = Some((
+                            fingerprint,
+                            waku_protocol::wireframe::Wireframe::parse(&content),
+                        ));
+                    }
+                    editor.wireframe.as_ref().map(|(_, result)| result)
+                })
+        };
+
+        let message = |text: String, color: Hsla| {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(24.0))
+                .text_size(sp(12.5))
+                .text_color(color)
+                .child(text)
+        };
+        let body: AnyElement = match parsed {
+            Some(Ok(wireframe)) if wireframe.screens.is_empty() => {
+                message(tr!("files.wireframe_empty"), theme.text_tertiary).into_any_element()
+            }
+            Some(Ok(wireframe)) => div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(40.0))
+                .px(px(24.0))
+                .py(px(32.0))
+                .children(wireframe.screens.iter().map(|screen| {
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(
+                            div()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(screen.name.clone()),
+                        )
+                        .child(wireframe::wireframe_screen_element(screen, &theme))
+                }))
+                .into_any_element(),
+            // Parse errors render verbatim — the surface names the problem
+            // rather than blanking, like the schema intends.
+            Some(Err(error)) => message(error.to_string(), theme.danger).into_any_element(),
+            // No cached parse means the file's read has not landed yet.
+            None => message(tr!("files.loading"), theme.text_tertiary).into_any_element(),
+        };
+
+        div()
+            .key_context("FileEditorPane")
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(theme.surface)
+            .font_family(crate::fonts::current(cx).ui)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("file-wireframe-{relative_path}")))
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.wireframe_preview_scroll_handle)
+                            .child(body),
+                    )
+                    .child(scrollbar::vertical(
+                        &self.wireframe_preview_scroll_handle,
+                        &self.wireframe_preview_scrollbar,
+                    )),
+            )
     }
 
     /// The image alternative to the editor body: bytes read through

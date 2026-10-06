@@ -7395,8 +7395,8 @@ impl Waku {
     }
 
     /// The wireframes opt-in is daemon-owned like the other experiments.
-    /// There is no visible surface to unmount yet — the flag gates the
-    /// emit affordance and preview that arrive with the feature.
+    /// An open `.wireframe.json` preview needs no unmount — the file
+    /// viewer reads the flag each frame and falls back to JSON source.
     fn set_wireframes_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.wireframes_experiment_enabled = enabled;
         self.save();

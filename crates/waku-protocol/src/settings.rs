@@ -123,7 +123,7 @@ pub struct DaemonSettings {
     #[serde(default)]
     pub sandbox_default_enabled: bool,
     /// Experimental opt-in for planning-session wireframes — the emit
-    /// affordance, preview surfaces, and Figma export stay hidden while
+    /// affordance and the file viewer's themed preview stay hidden while
     /// this is off, and emitted `.wireframe.json` files persist either
     /// way. Defaults on in development builds, opt-in in release builds.
     #[serde(default = "default_experiment_enabled")]

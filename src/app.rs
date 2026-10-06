@@ -1345,9 +1345,13 @@ struct RightPanelFileEditor {
     /// the wheel handler needs both to clamp pan and zoom around the cursor.
     image_viewport: Option<Bounds<Pixels>>,
     image_natural: Option<(f32, f32)>,
-    /// SVG only: edit the source instead of viewing the rendered preview.
-    /// Other image formats have no meaningful text view.
+    /// SVG and wireframe files: edit the source instead of viewing the
+    /// rendered preview. Other image formats have no meaningful text view.
     show_source: bool,
+    /// Parsed `.wireframe.json`, keyed by a hash of the content it came
+    /// from — the preview re-parses only when the text changes rather
+    /// than once a frame.
+    wireframe: Option<(u64, Result<waku_protocol::wireframe::Wireframe, waku_protocol::wireframe::WireframeError>)>,
     /// A read is in flight on the background executor. Set from the moment the
     /// editor is created, because `render` may not touch the filesystem: until
     /// the first read lands the editor is empty and locked, and that means
@@ -3509,6 +3513,10 @@ pub struct Waku {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
+    /// The `.wireframe.json` preview's scroll region — separate from the
+    /// markdown preview's so neither inherits the other's offset.
+    wireframe_preview_scroll_handle: ScrollHandle,
+    wireframe_preview_scrollbar: Rc<ScrollbarState>,
     /// Plan documents fetched through each planning session's boss daemon,
     /// keyed by session id — the rendered tab is read-only, so the cache
     /// holds only text plus the Boss revision it answered.
@@ -4297,6 +4305,7 @@ mod usage_page;
 mod voice_briefing;
 mod voice_scratchpad;
 mod window_chrome;
+mod wireframe;
 mod worktrees;
 
 pub use annotations::init as init_annotation_keys;
@@ -7279,6 +7288,8 @@ impl Waku {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
+                wireframe_preview_scroll_handle: ScrollHandle::new(),
+                wireframe_preview_scrollbar: ScrollbarState::new(),
                 plan_docs: HashMap::new(),
                 plan_annotations,
                 plan_markdown: RefCell::new(None),

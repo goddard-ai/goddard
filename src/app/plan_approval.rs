@@ -93,6 +93,9 @@ impl Waku {
             key,
             waku_client::boss::BossOperation::FinalizePlan {
                 plan_file: Some(plan_file),
+                // Approval only seals the document — an already-declared
+                // work breakdown stays as it is.
+                items: None,
             },
             super::boss::BossReply::Finalize(session_id),
             cx,
