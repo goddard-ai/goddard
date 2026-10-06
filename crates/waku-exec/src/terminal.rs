@@ -4,14 +4,16 @@
 //! stream and send input/resize controls, so a browser can operate against a
 //! daemon on another machine without interpreting any daemon-side paths.
 
+/// Receives live terminal events without retaining them in a replay journal.
+pub trait TerminalEventSink: Send + 'static {
+    fn send_ephemeral(&self, event: waku_protocol::WireDriverEvent) -> anyhow::Result<()>;
+}
+
 #[cfg(not(unix))]
 use std::path::Path;
 
 #[cfg(not(unix))]
 use anyhow::bail;
-
-#[cfg(not(unix))]
-use crate::EventSink;
 
 #[cfg(unix)]
 mod platform {
@@ -28,7 +30,8 @@ mod platform {
     use parking_lot::Mutex;
     use serde_json::json;
 
-    use crate::{EventSink, WireDriverEvent};
+    use super::TerminalEventSink;
+    use waku_protocol::WireDriverEvent;
 
     const CELL_WIDTH: u16 = 8;
     const CELL_HEIGHT: u16 = 16;
@@ -52,7 +55,7 @@ mod platform {
             cwd: &std::path::Path,
             cols: u16,
             rows: u16,
-            events: EventSink,
+            events: impl TerminalEventSink,
         ) -> anyhow::Result<Self> {
             let shell = crate::command_env::default_terminal_shell();
             let shell_args = crate::command_env::default_terminal_shell_args(&shell);
@@ -65,11 +68,11 @@ mod platform {
             )
         }
 
-        pub(crate) fn open_with_shell(
+        pub fn open_with_shell(
             cwd: &std::path::Path,
             cols: u16,
             rows: u16,
-            events: EventSink,
+            events: impl TerminalEventSink,
             shell: Shell,
         ) -> anyhow::Result<Self> {
             if !cwd.is_dir() {
@@ -277,7 +280,12 @@ pub struct DaemonTerminal;
 
 #[cfg(not(unix))]
 impl DaemonTerminal {
-    pub fn open(_cwd: &Path, _cols: u16, _rows: u16, _events: EventSink) -> anyhow::Result<Self> {
+    pub fn open(
+        _cwd: &Path,
+        _cols: u16,
+        _rows: u16,
+        _events: impl TerminalEventSink,
+    ) -> anyhow::Result<Self> {
         bail!("daemon terminals are not supported on this platform")
     }
 

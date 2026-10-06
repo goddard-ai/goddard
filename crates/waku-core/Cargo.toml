@@ -37,6 +37,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-base = { path = "../waku-base" }
+waku-exec = { path = "../waku-exec" }
 waku-localization = { path = "../waku-localization" }
 waku-boss = { path = "../waku-boss" }
 waku-protocol = { path = "../waku-protocol" }

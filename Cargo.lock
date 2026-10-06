@@ -11524,6 +11524,7 @@ dependencies = [
  "waku-base",
  "waku-boss",
  "waku-client",
+ "waku-exec",
  "waku-localization",
  "waku-protocol",
  "waku-repo-map",
@@ -11539,6 +11540,23 @@ dependencies = [
  "anyhow",
  "serde_json",
  "waku-core",
+ "waku-protocol",
+]
+
+[[package]]
+name = "waku-exec"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "anyhow",
+ "base64 0.22.1",
+ "dirs 6.0.0",
+ "libc",
+ "parking_lot",
+ "serde_json",
+ "uuid",
+ "waku-base",
+ "waku-localization",
  "waku-protocol",
 ]
 

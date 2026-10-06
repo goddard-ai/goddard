@@ -445,6 +445,12 @@ pub struct EventSink {
     source_subscriber_id: u64,
 }
 
+impl crate::terminal::TerminalEventSink for EventSink {
+    fn send_ephemeral(&self, event: WireDriverEvent) -> anyhow::Result<()> {
+        EventSink::send_ephemeral(self, event)
+    }
+}
+
 impl EventSink {
     pub fn send(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         self.hub.emit(self.session_id, self.runtime_id, event, true);

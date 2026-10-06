@@ -78,14 +78,14 @@ impl Proc {
     }
 
     /// The wrapped [`Command`], read-only.
-    pub(crate) fn command_ref(&self) -> &Command {
+    pub fn command_ref(&self) -> &Command {
         &self.command
     }
 
     /// The wrapped [`Command`], for helpers that only configure. Run
     /// methods reached through it bypass the spawn gate — keep those calls
     /// on `Proc`.
-    pub(crate) fn command_mut(&mut self) -> &mut Command {
+    pub fn command_mut(&mut self) -> &mut Command {
         &mut self.command
     }
 
@@ -357,7 +357,7 @@ fn resolve_spawn_program(program: &OsStr) -> OsString {
 /// token, its task id, the daemon address, and `PATH` with the `goddard-agent`
 /// directory prepended. Callers build `command` through [`command`] first so
 /// the prepend lands on the PATH the provider would already run with.
-pub fn apply_agent_environment(command: &mut Command, agent: &crate::agent::AgentLaunchEnv) {
+pub fn apply_agent_environment(command: &mut Command, agent: &crate::AgentLaunchEnv) {
     let base_path = command
         .get_envs()
         .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
@@ -375,7 +375,7 @@ pub fn apply_agent_environment(command: &mut Command, agent: &crate::agent::Agen
 /// silently dropped on some platforms.
 pub fn merge_agent_environment(
     environment: &mut Vec<(String, String)>,
-    agent: &crate::agent::AgentLaunchEnv,
+    agent: &crate::AgentLaunchEnv,
 ) {
     let base_path = environment
         .iter()
@@ -400,9 +400,9 @@ pub fn merge_agent_environment(
 /// Copilot SDK's `ClientOptions.env`). Mirrors [`command`] plus
 /// [`apply_agent_environment`]: the login shell's variables, the search-path
 /// `PATH`, then the agent surface.
-pub(crate) fn spawn_environment(
+pub fn spawn_environment(
     program: &Path,
-    agent: Option<&crate::agent::AgentLaunchEnv>,
+    agent: Option<&crate::AgentLaunchEnv>,
 ) -> Vec<(OsString, OsString)> {
     let mut environment = shell_environment();
     if let Some(search_path) = child_search_path(program) {
@@ -430,7 +430,7 @@ pub(crate) fn spawn_environment(
 }
 
 fn agent_environment_pairs(
-    agent: &crate::agent::AgentLaunchEnv,
+    agent: &crate::AgentLaunchEnv,
     base_path: Option<OsString>,
 ) -> Vec<(String, String)> {
     let cli_directory = agent
@@ -527,7 +527,7 @@ pub fn plain_command(program: impl AsRef<OsStr>) -> Proc {
 // /dev/null first, so `<&0` duplicates the dead fd — while `<&9` dup's the
 // original stdin saved before the backgrounded command runs.
 #[cfg(unix)]
-pub(crate) const DAEMON_GUARDIAN_SCRIPT: &str = r#"
+pub const DAEMON_GUARDIAN_SCRIPT: &str = r#"
 daemon=$PPID
 wrapper=$$
 exec 9<&0
@@ -645,7 +645,7 @@ pub fn raise_open_file_limit() {}
 /// Normalize a Goddard-owned provider thread before a dependency spawns the child
 /// internally. The ACP SDK owns its `async_process::Command`, so its dedicated
 /// connection thread uses this once at startup instead of [`spawn`].
-pub(crate) fn unblock_sigchld_for_current_thread() -> io::Result<()> {
+pub fn unblock_sigchld_for_current_thread() -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let sigchld = sigchld_set()?;
@@ -1142,7 +1142,7 @@ fn login_shell_environment() -> &'static RwLock<Option<ShellEnvironment>> {
     LOGIN_SHELL_ENVIRONMENT.get_or_init(|| RwLock::new(None))
 }
 
-pub(crate) fn shell_environment() -> ShellEnvironment {
+pub fn shell_environment() -> ShellEnvironment {
     login_shell_environment()
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1559,8 +1559,8 @@ mod tests {
         std::env::split_paths(path).collect()
     }
 
-    fn agent_launch_env(token: &str) -> crate::agent::AgentLaunchEnv {
-        crate::agent::AgentLaunchEnv {
+    fn agent_launch_env(token: &str) -> crate::AgentLaunchEnv {
+        crate::AgentLaunchEnv {
             token: token.to_owned(),
             task_id: uuid::Uuid::new_v4(),
             parent_task_id: None,

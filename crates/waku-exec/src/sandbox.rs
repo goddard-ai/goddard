@@ -774,7 +774,7 @@ pub fn sign_in_invocation(
 
 /// The shuru CLI itself: `GODDARD_SHURU_BIN` wins for development, then the
 /// shell's PATH, then the documented install location.
-pub(crate) fn shuru_binary() -> anyhow::Result<PathBuf> {
+pub fn shuru_binary() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_SHURU_BIN").map(PathBuf::from) {
         return Ok(path);
     }
