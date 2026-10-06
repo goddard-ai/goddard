@@ -1490,6 +1490,7 @@ pub struct TerminalView {
     scrollbar_state: Rc<ScrollbarState>,
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     selecting: bool,
+    selection_scroll_task: Option<Task<()>>,
     /// The link a link-modifier press landed on, awaiting release. While it
     /// lives the press is swallowed — the program never sees it and no
     /// selection starts.
@@ -1585,6 +1586,7 @@ impl TerminalView {
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
             selecting: false,
+            selection_scroll_task: None,
             link_gesture: None,
             last_mouse_cell: None,
             hovered_link: None,
@@ -1674,6 +1676,7 @@ impl TerminalView {
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
             selecting: false,
+            selection_scroll_task: None,
             link_gesture: None,
             last_mouse_cell: None,
             hovered_link: None,
@@ -2155,10 +2158,69 @@ impl TerminalView {
         }
         drop(term);
 
+        self.selection_scroll_task = None;
         self.selecting = true;
         session.dirty.store(true, Ordering::Release);
+        // Poll the window's pointer so a held drag keeps scrolling even
+        // without motion events, including outside the grid's hitbox.
+        let origin = event.position;
+        self.selection_scroll_task = Some(cx.spawn(async move |this, cx| {
+            let mut dragging = false;
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+                let keep_scrolling = this.update_in(cx, |this, window, cx| {
+                    dragging |= window.mouse_position() != origin;
+                    this.scroll_selection(dragging, window, cx)
+                });
+                if !matches!(keep_scrolling, Ok(true)) {
+                    break;
+                }
+            }
+        }));
         cx.stop_propagation();
         cx.notify();
+    }
+
+    fn scroll_selection(
+        &mut self,
+        dragging: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.selecting || !window.is_window_active() || !self.focus_handle.is_focused(window) {
+            self.selecting = false;
+            return false;
+        }
+        if !dragging {
+            return true;
+        }
+        let Some(bounds) = self.grid_bounds.get() else {
+            return false;
+        };
+        let Some(session) = &self.session else {
+            return false;
+        };
+        let position = window.mouse_position();
+        let edge = px(session.cell_size.1);
+        let lines = if position.y < bounds.top() + edge {
+            1
+        } else if position.y > bounds.bottom() - edge {
+            -1
+        } else {
+            return true;
+        };
+        session.scroll(lines);
+        // Map after scrolling: the same pointer now extends the selection
+        // into the newly revealed history rather than its previous row.
+        if let Some((point, side)) = self.grid_point_for_position(position, true)
+            && let Some(selection) = session.term.lock().selection.as_mut()
+        {
+            selection.update(point, side);
+        }
+        cx.notify();
+        true
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -2181,6 +2243,8 @@ impl TerminalView {
         if self.selecting {
             let hover_changed = self.set_hovered_link(None);
             if event.pressed_button != Some(MouseButton::Left) {
+                self.selecting = false;
+                self.selection_scroll_task = None;
                 if hover_changed {
                     cx.notify();
                 }
@@ -2239,6 +2303,7 @@ impl TerminalView {
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         let was_selecting = self.selecting;
         self.selecting = false;
+        self.selection_scroll_task = None;
         self.last_mouse_cell = None;
 
         // Resolve a link gesture: releasing on the link the press started on

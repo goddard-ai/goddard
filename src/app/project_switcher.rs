@@ -819,6 +819,9 @@ impl Waku {
                 let root = project.path.clone();
                 if let Some(terminal_id) = self.create_terminal(root, None, None, cx) {
                     self.select_terminal(terminal_id, window, cx);
+                    // Activation owns focus now; restoring the switcher's
+                    // previous focus would send typing back to the composer.
+                    return;
                 }
             }
             if let Some(previous_focus) = previous_focus {
