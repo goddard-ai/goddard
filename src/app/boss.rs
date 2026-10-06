@@ -477,9 +477,6 @@ pub(super) struct BossGoalRow {
     /// The project label the summon declared — the Pending row's project
     /// before its session shell exists.
     pub queued_project: Option<String>,
-    /// The queued wait reason for the tooltip — the daemon's admission
-    /// blocker or a neutral admission label, never a position number.
-    pub queue_detail: Option<String>,
     /// 1-based admission order among the daemon's queued employees —
     /// Pending sorts on it; it is never displayed as a number.
     pub queue_rank: Option<usize>,
@@ -718,10 +715,6 @@ impl Waku {
                         employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
                     })
                     .map(|employee| {
-                        let queue_detail = boss_queue_detail(
-                            employee,
-                            queue_rank.get(&employee.session_id).copied(),
-                        );
                         BossGoalRow {
                             session_id: employee.session_id,
                             name: employee.identity.name.clone(),
@@ -748,7 +741,6 @@ impl Waku {
                                 .map(|ticket| ticket.project.trim())
                                 .filter(|project| !project.is_empty())
                                 .map(str::to_owned),
-                            queue_detail,
                             queue_rank: queue_rank.get(&employee.session_id).copied(),
                             group_id: employee
                                 .ticket

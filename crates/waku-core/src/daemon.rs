@@ -9646,6 +9646,12 @@ impl WakuBackend {
             },
         );
         driver.steer(transport.unwrap_or(prompt));
+        // A steer landing mid-turn is the supervisor's answer to a raised
+        // blocker — the flagged presentation goes stale the moment fresh
+        // direction arrives, not when the employee next expires.
+        if let Err(error) = self.boss.clear_employee_blocker(session_id) {
+            eprintln!("could not clear a Boss employee's blocker: {error:#}");
+        }
     }
 
     /// `agent prompt`: deliver a message to an existing task, by Waku task

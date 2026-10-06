@@ -1462,7 +1462,8 @@ fn tab_scroll_fade(
 
 /// The Goals panel's compact row geometry: a two-line base row, a small
 /// third line only for attention reasons, and a finished-history viewport
-/// bounded to five rows or 45% of the panel body while ongoing work exists.
+/// bounded to five rows or 45% of the panel body while ongoing work exists —
+/// Show more expands history into the panel's flexible share instead.
 const GOALS_PANEL_ROW_HEIGHT: f32 = 48.0;
 const GOALS_PANEL_REASON_HEIGHT: f32 = 16.0;
 const GOALS_PANEL_RECENT_LIMIT: usize = 5;
@@ -1676,7 +1677,6 @@ struct BossGoalPanelRow {
     reason: Option<String>,
     reason_attention: bool,
     aria: String,
-    tooltip: String,
     updated_sort: u64,
     created_sort: u64,
     rank_sort: usize,
@@ -1687,7 +1687,6 @@ enum BossGoalItem {
     Header {
         section: boss::BossGoalSection,
         label: String,
-        count: usize,
         attention: usize,
         collapsed: bool,
         top_gap: bool,
@@ -1695,14 +1694,13 @@ enum BossGoalItem {
     Row(Arc<BossGoalPanelRow>),
 }
 
-/// One disclosure header — chevron, quiet label, count, and the "needs
-/// attention" tally the Finished header always carries and folded sections
-/// carry in place of their hidden rows.
+/// One disclosure header — quiet label, its trailing chevron, and the
+/// "needs attention" tally folded sections carry in place of their hidden
+/// rows.
 #[track_caller]
 fn boss_goal_section_header(
     section: boss::BossGoalSection,
     label: &str,
-    count: usize,
     attention: usize,
     collapsed: bool,
     top_gap: bool,
@@ -1728,15 +1726,6 @@ fn boss_goal_section_header(
         .focus_visible(|style| style.bg(theme.focus_highlight()))
         .hover(|style| style.bg(theme.overlay))
         .active(|style| style.bg(theme.overlay_strong))
-        .child(icon(
-            if collapsed {
-                "icons/chevron-right.svg"
-            } else {
-                "icons/chevron-down.svg"
-            },
-            11.0,
-            theme.text_tertiary,
-        ))
         .child(
             div()
                 .min_w_0()
@@ -1746,16 +1735,18 @@ fn boss_goal_section_header(
                 .text_color(theme.text_secondary)
                 .child(label.to_owned()),
         )
-        .child(
-            div()
-                .flex_none()
-                .text_size(sp(11.0))
-                .text_color(theme.text_tertiary)
-                .child(count.to_string()),
-        )
+        .child(icon(
+            if collapsed {
+                "icons/chevron-right.svg"
+            } else {
+                "icons/chevron-down.svg"
+            },
+            11.0,
+            theme.text_tertiary,
+        ))
         .child(div().flex_1())
         .when(
-            attention > 0 && (section == boss::BossGoalSection::Finished || collapsed),
+            attention > 0 && collapsed && section != boss::BossGoalSection::Finished,
             |element| {
                 element.child(
                     div()
@@ -1794,11 +1785,12 @@ fn boss_goal_section_header(
         })
 }
 
-/// The compact two-line goal row: status icon and task title, then the
-/// employee's avatar and name, project folder and name, the worktree fork
-/// hugging the trailing relative update time. Attention states add a small
-/// reason line. Activation defers to `on_activation_app` so the list item
-/// builder never re-leases Waku.
+/// The compact two-line goal row: status icon and task title, then an
+/// indented detail line — project folder and name, a "·" separator, the
+/// employee's avatar and name, and the worktree fork hugging the trailing
+/// relative update time. Attention states add a small reason line.
+/// Activation defers to `on_activation_app` so the list item builder never
+/// re-leases Waku.
 #[track_caller]
 fn boss_goal_panel_row_element(
     row: &Arc<BossGoalPanelRow>,
@@ -1851,7 +1843,6 @@ fn boss_goal_panel_row_element(
         .flex_col()
         .gap(px(3.0))
         .aria_label(row.aria.clone())
-        .tooltip(Tooltip::text(row.tooltip.clone()))
         .focus_visible(|style| style.bg(theme.focus_highlight()))
         .when(row.destination, |element| {
             element
@@ -1899,10 +1890,32 @@ fn boss_goal_panel_row_element(
                 .flex()
                 .items_center()
                 .gap(px(5.0))
-                .child(div().flex_none().child(avatar))
+                // Indent past the status icon and its gap so the detail line
+                // opens under the title, leaving the marker column clear.
+                .pl(px(18.0))
+                .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .max_w(px(160.0))
+                        .truncate()
+                        .text_size(sp(11.0))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child(row.project_label.clone()),
+                )
                 .child(
                     div()
                         .flex_none()
+                        .text_size(sp(11.0))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child("·"),
+                )
+                .child(div().flex_none().child(avatar))
+                .child(
+                    div()
+                        .min_w_0()
                         .max_w(px(112.0))
                         .truncate()
                         .text_size(sp(11.5))
@@ -1910,17 +1923,7 @@ fn boss_goal_panel_row_element(
                         .text_color(theme.text_secondary)
                         .child(row.employee_name.clone()),
                 )
-                .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(sp(11.0))
-                        .line_height(sp(15.0))
-                        .text_color(theme.text_tertiary)
-                        .child(row.project_label.clone()),
-                )
+                .child(div().flex_1())
                 .when(row.worktree, |element| {
                     element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
                 })
@@ -2608,7 +2611,6 @@ mod tests {
             queued_at: None,
             queued_objective: None,
             queued_project: None,
-            queue_detail: None,
             queue_rank: None,
             group_id: None,
         };
@@ -9373,7 +9375,7 @@ impl Waku {
         });
         let destination = session.is_some();
         let reason = if row.lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued {
-            // Pending detail stays in the tooltip, never a routine row line.
+            // A queued wait reason is not a routine row line.
             None
         } else if let Some(blocker) = &row.blocker {
             Some(blocker.clone())
@@ -9391,38 +9393,6 @@ impl Waku {
             .and_then(|identity| {
                 self.boss_avatar_image(&identity.avatar_seed, GOALS_PANEL_AVATAR)
             });
-        let mut tooltip = title.clone();
-        tooltip.push('\n');
-        tooltip.push_str(&row.name);
-        if !row.job_title.is_empty() {
-            tooltip.push_str(" · ");
-            tooltip.push_str(&row.job_title);
-        }
-        tooltip.push('\n');
-        tooltip.push_str(&project_label);
-        if let Some(name) = &worktree_name {
-            tooltip.push_str(" · ");
-            tooltip.push_str(&tr!("boss.goals_worktree"));
-            tooltip.push(' ');
-            tooltip.push_str(name);
-        }
-        if let Some(path) = project.map(|project| project.path.display().to_string()) {
-            tooltip.push('\n');
-            tooltip.push_str(&path);
-        }
-        tooltip.push('\n');
-        tooltip.push_str(&status_label);
-        if let Some(label) = &updated_label {
-            tooltip.push_str(" · ");
-            tooltip.push_str(label);
-        }
-        if let Some(reason) = &reason {
-            tooltip.push('\n');
-            tooltip.push_str(reason);
-        } else if let Some(detail) = &row.queue_detail {
-            tooltip.push('\n');
-            tooltip.push_str(detail);
-        }
         BossGoalPanelRow {
             session_id: row.session_id,
             bucket,
@@ -9441,7 +9411,6 @@ impl Waku {
                 employee = row.name.clone(),
                 status = status_label
             ),
-            tooltip,
             updated_sort: updated_at.unwrap_or(0),
             created_sort: row.created_at.or(row.queued_at).unwrap_or(0),
             rank_sort: row.queue_rank.unwrap_or(usize::MAX),
@@ -9569,7 +9538,6 @@ impl Waku {
             ongoing_items.push(BossGoalItem::Header {
                 section,
                 label,
-                count: section_rows.len(),
                 attention: section_rows
                     .iter()
                     .filter(|row| row.reason.is_some())
@@ -9598,14 +9566,12 @@ impl Waku {
                 match item {
                     BossGoalItem::Header {
                         section,
-                        count,
                         attention,
                         collapsed,
                         ..
                     } => {
                         0u8.hash(&mut hasher);
                         section.hash(&mut hasher);
-                        count.hash(&mut hasher);
                         attention.hash(&mut hasher);
                         collapsed.hash(&mut hasher);
                     }
@@ -9651,12 +9617,10 @@ impl Waku {
             );
         }
         if !finished.is_empty() {
-            let attention = finished.iter().filter(|row| row.reason.is_some()).count();
             panel = panel.child(boss_goal_section_header(
                 boss::BossGoalSection::Finished,
                 &tr!("boss.goals_section_finished"),
-                finished.len(),
-                attention,
+                0,
                 finished_collapsed,
                 false,
                 key,
@@ -9664,9 +9628,11 @@ impl Waku {
                 &theme,
             ));
             if !finished_collapsed {
-                // The history viewport caps at five rows or 45% of the panel
-                // body while ongoing work exists; Show more expands history
-                // inside the same bound rather than pushing sections down.
+                // The preview caps at five rows or 45% of the panel body
+                // while ongoing work exists; expanding hands history the
+                // larger flex share, bounded by its real height, so Show
+                // more visibly reveals older rows instead of only
+                // lengthening a hidden scroll area.
                 let estimate: f32 = visible_finished
                     .iter()
                     .map(|row| {
@@ -9685,12 +9651,19 @@ impl Waku {
                 let weak = waku.clone();
                 panel = panel.child(
                     div()
-                        .flex_none()
                         .relative()
-                        .when(ongoing_exists, |element| {
+                        .when(ongoing_exists && !history_expanded, |element| {
                             element
+                                .flex_none()
                                 .h(px(estimate.min(GOALS_PANEL_FINISHED_MAX_HEIGHT)))
                                 .max_h(gpui::relative(GOALS_PANEL_FINISHED_HEIGHT_FRACTION))
+                        })
+                        .when(ongoing_exists && history_expanded, |element| {
+                            element
+                                .flex_1()
+                                .flex_grow(2.0)
+                                .min_h_0()
+                                .max_h(px(estimate))
                         })
                         .when(!ongoing_exists, |element| element.flex_1().min_h_0())
                         .child(
@@ -9716,6 +9689,9 @@ impl Waku {
                             .flex_none()
                             .h(px(28.0))
                             .mt(px(4.0))
+                            // Align with the rows' text column — the row's
+                            // inset plus the status-icon indent.
+                            .pl(px(26.0))
                             .flex()
                             .items_center()
                             .cursor_default()
@@ -9761,14 +9737,13 @@ impl Waku {
                                     BossGoalItem::Header {
                                         section,
                                         label,
-                                        count,
                                         attention,
                                         collapsed,
                                         top_gap,
                                     } => {
                                         let theme = Theme::current(cx);
                                         boss_goal_section_header(
-                                            *section, label, *count, *attention, *collapsed,
+                                            *section, label, *attention, *collapsed,
                                             *top_gap, key, &weak, &theme,
                                         )
                                         .into_any_element()

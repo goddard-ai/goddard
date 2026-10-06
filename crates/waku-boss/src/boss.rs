@@ -642,6 +642,29 @@ impl BossService {
         })
     }
 
+    /// Drop a flagged blocker once fresh direction reaches the employee —
+    /// a steer delivered mid-turn is the supervisor's answer, and the flag
+    /// would otherwise linger until expiry. The flag check keeps a routine
+    /// steer from paying `update`'s clone-and-diff.
+    pub fn clear_employee_blocker(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let flagged = self.state.lock().employees.iter().any(|employee| {
+            employee.session_id == session_id && employee.blocker.is_some()
+        });
+        if !flagged {
+            return Ok(());
+        }
+        self.update(|state| {
+            if let Some(employee) = state
+                .employees
+                .iter_mut()
+                .find(|employee| employee.session_id == session_id)
+            {
+                employee.blocker = None;
+            }
+            Ok(())
+        })
+    }
+
     /// Plan documents moved out of `memory/` to `plans/` at the files
     /// root — they are work product, not memory. Move a legacy
     /// `memory/plans/` wholesale when `plans/` is absent, else merge the
@@ -4725,6 +4748,15 @@ mod tests {
         assert_eq!(service.report_target(&flagged), Some(supervisor_id));
         service.expire(supervisor_id).unwrap();
         assert_eq!(service.report_target(&flagged), Some(boss));
+        // A steer delivered mid-turn answers the flag in place — the record
+        // clears without a resurrection, and clearing an unflagged or
+        // unmanaged session is a no-op.
+        service.clear_employee_blocker(session_id).unwrap();
+        assert_eq!(service.employee(session_id).unwrap().blocker, None);
+        service.clear_employee_blocker(Uuid::new_v4()).unwrap();
+        service
+            .report_blocker(session_id, "still waiting".into())
+            .unwrap();
         // Resurrection hands the employee a fresh job — the old flag goes
         // with the job that raised it.
         service.expire(session_id).unwrap();
