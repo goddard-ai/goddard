@@ -14029,7 +14029,7 @@ mod tests {
         let repl = root.join("kernel");
         std::fs::write(
             &repl,
-            include_str!("driver/fixtures/computer_use_kernel.py"),
+            include_str!("../../waku-drivers/src/driver/fixtures/computer_use_kernel.py"),
         )
         .unwrap();
         std::fs::set_permissions(&repl, std::fs::Permissions::from_mode(0o700)).unwrap();

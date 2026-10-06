@@ -7,13 +7,13 @@ pub mod deliver;
 mod http;
 mod oauth;
 mod proxy;
-pub(crate) mod secrets;
+pub mod secrets;
 mod service;
 
 pub use oauth::StoredCredential;
-pub(crate) use secrets::SecretStore;
+pub use secrets::SecretStore;
 pub(crate) use service::Inner;
-pub use service::{IntegrationService, Upstream};
+pub use service::{IntegrationEventSink, IntegrationService, Upstream};
 
 /// Server name agents see for a delivered integration: `goddard_linear`,
 /// `goddard_github`, … The prefix keeps delivered entries distinct from

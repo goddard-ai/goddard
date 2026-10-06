@@ -21,9 +21,14 @@ use super::catalog::{self};
 use super::oauth::{self, StoredCredential};
 use super::proxy;
 use super::secrets::SecretStore;
-use crate::EventSink;
 use crate::driver::McpServerSpec;
 use crate::settings::DaemonSettingsStore;
+
+/// Settings broadcasts required by integration authentication.
+pub trait IntegrationEventSink: Clone + Send + Sync + 'static {
+    fn settings_changed(&self, settings: waku_protocol::DaemonSettings);
+    fn with_source_subscriber(self, id: u64) -> Self;
+}
 
 /// What the proxy needs to forward one request.
 pub struct Upstream {
@@ -141,7 +146,7 @@ impl IntegrationService {
 
     /// Integrations a provider launch should receive, in the uniform
     /// `goddard_<id>` + local-URL shape. Empty while the experiment is off.
-    pub(crate) fn launch_mcp_servers(&self, provider: ProviderKind) -> Vec<McpServerSpec> {
+    pub fn launch_mcp_servers(&self, provider: ProviderKind) -> Vec<McpServerSpec> {
         if super::deliver::uses_file_sync(provider) && !super::deliver::uses_acp(provider) {
             return Vec::new();
         }
@@ -163,7 +168,7 @@ impl IntegrationService {
             .collect()
     }
 
-    pub(crate) fn scoped_mcp_servers(&self, task: Uuid, grants: &[String]) -> Vec<McpServerSpec> {
+    pub fn scoped_mcp_servers(&self, task: Uuid, grants: &[String]) -> Vec<McpServerSpec> {
         let settings = self.inner.settings.get();
         self.revoke_task(task);
         let token = format!("gms{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -193,21 +198,21 @@ impl IntegrationService {
             .collect()
     }
 
-    pub(crate) fn revoke_task(&self, task: Uuid) {
+    pub fn revoke_task(&self, task: Uuid) {
         self.inner
             .scoped_tokens
             .lock()
             .retain(|_, (owner, _)| *owner != task);
     }
 
-    pub(crate) fn http_mcp_supported(&self, provider: ProviderKind) -> bool {
+    pub fn http_mcp_supported(&self, provider: ProviderKind) -> bool {
         self.inner
             .http_mcp_capable_providers
             .lock()
             .contains(&provider)
     }
 
-    pub(crate) fn record_http_mcp_capability(
+    pub fn record_http_mcp_capability(
         &self,
         provider: ProviderKind,
         supported: bool,
@@ -249,7 +254,7 @@ impl IntegrationService {
         variant_id: &str,
         providers: Vec<ProviderKind>,
         api_key: Option<String>,
-        events: &EventSink,
+        events: &impl IntegrationEventSink,
     ) -> anyhow::Result<()> {
         let entry = catalog::find(id).ok_or_else(|| anyhow!("unknown integration {id}"))?;
         let variant = entry
@@ -304,7 +309,7 @@ impl IntegrationService {
     /// Start the OAuth browser flow on a background thread. On success the
     /// credential lands in the secret store, `auth` flips to Connected, and
     /// every client hears it through `SettingsChanged`.
-    pub fn begin_auth(&self, id: &str, events: &EventSink) -> anyhow::Result<()> {
+    pub fn begin_auth(&self, id: &str, events: &impl IntegrationEventSink) -> anyhow::Result<()> {
         if !self.auth_inflight.lock().insert(id.to_owned()) {
             return Ok(());
         }

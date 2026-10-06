@@ -23,7 +23,7 @@ fn services() -> &'static Mutex<HashMap<Uuid, Weak<Service>>> {
     SERVICES.get_or_init(Default::default)
 }
 
-pub(crate) fn for_task(task: Uuid) -> anyhow::Result<Arc<Service>> {
+pub fn for_task(task: Uuid) -> anyhow::Result<Arc<Service>> {
     services()
         .lock()
         .get(&task)
@@ -36,7 +36,7 @@ struct Connection {
     output: Receiver<anyhow::Result<Value>>,
 }
 
-pub(crate) struct Service {
+pub struct Service {
     config: ComputerUseConfig,
     cwd: PathBuf,
     blobs: Arc<crate::blob_store::BlobStore>,
@@ -134,7 +134,7 @@ impl Service {
         })
     }
 
-    pub(crate) fn call(
+    pub fn call(
         &self,
         code: Option<&str>,
         timeout_ms: Option<u64>,
@@ -236,7 +236,7 @@ impl Service {
         Ok(result)
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub fn shutdown(&self) {
         self.closed.store(true, Ordering::Release);
         super::stop_registered_processes(&self.config.process_directory, &self.config.server_path);
         self.events.lock().take();
@@ -281,8 +281,8 @@ fn materialize_images(
     Ok(references)
 }
 
-#[cfg(test)]
-pub(crate) fn bind_for_test(
+#[cfg(any(test, feature = "test-support"))]
+pub fn bind_for_test(
     task: Uuid,
     repl_path: PathBuf,
     directory: &Path,

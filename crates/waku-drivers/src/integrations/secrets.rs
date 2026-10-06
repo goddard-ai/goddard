@@ -29,7 +29,7 @@ impl SecretStore {
 
     /// A store confined to the file fallback — tests must not touch the
     /// real keychain.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn file_only(dir: PathBuf) -> Self {
         Self {
             fallback_dir: dir.join("secrets"),

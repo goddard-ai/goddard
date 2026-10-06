@@ -48,7 +48,7 @@ pub(super) fn uses_file_sync(provider: ProviderKind) -> bool {
     FILE_PROVIDERS.contains(&provider)
 }
 
-pub(crate) fn uses_acp(provider: ProviderKind) -> bool {
+pub fn uses_acp(provider: ProviderKind) -> bool {
     ACP_PROVIDERS.contains(&provider)
 }
 

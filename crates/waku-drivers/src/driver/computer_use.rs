@@ -35,14 +35,14 @@ pub(super) struct ComputerUseConfig {
     pub(super) process_directory: PathBuf,
 }
 
-pub(crate) fn hint(skill_path: &Path) -> String {
+pub fn hint(skill_path: &Path) -> String {
     format!(
         "When the user asks you to interact with a local app, use `goddard-agent computer js` (or the session-specific launcher supplied in the Goddard instructions) and read the Goddard Computer Use skill at {} before the first call. JavaScript bindings persist per task. Returned image paths must be opened with your image-reading tool.",
         skill_path.display()
     )
 }
 
-pub(crate) struct ComputerUseRuntime {
+pub struct ComputerUseRuntime {
     pub(super) config: ComputerUseConfig,
     preview_monitor: Option<ComputerUsePreviewMonitor>,
     cli_service: Option<Arc<cli::Service>>,
@@ -50,7 +50,7 @@ pub(crate) struct ComputerUseRuntime {
 }
 
 impl ComputerUseRuntime {
-    pub(crate) fn start(events: DriverEventSender) -> anyhow::Result<Self> {
+    pub fn start(events: DriverEventSender) -> anyhow::Result<Self> {
         let server_path = computer_use::mcp_server_command()?;
         let repl_path = computer_use::js_repl_server_path()?;
         let skill_path = computer_use::skill_root_path()?
@@ -78,12 +78,7 @@ impl ComputerUseRuntime {
         })
     }
 
-    pub(crate) fn bind_task(
-        &mut self,
-        task: Uuid,
-        cwd: &Path,
-        blobs: Arc<crate::blob_store::BlobStore>,
-    ) {
+    pub fn bind_task(&mut self, task: Uuid, cwd: &Path, blobs: Arc<crate::blob_store::BlobStore>) {
         self.cli_service = Some(cli::Service::bind(
             task,
             self.config.clone(),

@@ -445,6 +445,16 @@ pub struct EventSink {
     source_subscriber_id: u64,
 }
 
+impl crate::integrations::IntegrationEventSink for EventSink {
+    fn settings_changed(&self, settings: crate::DaemonSettings) {
+        EventSink::settings_changed(self, settings)
+    }
+
+    fn with_source_subscriber(self, id: u64) -> Self {
+        EventSink::with_source_subscriber(self, id)
+    }
+}
+
 impl crate::terminal::TerminalEventSink for EventSink {
     fn send_ephemeral(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         EventSink::send_ephemeral(self, event)

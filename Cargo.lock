@@ -11490,10 +11490,8 @@ dependencies = [
 name = "waku-core"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
  "alacritty_terminal",
  "anyhow",
- "async-trait",
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
@@ -11501,8 +11499,6 @@ dependencies = [
  "crossbeam-channel",
  "dirs 6.0.0",
  "dunce",
- "futures",
- "github-copilot-sdk",
  "libc",
  "mdns-sd",
  "nucleo-matcher",
@@ -11516,14 +11512,13 @@ dependencies = [
  "smol",
  "subtle",
  "tokio",
- "toml 0.8.23",
  "trash",
  "tungstenite 0.30.0",
- "url",
  "uuid",
  "waku-base",
  "waku-boss",
  "waku-client",
+ "waku-drivers",
  "waku-exec",
  "waku-git",
  "waku-localization",
@@ -11543,6 +11538,39 @@ dependencies = [
  "serde_json",
  "waku-core",
  "waku-protocol",
+]
+
+[[package]]
+name = "waku-drivers"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "crossbeam-channel",
+ "dirs 6.0.0",
+ "dunce",
+ "futures",
+ "github-copilot-sdk",
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smol",
+ "tokio",
+ "toml 0.8.23",
+ "url",
+ "uuid",
+ "waku-base",
+ "waku-exec",
+ "waku-git",
+ "waku-localization",
+ "waku-protocol",
+ "waku-sessions",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

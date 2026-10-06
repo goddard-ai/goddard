@@ -24,7 +24,7 @@ const COMMAND_CATALOG_CAP: usize = 500;
 /// a provider session. `None` means either that the provider only reports
 /// commands from a real session or that its probe failed; filesystem-defined
 /// commands remain available as the caller's fallback in both cases.
-pub(crate) fn discover(
+pub fn discover(
     provider: ProviderKind,
     binary: &Path,
     project_root: &Path,

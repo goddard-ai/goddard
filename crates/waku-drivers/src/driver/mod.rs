@@ -14,24 +14,24 @@ mod muse;
 mod opencode;
 mod opencode_computer_use;
 mod pi;
-pub(crate) mod session_import;
+pub mod session_import;
 mod support;
 mod title_refresh;
 
-pub(crate) use computer_use::ComputerUseRuntime;
-#[cfg(test)]
-pub(crate) use computer_use::cli::bind_for_test as bind_computer_use_for_test;
-pub(crate) use computer_use::cli::for_task as computer_use_service;
-pub(crate) use computer_use::hint as computer_use_hint;
-pub(crate) use mcp::McpServerSpec;
+pub use computer_use::ComputerUseRuntime;
+#[cfg(any(test, feature = "test-support"))]
+pub use computer_use::cli::bind_for_test as bind_computer_use_for_test;
+pub use computer_use::cli::for_task as computer_use_service;
+pub use computer_use::hint as computer_use_hint;
+pub use mcp::McpServerSpec;
 
 pub(crate) use acp::{catalog_agent, discover_devin_models_via_acp};
 
-pub(crate) fn set_computer_use_enabled_for_runtimes(enabled: bool) {
+pub fn set_computer_use_enabled_for_runtimes(enabled: bool) {
     computer_use::set_enabled_for_runtimes(enabled);
 }
 
-pub(crate) fn revoke_computer_app_grants_for_runtimes() {
+pub fn revoke_computer_app_grants_for_runtimes() {
     computer_use::revoke_app_grants_for_runtimes();
 }
 
@@ -88,8 +88,8 @@ pub fn event_channel(
     (DriverEventSender { events, wake }, receiver)
 }
 
-#[cfg(test)]
-pub(crate) fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>) {
     let (wake, _wakes) = smol::channel::bounded(1);
     event_channel(wake)
 }
@@ -319,7 +319,7 @@ pub struct DriverStartOptions {
     /// Computer Use's session-owned resources are prepared by the daemon so
     /// its stdio server can be described in the same launch spec as HTTP
     /// integrations.
-    pub(crate) computer_use_runtime: Option<ComputerUseRuntime>,
+    pub computer_use_runtime: Option<ComputerUseRuntime>,
     /// The scoped agent surface for this launch: the per-session token,
     /// daemon address, and `goddard-agent` CLI location. The daemon fills this
     /// in when `agent_tools_enabled` is on; it never crosses the wire, so no
@@ -337,10 +337,10 @@ pub struct DriverStartOptions {
     /// field.
     pub subagents: Option<waku_protocol::model::SubagentSpec>,
     /// Provider-neutral MCP servers composed by the daemon for this launch.
-    pub(crate) mcp_servers: Vec<McpServerSpec>,
+    pub mcp_servers: Vec<McpServerSpec>,
     /// ACP reports its HTTP MCP support during initialization. The daemon
     /// records that capability so file delivery can switch to session scope.
-    pub(crate) http_mcp_capability_recorder: Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    pub http_mcp_capability_recorder: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// The configured evaluation backend, snapshotted at session start.
     /// `Auto`-mode permission requests for providers without their own
@@ -380,7 +380,7 @@ pub struct SessionOptions {
 
 /// A cloud-environment session: no local process, no VM — the driver owns
 /// a remote task's lifecycle through the provider's hosted API or CLI.
-pub(crate) fn start_cloud(
+pub fn start_cloud(
     provider: ProviderKind,
     options: DriverStartOptions,
     events: DriverEventSender,
@@ -390,7 +390,7 @@ pub(crate) fn start_cloud(
     })
 }
 
-pub(crate) fn start_local(
+pub fn start_local(
     provider: ProviderKind,
     options: DriverStartOptions,
     events: DriverEventSender,

@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 /// A provider-neutral MCP server description. Provider drivers own the
 /// translation from this transport shape to the provider's configuration.
 #[derive(Clone)]
-pub(crate) enum McpServerSpec {
+pub enum McpServerSpec {
     // Kept for non-CUA stdio integrations; current connected integrations use HTTP.
     #[allow(dead_code)]
     Stdio {

@@ -8,19 +8,13 @@ build = "build.rs"
 readme = "README.md"
 
 [dependencies]
-agent-client-protocol = "2.0.0"
 alacritty_terminal = { version = "0.26", default-features = false }
 anyhow = "1.0"
-async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 crossbeam-channel = "0.5"
 dirs = "6.0"
 dunce = "1"
-futures = "0.3"
-# bundled-cli (default) embeds the ~118 MB Copilot CLI archive in the binary;
-# the driver always launches the installed `copilot` via CliProgram::Path.
-github-copilot-sdk = { version = "1.0.14", default-features = false }
 nucleo-matcher = "0.3"
 parking_lot = "0.12"
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -31,11 +25,10 @@ sha2 = "0.10"
 smol = "2"
 subtle = "2"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-toml = "0.8"
 trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
-url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+waku-drivers = { path = "../waku-drivers" }
 waku-base = { path = "../waku-base" }
 waku-exec = { path = "../waku-exec" }
 waku-git = { path = "../waku-git" }
@@ -70,6 +63,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+waku-drivers = { path = "../waku-drivers", features = ["test-support"] }
 waku-sessions = { path = "../waku-sessions", features = ["test-support"] }
 waku-client = { path = "../waku-client" }
 
