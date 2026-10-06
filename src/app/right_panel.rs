@@ -4563,11 +4563,33 @@ impl Waku {
                     .pt(px(8.0))
                     // Parked follow-ups tuck against the composer card's top
                     // edge, inset the same 14px the session column gives the
-                    // queue card inside its composer column.
-                    .children(
-                        self.queued_messages_card(&session, cx)
-                            .map(|card| div().px(px(14.0)).child(card)),
-                    )
+                    // queue card inside its composer column. The bounds probe
+                    // lets the autocomplete popup clear the card rather than
+                    // cover it — cleared on every miss, the cell goes stale
+                    // the moment the card unmounts.
+                    .children({
+                        let queue_bounds = self
+                            .side_chat_composers
+                            .get(&session_id)
+                            .map(|chat| chat.autocomplete.queue_bounds_cell());
+                        match self.queued_messages_card(&session, cx) {
+                            Some(card) => Some(
+                                div()
+                                    .px(px(14.0))
+                                    .relative()
+                                    .children(queue_bounds.map(
+                                        super::autocomplete::composer_card_bounds_probe,
+                                    ))
+                                    .child(card),
+                            ),
+                            None => {
+                                if let Some(cell) = queue_bounds {
+                                    cell.set(None);
+                                }
+                                None
+                            }
+                        }
+                    })
                     .child(self.render_composer_card(
                         &composer::ComposerCard::SideChat {
                             session_id,

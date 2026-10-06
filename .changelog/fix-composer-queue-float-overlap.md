@@ -1,0 +1,1 @@
+- The chips and command/mention suggestions that float above the composer no longer cover parked follow-ups; while prompts are queued they rest above the queue card instead.

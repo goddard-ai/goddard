@@ -179,6 +179,10 @@ pub(super) struct AutocompleteUi {
     /// The composer card's bounds as of the last frame, recorded by a probe,
     /// so the popup can anchor above the card at the card's own width.
     card_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The queued-messages card's bounds as of the last frame, recorded the
+    /// same way — while a queue is parked above the composer, floats clear
+    /// it rather than covering its rows.
+    queue_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     results: RefCell<Option<ResultsMemo>>,
     matcher: RefCell<Matcher>,
     /// The `#` query waiting out the debounce, and the generation of the
@@ -195,6 +199,7 @@ impl AutocompleteUi {
             dismissed: Cell::new(false),
             scroll: ScrollHandle::new(),
             card_bounds: Rc::new(Cell::new(None)),
+            queue_bounds: Rc::new(Cell::new(None)),
             results: RefCell::new(None),
             matcher: RefCell::new(composer_complete::matcher()),
             work_item_scheduled: RefCell::new(None),
@@ -205,6 +210,21 @@ impl AutocompleteUi {
     /// The cell the composer card's bounds probe writes into.
     pub(super) fn card_bounds_cell(&self) -> Rc<Cell<Option<Bounds<Pixels>>>> {
         self.card_bounds.clone()
+    }
+
+    /// The cell the queue card's bounds probe writes into.
+    pub(super) fn queue_bounds_cell(&self) -> Rc<Cell<Option<Bounds<Pixels>>>> {
+        self.queue_bounds.clone()
+    }
+
+    /// The queue card's painted height this frame — zero while no card is
+    /// parked. Floats anchored off the composer card's top edge shift up by
+    /// this much so they rest above the queue instead of covering its rows.
+    pub(super) fn queue_card_height(&self) -> f32 {
+        self.queue_bounds
+            .get()
+            .map(|bounds| f32::from(bounds.size.height))
+            .unwrap_or(0.0)
     }
 }
 
@@ -1683,7 +1703,20 @@ impl Waku {
             }
         }
 
-        let anchor = point(card_bounds.origin.x, card_bounds.origin.y - px(6.0));
+        // A parked queue card sits flush on the composer card's top edge —
+        // anchor above it so the popup clears the queued rows instead of
+        // covering them. Big Picture remounts the composer without a queue
+        // card, and the probe's last write stays parked in the cell, so the
+        // overlay reads the composer card alone.
+        let anchor_top = if self.big_picture.is_open() {
+            None
+        } else {
+            ui.queue_bounds.get().map(|bounds| bounds.origin.y)
+        };
+        let anchor = point(
+            card_bounds.origin.x,
+            anchor_top.unwrap_or(card_bounds.origin.y) - px(6.0),
+        );
         let dismiss_surface = surface.clone();
         Some((
             deferred(

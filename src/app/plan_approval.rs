@@ -185,10 +185,19 @@ impl Waku {
         if approval.is_none() && playback.is_none() {
             return None;
         }
+        // A parked queue card sits flush on the composer card's top edge, so
+        // the float rises past it rather than covering its last row. Big
+        // Picture mounts no queue card — the probe's last write stays parked
+        // in the cell, and there the card's top edge is the right anchor.
+        let queue_height = if self.big_picture.is_open() {
+            0.0
+        } else {
+            self.composer_autocomplete.queue_card_height()
+        };
         Some(
             div()
                 .absolute()
-                .top(px(-32.0))
+                .top(px(-32.0 - queue_height))
                 .left(px(COMPOSER_CHIP_INSET))
                 .flex()
                 .gap(px(6.0))

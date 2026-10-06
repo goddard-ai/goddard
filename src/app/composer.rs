@@ -5048,17 +5048,33 @@ impl Waku {
     /// row pulls its text back into the composer on click and carries
     /// steer/remove/more controls on the right; the nudge row only removes.
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let session = self.selected_session()?;
-        let card = self.queued_messages_card(session, cx)?;
+        // The composer card's floating chips and the autocomplete popup
+        // anchor off the card's top edge; the probe lets them clear the
+        // parked queue instead of covering its rows. The cell goes stale
+        // the moment the card unmounts, so it is cleared on every miss.
+        let queue_bounds = self.composer_autocomplete.queue_bounds_cell();
+        let Some(session) = self.selected_session() else {
+            queue_bounds.set(None);
+            return None;
+        };
+        let Some(card) = self.queued_messages_card(session, cx) else {
+            queue_bounds.set(None);
+            return None;
+        };
         Some(
-            div().flex_none().px(px(20.0 - COMPOSER_OVERHANG)).child(
-                div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                    .mx_auto()
-                    .px(px(14.0))
-                    .child(card),
-            ),
+            div()
+                .flex_none()
+                .relative()
+                .px(px(20.0 - COMPOSER_OVERHANG))
+                .child(super::autocomplete::composer_card_bounds_probe(queue_bounds))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                        .mx_auto()
+                        .px(px(14.0))
+                        .child(card),
+                ),
         )
     }
 
