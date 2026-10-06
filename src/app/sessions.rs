@@ -4250,9 +4250,6 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(text) = type_to_focus_text(&event.keystroke) else {
-            return;
-        };
         // The composer only exists once a project is on screen; settings
         // replaces the workspace root wholesale, a selected terminal owns the
         // main area's keystrokes, and the Projects page's filter owns theirs.
@@ -4287,17 +4284,18 @@ impl Waku {
         {
             return;
         }
-        // The scratchpad claims a bare Space as its pause key while it
-        // owns the chat column — the same toggle the Mute pill fires — so
-        // it never lands in the draft under the panel. A live transcript
-        // caret consumed it a level deeper; here, the scratchpad's own
-        // composer is the one typing-owned surface that yields, since the
-        // field is the resting focus while dictating. Key repeat is kept
-        // out so holding Space can't strobe the tap.
+        // The scratchpad claims ⌥M as its pause key while it owns the chat
+        // column — the same toggle the Mute pill fires. The chord sits ahead
+        // of the text filter because it is not typing: a layout that resolves
+        // ⌥M to no key_char must not lose the pause key. A live transcript
+        // caret consumed the keystroke a level deeper; here, the
+        // scratchpad's own composer is the one typing-owned surface that
+        // yields, since the field is the resting focus while dictating. Key
+        // repeat is kept out so holding the chord can't strobe the tap.
         if !event.is_held
-            && !event.keystroke.modifiers.modified()
-            && event.keystroke.key == "space"
-            && self.voice_scratchpad_space_mutes()
+            && event.keystroke.modifiers == Modifiers::alt()
+            && event.keystroke.key == "m"
+            && self.voice_scratchpad_alt_m_mutes()
         {
             let foreign_field = !self.composer.read(cx).focus().is_focused(window)
                 && window.context_stack().iter().any(|context| {
@@ -4306,11 +4304,14 @@ impl Waku {
                         .any(|owned| context.contains(owned))
                 });
             if !foreign_field {
-                self.voice_scratchpad_space_toggle(cx);
+                self.voice_scratchpad_alt_m_toggle(cx);
                 cx.stop_propagation();
             }
             return;
         }
+        let Some(text) = type_to_focus_text(&event.keystroke) else {
+            return;
+        };
         if window.context_stack().iter().any(|context| {
             TYPING_OWNED_CONTEXTS
                 .iter()

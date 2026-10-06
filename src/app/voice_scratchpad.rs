@@ -1876,21 +1876,21 @@ impl Waku {
         cx.notify();
     }
 
-    /// Whether a bare Space is the scratchpad's pause key right now: the
+    /// Whether ⌥M is the scratchpad's pause key right now: the
     /// panel owns the chat column and no annotation box has reclaimed
     /// typing for the composer draft. The transcript's live caret consumes
-    /// Space a level deeper, so a space that lands as text never reaches
-    /// the caller this gate answers for.
-    pub(super) fn voice_scratchpad_space_mutes(&self) -> bool {
+    /// the chord's character a level deeper, so one that lands as text
+    /// never reaches the caller this gate answers for.
+    pub(super) fn voice_scratchpad_alt_m_mutes(&self) -> bool {
         self.voice_scratchpad_visible()
             && self
                 .selected_voice_scratchpad()
                 .is_some_and(|scratchpad| scratchpad.transcript.annotation_target.is_none())
     }
 
-    /// Space's pause effect — the same toggle the control row's Mute pill
+    /// ⌥M's pause effect — the same toggle the control row's Mute pill
     /// fires.
-    pub(super) fn voice_scratchpad_space_toggle(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn voice_scratchpad_alt_m_toggle(&mut self, cx: &mut Context<Self>) {
         let muted = self
             .selected_voice_scratchpad()
             .is_some_and(|scratchpad| !scratchpad.muted);
