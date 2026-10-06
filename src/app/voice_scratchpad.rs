@@ -98,10 +98,11 @@ const CONTROLS_INSET: f32 = 18.0;
 const TITLE_TOP_INSET: f32 = 24.0;
 /// The gap under the title before the first transcript row.
 const TITLE_BOTTOM_GAP: f32 = 30.0;
-/// A radius below half the 32px pill height keeps the corner unsaturated so
-/// the renderer's smoothed-corner shoulder engages — the frame's squircles.
-/// `rounded_full` saturates and stays a plain circular capsule.
-const PILL_RADIUS: f32 = 12.0;
+/// A radius just under half the 32px pill height gives the frame's capsule
+/// silhouette while staying unsaturated, so the renderer's smoothed-corner
+/// shoulder still engages — the frame's squircles. `rounded_full` saturates
+/// and stays a plain circular capsule.
+const PILL_RADIUS: f32 = 15.5;
 /// The annotation bullet marker — a drawn disc reads heavier than the "•"
 /// text glyph, which renders as a ~4px speck at body size.
 const BULLET_SIZE: f32 = 6.0;
