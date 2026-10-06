@@ -175,6 +175,10 @@ struct ScratchpadParagraph {
     bullets: Vec<String>,
 }
 
+/// Rolling cap on `finalized_tail` — dedup only needs the stream's recent
+/// end.
+const FINALIZED_TAIL_CAP: usize = 16 * 1024;
+
 /// The scratchpad's text model: ordered paragraphs, per-paragraph bullets,
 /// the live interim suffix, and the annotation box's target and content.
 #[derive(Default)]
@@ -188,6 +192,10 @@ pub(super) struct ScratchpadTranscript {
     annotation_interim: String,
     /// Interim speech at the main append point.
     interim: String,
+    /// The raw finalized stream's recent tail. `transcript-final` dedup
+    /// compares against it — the folded text can't serve, since the
+    /// command filter removes "okay next" spans before they land.
+    finalized_tail: String,
 }
 
 impl ScratchpadTranscript {
@@ -213,8 +221,24 @@ impl ScratchpadTranscript {
         } else {
             self.interim.clear();
         }
+        self.finalized_tail.push_str(segment);
+        if self.finalized_tail.len() > FINALIZED_TAIL_CAP {
+            let cut = self.finalized_tail.len() - FINALIZED_TAIL_CAP;
+            let boundary = (cut..self.finalized_tail.len())
+                .find(|&i| self.finalized_tail.is_char_boundary(i))
+                .unwrap_or(self.finalized_tail.len());
+            self.finalized_tail.drain(..boundary);
+        }
         let mut rest = segment;
         loop {
+            // The command can straddle this chunk's leading edge — the
+            // append point's trailing word pairs with the chunk's first.
+            if let Some(after) = seam_command(self.append_point_text(), rest) {
+                self.strip_append_point_word();
+                self.commit_next();
+                rest = after;
+                continue;
+            }
             match split_next_command(rest) {
                 None => {
                     self.push_text(rest);
@@ -229,28 +253,67 @@ impl ScratchpadTranscript {
         }
     }
 
+    /// The text at the append point new speech writes into — the open
+    /// annotation box's content, else the current paragraph's text.
+    fn append_point_text(&self) -> &str {
+        if self.annotation_target.is_some() {
+            &self.annotation_text
+        } else {
+            self.paragraphs
+                .last()
+                .map(|paragraph| paragraph.text.as_str())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Remove the append point's trailing word — a command's first half
+    /// consumed it — along with any punctuation and whitespace that rode
+    /// along.
+    fn strip_append_point_word(&mut self) {
+        let text = if self.annotation_target.is_some() {
+            &mut self.annotation_text
+        } else {
+            match self.paragraphs.last_mut() {
+                Some(paragraph) => &mut paragraph.text,
+                None => return,
+            }
+        };
+        let word_start = text
+            .trim_end_matches(|c: char| !c.is_alphanumeric())
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !c.is_alphanumeric())
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        text.truncate(word_start);
+        text.truncate(text.trim_end().len());
+    }
+
     /// A `transcript-final` part: the segment's complete text. Models that
-    /// also emit deltas repeat themselves here, so a tail that already ends
-    /// with it only clears the interim.
+    /// also emit deltas repeat themselves here — the raw stream's tail is
+    /// the dedup key, since the command filter strips "okay next" spans
+    /// out of what reaches paragraphs.
     fn apply_final_segment(&mut self, text: &str) {
         let text = text.trim();
         if text.is_empty() {
             return;
         }
-        let tail = if self.annotation_target.is_some() {
-            self.annotation_text.trim_end().to_owned()
-        } else {
-            self.paragraphs
-                .last()
-                .map(|paragraph| paragraph.text.trim_end().to_owned())
-                .unwrap_or_default()
-        };
-        if tail.is_empty() || !tail.ends_with(text) {
-            self.append_finalized(text);
-        } else {
+        if self.tail_delivered(text) {
             self.interim.clear();
             self.annotation_interim.clear();
+        } else {
+            self.append_finalized(text);
         }
+    }
+
+    /// Whether the raw finalized stream already delivered `text` — a
+    /// whitespace-insensitive suffix compare, since delta chunking decides
+    /// where spaces land.
+    fn tail_delivered(&self, text: &str) -> bool {
+        let text_words: Vec<&str> = text.split_whitespace().collect();
+        let tail_words: Vec<&str> = self.finalized_tail.split_whitespace().collect();
+        text_words.len() <= tail_words.len()
+            && tail_words[tail_words.len() - text_words.len()..] == text_words[..]
     }
 
     /// The provisional suffix at the active append point — each partial
@@ -403,6 +466,42 @@ fn split_next_command(text: &str) -> Option<(&str, &str)> {
         }
     }
     None
+}
+
+/// The trailing alphanumeric run of `text`, punctuation aside — the word a
+/// straddling command would open with.
+fn trailing_word(text: &str) -> Option<&str> {
+    let trimmed = text.trim_end_matches(|c: char| !c.is_alphanumeric());
+    if trimmed.is_empty() {
+        return None;
+    }
+    let start = trimmed
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_alphanumeric())
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    Some(&trimmed[start..])
+}
+
+/// Whether a command spans the seam between the append point's committed
+/// `tail` and the incoming chunk `rest`: the tail ends on "ok"/"okay" and
+/// `rest` opens with "next". Returns `rest` past the command, punctuation
+/// and whitespace going with it.
+fn seam_command<'a>(tail: &str, rest: &'a str) -> Option<&'a str> {
+    let word = trailing_word(tail)?;
+    if !word.eq_ignore_ascii_case("ok") && !word.eq_ignore_ascii_case("okay") {
+        return None;
+    }
+    let start = rest.find(|c: char| c.is_alphanumeric())?;
+    let end = rest[start..]
+        .find(|c: char| !c.is_alphanumeric())
+        .map(|i| start + i)
+        .unwrap_or(rest.len());
+    if !rest[start..end].eq_ignore_ascii_case("next") {
+        return None;
+    }
+    Some(rest[end..].trim_start_matches(|c: char| !c.is_alphanumeric()))
 }
 
 /// Streaming resampler: f32 mono at the device rate → s16le mono bytes at
@@ -1880,6 +1979,57 @@ mod tests {
             transcript.to_message(),
             "First thought, then\n\nthe second idea"
         );
+    }
+
+    #[test]
+    fn next_command_split_across_chunks_still_breaks() {
+        // Streaming deltas are word-level — the command's two halves
+        // almost always arrive in separate finalized chunks.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("First thought okay");
+        transcript.append_finalized("next second idea");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[0].text, "First thought");
+        assert_eq!(transcript.paragraphs[1].text, "second idea");
+        assert_eq!(transcript.to_message(), "First thought\n\nsecond idea");
+    }
+
+    #[test]
+    fn next_command_seam_ignores_punctuation_and_case() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("end of point. Okay,");
+        transcript.append_finalized("NEXT, moving on");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[0].text, "end of point.");
+        assert_eq!(transcript.paragraphs[1].text, "moving on");
+        // A tail that isn't "ok"/"okay" leaves "next" as plain speech.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("come");
+        transcript.append_finalized("next week");
+        assert_eq!(transcript.to_message(), "come next week");
+    }
+
+    #[test]
+    fn final_segment_after_deltas_does_not_repeat() {
+        // The whole segment arrives again as `transcript-final` — dedup
+        // against the raw stream, not folded text (which no longer holds
+        // the consumed command).
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("one okay ");
+        transcript.append_finalized("next two");
+        transcript.apply_final_segment("one okay next two");
+        assert_eq!(transcript.to_message(), "one\n\ntwo");
+    }
+
+    #[test]
+    fn annotation_commit_split_across_chunks() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("fix the login okay");
+        transcript.append_finalized("next check the redirect");
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["fix the login"]);
+        assert_eq!(transcript.annotation_text, "check the redirect");
     }
 
     #[test]
