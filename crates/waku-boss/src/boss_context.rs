@@ -151,11 +151,18 @@ pub fn employee_roster(
                 (false, true) => " [queued]",
                 (false, false) => "",
             };
+            // An expired row names its settle cause so the boss can tell
+            // an interrupted (resumable) job from a finished one.
+            let expiry = employee
+                .expiry
+                .as_ref()
+                .map(|expiry| format!(" ({})", expiry.cause.label()))
+                .unwrap_or_default();
             (
                 rank,
                 employee.identity.name.to_lowercase(),
                 format!(
-                    "{} ({}) — {provider}/{model}, {status} {elapsed}, {location}{flags}",
+                    "{} ({}) — {provider}/{model}, {status}{expiry} {elapsed}, {location}{flags}",
                     employee.identity.name, employee.job_title
                 ),
                 status,
@@ -721,6 +728,7 @@ mod tests {
             expired_at: expired.then(unix_time),
             blocker: None,
             cancelled: false,
+            expiry: None,
             state: EmployeeLifecycle::Working,
             ticket: None,
             queued_at: None,

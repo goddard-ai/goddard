@@ -90,6 +90,14 @@ struct AgentSurface {
     announced: bool,
 }
 
+/// A parked `agentAsk` — the question text is kept so an expiry can
+/// report what went unanswered after session teardown drains the waiter
+/// as cancelled.
+struct ParkedAsk {
+    question: String,
+    settled: Sender<AgentAskOutcome>,
+}
+
 /// Shared agent surface state. One instance lives on the backend; the runtime
 /// event forwarder holds a second reference so it can track turns, drain
 /// queues, and attach provenance to echoed steers without round-tripping
@@ -119,7 +127,7 @@ pub struct AgentState {
     /// Daemon-owned `agentAsk` requests parked on a session, by request id.
     /// The provider never sees these — the response commands the client
     /// sends resolve here instead of reaching the driver.
-    pending_asks: Mutex<HashMap<Uuid, HashMap<String, Sender<AgentAskOutcome>>>>,
+    pending_asks: Mutex<HashMap<Uuid, HashMap<String, ParkedAsk>>>,
     /// Daemon-owned permission requests (`agentRenameSelf`,
     /// `agentProposeArchive`) parked on a session, by request id. The parked
     /// sender takes the chosen permission option id — or `None` when the
@@ -271,8 +279,8 @@ impl AgentState {
         self.parent_indexes.lock().clear();
         self.turns.lock().clear();
         for (_, asks) in std::mem::take(&mut *self.pending_asks.lock()) {
-            for (_, sender) in asks {
-                let _ = sender.send(AgentAskOutcome::Cancelled);
+            for (_, ask) in asks {
+                let _ = ask.settled.send(AgentAskOutcome::Cancelled);
             }
         }
         for (_, permissions) in std::mem::take(&mut *self.pending_permissions.lock()) {
@@ -497,6 +505,7 @@ impl AgentState {
         &self,
         session_id: Uuid,
         request_id: String,
+        question: String,
         settled: Sender<AgentAskOutcome>,
     ) -> bool {
         let mut asks = self.pending_asks.lock();
@@ -504,8 +513,18 @@ impl AgentState {
         if !pending.is_empty() {
             return false;
         }
-        pending.insert(request_id, settled);
+        pending.insert(request_id, ParkedAsk { question, settled });
         true
+    }
+
+    /// The `agentAsk` text still unanswered for the session — captured at
+    /// expiry so the settle report can name the question teardown is
+    /// about to drain as cancelled.
+    pub fn pending_ask_question(&self, session_id: Uuid) -> Option<String> {
+        self.pending_asks
+            .lock()
+            .get(&session_id)
+            .and_then(|asks| asks.values().next().map(|ask| ask.question.clone()))
     }
 
     /// Drop a parked ask without resolving it — the request that parked it
@@ -525,8 +544,8 @@ impl AgentState {
     /// callers.
     pub fn drain_asks(&self, session_id: Uuid) {
         if let Some(asks) = self.pending_asks.lock().remove(&session_id) {
-            for (_, sender) in asks {
-                let _ = sender.send(AgentAskOutcome::Cancelled);
+            for (_, ask) in asks {
+                let _ = ask.settled.send(AgentAskOutcome::Cancelled);
             }
         }
     }
@@ -558,15 +577,15 @@ impl AgentState {
             Command::CancelUserInput { request_id } => (request_id, AgentAskOutcome::Cancelled),
             _ => return false,
         };
-        let sender = self
+        let parked = self
             .pending_asks
             .lock()
             .get_mut(&session_id)
             .and_then(|asks| asks.remove(request_id));
-        let Some(sender) = sender else {
+        let Some(parked) = parked else {
             return false;
         };
-        let _ = sender.send(outcome);
+        let _ = parked.settled.send(outcome);
         true
     }
 
@@ -1193,7 +1212,7 @@ mod tests {
         let session = Uuid::new_v4();
 
         let (answered, answered_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), answered));
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), answered));
         assert!(state.resolve_user_input(
             session,
             &Command::RespondUserInput {
@@ -1215,7 +1234,7 @@ mod tests {
         );
 
         let (clarified, clarified_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-two".into(), clarified));
+        assert!(state.try_park_ask(session, "agent-ask-two".into(), "a question".into(), clarified));
         assert!(state.resolve_user_input(
             session,
             &Command::ClarifyUserInput {
@@ -1231,7 +1250,7 @@ mod tests {
         );
 
         let (dismissed, dismissed_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-three".into(), dismissed));
+        assert!(state.try_park_ask(session, "agent-ask-three".into(), "a question".into(), dismissed));
         assert!(state.resolve_user_input(
             session,
             &Command::CancelUserInput {
@@ -1247,12 +1266,12 @@ mod tests {
         let session = Uuid::new_v4();
         let (first, _first_rx) = crossbeam_channel::bounded(1);
         let (second, _second_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), first));
-        assert!(!state.try_park_ask(session, "agent-ask-two".into(), second));
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), first));
+        assert!(!state.try_park_ask(session, "agent-ask-two".into(), "a question".into(), second));
 
         state.remove_ask(session, "agent-ask-one");
         let (third, _third_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-three".into(), third));
+        assert!(state.try_park_ask(session, "agent-ask-three".into(), "a question".into(), third));
     }
 
     #[test]
@@ -1260,7 +1279,7 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, _rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-mine".into(), settled));
+        assert!(state.try_park_ask(session, "agent-ask-mine".into(), "a question".into(), settled));
 
         // A request id the daemon never parked — including one from another
         // session — is not consumed here.
@@ -1283,7 +1302,7 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, settle_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), settled));
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), settled));
 
         state.note_driver_event(
             session,
@@ -1301,7 +1320,7 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, settle_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), settled));
+        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), settled));
 
         state.revoke_session(session);
         assert_eq!(settle_rx.recv().unwrap(), AgentAskOutcome::Cancelled);

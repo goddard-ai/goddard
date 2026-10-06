@@ -913,14 +913,15 @@ impl WakuBackend {
 
     fn bind_boss_finish_callback(self: &Arc<Self>) {
         let backend = Arc::downgrade(self);
-        self.boss.set_finish_employee(Arc::new(move |session_id| {
-            let backend = backend
-                .upgrade()
-                .ok_or_else(|| anyhow::anyhow!("daemon is shutting down"))?;
-            // A settled turn drains: the finish defers while the session's
-            // next turn is already open rather than cutting it mid-tool-call.
-            backend.finish_boss_employee(session_id, true)
-        }));
+        self.boss
+            .set_finish_employee(Arc::new(move |session_id, settle| {
+                let backend = backend
+                    .upgrade()
+                    .ok_or_else(|| anyhow::anyhow!("daemon is shutting down"))?;
+                // A settled turn drains: the finish defers while the session's
+                // next turn is already open rather than cutting it mid-tool-call.
+                backend.finish_boss_employee(session_id, true, settle)
+            }));
         let agent = self.agent.clone();
         self.boss
             .set_session_busy(Arc::new(move |session_id| agent.has_open_turn(session_id)));
@@ -7016,7 +7017,11 @@ impl WakuBackend {
                                         },
                                     )?;
                                     self.boss.mark_cancelled(session_id)?;
-                                    self.finish_boss_employee(session_id, false)?;
+                                    self.finish_boss_employee(
+                                        session_id,
+                                        false,
+                                        waku_protocol::boss::EmployeeSettle::Stopped,
+                                    )?;
                                     Ok(BossResult::Saved)
                                 }
                                 _ => bail!("employee is dispatching — retry once it is working"),
@@ -7285,7 +7290,11 @@ impl WakuBackend {
                                 },
                             )?;
                             self.boss.mark_cancelled(session_id)?;
-                            self.finish_boss_employee(session_id, false)?;
+                            self.finish_boss_employee(
+                                session_id,
+                                false,
+                                waku_protocol::boss::EmployeeSettle::Stopped,
+                            )?;
                         }
                         EmployeeControl::SetModel { .. }
                         | EmployeeControl::SetPermissions { .. }
@@ -7471,11 +7480,14 @@ impl WakuBackend {
     /// the settle path passes it so a turn that began between the settle
     /// event and this pass runs to its own boundary, and that settle
     /// re-drives the finish. Stops, launch failures, and restart recovery
-    /// pass `false`: they tear a live turn down on purpose.
+    /// pass `false`: they tear a live turn down on purpose. `settle`
+    /// reports how the admission ended so the expired record can carry a
+    /// legible cause rather than a bare dead row.
     pub(crate) fn finish_boss_employee(
         &self,
         session_id: Uuid,
         drain: bool,
+        settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
         // `finishing` persists while the teardown runs — the model slot
         // stays claimed through shutdown, so a crash mid-finish leaves a
@@ -7489,10 +7501,17 @@ impl WakuBackend {
             .iter()
             .find(|session| session.id == session_id)
             .is_some_and(|session| session.status == SessionStatus::Failed);
-        let Some(employee) = self.boss.begin_finishing(session_id, failed, drain)? else {
+        // Leftovers are unknown until the tail reads the session document
+        // — the preliminary classification here is what a restart would
+        // recover if the tail never ran.
+        let cause = waku_protocol::boss::ExpiryCause::for_settle(settle, failed, 0, false);
+        let Some(employee) = self
+            .boss
+            .begin_finishing(session_id, failed, drain, cause)?
+        else {
             return Ok(());
         };
-        self.finish_boss_employee_tail(session_id, &employee)
+        self.finish_boss_employee_tail(session_id, &employee, settle)
     }
 
     /// The teardown after `begin_finishing` — also driven directly by
@@ -7505,8 +7524,12 @@ impl WakuBackend {
         &self,
         session_id: Uuid,
         employee: &waku_protocol::boss::BossEmployee,
+        settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
         self.integrations.revoke_task(session_id);
+        // An unanswered ask's question outlives its waiter — capture it
+        // before session teardown drains it as cancelled.
+        let pending_question = self.agent.pending_ask_question(session_id);
         self.agent.clear_session(session_id);
         let removed = self.sessions.lock().remove(&session_id);
         if let Some(entry) = &removed {
@@ -7524,45 +7547,100 @@ impl WakuBackend {
             sink.end_session_runtime();
         }
         drop_detached(removed);
+        let (body, failed, parked_prompts) = {
+            let mut state = self.task_state.lock();
+            let mut body = String::new();
+            let mut failed = false;
+            let mut parked = 0_u32;
+            // A session gone from the document still expires — the record
+            // keeps the settle's classification rather than stranding at
+            // `finishing` on a missing transcript.
+            if let Some(index) = state
+                .sessions
+                .iter()
+                .position(|session| session.id == session_id)
+            {
+                self.task_store.hydrate(&mut state.sessions[index])?;
+                let session = &mut state.sessions[index];
+                if session.active_turn_id().is_some() {
+                    session.finish_active_turn(TurnStatus::Interrupted);
+                }
+                failed = session.status == SessionStatus::Failed;
+                if !failed {
+                    session.status = SessionStatus::Idle;
+                }
+                // Daemon-owned parked prompts survive the expiry: the
+                // mirrored queue is the revive path's backlog, so a
+                // follow-up sent while the employee wound down still
+                // reaches its next turn. The count lands on the settle
+                // record.
+                parked = session
+                    .queued_messages
+                    .iter()
+                    .filter(|queued| queued.is_agent_owned())
+                    .count() as u32;
+                session
+                    .queued_messages
+                    .retain(|queued| queued.is_agent_owned());
+                // The report carries a pointer index; finishing does not
+                // record any of its claims as durable memory.
+                let (rendered, _) =
+                    crate::model::render_transcript_index(&session.transcript_index());
+                body = rendered.trim_end().to_owned();
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+            }
+            (body, failed, parked)
+        };
+        // `begin_finishing` recorded the preliminary cause — a `finishing`
+        // record recovered after a restart keeps it — so the tail only
+        // fills leftovers and upgrades a clean settle whose queue or ask
+        // outlived the turn.
+        let cause = employee
+            .expiry
+            .as_ref()
+            .map(|expiry| expiry.cause)
+            .unwrap_or_else(|| {
+                waku_protocol::boss::ExpiryCause::for_settle(
+                    settle,
+                    failed,
+                    parked_prompts,
+                    pending_question.is_some(),
+                )
+            });
+        let cause = match (cause, pending_question.is_some(), parked_prompts > 0) {
+            (waku_protocol::boss::ExpiryCause::Finished, true, _) => {
+                waku_protocol::boss::ExpiryCause::UnansweredAsk
+            }
+            (waku_protocol::boss::ExpiryCause::Finished, false, true) => {
+                waku_protocol::boss::ExpiryCause::ParkedWork
+            }
+            (cause, ..) => cause,
+        };
+        let expiry = waku_protocol::boss::EmployeeExpiry {
+            cause,
+            resumable: cause.resumable(),
+            parked_prompts,
+            pending_question,
+        };
         // Capacity releases exactly once, after the runtime is gone —
         // `complete_expiry` hands back the ticket's reservations only on
         // the winning expiry, and the broker's release keeps resident
         // devices under their own retention rules. Waking the scheduler
         // is what pulls the next queued ticket forward.
-        for reservation in self.boss.complete_expiry(session_id)? {
+        for reservation in self.boss.complete_expiry(session_id, Some(expiry.clone()))? {
             if let Ok(broker) = self.resource_broker() {
                 broker.release_admission(session_id, reservation);
             }
         }
         self.wake_summon_queue();
-        let (body, failed) = {
-            let mut state = self.task_state.lock();
-            let session = state
-                .sessions
-                .iter_mut()
-                .find(|session| session.id == session_id)
-                .ok_or_else(|| anyhow!("employee session is missing"))?;
-            self.task_store.hydrate(session)?;
-            if session.active_turn_id().is_some() {
-                session.finish_active_turn(TurnStatus::Interrupted);
-            }
-            let failed = session.status == SessionStatus::Failed;
-            if !failed {
-                session.status = SessionStatus::Idle;
-            }
-            // Daemon-owned parked prompts survive the expiry: the mirrored
-            // queue is the revive path's backlog, so a follow-up sent while
-            // the employee wound down still reaches its next turn.
-            session
-                .queued_messages
-                .retain(|queued| queued.is_agent_owned());
-            // The report carries a pointer index; finishing does not record
-            // any of its claims as durable memory.
-            let (body, _) = crate::model::render_transcript_index(&session.transcript_index());
-            state.mark_session_dirty(session_id);
-            self.task_store.save(&mut state)?;
-            (body.trim_end().to_owned(), failed)
-        };
+        eprintln!(
+            "employee {session_id} expired — cause {}, resumable {}, parked {}, pending question {}",
+            expiry.cause.label(),
+            expiry.resumable,
+            expiry.parked_prompts,
+            expiry.pending_question.is_some()
+        );
         // The work kind the summon fixed decides whether a clean finish
         // reports: an errand's lands with the supervisor (escalating to
         // the boss when the supervisor cannot take prompts), while a
@@ -8098,7 +8176,11 @@ impl WakuBackend {
                     session_id,
                     format!("Employee launch failed: {error:#}"),
                 );
-                self.finish_boss_employee(session_id, false)?;
+                self.finish_boss_employee(
+                    session_id,
+                    false,
+                    waku_protocol::boss::EmployeeSettle::LaunchFailed,
+                )?;
                 Ok(true)
             }
         }
@@ -8474,17 +8556,27 @@ impl WakuBackend {
                         entry.session_id,
                         "interrupted by a daemon restart".into(),
                     );
-                    self.finish_boss_employee(entry.session_id, false)
+                    self.finish_boss_employee(
+                        entry.session_id,
+                        false,
+                        waku_protocol::boss::EmployeeSettle::Restarted,
+                    )
                 } else {
                     self.boss.revert_dispatch(entry.session_id)?;
                     self.wake_summon_queue();
                     Ok(())
                 }
             }
-            EmployeeLifecycle::Finishing => {
-                self.finish_boss_employee_tail(session_id, &entry)
-            }
-            _ => self.finish_boss_employee(entry.session_id, false),
+            EmployeeLifecycle::Finishing => self.finish_boss_employee_tail(
+                session_id,
+                &entry,
+                waku_protocol::boss::EmployeeSettle::Restarted,
+            ),
+            _ => self.finish_boss_employee(
+                entry.session_id,
+                false,
+                waku_protocol::boss::EmployeeSettle::Restarted,
+            ),
         }
     }
 
@@ -8624,6 +8716,7 @@ impl WakuBackend {
             pending_reservation: None,
             blocked_by: Vec::new(),
             dispatch_event: None,
+            interruptions: Vec::new(),
         };
         employee.request_id = request_id;
         employee.request_fingerprint = request_id.map(|_| fingerprint);
@@ -8810,7 +8903,11 @@ impl WakuBackend {
                     },
                 )?;
                 self.boss.mark_cancelled(session_id)?;
-                self.finish_boss_employee(session_id, false)?;
+                self.finish_boss_employee(
+                    session_id,
+                    false,
+                    waku_protocol::boss::EmployeeSettle::Stopped,
+                )?;
                 Ok(BossResult::Saved)
             }
             EmployeeControl::SetModel {
@@ -9063,6 +9160,7 @@ impl WakuBackend {
                 pending_reservation: None,
                 blocked_by: Vec::new(),
                 dispatch_event: None,
+                interruptions: Vec::new(),
             },
             started,
         ))
@@ -10167,14 +10265,24 @@ impl WakuBackend {
             waku_protocol::AGENT_ASK_REQUEST_PREFIX,
             Uuid::new_v4()
         );
+        // The card holds one request — a parallel ask would hide the first
+        // behind it and park forever, so the second is refused instead. The
+        // question text parks with it so an expiry can report what went
+        // unanswered.
+        let question_text = questions
+            .iter()
+            .map(|question| question.question.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let wire = event_to_wire(DriverEvent::UserInputRequested {
             request_id: request_id.clone(),
             questions,
         })?;
         let (settled, settle_rx) = crossbeam_channel::bounded(1);
-        // The card holds one request — a parallel ask would hide the first
-        // behind it and park forever, so the second is refused instead.
-        if !self.agent.try_park_ask(target, request_id.clone(), settled) {
+        if !self
+            .agent
+            .try_park_ask(target, request_id.clone(), question_text, settled)
+        {
             bail!("task {target} already has an `ask` waiting on the user");
         }
         // A turn that finished between the check and the park left every
@@ -10919,6 +11027,24 @@ fn forward_driver_events(
         {
             entry.last_active = std::time::Instant::now();
         }
+        // A provider exit that kills an open turn classifies the
+        // employee's settle as an interruption — capture the flag before
+        // either recorder retires the turn.
+        let exited_mid_turn = matches!(&event, DriverEvent::ProcessExited)
+            && (agent.has_open_turn(session_id) || {
+                let mut state = task_state.lock();
+                state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                    .and_then(|session| {
+                        task_store
+                            .hydrate(session)
+                            .ok()
+                            .and_then(|()| session.active_turn_id())
+                    })
+                    .is_some()
+            });
         if boss.is_managed(session_id) {
             if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &event) {
                 eprintln!("could not record Boss session {session_id}: {error:#}");
@@ -11062,6 +11188,18 @@ fn forward_driver_events(
             &event,
             DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
         );
+        let settle = if settled {
+            Some(match &event {
+                DriverEvent::ProcessExited => {
+                    waku_protocol::boss::EmployeeSettle::ProcessExited {
+                        mid_turn: exited_mid_turn,
+                    }
+                }
+                _ => waku_protocol::boss::EmployeeSettle::TurnFinished,
+            })
+        } else {
+            None
+        };
         let wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
                 "error",
@@ -11076,8 +11214,8 @@ fn forward_driver_events(
         if delivered.is_err() {
             break;
         }
-        if settled {
-            boss.note_settled(session_id);
+        if let Some(settle) = settle {
+            boss.note_settled(session_id, settle);
         }
         if drains_queue && !boss.is_employee(session_id) {
             // A restarted daemon rebuilt no in-memory queue — the session
@@ -15400,8 +15538,8 @@ mod tests {
         }
         let token = backend.agent.mint(employee_id);
         assert_eq!(backend.agent.resolve(&token), Some(employee_id));
-        backend.finish_boss_employee(employee_id, false).unwrap();
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(backend.boss.employee(employee_id).unwrap().expired);
         assert!(backend.agent.resolve(&token).is_none());
         assert!(!backend.sessions.lock().contains_key(&employee_id));
@@ -15481,6 +15619,189 @@ mod tests {
         )
     }
 
+    /// The settle signal classifies the expiry on the durable record —
+    /// every cause lands with its resumable verdict so a bare dead row
+    /// is never the whole story.
+    #[test]
+    fn the_settle_signal_classifies_the_expiry() {
+        use waku_protocol::boss::{EmployeeSettle, ExpiryCause};
+        for (settle, cause, resumable) in [
+            (EmployeeSettle::TurnFinished, ExpiryCause::Finished, true),
+            (
+                EmployeeSettle::ProcessExited { mid_turn: true },
+                ExpiryCause::ExitedMidTurn,
+                true,
+            ),
+            (
+                EmployeeSettle::ProcessExited { mid_turn: false },
+                ExpiryCause::ExitedIdle,
+                true,
+            ),
+            (EmployeeSettle::Stopped, ExpiryCause::Stopped, false),
+            (EmployeeSettle::LaunchFailed, ExpiryCause::Failed, true),
+            (EmployeeSettle::Restarted, ExpiryCause::Restarted, true),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("boss-settle-{cause:?}-{}", Uuid::new_v4()));
+            let (backend, _supervisor, employee_id, _parent, _child) =
+                employee_finish_fixture(&root);
+            if matches!(settle, EmployeeSettle::Stopped) {
+                backend.boss.mark_cancelled(employee_id).unwrap();
+            }
+            backend
+                .finish_boss_employee(employee_id, false, settle)
+                .unwrap();
+            let expiry = backend
+                .boss
+                .employee(employee_id)
+                .unwrap()
+                .expiry
+                .unwrap();
+            assert_eq!(expiry.cause, cause, "{settle:?}");
+            assert_eq!(expiry.resumable, resumable, "{settle:?}");
+            assert_eq!(expiry.parked_prompts, 0, "{settle:?}");
+            assert!(expiry.pending_question.is_none(), "{settle:?}");
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// A session that failed classifies its turn-finished settle as
+    /// `failed` rather than clean.
+    #[test]
+    fn a_failed_turn_settles_as_failed() {
+        use waku_protocol::boss::{EmployeeSettle, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-settle-fail-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            session.status = SessionStatus::Failed;
+            backend.task_store.save(&mut state).unwrap();
+        }
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        assert_eq!(
+            backend
+                .boss
+                .employee(employee_id)
+                .unwrap()
+                .expiry
+                .unwrap()
+                .cause,
+            ExpiryCause::Failed
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A prompt parked while the employee wound down upgrades the clean
+    /// settle to `parkedWork` — the record counts what never delivered.
+    #[test]
+    fn a_parked_prompt_settles_as_parked_work() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeSettle, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-settle-parked-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued while working".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        let expiry = backend
+            .boss
+            .employee(employee_id)
+            .unwrap()
+            .expiry
+            .unwrap();
+        assert_eq!(expiry.cause, ExpiryCause::ParkedWork);
+        assert_eq!(expiry.parked_prompts, 1);
+        assert!(expiry.resumable);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An `agentAsk` still unanswered at expiry upgrades the clean settle
+    /// to `unansweredAsk` and keeps the question text — while the parked
+    /// waiter drains as cancelled like before.
+    #[test]
+    fn an_unanswered_ask_settles_with_its_question() {
+        use waku_protocol::boss::{EmployeeSettle, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-settle-ask-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        let (settled, settle_rx) = crossbeam_channel::bounded(1);
+        assert!(backend.agent.try_park_ask(
+            employee_id,
+            "ask-1".into(),
+            "Ship the release?".into(),
+            settled
+        ));
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        let expiry = backend
+            .boss
+            .employee(employee_id)
+            .unwrap()
+            .expiry
+            .unwrap();
+        assert_eq!(expiry.cause, ExpiryCause::UnansweredAsk);
+        assert_eq!(expiry.pending_question.as_deref(), Some("Ship the release?"));
+        assert!(expiry.resumable);
+        assert!(matches!(
+            settle_rx.try_recv(),
+            Ok(crate::model::AgentAskOutcome::Cancelled)
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A `finishing` record recovered after a restart keeps the cause it
+    /// began with — the tail refills leftovers rather than relabelling
+    /// the settle.
+    #[test]
+    fn a_recovered_finish_keeps_its_recorded_cause() {
+        use waku_protocol::boss::{EmployeeSettle, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-settle-recover-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        backend
+            .boss
+            .begin_finishing(employee_id, false, false, ExpiryCause::ExitedMidTurn)
+            .unwrap();
+        // Recovery drives the tail directly with the restart signal.
+        backend
+            .finish_boss_employee_tail(employee_id, &backend.boss.employee(employee_id).unwrap(), EmployeeSettle::Restarted)
+            .unwrap();
+        assert_eq!(
+            backend
+                .boss
+                .employee(employee_id)
+                .unwrap()
+                .expiry
+                .unwrap()
+                .cause,
+            ExpiryCause::ExitedMidTurn
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn a_flagged_employee_finish_delivers_the_index() {
         let root = std::env::temp_dir().join(format!("boss-flagged-{}", Uuid::new_v4()));
@@ -15490,8 +15811,8 @@ mod tests {
             .boss
             .set_employee_blocker(employee_id, "needs a release call".into())
             .unwrap();
-        backend.finish_boss_employee(employee_id, false).unwrap();
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         let prompts = parent_capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains(&employee_id.to_string()));
@@ -15518,7 +15839,7 @@ mod tests {
             session.status = SessionStatus::Failed;
             backend.task_store.save(&mut state).unwrap();
         }
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         let prompts = parent_capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains(&employee_id.to_string()));
@@ -15551,7 +15872,7 @@ mod tests {
             .set_employee_goal(employee_id, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
         let employee = backend.boss.employee(employee_id).unwrap();
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert_eq!(parent_capture.prompts.lock().len(), 1);
 
         let state = backend.task_state.lock();
@@ -15658,7 +15979,7 @@ mod tests {
         backend
             .agent
             .note_driver_event(supervisor, &DriverEvent::TurnStarted);
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(backend.agent.has_queued(supervisor));
 
         let state = backend.task_state.lock();
@@ -15702,7 +16023,7 @@ mod tests {
             .boss
             .set_employee_goal(employee_id, waku_protocol::boss::EmployeeGoal::Errand)
             .unwrap();
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         let prompts = parent_capture.prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].contains(&employee_id.to_string()));
@@ -15753,7 +16074,7 @@ mod tests {
         assert!(steers[0].contains("build is red"));
         // The flag survives to the finish, which reports instead of expiring
         // silently — here it parks behind the open turn as a queued prompt.
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(parent_capture.prompts.lock().is_empty());
         assert!(backend.agent.has_queued(supervisor));
         // And only an employee may flag: the boss itself cannot.
@@ -15822,7 +16143,7 @@ mod tests {
         let tapped = source.tapped_events();
         *backend.event_source.lock() =
             source.begin_session_runtime(employee_id, employee_runtime);
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         match tapped.try_recv() {
             Ok(crate::ServerMessage::Event(event)) => {
                 assert_eq!(event.session_id, employee_id);
@@ -15908,7 +16229,7 @@ mod tests {
                 cwd: root.clone(),
             },
         );
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(backend.boss.employee(employee_id).unwrap().expired);
         // The expiry pass dropped the employee's runtime; a resurrected
         // prompt cold-starts one in production — a control driver stands
@@ -15965,7 +16286,7 @@ mod tests {
         assert!(prompts[0].contains("One more check"));
         drop(prompts);
 
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         backend.boss.set_employee_expired_at(employee_id, 1).unwrap();
         assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
         assert!(backend.boss.employee(employee_id).is_none());
@@ -16033,7 +16354,7 @@ mod tests {
         backend
             .agent
             .note_driver_event(employee_id, &DriverEvent::TurnStarted);
-        backend.finish_boss_employee(employee_id, true).unwrap();
+        backend.finish_boss_employee(employee_id, true, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         let employee = backend.boss.employee(employee_id).unwrap();
         assert!(!employee.expired);
         assert_eq!(
@@ -16054,7 +16375,7 @@ mod tests {
                 summary_i18n: None,
             },
         );
-        backend.finish_boss_employee(employee_id, true).unwrap();
+        backend.finish_boss_employee(employee_id, true, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(backend.boss.employee(employee_id).unwrap().expired);
         assert!(backend.sessions.lock().get(&employee_id).is_none());
         drop(backend);
@@ -19129,7 +19450,7 @@ mod tests {
             )
             .unwrap();
         assert!(child.prompts.lock().is_empty());
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         assert!(backend.boss.employee(employee_id).unwrap().expired);
         {
             let mut state = backend.task_state.lock();
@@ -19186,7 +19507,7 @@ mod tests {
         use waku_protocol::boss::{BossOperation, EmployeeControl};
         let root = std::env::temp_dir().join(format!("boss-revive-events-{}", Uuid::new_v4()));
         let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
-        backend.finish_boss_employee(employee_id, false).unwrap();
+        backend.finish_boss_employee(employee_id, false, waku_protocol::boss::EmployeeSettle::TurnFinished).unwrap();
         // The expiry pass dropped the runtime; a revived prompt would
         // cold-start one in production — a control driver stands in here.
         let employee_runtime = Uuid::new_v4();

@@ -7556,6 +7556,7 @@ mod tests {
             expired_at: None,
             blocker: None,
             cancelled: false,
+            expiry: None,
             state: waku_protocol::boss::EmployeeLifecycle::Working,
             ticket: None,
             queued_at: None,
@@ -7686,6 +7687,7 @@ mod tests {
             pending_reservation: None,
             blocked_by,
             dispatch_event: None,
+            interruptions: Vec::new(),
         }
     }
 
@@ -7714,6 +7716,7 @@ mod tests {
             expired_at: None,
             blocker: None,
             cancelled: false,
+            expiry: None,
             state: lifecycle,
             ticket,
             queued_at: (lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued).then_some(1),

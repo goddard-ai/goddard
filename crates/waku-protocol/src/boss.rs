@@ -194,6 +194,201 @@ pub enum EmployeeLifecycle {
     Expired,
 }
 
+/// What settled the employee's admission — a runtime signal the daemon
+/// reports to the Boss service so the finish can classify the expiry
+/// legibly. The durable record is `ExpiryCause`; this is only how the
+/// settle was observed.
+#[derive(Clone, Copy, Debug)]
+pub enum EmployeeSettle {
+    /// The provider's turn ended — success or failure is the session's
+    /// terminal verdict, read at finish time.
+    TurnFinished,
+    /// The provider process exited; `mid_turn` records whether a turn
+    /// was still open when it died.
+    ProcessExited { mid_turn: bool },
+    /// A supervisor stopped or cancelled the employee.
+    Stopped,
+    /// Dispatch could not deliver the assignment — the launch failed.
+    LaunchFailed,
+    /// A daemon restart forced the finish.
+    Restarted,
+}
+
+/// Why an employee's last admission ended — the settle classification
+/// written on the expired record so an interruption reads as, say,
+/// "interrupted — provider exited mid-turn" rather than a bare dead row.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ExpiryCause {
+    /// The turn finished with nothing parked and no ask open.
+    Finished,
+    /// The turn or session failed, or launch could not deliver the job.
+    Failed,
+    /// The provider process exited while a turn was open.
+    ExitedMidTurn,
+    /// The provider process exited while the employee held no turn.
+    ExitedIdle,
+    /// A clean settle left agent-owned prompts parked in the queue.
+    ParkedWork,
+    /// A clean settle left an `agentAsk` question unanswered.
+    UnansweredAsk,
+    /// A supervisor stopped or cancelled the employee — terminal intent.
+    Stopped,
+    /// A daemon restart forced the finish.
+    Restarted,
+}
+
+impl ExpiryCause {
+    /// Classify an expiry from the settle signal plus what the finish
+    /// pass found parked or unanswered. Leftovers upgrade only a
+    /// otherwise-clean settle — a failed turn keeps its cause and the
+    /// parked count still lands on the record.
+    pub fn for_settle(
+        settle: EmployeeSettle,
+        failed: bool,
+        parked_prompts: u32,
+        pending_question: bool,
+    ) -> Self {
+        match settle {
+            EmployeeSettle::Stopped => Self::Stopped,
+            EmployeeSettle::Restarted => Self::Restarted,
+            EmployeeSettle::LaunchFailed => Self::Failed,
+            EmployeeSettle::ProcessExited { mid_turn: true } => Self::ExitedMidTurn,
+            EmployeeSettle::ProcessExited { mid_turn: false } => Self::ExitedIdle,
+            EmployeeSettle::TurnFinished if failed => Self::Failed,
+            EmployeeSettle::TurnFinished if pending_question => Self::UnansweredAsk,
+            EmployeeSettle::TurnFinished if parked_prompts > 0 => Self::ParkedWork,
+            EmployeeSettle::TurnFinished => Self::Finished,
+        }
+    }
+
+    /// Whether reviving the job makes sense — only a supervisor stop is
+    /// terminal intent; every other settle revives through `resume` or a
+    /// plain prompt.
+    pub fn resumable(self) -> bool {
+        self != Self::Stopped
+    }
+
+    /// Whether the settle cut live work off — the wave tally counts it
+    /// as a failure rather than a finish.
+    pub fn interrupted(self) -> bool {
+        matches!(self, Self::Failed | Self::ExitedMidTurn | Self::Restarted)
+    }
+
+    /// Whether the settle appends to the ticket's interruption history —
+    /// anything but a clean finish or a deliberate stop counts, so a
+    /// crash-looping employee reports "Nth interruption" honestly.
+    pub fn counts_interruption(self) -> bool {
+        !matches!(self, Self::Finished | Self::Stopped)
+    }
+
+    /// Whether the cause alone warrants an interruption report — parked
+    /// prompts and an unanswered ask still report through
+    /// [`EmployeeExpiry::reports`], and an idle exit reports only with
+    /// leftovers.
+    pub fn reports(self) -> bool {
+        matches!(
+            self,
+            Self::Failed | Self::ExitedMidTurn | Self::Restarted | Self::ParkedWork | Self::UnansweredAsk
+        )
+    }
+
+    /// The transcript notice an interrupted expiry leaves — `None` for
+    /// settles that already write their own record (a failed turn's
+    /// summary row, a supervisor's stop) and for finishes.
+    pub fn notice(self) -> Option<&'static str> {
+        match self {
+            Self::Restarted => Some("Turn interrupted — the daemon restarted"),
+            Self::ExitedMidTurn => Some("Turn interrupted — the provider process exited"),
+            Self::ExitedIdle => Some("The provider process exited while the employee was idle"),
+            _ => None,
+        }
+    }
+
+    /// The wire name — digests and logs render the cause compactly.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::ExitedMidTurn => "exited-mid-turn",
+            Self::ExitedIdle => "exited-idle",
+            Self::ParkedWork => "parked-work",
+            Self::UnansweredAsk => "unanswered-ask",
+            Self::Stopped => "stopped",
+            Self::Restarted => "restarted",
+        }
+    }
+
+    /// The short cause phrase reports and resume prompts embed.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Finished => "finished",
+            Self::Failed => "a failed turn",
+            Self::ExitedMidTurn => "the provider process exited mid-turn",
+            Self::ExitedIdle => "the provider process exited while idle",
+            Self::ParkedWork => "prompts stayed parked in its queue",
+            Self::UnansweredAsk => "a question went unanswered",
+            Self::Stopped => "a supervisor stopped it",
+            Self::Restarted => "a daemon restart",
+        }
+    }
+}
+
+/// The settle record an expired employee carries — the cause, whether
+/// reviving makes sense, and the leftovers (parked prompts, an
+/// unanswered ask) the finish surfaces so they are never silently lost.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeExpiry {
+    pub cause: ExpiryCause,
+    /// Whether reviving the job makes sense — `cause.resumable()`
+    /// copied onto the wire so clients never re-derive it.
+    pub resumable: bool,
+    /// Agent-owned prompts still parked in the mirrored queue at expiry
+    /// — they ride the ticket's pending list ahead of a revive prompt.
+    #[serde(default)]
+    pub parked_prompts: u32,
+    /// The `agentAsk` text still unanswered when the job expired.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending_question: Option<String>,
+}
+
+impl EmployeeExpiry {
+    /// The record at `begin_finishing` time — leftovers are filled in by
+    /// the finish tail once the session document is readable.
+    pub fn settle(cause: ExpiryCause) -> Self {
+        Self {
+            cause,
+            resumable: cause.resumable(),
+            parked_prompts: 0,
+            pending_question: None,
+        }
+    }
+
+    /// Whether the expiry warrants a report beyond the work kind's own
+    /// contract — interruptions and unfinished leftovers (parked
+    /// prompts, an unanswered ask) report; plain finishes and stops do
+    /// not.
+    pub fn reports(&self) -> bool {
+        self.cause.reports() || self.parked_prompts > 0 || self.pending_question.is_some()
+    }
+}
+
+/// One interruption a ticket's admission settled with — the boss's
+/// "Nth interruption" bookkeeping, capped so a crash loop stays legible
+/// without growing the record.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptionRecord {
+    pub cause: ExpiryCause,
+    pub at: u64,
+}
+
+/// The interruption history a ticket retains — appended at expiry,
+/// oldest entries drop past the cap.
+pub const INTERRUPTION_HISTORY_CAP: usize = 16;
+
 /// The durable admission ticket a summon persists before it returns.
 /// Everything the deferred launch needs lives here so a restart re-creates
 /// the pending admission idempotently rather than re-asking the boss.
@@ -290,6 +485,13 @@ pub struct SummonTicket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dispatch_event: Option<u64>,
+    /// The interruption history this ticket's admissions have settled
+    /// with — appended at expiry for every cause that counts, capped at
+    /// [`INTERRUPTION_HISTORY_CAP`] with the oldest dropped. Advisory
+    /// bookkeeping so the boss can read "Nth interruption" rather than a
+    /// daemon policy; it never gates recovery.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interruptions: Vec<InterruptionRecord>,
 }
 
 /// Why an accepted ticket cannot dispatch yet — a wait reason, never an
@@ -485,6 +687,13 @@ pub struct BossEmployee {
     /// Re-admission clears it like `blocker`.
     #[serde(default)]
     pub cancelled: bool,
+    /// The settle classification from the last expiry — the
+    /// interruption's cause, resumability, and leftovers the finish
+    /// surfaced. `None` while live and on records that expired before
+    /// the field existed; re-admission clears it with `blocker`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expiry: Option<EmployeeExpiry>,
     /// Admission lifecycle — `queued`, `dispatching`, `working`,
     /// `finishing`, or `expired`. Records written before the queue
     /// deserialize as `working`; `expired` stays the wire projection.

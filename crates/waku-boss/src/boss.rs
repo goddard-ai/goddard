@@ -13,9 +13,11 @@ use waku_protocol::boss::BossPersonaUpsert;
 use waku_protocol::boss::{
     AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
     BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
-    DispatchNotification, EmployeeGoal, EmployeeLifecycle, MemoryMigrationCandidate,
-    MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, SummonTicket,
-    WaveMember, WaveMemberOutcome, WaveNotification,
+    DispatchNotification, EmployeeExpiry, EmployeeGoal, EmployeeLifecycle, EmployeeSettle,
+    ExpiryCause, INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate,
+    MemoryMigrationReport,
+    ModelLimit, PermissionOverrides, PersonaPermissions, SummonTicket, WaveMember,
+    WaveMemberOutcome, WaveNotification,
 };
 use waku_protocol::model::ProviderKind;
 
@@ -983,6 +985,7 @@ impl BossService {
             expired_at: None,
             blocker: None,
             cancelled: false,
+            expiry: None,
             state: EmployeeLifecycle::Queued,
             ticket: None,
             queued_at: None,
@@ -1258,7 +1261,10 @@ impl BossService {
         }
     }
 
-    pub fn note_settled(&self, session: Uuid) {
+    /// A provider settle ended the employee's turn — the forwarder
+    /// reports how it ended so the finish can classify the expiry
+    /// legibly (`EmployeeSettle` → `ExpiryCause`).
+    pub fn note_settled(&self, session: Uuid, settle: EmployeeSettle) {
         if !self.employee(session).is_some_and(|entry| !entry.expired) {
             return;
         }
@@ -1267,7 +1273,7 @@ impl BossService {
             let _ = std::thread::Builder::new()
                 .name("boss-employee-finish".into())
                 .spawn(move || {
-                    if let Err(error) = finish(session) {
+                    if let Err(error) = finish(session, settle) {
                         eprintln!("could not settle Boss employee {session}: {error:#}");
                     }
                 });
@@ -1305,6 +1311,7 @@ impl BossService {
                     entry.expired_at = None;
                     entry.blocker = None;
                     entry.cancelled = false;
+                    entry.expiry = None;
                     state.employees.push(entry);
                     wave_member_in_flight(state, session);
                     revived = true;
@@ -1320,6 +1327,7 @@ impl BossService {
                 entry.expired_at = None;
                 entry.blocker = None;
                 entry.cancelled = false;
+                entry.expiry = None;
                 revived = true;
             }
             if revived {
@@ -1391,9 +1399,10 @@ impl BossService {
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
-        let employee = self.begin_finishing(session, false, true)?;
+        let employee =
+            self.begin_finishing(session, false, true, ExpiryCause::Finished)?;
         if employee.is_some() {
-            self.complete_expiry(session)?;
+            self.complete_expiry(session, None)?;
         }
         Ok(employee)
     }
@@ -1434,11 +1443,18 @@ impl BossService {
     /// the finish, so expiry never cuts an in-flight tool call. Forced
     /// finishes (a supervisor stop, restart recovery, a failed launch)
     /// pass `false` and tear down immediately.
+    ///
+    /// `cause` is the daemon's settle classification — the record carries
+    /// it on `expiry` so an interruption reads legibly, the wave outcome
+    /// counts an interrupted settle as failed, and the ticket's
+    /// interruption history appends here so a restart recovering a
+    /// `finishing` record never double-counts.
     pub fn begin_finishing(
         &self,
         session: Uuid,
         failed: bool,
         drain: bool,
+        cause: ExpiryCause,
     ) -> anyhow::Result<Option<BossEmployee>> {
         let now = waku_protocol::model::unix_time();
         let session_busy = self.session_busy.lock().clone();
@@ -1472,9 +1488,29 @@ impl BossService {
                     },
                     now,
                 );
+                // A stop the supervisor already marked outranks whatever
+                // settle signal arrived — the record stays terminal.
+                let cause = if entry.cancelled {
+                    ExpiryCause::Stopped
+                } else {
+                    cause
+                };
+                entry.expiry = Some(EmployeeExpiry::settle(cause));
+                if cause.counts_interruption()
+                    && let Some(ticket) = &mut entry.ticket
+                {
+                    ticket.interruptions.push(InterruptionRecord {
+                        cause,
+                        at: now,
+                    });
+                    if ticket.interruptions.len() > INTERRUPTION_HISTORY_CAP {
+                        let overflow = ticket.interruptions.len() - INTERRUPTION_HISTORY_CAP;
+                        ticket.interruptions.drain(..overflow);
+                    }
+                }
                 let outcome = if entry.cancelled {
                     WaveMemberOutcome::Cancelled
-                } else if failed || entry.blocker.is_some() {
+                } else if failed || entry.blocker.is_some() || cause.interrupted() {
                     WaveMemberOutcome::Failed
                 } else {
                     WaveMemberOutcome::Finished
@@ -1503,8 +1539,13 @@ impl BossService {
     /// record expired and hand back the reservation ids still owed a
     /// broker release — the held admission plus a parked update's id —
     /// empty when the slot is already free, so the caller releases
-    /// exactly once.
-    pub fn complete_expiry(&self, session: Uuid) -> anyhow::Result<Vec<Uuid>> {
+    /// exactly once. `expiry` is the tail's refined settle record —
+    /// `None` preserves whatever `begin_finishing` recorded.
+    pub fn complete_expiry(
+        &self,
+        session: Uuid,
+        expiry: Option<EmployeeExpiry>,
+    ) -> anyhow::Result<Vec<Uuid>> {
         let now = waku_protocol::model::unix_time();
         let mut reservations = Vec::new();
         self.update(|state| {
@@ -1516,6 +1557,9 @@ impl BossService {
                 return Ok(());
             };
             entry.set_lifecycle(EmployeeLifecycle::Expired, now);
+            if let Some(expiry) = expiry {
+                entry.expiry = Some(expiry);
+            }
             if let Some(ticket) = &mut entry.ticket {
                 reservations.extend(ticket.reservation.take());
                 reservations.extend(ticket.pending_reservation.take());
@@ -1991,6 +2035,7 @@ impl BossService {
             employee.expired_at = None;
             employee.blocker = None;
             employee.cancelled = false;
+            employee.expiry = None;
             employee.queued_at = Some(now);
             employee.ticket = Some(ticket);
             outcome = Some((employee.clone(), stale_reservations));
@@ -4268,6 +4313,7 @@ mod tests {
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
+                    expiry: None,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -4326,6 +4372,7 @@ mod tests {
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
+                    expiry: None,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -4577,6 +4624,7 @@ mod tests {
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
+                    expiry: None,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -5036,6 +5084,7 @@ mod tests {
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
+                    expiry: None,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -5462,6 +5511,7 @@ mod tests {
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
+                    expiry: None,
                     state: EmployeeLifecycle::Working,
                     ticket: None,
                     queued_at: None,
@@ -6284,6 +6334,7 @@ mod memory_op_tests {
             pending_reservation: None,
             blocked_by: Vec::new(),
             dispatch_event: None,
+            interruptions: Vec::new(),
         };
         let member = |title: &str| {
             service
@@ -6307,17 +6358,17 @@ mod memory_op_tests {
         assert!(wave.resolved_at.is_none());
 
         service
-            .begin_finishing(first.session_id, false, false)
+            .begin_finishing(first.session_id, false, false, ExpiryCause::Finished)
             .unwrap();
-        service.complete_expiry(first.session_id).unwrap();
+        service.complete_expiry(first.session_id, None).unwrap();
         assert!(
             service.document().wave_outbox.is_empty(),
             "one member still in flight — no notice yet"
         );
         service
-            .begin_finishing(second.session_id, false, false)
+            .begin_finishing(second.session_id, false, false, ExpiryCause::Finished)
             .unwrap();
-        service.complete_expiry(second.session_id).unwrap();
+        service.complete_expiry(second.session_id, None).unwrap();
         let document = service.document();
         let wave = &document.waves[0];
         assert!(wave.resolved_at.is_some());
@@ -6342,7 +6393,7 @@ mod memory_op_tests {
                 .is_none()
         );
         service
-            .begin_finishing(first.session_id, false, false)
+            .begin_finishing(first.session_id, false, false, ExpiryCause::Finished)
             .unwrap();
         let document = service.document();
         assert!(document.waves[0].resolved_at.is_some());
@@ -6393,6 +6444,7 @@ mod memory_op_tests {
             pending_reservation: None,
             blocked_by: Vec::new(),
             dispatch_event: None,
+            interruptions: Vec::new(),
         };
         let builds = |count: u32| waku_protocol::resources::ResourceSet {
             native_builds: count,
@@ -6474,8 +6526,8 @@ mod memory_op_tests {
         service
             .request_resource_update(session, ticket(), builds(1), parked)
             .unwrap();
-        service.begin_finishing(session, false, false).unwrap();
-        let released = service.complete_expiry(session).unwrap();
+        service.begin_finishing(session, false, false, ExpiryCause::Finished).unwrap();
+        let released = service.complete_expiry(session, None).unwrap();
         assert!(released.contains(&held_two));
         assert!(released.contains(&parked));
         fs::remove_dir_all(root).unwrap();
@@ -6592,7 +6644,7 @@ mod memory_op_tests {
         let forced = hire("Force");
         assert!(
             service
-                .begin_finishing(forced, false, false)
+                .begin_finishing(forced, false, false, ExpiryCause::Finished)
                 .unwrap()
                 .is_some(),
             "a forced finish ignores the open turn"
@@ -6607,6 +6659,109 @@ mod memory_op_tests {
         busy.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(service.expire(draining).unwrap().is_some());
         assert!(service.employee(draining).unwrap().expired);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The settle classification rides the record and the ticket: an
+    /// interruption appends to the ticket's history, a clean finish
+    /// records `finished` without one, a marked stop stays `stopped`
+    /// whatever the caller reported, and re-admission clears the record
+    /// with the rest of the old admission's flags.
+    #[test]
+    fn an_expiry_records_its_cause_on_the_ticket() {
+        let root = std::env::temp_dir().join(format!("boss-expiry-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let persona = service.document().personas[0].id;
+        let ticket = || SummonTicket {
+            sequence: 0,
+            generation: 1,
+            provider: ProviderKind::Codex,
+            model: "gpt-5.5".into(),
+            reasoning_effort: None,
+            prompt: "do it".into(),
+            project: "/tmp".into(),
+            workspace: None,
+            base_branch: None,
+            adopt_worktree: None,
+            resources: waku_protocol::resources::ResourceSet::default(),
+            allow_burst: false,
+            pending_prompts: Vec::new(),
+            group_id: None,
+            priority: None,
+            goal_id: None,
+            reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
+            blocked_by: Vec::new(),
+            dispatch_event: None,
+            interruptions: Vec::new(),
+        };
+        let member = |title: &str| {
+            service
+                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
+                .unwrap()
+        };
+
+        let interrupted = member("Crash");
+        service
+            .enqueue_ticket(interrupted.clone(), ticket())
+            .unwrap();
+        service
+            .begin_finishing(interrupted.session_id, false, false, ExpiryCause::Restarted)
+            .unwrap();
+        service
+            .complete_expiry(interrupted.session_id, None)
+            .unwrap();
+        let record = service.employee(interrupted.session_id).unwrap();
+        let expiry = record.expiry.as_ref().unwrap();
+        assert_eq!(expiry.cause, ExpiryCause::Restarted);
+        assert!(expiry.resumable);
+        let interruptions = &record.ticket.as_ref().unwrap().interruptions;
+        assert_eq!(interruptions.len(), 1);
+        assert_eq!(interruptions[0].cause, ExpiryCause::Restarted);
+
+        let clean = member("Done");
+        service.enqueue_ticket(clean.clone(), ticket()).unwrap();
+        service
+            .begin_finishing(clean.session_id, false, false, ExpiryCause::Finished)
+            .unwrap();
+        service.complete_expiry(clean.session_id, None).unwrap();
+        let record = service.employee(clean.session_id).unwrap();
+        assert_eq!(record.expiry.as_ref().unwrap().cause, ExpiryCause::Finished);
+        assert!(record.ticket.as_ref().unwrap().interruptions.is_empty());
+
+        // A marked stop classifies `stopped` even when the caller
+        // reported a clean settle — the flag is the durable intent.
+        let stopped = member("Halt");
+        service.enqueue_ticket(stopped.clone(), ticket()).unwrap();
+        service.mark_cancelled(stopped.session_id).unwrap();
+        service
+            .begin_finishing(stopped.session_id, false, false, ExpiryCause::Finished)
+            .unwrap();
+        service
+            .complete_expiry(stopped.session_id, None)
+            .unwrap();
+        let record = service.employee(stopped.session_id).unwrap();
+        let expiry = record.expiry.as_ref().unwrap();
+        assert_eq!(expiry.cause, ExpiryCause::Stopped);
+        assert!(!expiry.resumable);
+        assert!(record.ticket.as_ref().unwrap().interruptions.is_empty());
+
+        // Re-admission clears the settle record with blocker/cancelled;
+        // the ticket's interruption history survives the requeue.
+        service
+            .requeue_employee(interrupted.session_id, ticket(), |_| {})
+            .unwrap();
+        let record = service.employee(interrupted.session_id).unwrap();
+        assert!(record.expiry.is_none());
+        assert_eq!(record.ticket.as_ref().unwrap().interruptions.len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 }
