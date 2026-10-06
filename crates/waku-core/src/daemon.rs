@@ -11568,7 +11568,50 @@ fn forward_driver_events(
         if delivered.is_err() {
             break;
         }
-        if let Some(settle) = settle {
+        // A parked prompt is unfinished work — an employee whose queue is
+        // still full drains it into new turns instead of expiring, and the
+        // settle only fires once the queue runs dry. The orphan case — a
+        // provider exit, a marked stop, a failed delivery — still expires
+        // with the leftovers counted as `parkedWork`.
+        let mut keeps_working = false;
+        if matches!(
+            settle,
+            Some(waku_protocol::boss::EmployeeSettle::TurnFinished)
+        ) && boss.is_employee(session_id)
+        {
+            rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
+            while let Some(entry) = agent.pop_queued(session_id) {
+                if agent.is_working(session_id) {
+                    // A fresh turn opened while the queue drained — the
+                    // rest waits for its finish like any other queued
+                    // prompt.
+                    agent.requeue_front(session_id, entry);
+                    keeps_working = true;
+                    break;
+                }
+                if let Err(error) = deliver_agent_prompt(
+                    session_id,
+                    &driver,
+                    entry,
+                    &events,
+                    &agent,
+                    &auto_prompts,
+                    &task_state,
+                    &task_store,
+                    &boss,
+                    &automations,
+                ) {
+                    eprintln!(
+                        "goddard-daemon could not deliver a queued employee prompt for task {session_id}: {error:#}"
+                    );
+                    break;
+                }
+                keeps_working = true;
+            }
+        }
+        if !keeps_working
+            && let Some(settle) = settle
+        {
             boss.note_settled(session_id, settle);
         }
         if drains_queue && !boss.is_employee(session_id) {
@@ -16071,7 +16114,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
-                        delivery: Some(AgentPromptDelivery::Interrupt),
+                        delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
                     },
                 },
                 &EventSink::detached(),
@@ -16199,7 +16242,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
-                        delivery: Some(AgentPromptDelivery::Interrupt),
+                        delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
                     },
                 },
                 &EventSink::detached(),
@@ -18887,7 +18930,7 @@ mod tests {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: "queued while working".into(),
-                        delivery: Some(AgentPromptDelivery::Interrupt),
+                        delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
                     },
                 },
                 &EventSink::detached(),
@@ -18914,6 +18957,116 @@ mod tests {
         assert_eq!(pending.len(), 2, "{pending:?}");
         assert_eq!(pending[0], "queued while working");
         assert!(pending[1].contains("interrupted"), "{}", pending[1]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A parked prompt is unfinished work, not a finish: a `TurnFinished`
+    /// arriving with the queue still full drains the entry into a fresh
+    /// prompt and the employee stays live. Only the next finish — queue
+    /// empty — settles the record.
+    #[test]
+    fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-drain-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, child_capture) =
+            employee_finish_fixture(&root);
+        // The settle's finish rides the callback `start_automations` binds
+        // in production — wire it directly so `note_settled` expires.
+        let backend = Arc::new(backend);
+        backend.bind_boss_finish_callback();
+        let runtime_id = backend
+            .sessions
+            .lock()
+            .get(&employee_id)
+            .unwrap()
+            .runtime_id;
+        // The follow-up lands mid-turn, so it parks in the prompt queue.
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued while working".into(),
+                        delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert!(backend.agent.has_queued(employee_id));
+
+        let forward = |feed: &[DriverEvent]| {
+            let events = EventSink::detached().begin_session_runtime(employee_id, runtime_id);
+            let (driver_events, event_receiver) = driver::test_event_channel();
+            for event in feed {
+                driver_events.send(event.clone()).unwrap();
+            }
+            drop(driver_events);
+            forward_driver_events(
+                employee_id,
+                runtime_id,
+                event_receiver,
+                events,
+                DriverHandle::from_control(child_capture.clone()),
+                backend.agent.clone(),
+                backend.task_state.clone(),
+                backend.task_store.clone(),
+                backend.sessions.clone(),
+                backend.automations.clone(),
+                backend.boss.clone(),
+                backend.auto_prompts.clone(),
+                backend.repo_maps.clone(),
+            );
+        };
+        forward(&[DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        }]);
+
+        // The parked prompt delivered to the live employee — no settle,
+        // no expiry, nothing left parked.
+        let employee = backend.boss.employee(employee_id).unwrap();
+        assert!(!employee.expired);
+        assert!(!backend.agent.has_queued(employee_id));
+        assert!(
+            child_capture
+                .prompts
+                .lock()
+                .iter()
+                .any(|prompt| prompt.contains("queued while working")),
+            "{:?}",
+            child_capture.prompts.lock()
+        );
+
+        // Queue empty now — the next finish is a real settle. The expiry
+        // itself runs off the forwarder on the finish callback's thread.
+        forward(&[
+            DriverEvent::TurnStarted,
+            DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            },
+        ]);
+        let expired = (0..400).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            backend
+                .boss
+                .employee(employee_id)
+                .is_some_and(|employee| employee.expired)
+        });
+        assert!(expired, "the empty-queue settle expired the employee");
+        let employee = backend.boss.employee(employee_id).unwrap();
+        assert_eq!(
+            employee.expiry.as_ref().unwrap().cause,
+            ExpiryCause::Finished
+        );
+        drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
 
