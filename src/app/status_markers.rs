@@ -1213,6 +1213,15 @@ impl Waku {
         if !self.state.status_markers_enabled {
             return;
         }
+        if self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| self.session_is_employee(session))
+        {
+            return;
+        }
         if self.state.selected_session == Some(session_id) {
             self.request_status_marker_eval(session_id, turn_id, summary, cx);
         } else {
@@ -1266,10 +1275,10 @@ impl Waku {
         else {
             return;
         };
-        // Boss-owned sessions never render the chips, so the verdict could
-        // not act — skip the call rather than paying for answers nothing
-        // displays and journaling verdicts that can never resolve.
-        if self.session_is_boss_owned(session) {
+        // Boss-owned surfaces already omit the chips, and employee chats
+        // should not emit turn-status verdicts either. Skip the evaluation
+        // rather than paying for answers these sessions will not display.
+        if self.session_is_boss_owned(session) || self.session_is_employee(session) {
             return;
         }
         let state = turn_eval_state(session, turn_id, summary.as_deref());
@@ -1317,6 +1326,11 @@ impl Waku {
                         .iter()
                         .find(|session| session.turns.iter().any(|turn| turn.id == turn_id))
                     {
+                        // Ownership may have changed while the evaluation
+                        // was in flight; employee chats never land markers.
+                        if self.session_is_employee(session) {
+                            continue;
+                        }
                         let session_id = session.id;
                         let actions = suggested_actions(&evaluation);
                         self.note_marker_verdict(session_id, turn_id, &evaluation, &actions);
@@ -1440,8 +1454,8 @@ impl Waku {
 
     /// The marker chips a settled turn's response footer shows, if the
     /// evaluation answered and at least one marker cleared its threshold.
-    /// Boss-owned sessions never carry the chips — the verdict judges a
-    /// turn for the human reviewing an employee's work.
+    /// Boss-owned surfaces and employee chats do not evaluate turns for
+    /// these markers.
     #[track_caller]
     pub(super) fn render_status_marker_row(
         &self,
