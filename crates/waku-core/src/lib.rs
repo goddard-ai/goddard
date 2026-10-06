@@ -6,60 +6,19 @@
 //! the transport-neutral contract in `waku-protocol`. Client applications
 //! intentionally depend on `waku-client` instead of this crate.
 
-// The catalog is embedded once by `waku-localization` and registered into
-// `waku-protocol` when linked; `crate::i18n` re-exports it.
-macro_rules! tr {
-    ($key:expr) => {
-        waku_localization::translate($key)
-    };
-    ($key:expr, $($name:ident => $value:expr),+ $(,)?) => {
-        waku_localization::translate_args(
-            $key,
-            &[$( (stringify!($name), $value.to_string()) ),+],
-        )
-    };
-    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
-        waku_localization::translate_args(
-            $key,
-            &[$( (stringify!($name), $value.to_string()) ),+],
-        )
-    };
-}
+// `tr!`, `keyed!`, and `localized!` live in `waku-base` now; importing them at
+// the crate root keeps every module's unqualified calls working.
+#[macro_use]
+extern crate waku_base;
 
-/// Pair a translated fallback string with its `WireTranslation` so wire
-/// emitters ship the semantic and each client renders its own locale.
-/// Args are recorded by name so the client can substitute `%{name}` itself.
-/// A `KeyedError` whose message is the `tr!` fallback and whose key+args ride
-/// to the RPC boundary so clients can render their own locale.
-macro_rules! keyed {
-    ($($t:tt)*) => {
-        waku_protocol::KeyedError::localized(localized!($($t)*))
-    };
-}
-
-macro_rules! localized {
-    ($key:expr) => {
-        (tr!($key), waku_protocol::WireTranslation::new($key, []))
-    };
-    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {
-        (
-            tr!($key, $($name = $value),+),
-            waku_protocol::WireTranslation::new(
-                $key,
-                [$( (stringify!($name), $value.to_string()) ),+],
-            ),
-        )
-    };
-}
+pub use waku_base::{keyed, localized, tr};
 
 pub mod acp_session;
 pub mod agent;
 mod agent_merge;
 pub mod amp_session;
-pub mod attachments;
 pub mod auto_prompts;
 pub mod automations;
-pub mod blob_store;
 pub mod boss;
 pub mod boss_context;
 pub mod boss_eval;
@@ -80,21 +39,15 @@ pub mod deepseek_session;
 pub mod devin_session;
 pub mod driver;
 pub mod eval;
-mod frontmatter;
 pub mod git_branch;
 pub mod git_commit;
 pub mod git_panel;
 pub mod github;
 pub mod grok_session;
-mod http_wire;
-pub mod i18n;
-pub mod identity;
 pub mod inference;
 pub mod integrations;
-pub mod issue_templates;
 pub mod issues;
 pub mod kimi_session;
-pub mod lan;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;
@@ -104,40 +57,51 @@ pub mod notifications;
 pub mod opencode_api;
 pub mod opencode_service;
 pub mod opencode_session;
-pub mod pairing;
 pub mod permission_review;
 pub mod persistence;
 pub mod pi_session;
-pub mod power;
-mod pressure;
-pub mod projectless;
 pub mod pull_requests;
 pub mod repo;
 pub use waku_repo_map as repo_map;
-pub mod resource_broker;
 pub mod review;
 pub mod routing;
 pub mod sandbox;
-pub mod settings;
 pub mod share;
 pub mod shell_command;
 pub mod skills;
 mod slash_command_catalog;
 pub mod stats;
 mod subagents;
-mod subprocess;
 pub mod sync;
 pub mod terminal;
-pub mod theme;
 pub mod usage;
 pub mod usage_history;
 pub mod whistle;
 pub mod workspace;
 pub mod worktree;
 
-mod fs_ext;
-mod protocol;
 mod server;
+
+// `waku-base` leaves, re-exported so `waku_core::x` paths keep working while
+// the crate split lands in stages.
+pub use waku_base::attachments;
+pub use waku_base::blob_store;
+pub(crate) use waku_base::frontmatter;
+pub(crate) use waku_base::fs_ext;
+pub(crate) use waku_base::http_wire;
+pub use waku_base::i18n;
+pub use waku_base::identity;
+pub use waku_base::issue_templates;
+pub use waku_base::lan;
+pub use waku_base::pairing;
+pub use waku_base::power;
+pub(crate) use waku_base::pressure;
+pub use waku_base::projectless;
+pub(crate) use waku_base::protocol;
+pub use waku_base::resource_broker;
+pub use waku_base::settings;
+pub(crate) use waku_base::subprocess;
+pub use waku_base::theme;
 
 pub use protocol::{
     AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace,

@@ -17,6 +17,7 @@ use anyhow::{Context as _, anyhow, bail};
 use uuid::Uuid;
 
 use crate::model::ProviderKind;
+pub(crate) use waku_base::ansi::strip_ansi;
 pub use waku_protocol::git::{
     AgentInvocation, ArchivePreview, CheckoutStatus, CommitSnapshot as Snapshot, StatusEntry,
 };
@@ -751,24 +752,6 @@ fn normalize_message(output: &str) -> Option<String> {
         return None;
     }
     Some(candidate.chars().take(200).collect())
-}
-
-pub(crate) fn strip_ansi(text: &str) -> String {
-    let mut clean = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-        } else {
-            clean.push(character);
-        }
-    }
-    clean
 }
 
 pub(crate) fn truncate_utf8(mut value: String, limit: usize) -> (String, bool) {

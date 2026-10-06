@@ -11413,6 +11413,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "crossbeam-channel",
+ "dirs 6.0.0",
+ "dunce",
+ "libc",
+ "mdns-sd",
+ "objc2-foundation 0.3.2",
+ "parking_lot",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "subtle",
+ "trash",
+ "url",
+ "uuid",
+ "waku-localization",
+ "waku-protocol",
+ "windows-sys 0.61.2",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "waku-boss"
 version = "0.1.0"
 dependencies = [
@@ -11494,6 +11521,7 @@ dependencies = [
  "tungstenite 0.30.0",
  "url",
  "uuid",
+ "waku-base",
  "waku-boss",
  "waku-client",
  "waku-localization",

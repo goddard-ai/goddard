@@ -32,7 +32,7 @@ use serde_json::Value;
 /// Precompute the header once so it is never rebuilt per request — and never
 /// log it.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct Endpoint {
+pub struct Endpoint {
     pub host: String,
     pub port: u16,
     pub auth: Option<String>,
@@ -40,7 +40,7 @@ pub(crate) struct Endpoint {
 
 impl Endpoint {
     /// An unauthenticated loopback server.
-    pub(crate) fn local(port: u16) -> Self {
+    pub fn local(port: u16) -> Self {
         Self {
             host: "127.0.0.1".to_owned(),
             port,
@@ -49,7 +49,7 @@ impl Endpoint {
     }
 
     /// Parses a registration URL and precomputes its Basic credential.
-    pub(crate) fn basic(url: &str, user: &str, password: &str) -> anyhow::Result<Self> {
+    pub fn basic(url: &str, user: &str, password: &str) -> anyhow::Result<Self> {
         let parsed = url::Url::parse(url).with_context(|| format!("invalid server URL {url}"))?;
         let host = parsed
             .host_str()
@@ -67,7 +67,7 @@ impl Endpoint {
         })
     }
 
-    pub(crate) fn address(&self) -> String {
+    pub fn address(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
 }
@@ -76,7 +76,7 @@ impl Endpoint {
 ///
 /// A 204/205/304 — or any empty success body — answers `Value::Null`, which is
 /// what every acknowledgement-only route returns.
-pub(crate) fn request_json(
+pub fn request_json(
     endpoint: &Endpoint,
     method: &str,
     path: &str,
@@ -96,7 +96,7 @@ pub(crate) fn request_json(
 /// unreserved characters. Session ids, MCP server names and directories all
 /// pass through here, and a deepObject key's brackets must arrive as
 /// `%5B`/`%5D`.
-pub(crate) fn encode_path_segment(value: &str) -> String {
+pub fn encode_path_segment(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
@@ -108,7 +108,7 @@ pub(crate) fn encode_path_segment(value: &str) -> String {
     encoded
 }
 
-pub(crate) fn http_request(
+pub fn http_request(
     endpoint: &Endpoint,
     method: &str,
     path: &str,
@@ -275,13 +275,13 @@ fn decode_chunked(mut input: &[u8]) -> anyhow::Result<Vec<u8>> {
 /// The socket handle lives here rather than with the reader so a drop during
 /// response setup still cancels: see [`open_event_stream`].
 #[derive(Default)]
-pub(crate) struct StreamControl {
+pub struct StreamControl {
     cancelled: AtomicBool,
     socket: Mutex<Option<TcpStream>>,
 }
 
 impl StreamControl {
-    pub(crate) fn attach(&self, stream: &TcpStream) -> std::io::Result<bool> {
+    pub fn attach(&self, stream: &TcpStream) -> std::io::Result<bool> {
         let socket = stream.try_clone()?;
         let mut active = self.socket.lock();
         if self.cancelled.load(Ordering::Acquire) {
@@ -292,23 +292,23 @@ impl StreamControl {
         Ok(true)
     }
 
-    pub(crate) fn cancel(&self) {
+    pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
         if let Some(socket) = self.socket.lock().take() {
             let _ = socket.shutdown(Shutdown::Both);
         }
     }
 
-    pub(crate) fn clear(&self) {
+    pub fn clear(&self) {
         self.socket.lock().take();
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
 
     /// Lets a long-lived reader be restarted after a cancel-driven park.
-    pub(crate) fn reset(&self) {
+    pub fn reset(&self) {
         self.cancelled.store(false, Ordering::Release);
         self.socket.lock().take();
     }
@@ -318,7 +318,7 @@ impl StreamControl {
 ///
 /// The shared request helper reads a whole response before returning, which a
 /// stream never finishes doing.
-pub(crate) fn open_event_stream(
+pub fn open_event_stream(
     endpoint: &Endpoint,
     path: &str,
     control: &StreamControl,
@@ -397,7 +397,7 @@ pub(crate) fn open_event_stream(
 
 /// One parsed server-sent-event frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum SseFrame {
+pub enum SseFrame {
     /// A frame with only `data:` lines, which is every ordinary event.
     Data(String),
     /// A frame carrying an `event:` field. OpenCode uses this solely to
@@ -412,7 +412,7 @@ pub(crate) enum SseFrame {
 /// Reads SSE frames until the stream dies.
 ///
 /// `read_timeout` bounds a silent stream; pass `None` to block indefinitely.
-pub(crate) fn read_sse_frames(
+pub fn read_sse_frames(
     stream: TcpStream,
     read_timeout: Option<Duration>,
 ) -> anyhow::Result<impl Iterator<Item = anyhow::Result<SseFrame>>> {

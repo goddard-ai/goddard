@@ -3,7 +3,7 @@
 /// Unknown and unsupported values are ignored so a hand-written prompt still
 /// stays listed. YAML syntax, including folded and literal block scalars, is
 /// handled by `serde-saphyr`.
-pub(crate) fn parse_frontmatter_fields<'a>(
+pub fn parse_frontmatter_fields<'a>(
     contents: &'a str,
     mut visit: impl FnMut(&str, String),
 ) -> &'a str {
@@ -26,7 +26,7 @@ pub(crate) fn parse_frontmatter_fields<'a>(
     body.trim_start_matches(['-']).trim_start()
 }
 
-pub(crate) fn frontmatter_value(value: serde_json::Value) -> Option<String> {
+pub fn frontmatter_value(value: serde_json::Value) -> Option<String> {
     let value = match value {
         serde_json::Value::String(value) => value,
         // Preserve the bracket notation historically accepted by command

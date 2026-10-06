@@ -69,10 +69,10 @@ fn stats() -> &'static Mutex<HashMap<String, LabelStats>> {
     STATS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The wire snapshot [`crate::stats`] folds into each `daemon-stats.jsonl`
+/// The wire snapshot `crate::stats` folds into each `daemon-stats.jsonl`
 /// sample. Counters accumulate over the daemon's lifetime; `in_flight`
 /// reads live.
-pub(crate) fn snapshot() -> BTreeMap<String, SubprocessLabelSample> {
+pub fn snapshot() -> BTreeMap<String, SubprocessLabelSample> {
     stats()
         .lock()
         .expect("subprocess stats lock")
@@ -96,7 +96,7 @@ pub(crate) fn snapshot() -> BTreeMap<String, SubprocessLabelSample> {
 /// A held (or timed-out) spawn slot. Dropping returns the token and
 /// records the hold; carrying it inside a child handle extends the hold to
 /// the handle's lifetime.
-pub(crate) struct Permit {
+pub struct Permit {
     tokens: crossbeam_channel::Sender<()>,
     label: String,
     /// `false` when the wait timed out and the spawn proceeds uncounted by
@@ -161,7 +161,7 @@ fn acquire_on(tokens: &PermitTokens, label: String, limit: Duration) -> Permit {
 /// Wait for a spawn slot for `label`, recording the wait. Waiting longer
 /// than [`PERMIT_WAIT`] logs and returns a tokenless permit — see the
 /// constant.
-pub(crate) fn acquire(label: String) -> Permit {
+pub fn acquire(label: String) -> Permit {
     acquire_on(permits(), label, PERMIT_WAIT)
 }
 

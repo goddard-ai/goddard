@@ -14,7 +14,7 @@ use std::path::Path;
 /// Windows has no mode bits: the locations Goddard creates here live under the
 /// user's own profile (`%LOCALAPPDATA%`, `%TEMP%`), which already inherits an
 /// ACL granting the owner and administrators alone.
-pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
+pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -27,7 +27,7 @@ pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
 
 /// Drop group and other access on an existing directory. A no-op on Windows,
 /// where the inherited profile ACL already restricts it.
-pub(crate) fn restrict_to_owner(path: &Path) -> io::Result<()> {
+pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -46,7 +46,7 @@ pub(crate) fn restrict_to_owner(path: &Path) -> io::Result<()> {
 /// either needs Developer Mode or `SeCreateSymbolicLinkPrivilege`; callers
 /// treat a failure as "this resource could not be mirrored" rather than
 /// assuming POSIX semantics.
-pub(crate) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
+pub fn symlink(original: &Path, link: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(original, link)
@@ -72,7 +72,7 @@ pub(crate) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
 /// Append `bytes` to `path`, then keep the file under `cap` by rewriting it
 /// to its newest half, cut at a line boundary. JSONL-style append logs use
 /// this to stay self-bounding; callers decide whether a failure is fatal.
-pub(crate) fn append_capped(path: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
+pub fn append_capped(path: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
