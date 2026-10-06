@@ -1,0 +1,20 @@
+[package]
+name = "waku-git"
+version = "0.1.0"
+edition = "2024"
+description = "Git checkpoints, branches, commits, and worktrees for Goddard"
+license = "GPL-3.0-only"
+
+[dependencies]
+anyhow = "1.0"
+dunce = "1"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+waku-base = { path = "../waku-base" }
+waku-exec = { path = "../waku-exec" }
+waku-protocol = { path = "../waku-protocol" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

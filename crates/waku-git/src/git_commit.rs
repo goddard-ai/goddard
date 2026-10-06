@@ -16,12 +16,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, anyhow, bail};
 use uuid::Uuid;
 
-use crate::model::ProviderKind;
-pub(crate) use waku_base::ansi::strip_ansi;
+pub use waku_base::ansi::strip_ansi;
 pub use waku_protocol::git::{
     AgentInvocation, ArchivePreview, CheckoutStatus, CommitSnapshot as Snapshot, StatusEntry,
 };
 use waku_protocol::git::{CLAUDE_COMMIT_MODEL, CODEX_COMMIT_MODEL};
+use waku_protocol::model::ProviderKind;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const CHECKOUT_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -56,10 +56,10 @@ const CLAUDE_COMMIT_EFFORT: &str = "low";
 // `unsupported_value`, listing `none` as the lowest it accepts.
 const CODEX_COMMIT_EFFORT: &str = r#"model_reasoning_effort="none""#;
 
-pub(crate) struct CapturedOutput {
-    pub(crate) status: ExitStatus,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
+pub struct CapturedOutput {
+    pub status: ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -260,7 +260,7 @@ pub fn generate_session_title(
 /// and terminal commands take the same path. `description` names what was
 /// being generated in failure messages ("a commit message"). Returns the
 /// provider's raw stdout; the caller normalizes it.
-pub(crate) fn agent_oneshot(
+pub fn agent_oneshot(
     cwd: &Path,
     prompt: &str,
     invocation: &AgentInvocation,
@@ -767,7 +767,7 @@ pub(crate) fn truncate_utf8(mut value: String, limit: usize) -> (String, bool) {
     (value, true)
 }
 
-pub(crate) fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
+pub fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
     git_success(cwd, &["rev-parse", "--git-dir"]).map(|_| ())
 }
 
@@ -849,14 +849,14 @@ pub(crate) fn push_target(cwd: &Path, branch: &str) -> anyhow::Result<Option<Str
     Ok(exists.status.success().then_some(target))
 }
 
-pub(crate) fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+pub fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = git_success(cwd, args)?;
     Ok(String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_owned())
 }
 
-pub(crate) fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
+pub fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
     let output = git_capture(cwd, args)?;
     if output.status.success() {
         return Ok(Some(
@@ -869,7 +869,7 @@ pub(crate) fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<O
     bail!("Git command failed: {}", command_error(&output))
 }
 
-pub(crate) fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
+pub fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
     let output = git_capture(cwd, args)?;
     if output.status.success() {
         Ok(output)
@@ -878,7 +878,7 @@ pub(crate) fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedO
     }
 }
 
-pub(crate) fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
+pub fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
     let mut command = crate::command_env::command("git");
     command
         .args(args)
@@ -1030,7 +1030,7 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {
     kept
 }
 
-pub(crate) fn command_error(output: &CapturedOutput) -> String {
+pub fn command_error(output: &CapturedOutput) -> String {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     let stderr = stderr.trim();
     if stderr.is_empty() {

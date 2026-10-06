@@ -291,7 +291,7 @@ fn upstream_pending(cwd: &Path) -> anyhow::Result<Option<(String, u64)>> {
 /// The working-tree paths still unmerged — what `git status` shows as
 /// "both modified" (or added/deleted). `--diff-filter=U` covers every
 /// unmerged status pair.
-pub(crate) fn conflicted_paths(cwd: &Path) -> anyhow::Result<Vec<String>> {
+pub fn conflicted_paths(cwd: &Path) -> anyhow::Result<Vec<String>> {
     let stdout = git_stdout(cwd, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
     Ok(stdout
         .split('\0')
@@ -508,7 +508,7 @@ pub fn sync_base(
 /// dir — `REBASE_HEAD` itself lingers after a stopped rebase is continued
 /// to completion, so it cannot stand in for them. `MERGE_HEAD` is removed
 /// when the merge concludes, so the ref check is reliable there.
-pub(crate) fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
+pub fn sync_in_progress(cwd: &Path) -> anyhow::Result<Option<SyncInProgress>> {
     if git_path_exists(cwd, "rebase-merge")? || git_path_exists(cwd, "rebase-apply")? {
         return Ok(Some(SyncInProgress::Rebase));
     }
@@ -657,7 +657,7 @@ pub fn rebase_onto(
 /// (`origin/HEAD`), then the branch the primary checkout holds, then
 /// `main`/`master`. The checkout's own branch never qualifies — being on the
 /// base means there is nothing to land.
-pub(crate) fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String>> {
+pub fn land_base(cwd: &Path, recorded: Option<&str>) -> anyhow::Result<Option<String>> {
     let current = git_optional_stdout(cwd, &["branch", "--show-current"])?
         .filter(|branch| !branch.is_empty());
     let usable = |candidate: Option<String>| -> anyhow::Result<Option<String>> {
@@ -877,7 +877,7 @@ pub fn upstream_commits(cwd: &Path, skip: usize, limit: usize) -> anyhow::Result
     log_commits(cwd, &revs, skip, limit)
 }
 
-pub(crate) fn log_commits(
+pub fn log_commits(
     cwd: &Path,
     revs: &[String],
     skip: usize,

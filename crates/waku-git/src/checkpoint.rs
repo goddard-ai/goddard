@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
+use waku_protocol::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
 
 const TURN_START_METADATA_PREFIX: &str = "Waku-Turn-Start: ";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -73,7 +73,7 @@ impl Drop for TurnCaptureDeadlineScope {
     }
 }
 
-pub(crate) fn with_turn_capture_deadline<T>(
+pub fn with_turn_capture_deadline<T>(
     capture: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     with_capture_deadline(TURN_CAPTURE_TIMEOUT, capture)
@@ -94,7 +94,7 @@ fn with_capture_deadline<T>(
     result
 }
 
-pub(crate) fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
+pub fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
     TURN_CAPTURE_DEADLINE.with(|deadline| {
         let Some(deadline) = deadline.get() else {
             return Ok(None);
@@ -108,7 +108,7 @@ pub(crate) fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
     })
 }
 
-pub(crate) fn lock_capture_mutex<'a, T: ?Sized>(
+pub fn lock_capture_mutex<'a, T: ?Sized>(
     lock: &'a Mutex<T>,
 ) -> anyhow::Result<parking_lot::MutexGuard<'a, T>> {
     match remaining_capture_time()? {

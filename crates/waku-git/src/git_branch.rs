@@ -282,7 +282,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
 /// The fetch URL for `remote`, `None` when the remote is not configured.
 /// `git remote get-url` exits 2 for a missing remote rather than 1, so this
 /// cannot share `optional_stdout`'s exit-code handling.
-pub(crate) fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
+pub fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
     let output = crate::command_env::search_path_command("git")
         .args(["remote", "get-url", remote])
         .current_dir(cwd)

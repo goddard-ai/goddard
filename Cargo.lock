@@ -11525,6 +11525,7 @@ dependencies = [
  "waku-boss",
  "waku-client",
  "waku-exec",
+ "waku-git",
  "waku-localization",
  "waku-protocol",
  "waku-repo-map",
@@ -11557,6 +11558,22 @@ dependencies = [
  "uuid",
  "waku-base",
  "waku-localization",
+ "waku-protocol",
+]
+
+[[package]]
+name = "waku-git"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "uuid",
+ "waku-base",
+ "waku-exec",
  "waku-protocol",
 ]
 
