@@ -1091,9 +1091,7 @@ impl Waku {
                         self.state.completion_sound_volume,
                     );
                 }
-                // The briefing's clip builds while the task is still
-                // unread, so landing on it plays instantly rather than
-                // waiting on both gateway calls.
+                // Automatic briefings follow only the visible, idle chat.
                 self.prefetch_voice_brief(session_id, cx);
                 if let Some((title, body)) = task_notification
                     && inside_focus

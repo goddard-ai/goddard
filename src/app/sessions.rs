@@ -3765,6 +3765,10 @@ impl Waku {
             }
             let departed = self.current_settings_entry();
             self.settings_page = None;
+            self.sync_voice_briefing_navigation();
+            if let Some(session_id) = self.state.selected_session {
+                self.maybe_voice_brief(session_id, cx);
+            }
             // Leaving through back is a real hop: consume the surface the
             // visit pushed on open and park the departing pane where the
             // forward hop back in picks it up. When the recorded surface

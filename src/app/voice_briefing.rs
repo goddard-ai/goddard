@@ -1,14 +1,6 @@
-//! Voice briefing (experimental): a settled reply gets a short "what
-//! happened / what you decide" summary voiced aloud. With automatic
-//! playback on, a reply that settles off screen gets its clip built
-//! immediately — the selected provider's chat model writes a ~45-second
-//! plain-speech transcript and the chosen TTS model voices it — so
-//! opening the task plays instantly instead of waiting on both calls,
-//! optionally after a Jev gate decides the reply is worth hearing. With
-//! it off nothing generates on its own; the response footer's headphones
-//! button or the command palette builds the clip on demand. Everything
-//! degrades quietly — no key, no model, a short reply, or a failed call
-//! all leave the transcript as the only surface.
+//! Voice briefing: automatic generation follows the visible idle chat.
+//! One ready clip may wait behind the current playback; a newer successful
+//! generation replaces it. Manual replay bypasses autoplay and the Jev gate.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -119,40 +111,73 @@ impl BriefingQueue {
     }
 }
 
+fn automatic_briefing_allowed(
+    viewed: Option<Uuid>,
+    session_id: Uuid,
+    status: SessionStatus,
+) -> bool {
+    viewed == Some(session_id)
+        && !matches!(
+            status,
+            SessionStatus::Connecting | SessionStatus::Working | SessionStatus::Background
+        )
+}
+
 impl Waku {
     /// The settle-side half: a reply that finishes off screen gets its
     /// clip built now, so landing on the task plays instantly. Runs only
     /// under automatic playback — manual mode leaves generation to the
     /// footer's on-demand button.
-    pub(super) fn prefetch_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if !self.state.voice_briefing_autoplay || self.state.selected_session == Some(session_id) {
-            return;
+    fn viewed_briefing_session(&self) -> Option<Uuid> {
+        if self.settings_page.is_some() || self.selected_terminal.is_some() {
+            return None;
         }
-        let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
-        else {
-            return;
-        };
-        if self.briefed_messages.contains(&message_id)
-            || self.briefing_clips.contains_key(&message_id)
-            || self.briefing_pending.contains_key(&message_id)
-            || self.briefing_gate_pending.contains_key(&message_id)
+        match self.navigation_location() {
+            Some(NavigationLocation::Task(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub(super) fn sync_voice_briefing_navigation(&mut self) -> bool {
+        let viewed = self.viewed_briefing_session();
+        if viewed == self.briefing_viewed_session {
+            return false;
+        }
+        self.briefing_viewed_session = viewed;
+        // Pausing is terminal for the chrome. A manual replay remains possible.
+        if self
+            .voice_briefing_playback
+            .is_some_and(|p| p.message_id.is_some())
+        {
+            crate::platform::pause_briefing_audio();
+            self.voice_briefing_playback = None;
+            self.voice_briefing_playback_generation =
+                self.voice_briefing_playback_generation.wrapping_add(1);
+        }
+        self.briefing_queue.waiting = None;
+        self.briefing_pending.clear();
+        self.briefing_gate_pending.clear();
+        true
+    }
+
+    /// A completed turn can brief only while its chat is visible.
+    pub(super) fn prefetch_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.maybe_voice_brief(session_id, cx);
+    }
+
+    /// On arrival, consider only the last completed reply of an idle chat —
+    /// play the clip if it is ready, ride a prefetch already in flight,
+    /// revoice a stale clip in place, or build it.
+    pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.state.voice_briefing_autoplay || self.viewed_briefing_session() != Some(session_id)
         {
             return;
         }
-        self.queue_voice_briefing(session_id, message_id, turn_id, response, false, cx);
-    }
-
-    /// The activation-side half: play the clip if it is ready, ride a
-    /// prefetch already in flight, revoice a stale clip in place, or build
-    /// it on arrival.
-    pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if !self.state.voice_briefing_autoplay {
-            return;
-        }
         let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
         else {
             return;
         };
+
         if let Some(play) = self
             .briefing_pending
             .get_mut(&message_id)
@@ -175,9 +200,9 @@ impl Waku {
             if self.briefed_messages.contains(&message_id) {
                 return;
             }
-            if !self.play_voice_briefing_clip(message_id, cx) {
-                self.show_toast(tr!("errors.voice_briefing_playback"));
-            }
+            let sequence = self.briefing_queue.issue();
+            self.briefing_queue.accept(sequence, message_id);
+            self.pump_briefing_queue(cx);
             return;
         }
         if self.briefed_messages.contains(&message_id) {
@@ -234,10 +259,7 @@ impl Waku {
         // Connecting, working, and parked-with-detached-work all mean the
         // reply is still moving; waiting-for-input is exactly the moment a
         // briefing helps.
-        if matches!(
-            session.status,
-            SessionStatus::Connecting | SessionStatus::Working | SessionStatus::Background
-        ) {
+        if !automatic_briefing_allowed(self.viewed_briefing_session(), session_id, session.status) {
             return None;
         }
         let message = session
@@ -344,6 +366,9 @@ impl Waku {
                     let Some(play) = this.briefing_gate_pending.remove(&message_id) else {
                         return;
                     };
+                    if this.viewed_briefing_session() != Some(session_id) {
+                        return;
+                    }
                     if approved {
                         this.start_voice_briefing(message_id, response, play, Some(sequence), cx);
                     } else {
@@ -624,7 +649,7 @@ impl Waku {
     }
 
     fn pump_briefing_queue(&mut self, cx: &mut Context<Self>) {
-        if self.voice_briefing_playback.is_some() {
+        if self.voice_briefing_playback.is_some() || self.viewed_briefing_session().is_none() {
             return;
         }
         if let Some(message_id) = self.briefing_queue.waiting.take() {
@@ -729,6 +754,7 @@ impl Waku {
         if self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
             return;
         }
+        let viewed_session = self.viewed_briefing_session();
         self.briefing_pending.insert(message_id, play);
         cx.notify();
         let voice_key = self.voice_briefing_voice_key();
@@ -785,6 +811,12 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
+                if this.viewed_briefing_session() != viewed_session
+                    || viewed_session.is_none()
+                {
+                    this.briefing_pending.remove(&message_id);
+                    return;
+                }
                 this.finish_voice_briefing(message_id, voice_key, result, sequence, cx);
             });
         })
@@ -1142,6 +1174,29 @@ pub(super) async fn post_json(
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    #[test]
+    fn automatic_briefing_requires_the_visible_idle_chat() {
+        let chat = Uuid::new_v4();
+        assert!(automatic_briefing_allowed(
+            Some(chat),
+            chat,
+            SessionStatus::Idle
+        ));
+        assert!(!automatic_briefing_allowed(None, chat, SessionStatus::Idle));
+        assert!(!automatic_briefing_allowed(
+            Some(Uuid::new_v4()),
+            chat,
+            SessionStatus::Idle
+        ));
+        for status in [
+            SessionStatus::Connecting,
+            SessionStatus::Working,
+            SessionStatus::Background,
+        ] {
+            assert!(!automatic_briefing_allowed(Some(chat), chat, status));
+        }
+    }
 
     #[test]
     fn newest_generated_briefing_is_the_only_waiting_clip() {

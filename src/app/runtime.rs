@@ -7931,6 +7931,12 @@ impl Waku {
     }
 
     pub(super) fn drain_driver_events(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.sync_voice_briefing_navigation() {
+            if let Some(session_id) = self.state.selected_session {
+                self.maybe_voice_brief(session_id, cx);
+            }
+            cx.notify();
+        }
         let session_ids = self.runtimes.keys().copied().collect::<Vec<_>>();
         let mut changed = false;
         let mut persisted_state_changed = false;

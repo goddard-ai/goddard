@@ -3057,6 +3057,11 @@ impl Waku {
     /// tabs and visibility exactly as they were left. A no-op when the owner
     /// did not change; call after the flags that decide the owner settle.
     pub(super) fn sync_right_panel_owner(&mut self, cx: &mut Context<Self>) {
+        if self.sync_voice_briefing_navigation() {
+            if let Some(session_id) = self.state.selected_session {
+                self.maybe_voice_brief(session_id, cx);
+            }
+        }
         let owner = self.active_right_panel_owner();
         if owner == self.right_panel_live_owner {
             return;
