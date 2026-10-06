@@ -64,7 +64,7 @@ const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
 /// their 8px inset, 24px height, and 8px clearance. The same offset lifts the
 /// jump button above them when status markers or suggestions are visible.
 /// Reserved whether or not a chip is showing so the transcript never shifts.
-const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
+pub(super) const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {

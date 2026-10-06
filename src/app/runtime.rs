@@ -7272,31 +7272,48 @@ impl Waku {
             self.transcript_control_focuses.borrow_mut().clear();
             self.message_edit = None;
             self.hide_toast();
-            self.transcript_anchor.set(transcript_anchor);
-            if hidden {
-                // No sent row to anchor on — a hidden prompt renders nothing.
-                // Hold the tail so the turn's work streams in where the
-                // reader already sits.
-                self.transcript_anchor_end_space.set(Pixels::ZERO);
+            // Keep-scroll-on-send leaves a reader parked above the tail where
+            // they are: no new anchor and no scroll, so the list on screen
+            // keeps its position and the turn streams in below the fold.
+            // `transcript_anchor` stays as it was because it picks which list
+            // renders — replacing or clearing it would swap scroll state. A
+            // tail the frame cannot prove above the fold — unmeasured, or
+            // already resting at the bottom — takes the normal jump so
+            // readers who never scroll up still follow the reply.
+            if send_holds_transcript_position(
+                self.state.transcript_keep_scroll_on_send,
+                self.transcript_rests_at_tail_now(),
+            ) {
                 self.transcript_anchor_following.set(false);
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                self.pin_transcript_to_tail();
             } else {
-                // Provisional reservation: the anchored list has no measured
-                // bounds until its first paint, and a zero end space cannot hold
-                // the sent row at the viewport top — without scroll room past the
-                // tail, the list clamps to its end and the prompt paints a frame
-                // at the bottom before the first measured frame lifts it. Seed a
-                // full viewport of end space instead; the overshoot is invisible
-                // under the top anchor and the first measured frame trues it up.
-                let mut provisional = self.transcript_rows.viewport_bounds().size.height;
-                if provisional <= Pixels::ZERO {
-                    provisional = self.anchored_transcript_rows.viewport_bounds().size.height;
+                self.transcript_anchor.set(transcript_anchor);
+                if hidden {
+                    // No sent row to anchor on — a hidden prompt renders nothing.
+                    // Hold the tail so the turn's work streams in where the
+                    // reader already sits.
+                    self.transcript_anchor_end_space.set(Pixels::ZERO);
+                    self.transcript_anchor_following.set(false);
+                    self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                    self.pin_transcript_to_tail();
+                } else {
+                    // Provisional reservation: the anchored list has no measured
+                    // bounds until its first paint, and a zero end space cannot hold
+                    // the sent row at the viewport top — without scroll room past the
+                    // tail, the list clamps to its end and the prompt paints a frame
+                    // at the bottom before the first measured frame lifts it. Seed a
+                    // full viewport of end space instead; the overshoot is invisible
+                    // under the top anchor and the first measured frame trues it up.
+                    let mut provisional = self.transcript_rows.viewport_bounds().size.height;
+                    if provisional <= Pixels::ZERO {
+                        provisional =
+                            self.anchored_transcript_rows.viewport_bounds().size.height;
+                    }
+                    self.transcript_anchor_end_space.set(provisional);
+                    self.transcript_anchor_following.set(true);
+                    self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                    self.scroll_transcript_to_anchor();
                 }
-                self.transcript_anchor_end_space.set(provisional);
-                self.transcript_anchor_following.set(true);
-                self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                self.scroll_transcript_to_anchor();
             }
         }
         cx.notify();

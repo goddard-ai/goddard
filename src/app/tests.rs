@@ -40,7 +40,8 @@ use super::{
     paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, prompt_answer_index,
     push_reasoning_delta, push_transcript_activity, response_footer_message_index,
     response_row_turn_id, retain_fading_working_indicator, row_starts_followup_turn,
-    session_accepts_turn_output, session_is_reapable, settle_stream_segment,
+    send_holds_transcript_position, session_accepts_turn_output, session_is_reapable,
+    settle_stream_segment,
     should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, sidebar_slide_right_panel_widths, still_archived_sessions,
     tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
@@ -3086,6 +3087,17 @@ fn scrolling_back_onto_the_tail_is_told_apart_from_an_unmeasured_tail() {
         transcript_rests_at_tail(viewport_bottom, None, Pixels::ZERO),
         None
     );
+}
+
+#[test]
+fn keep_scroll_on_send_holds_only_a_proven_above_tail_position() {
+    // Off, or resting at the bottom: the send jump runs as it always has.
+    assert!(!send_holds_transcript_position(false, Some(false)));
+    assert!(!send_holds_transcript_position(false, Some(true)));
+    assert!(!send_holds_transcript_position(true, Some(true)));
+    // Unmeasured is unknown — hold only a tail the frame proved out of view.
+    assert!(!send_holds_transcript_position(true, None));
+    assert!(send_holds_transcript_position(true, Some(false)));
 }
 
 #[test]

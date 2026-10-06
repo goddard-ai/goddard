@@ -1954,6 +1954,26 @@ impl Waku {
                 theme,
                 search,
             ),
+            setting_card(
+                "icons/pin.svg",
+                tr!("settings.transcript_keep_scroll_on_send"),
+                tr!("settings.transcript_keep_scroll_on_send_description"),
+                toggle_switch(
+                    "transcript-keep-scroll-on-send-toggle",
+                    self.state.transcript_keep_scroll_on_send,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.transcript_keep_scroll_on_send;
+                        move |this, _, cx| {
+                            this.set_transcript_keep_scroll_on_send(!enabled, cx)
+                        }
+                    },
+                ),
+                theme,
+                search,
+            ),
             if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
                 setting_card(
                     "icons/mic.svg",
@@ -11440,6 +11460,15 @@ impl Waku {
         }
         self.state.composer_enter_steers = enabled;
         crate::input::install_composer_enter_swap(enabled, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_transcript_keep_scroll_on_send(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.transcript_keep_scroll_on_send == enabled {
+            return;
+        }
+        self.state.transcript_keep_scroll_on_send = enabled;
         self.save();
         cx.notify();
     }

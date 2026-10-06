@@ -270,6 +270,24 @@ impl Waku {
         self.transcript_is_scrolled.set(true);
     }
 
+    /// Whether the transcript's tail is on screen right now — the same test
+    /// `render_transcript` runs each frame, for send-time decisions that need
+    /// the answer outside render. `None` while the last row is unmeasured.
+    pub(super) fn transcript_rests_at_tail_now(&self) -> Option<bool> {
+        let transcript_rows = self.active_transcript_rows();
+        let tail_bottom = transcript_rows
+            .item_count()
+            .checked_sub(1)
+            .and_then(|row| transcript_rows.bounds_for_item(row))
+            .map(|bounds| bounds.bottom());
+        transcript_rests_at_tail(
+            transcript_rows.viewport_bounds().bottom(),
+            tail_bottom,
+            self.transcript_anchor_end_space.get()
+                + px(transcript_view::TRANSCRIPT_SUGGESTION_CLEARANCE),
+        )
+    }
+
     /// Whether the departing viewport shows the live turn — the state where
     /// leaving the session asks a later selection to rejoin its tail rather
     /// than the exact row the reader happened to sit on. It takes a busy
@@ -1058,6 +1076,18 @@ pub(super) fn maintain_transcript_anchor(
 /// `scroll_to_end` parks.
 pub(super) fn tail_rejoin_follows_anchor(anchored: bool, end_space: Pixels) -> bool {
     anchored && end_space <= Pixels::ZERO
+}
+
+/// Whether a send holds the reader's scroll position instead of jumping to
+/// the new message: the keep-scroll preference is on and the tail is
+/// provably out of view. An unmeasured tail answers `None`, and "unknown"
+/// resolves to the normal jump rather than a held position no frame can
+/// confirm exists.
+pub(super) fn send_holds_transcript_position(
+    keep_scroll_on_send: bool,
+    rests_at_tail: Option<bool>,
+) -> bool {
+    keep_scroll_on_send && rests_at_tail == Some(false)
 }
 
 pub(super) const ACTIVITY_IMAGE_WIDTH: f32 = 300.0;

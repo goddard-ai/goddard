@@ -540,7 +540,7 @@ settings.commands:
 settings.terminal:
   en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit scroll position transcript pin keep
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer guided reading fixation saccade opacity
 settings.terminal_keywords:
@@ -1707,6 +1707,10 @@ settings.composer_enter_steers:
   en: Enter steers the running turn
 settings.composer_enter_steers_description:
   en: In the composer, Enter steers the draft into the running turn and %{modifier}Enter queues it. Shift+Enter still inserts a line break
+settings.transcript_keep_scroll_on_send:
+  en: Keep scroll position when sending
+settings.transcript_keep_scroll_on_send_description:
+  en: Sending a prompt leaves the transcript where you scrolled it instead of jumping to the new message; scroll back to the bottom to follow the reply
 settings.composer_dictation:
   en: Composer dictation
 settings.composer_dictation_description:
