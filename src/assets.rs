@@ -67,6 +67,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "dock-keyboard",
     "download",
     "ellipsis",
+    "ellipsis-vertical",
     "eye",
     "eye-off",
     "external-link",

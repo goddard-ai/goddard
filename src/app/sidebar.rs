@@ -7411,10 +7411,14 @@ mod tests {
         assert!(sidebar_planning_session_visible(&session, None));
         let mut state = boss_state_with_deliverables(Vec::new());
         state.planning.push(waku_client::boss::BossPlan {
+            id: Uuid::new_v4(),
             session_id: session.id,
             plan_file: "plans/auth.md".into(),
             idea: "Auth".into(),
             finalized_at: None,
+            items: Vec::new(),
+            outcome: None,
+            history: Vec::new(),
         });
         assert!(sidebar_planning_session_visible(&session, Some(&state)));
         state.planning[0].finalized_at = Some(100);

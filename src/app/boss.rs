@@ -257,9 +257,6 @@ pub(super) struct BossUi {
     persona_selection: TranscriptSelection,
     persona_scroll: ScrollHandle,
     persona_scrollbar: Rc<ScrollbarState>,
-    /// Employee task pages whose assignment summary the user expanded —
-    /// collapsed is the default so the transcript stays the content.
-    assignment_expanded: HashSet<Uuid>,
     /// Every loaded entry under the Boss files root's `memory/` tree —
     /// one flat list; folder rows parent their children by path prefix.
     files: Vec<BossFile>,
@@ -362,7 +359,6 @@ impl Default for BossUi {
             persona_selection: TranscriptSelection::default(),
             persona_scroll: ScrollHandle::new(),
             persona_scrollbar: ScrollbarState::new(),
-            assignment_expanded: HashSet::new(),
             files: Vec::new(),
             files_key: None,
             memory_expanded: HashMap::new(),
@@ -2525,6 +2521,7 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(job_title.to_owned())),
             )
+            .children(self.employee_assignment_popover(session_id, &theme, cx))
             .into_any_element()
     }
 
@@ -4783,13 +4780,14 @@ impl Waku {
         }
     }
 
-    /// The collapsible assignment summary an employee's task page carries
-    /// above its transcript: collapsed to one line, expanding into the
-    /// brief, persona, model, workspace, access, and resource state the
-    /// summon recorded.
-    pub(super) fn render_employee_assignment_strip(
+    /// The ellipsis popover an employee's top bar carries after its job
+    /// title — the brief, persona, memory, and resource inventory the
+    /// summon recorded. The boss's own chat gets no button: it has no
+    /// assignment to show.
+    fn employee_assignment_popover(
         &self,
         session_id: Uuid,
+        theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self
@@ -4800,138 +4798,107 @@ impl Waku {
         if !self.session_is_employee(session) {
             return None;
         }
-        let theme = Theme::current(cx);
-        let employee = self
-            .boss_ui
-            .states
-            .values()
-            .find_map(|state| {
-                state
-                    .employees
-                    .iter()
-                    .chain(state.retired_employees.iter())
-                    .find(|employee| employee.session_id == session_id)
-                    .map(|employee| (state, employee))
-            });
-        let Some((state, employee)) = employee else {
-            return None;
-        };
-        let expanded = self.boss_ui.assignment_expanded.contains(&session_id);
-        let (status, status_color) =
-            self.boss_employee_status_label(employee, Some(session), &theme);
-        let job = self
-            .boss_ui
-            .job_titles
-            .get(&session_id)
-            .cloned()
-            .unwrap_or_else(|| employee.job_title.clone());
-        let model_detail = self
-            .boss_ui
-            .queued_model_targets
-            .get(&session_id)
-            .map(|(model_key, provider, model, effort)| {
-                let name = self.model_display_name_on(*model_key, *provider, Some(model));
-                match effort.as_deref() {
-                    Some(effort) => format!(
-                        "{name} · {}",
-                        self.reasoning_effort_label_on(
-                            *model_key,
-                            *provider,
-                            Some(model),
-                            effort,
-                        )
-                    ),
-                    None => name,
-                }
-            })
-            .or_else(|| Some(self.session_sidebar_model_detail(session)));
-        let header = div()
-            .id(SharedString::from(format!("assignment-strip-{session_id}")))
-            .tab_index(0)
-            .w_full()
-            .px(px(16.0))
-            .py(px(6.0))
+        let (state, employee) = self.boss_ui.states.values().find_map(|state| {
+            state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|employee| employee.session_id == session_id)
+                .map(|employee| (state, employee))
+        })?;
+        let rows = Rc::new(self.employee_assignment_rows(session, state, employee));
+        let handle = self.menu_handle(format!("employee-assignment-{session_id}"), cx);
+        let trigger = div()
+            .id(SharedString::from(format!(
+                "employee-assignment-trigger-{session_id}"
+            )))
+            .size(px(22.0))
+            .rounded(px(7.0))
+            .flex_none()
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .hover(|style| style.bg(theme.overlay))
+            .justify_center()
+            .cursor_default()
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .on_activation(cx, move |this, _, cx| {
-                if !this.boss_ui.assignment_expanded.remove(&session_id) {
-                    this.boss_ui.assignment_expanded.insert(session_id);
+            .hover(|style| style.bg(theme.overlay))
+            .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tr!("boss.assignment")))
+            .child(icon("icons/ellipsis-vertical.svg", 14.0, theme.text_tertiary));
+        Some(popover(
+            trigger,
+            &handle,
+            MenuAlign::BelowRight,
+            move |handle, _, cx| {
+                let theme = Theme::current(cx);
+                let mut content = div()
+                    .id(SharedString::from(format!(
+                        "employee-assignment-scroll-{session_id}"
+                    )))
+                    .max_h(px(420.0))
+                    .overflow_y_scroll()
+                    .p(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .h(px(30.0))
+                            .px(px(8.0))
+                            .flex()
+                            .items_center()
+                            .text_size(sp(13.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.assignment")),
+                    );
+                for (label, value) in rows.iter() {
+                    content = content.child(
+                        div()
+                            .w_full()
+                            .px(px(8.0))
+                            .pb(px(6.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(label.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .child(value.clone()),
+                            ),
+                    );
                 }
-                cx.notify();
-            })
-            .child(icon(
-                if expanded {
-                    "icons/chevron-down.svg"
-                } else {
-                    "icons/chevron-right.svg"
-                },
-                11.0,
-                theme.text_tertiary,
-            ))
-            .child(
                 div()
-                    .flex_none()
-                    .text_size(sp(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .child(tr!("boss.assignment")),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_tertiary)
-                    .child(job),
-            )
-            .when_some(model_detail, |row, model| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .max_w(px(200.0))
-                        .truncate()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_tertiary)
-                        .child(model),
-                )
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(sp(12.0))
-                    .text_color(status_color)
-                    .child(status),
-            );
-        let mut strip = div()
-            .flex_none()
-            .w_full()
-            .flex()
-            .flex_col()
-            .border_b_1()
-            .border_color(theme.separator)
-            .child(header);
-        if expanded {
-            strip = strip.child(self.render_assignment_detail(
-                session, state, employee, &theme,
-            ));
-        }
-        Some(strip.into_any_element())
+                    .id(SharedString::from(format!(
+                        "employee-assignment-card-{session_id}"
+                    )))
+                    .track_focus(handle.focus_handle())
+                    .w(px(300.0))
+                    .rounded(px(15.0))
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .overflow_hidden()
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .child(content)
+                    .into_any_element()
+            },
+        ))
     }
 
-    /// The expanded half of the assignment strip — label/value rows under
-    /// the disclosure line.
-    fn render_assignment_detail(
+    /// The inventory the employee top bar's assignment popover lists —
+    /// label/value pairs for the brief, persona, model, workspace,
+    /// access, and resource state the summon recorded.
+    fn employee_assignment_rows(
         &self,
         session: &AgentSession,
         state: &BossState,
         employee: &waku_protocol::boss::BossEmployee,
-        theme: &Theme,
-    ) -> Div {
+    ) -> Vec<(String, String)> {
         let persona_name = state
             .personas
             .iter()
@@ -5005,7 +4972,7 @@ impl Waku {
             .map(|ticket| ticket.prompt.trim().to_owned())
             .filter(|prompt| !prompt.is_empty());
         let model = self.session_sidebar_model_detail(session);
-        let rows: Vec<(String, AnyElement)> = [
+        [
             brief.map(|brief| (tr!("boss.assignment_brief"), brief)),
             persona_name.map(|name| (tr!("boss.assignment_persona"), name)),
             Some((tr!("boss.assignment_model"), model)),
@@ -5022,19 +4989,7 @@ impl Waku {
         ]
         .into_iter()
         .flatten()
-        .map(|(label, value)| (label, boss_plain_value(theme, value)))
-        .collect();
-        let count = rows.len();
-        let mut info = div()
-            .px(px(16.0))
-            .pb(px(8.0))
-            .pt(px(2.0))
-            .flex()
-            .flex_col();
-        for (index, (label, value)) in rows.into_iter().enumerate() {
-            info = info.child(boss_info_row(theme, label, value, index + 1 == count));
-        }
-        info
+        .collect()
     }
 
     // ── Personas ─────────────────────────────────────────────────────────

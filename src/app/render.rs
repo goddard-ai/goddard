@@ -929,33 +929,12 @@ impl Render for Waku {
                         {
                             self.render_empty_state(cx).into_any_element()
                         } else {
-                            let transcript = self
-                                .transcript_pane
+                            self.transcript_pane
                                 .clone()
                                 .cached(
                                     StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
                                 )
-                                .into_any_element();
-                            // An employee task carries its collapsible
-                            // assignment summary above the transcript — the
-                            // brief, persona, model, and resource state the
-                            // summon recorded stay one disclosure away.
-                            match self
-                                .state
-                                .selected_session
-                                .and_then(|id| self.render_employee_assignment_strip(id, cx))
-                            {
-                                Some(strip) => div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .w_full()
-                                    .flex()
-                                    .flex_col()
-                                    .child(strip)
-                                    .child(transcript)
-                                    .into_any_element(),
-                                None => transcript,
-                            }
+                                .into_any_element()
                         },
                     )
                     .children(permission)
