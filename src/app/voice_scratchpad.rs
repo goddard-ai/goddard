@@ -257,6 +257,11 @@ pub(super) struct ScratchpadTranscript {
     /// later, so finals and partials both strip this credit rather
     /// than append the span twice or fire the command again.
     interim_folded: VecDeque<String>,
+    /// A punctuation-only chunk just glued or dropped — the recognizer's
+    /// stray emission after a pause. The next delivery's leading
+    /// punctuation run is the same emission spilling over, so it strips
+    /// before anything lands.
+    stray_punct: bool,
 }
 
 impl ScratchpadTranscript {
@@ -325,6 +330,17 @@ impl ScratchpadTranscript {
                 .map(|paragraph| paragraph.text.as_str())
                 .unwrap_or_default()
         }
+    }
+
+    /// The append point has no word a punctuation chunk can attach to —
+    /// it's empty (a fresh paragraph or annotation box) or already
+    /// closed by terminal punctuation.
+    fn append_point_bare(&self) -> bool {
+        self.append_point_text()
+            .trim_end()
+            .chars()
+            .next_back()
+            .is_none_or(is_sentence_punct)
     }
 
     /// Remove the append point's trailing word — a command's first half
@@ -416,6 +432,24 @@ impl ScratchpadTranscript {
                 }
             }
         }
+        // Stray punctuation obeys the finalized rule: it stays
+        // provisional only glued onto the speech it trails — at a fresh
+        // append point it drops, and a following delivery's leading run
+        // strips as the same emission. A wordless partial keeps the
+        // strip armed — the stray may still be spilling over.
+        if is_punct_only(rest) {
+            self.stray_punct = true;
+            if self.append_point_bare() {
+                rest = "";
+            }
+        } else {
+            if self.stray_punct || self.append_point_bare() {
+                rest = strip_leading_punct(rest);
+            }
+            if !rest.is_empty() {
+                self.stray_punct = false;
+            }
+        }
         let rest = rest.to_owned();
         if self.annotation_target.is_some() {
             self.annotation_interim = rest;
@@ -494,6 +528,11 @@ impl ScratchpadTranscript {
         if slot.is_empty() {
             return;
         }
+        // A punctuation-only delivery superseded nothing worded — it
+        // only retires the provisional twin of the same stray emission.
+        if is_punct_only(delivered) && !is_punct_only(slot) {
+            return;
+        }
         let spans = word_spans(slot);
         let delivered_spans = word_spans(delivered);
         let mut matched = 0;
@@ -513,12 +552,34 @@ impl ScratchpadTranscript {
         }
     }
 
-    /// Append plain speech to the open box or the current paragraph.
+    /// Append plain speech to the open box or the current paragraph. A
+    /// chunk that's punctuation alone is the recognizer's stray emission
+    /// after a pause: it glues onto the speech it trails, or drops at a
+    /// fresh append point — and either way the next chunk's leading
+    /// punctuation run strips with it.
     fn push_text(&mut self, text: &str) {
         let text = text.trim();
         if text.is_empty() {
             return;
         }
+        let bare = self.append_point_bare();
+        if is_punct_only(text) {
+            if !bare {
+                if self.annotation_target.is_some() {
+                    append_word_text(&mut self.annotation_text, text);
+                } else {
+                    append_word_text(&mut self.current().text, text);
+                }
+            }
+            self.stray_punct = true;
+            return;
+        }
+        let text = if self.stray_punct || bare {
+            strip_leading_punct(text)
+        } else {
+            text
+        };
+        self.stray_punct = false;
         if self.annotation_target.is_some() {
             append_word_text(&mut self.annotation_text, text);
         } else {
@@ -1103,6 +1164,25 @@ fn is_sentence_punct(c: char) -> bool {
         c,
         '.' | ',' | '!' | '?' | ';' | ':' | '…' | '\'' | '’' | ')' | ']' | '}' | '%'
     )
+}
+
+/// A delivery carrying no words — sentence punctuation, whitespace, and
+/// dashes only. After a pause the recognizer emits these as standalone
+/// chunks that would otherwise lead the next phrase.
+fn is_punct_only(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(is_stray_punct_char)
+}
+
+/// What a punctuation-only chunk can be made of — the set
+/// `is_punct_only` accepts and `strip_leading_punct` removes.
+fn is_stray_punct_char(c: char) -> bool {
+    c.is_whitespace() || is_sentence_punct(c) || matches!(c, '-' | '–' | '—')
+}
+
+/// Drop a delivery's leading punctuation-and-space run — the tail of a
+/// stray emission belongs to the pause, not the phrase opening here.
+fn strip_leading_punct(text: &str) -> &str {
+    text.trim_start_matches(is_stray_punct_char)
 }
 
 /// `text`'s words as byte spans — maximal alphanumeric runs, the
@@ -3316,6 +3396,51 @@ mod tests {
         transcript.append_finalized("and a clause");
         transcript.append_finalized(", too");
         assert_eq!(transcript.to_message(), "the sentence. and a clause, too");
+    }
+
+    #[test]
+    fn stray_punctuation_drops_instead_of_leading_a_phrase() {
+        // After a pause the recognizer emits punctuation alone — it glues
+        // onto the speech it trails, or drops at a fresh append point,
+        // including the fresh paragraph an "okay next" just opened.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized(".");
+        transcript.append_finalized("first phrase");
+        transcript.append_finalized(",");
+        transcript.append_finalized("okay next ,-");
+        transcript.append_finalized("second");
+        assert_eq!(transcript.to_message(), "first phrase,\n\nsecond");
+    }
+
+    #[test]
+    fn stray_punctuation_strips_off_the_next_delivery() {
+        // The stray emission can spill into the following chunk — its
+        // leading punctuation run strips rather than head the phrase.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("first okay next");
+        transcript.append_finalized(",-");
+        transcript.append_finalized("., second");
+        assert_eq!(transcript.to_message(), "first\n\nsecond");
+    }
+
+    #[test]
+    fn interim_stray_punctuation_follows_the_same_rule() {
+        // A punctuation-only partial drops at a fresh append point and
+        // arms the strip for the next partial.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.set_interim(".".to_owned());
+        assert!(transcript.interim.is_empty());
+        transcript.set_interim("., next".to_owned());
+        assert_eq!(transcript.interim, "next");
+        // Glued onto speech it trails, it stays provisional — and its
+        // final retires the provisional twin rather than the interim.
+        transcript.append_finalized("the sentence");
+        transcript.set_interim(".".to_owned());
+        assert_eq!(transcript.interim, ".");
+        assert_eq!(transcript.to_message(), "the sentence.");
+        transcript.append_finalized(".");
+        assert_eq!(transcript.paragraphs[0].text, "the sentence.");
+        assert!(transcript.interim.is_empty());
     }
 
     #[test]
