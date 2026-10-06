@@ -427,6 +427,16 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"type":"state","state":"updated BossState"}}),
             "goddard-agent boss plan items plans/session.md --json-file items.json".to_owned(),
         ),
+        "boss plan item" => (
+            json!({"PLAN":{"positional":true,"required":true,"type":"plan id, planning-session id, or plans/<file>.md"},"ITEM_ID":{"positional":true,"required":true,"type":"work item UUID"},"STATE":{"positional":true,"required":true,"enum":["toDo","done","dropped"],"notes":"toDo reopens a done or dropped item"}}),
+            json!({"json":{"type":"state","state":"updated BossState"}}),
+            "goddard-agent boss plan item plans/session.md ITEM_ID done".to_owned(),
+        ),
+        "boss plan outcome" => (
+            json!({"PLAN":{"positional":true,"required":true,"type":"plan id, planning-session id, or plans/<file>.md"},"OUTCOME":{"positional":true,"required":true,"enum":["completed","abandoned","approved"],"notes":"approved reopens a closed plan"}}),
+            json!({"json":{"type":"state","state":"updated BossState"}}),
+            "goddard-agent boss plan outcome plans/session.md completed".to_owned(),
+        ),
         "boss deliverable publish" => (
             json!({"PATH":{"positional":true,"required":true,"type":"absolute file or directory path"},"--name":{"type":"optional display name"}}),
             json!({"json":{"type":"saved"}}),
@@ -768,6 +778,8 @@ fn schema() -> serde_json::Value {
         "boss plan create",
         "boss plan finalize",
         "boss plan items",
+        "boss plan item",
+        "boss plan outcome",
         "boss deliverable publish",
         "boss deliverable dismiss",
         "boss speak",
@@ -1561,6 +1573,33 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 plan: pos[0].clone(),
                 items,
             })?)
+        }
+        ("plan", "item") => {
+            let (pos, _) = flags(args, &[], true)?;
+            if pos.len() != 3 {
+                bail!("usage: boss plan item PLAN ITEM_ID toDo|done|dropped");
+            }
+            let op: Op = serde_json::from_value(json!({
+                "type": "setPlanItemState",
+                "plan": pos[0],
+                "item": pos[1],
+                "state": pos[2],
+            }))
+            .context("invalid setPlanItemState payload")?;
+            print_boss(boss_request(op)?)
+        }
+        ("plan", "outcome") => {
+            let (pos, _) = flags(args, &[], true)?;
+            if pos.len() != 2 {
+                bail!("usage: boss plan outcome PLAN completed|abandoned|approved");
+            }
+            let op: Op = serde_json::from_value(json!({
+                "type": "setPlanOutcome",
+                "plan": pos[0],
+                "outcome": pos[1],
+            }))
+            .context("invalid setPlanOutcome payload")?;
+            print_boss(boss_request(op)?)
         }
         ("plan", "create") => {
             let (_, opts) = flags(

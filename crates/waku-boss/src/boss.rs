@@ -16,7 +16,8 @@ use waku_protocol::boss::{
     DispatchNotification, EmployeeExpiry, EmployeeGoal, EmployeeLifecycle, EmployeeSettle,
     ExpiryCause, INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate,
     MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, PlanActor,
-    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, SummonTicket, WaveMember,
+    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition,
+    SummonTicket, WaveMember,
     WaveMemberOutcome, WaveNotification,
 };
 use waku_protocol::model::ProviderKind;
@@ -792,6 +793,13 @@ impl BossService {
         let mut updated = None;
         self.update(|state| {
             let plan = plan_mut(state, reference)?;
+            if plan.terminal() {
+                bail!(
+                    "plan {} is {}; reopen it to reshape its work",
+                    plan.plan_file,
+                    plan.outcome().label()
+                );
+            }
             let old = std::mem::take(&mut plan.items);
             let mut next = Vec::with_capacity(items.len());
             for input in &items {
@@ -836,6 +844,98 @@ impl BossService {
                 next.push(item);
             }
             plan.items = next;
+            updated = Some(plan.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
+    }
+
+    /// `setPlanItemState` — check an item off, drop it, or reopen it to
+    /// `toDo`. Each change lands on the item's audit trail.
+    pub fn set_plan_item_state(
+        &self,
+        caller: Option<Uuid>,
+        reference: &str,
+        item: Uuid,
+        item_state: PlanItemState,
+    ) -> anyhow::Result<BossPlan> {
+        self.require_owner(caller)?;
+        let actor = self.plan_actor(caller);
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let plan = plan_mut(state, reference)?;
+            if plan.terminal() {
+                bail!(
+                    "plan {} is {}; reopen it to reshape its work",
+                    plan.plan_file,
+                    plan.outcome().label()
+                );
+            }
+            let entry = plan
+                .items
+                .iter_mut()
+                .find(|known| known.id == item)
+                .ok_or_else(|| anyhow!("unknown work item {item}"))?;
+            if entry.state != item_state {
+                entry.state = item_state;
+                entry.history.push(PlanItemTransition {
+                    state: item_state,
+                    at: now,
+                    actor,
+                });
+            }
+            updated = Some(plan.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
+    }
+
+    /// `setPlanOutcome` — the audited outcome lifecycle: `approved`
+    /// plans close to `completed`/`abandoned`, and a closed plan reopens
+    /// to `approved`. A draft has no outcome to set.
+    pub fn set_plan_outcome(
+        &self,
+        caller: Option<Uuid>,
+        reference: &str,
+        outcome: PlanOutcome,
+    ) -> anyhow::Result<BossPlan> {
+        self.require_owner(caller)?;
+        let actor = self.plan_actor(caller);
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let plan = plan_mut(state, reference)?;
+            if plan.finalized_at.is_none() {
+                bail!(
+                    "plan {} is still in planning; it has no outcome to set",
+                    plan.plan_file
+                );
+            }
+            let current = plan.outcome();
+            if current == outcome {
+                bail!("plan {} is already {}", plan.plan_file, outcome.label());
+            }
+            let allowed = matches!(
+                (current, outcome),
+                (PlanOutcome::Approved, PlanOutcome::Completed | PlanOutcome::Abandoned)
+                    | (
+                        PlanOutcome::Completed | PlanOutcome::Abandoned,
+                        PlanOutcome::Approved,
+                    )
+            );
+            anyhow::ensure!(
+                allowed,
+                "plan {} is {}; reopen it before setting another outcome",
+                plan.plan_file,
+                current.label()
+            );
+            plan.outcome = Some(outcome);
+            plan.history.push(PlanTransition {
+                outcome,
+                at: now,
+                actor,
+            });
             updated = Some(plan.clone());
             Ok(())
         })?;
@@ -2444,6 +2544,22 @@ impl BossService {
                     state: self.document(),
                 })
             }
+            BossOperation::SetPlanItemState {
+                plan,
+                item,
+                state,
+            } => {
+                self.set_plan_item_state(caller, &plan, item, state)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::SetPlanOutcome { plan, outcome } => {
+                self.set_plan_outcome(caller, &plan, outcome)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
             BossOperation::View => {
                 let mut state = self.document();
                 if let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) {
@@ -3264,14 +3380,22 @@ fn plan_mut<'a>(state: &'a mut BossState, reference: &str) -> anyhow::Result<&'a
     Ok(&mut state.planning[index])
 }
 
-/// Stamp an approved plan: freeze time and, when the caller declared
-/// one, seed the work breakdown from the document's course of work.
+/// Stamp an approved plan: freeze time, outcome, and the approval audit
+/// entry — always the user's act, since every finalization passes a
+/// user-facing approval — and, when the caller declared one, the work
+/// breakdown seeded from the document's course of work.
 fn apply_plan_approval(
     plan: &mut BossPlan,
     items: Option<Vec<String>>,
     now: u64,
 ) -> anyhow::Result<()> {
     plan.finalized_at = Some(now);
+    plan.outcome = Some(PlanOutcome::Approved);
+    plan.history.push(PlanTransition {
+        outcome: PlanOutcome::Approved,
+        at: now,
+        actor: PlanActor::User,
+    });
     if let Some(items) = items {
         for title in &items {
             anyhow::ensure!(!title.trim().is_empty(), "work item titles cannot be empty");
@@ -6264,6 +6388,8 @@ mod memory_op_tests {
                     idea: "Auth".into(),
                     finalized_at: None,
                     items: Vec::new(),
+                    outcome: None,
+                    history: Vec::new(),
                 });
                 Ok(())
             })
@@ -6431,6 +6557,8 @@ mod memory_op_tests {
                     idea: "Auth".into(),
                     finalized_at: None,
                     items: Vec::new(),
+                    outcome: None,
+                    history: Vec::new(),
                 });
                 Ok(())
             })
@@ -6933,6 +7061,8 @@ mod memory_op_tests {
             idea: "Plan".into(),
             finalized_at: None,
             items: Vec::new(),
+            outcome: None,
+            history: Vec::new(),
         }
     }
 
@@ -7050,5 +7180,130 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+
+    #[test]
+    fn plan_outcome_lifecycle_is_audited_and_reopens() {
+        let root = std::env::temp_dir().join(format!("boss-plan-outcome-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        add_plan(&service, test_plan("plans/auth.md"));
+        // A draft has no outcome to set.
+        for outcome in [
+            PlanOutcome::Completed,
+            PlanOutcome::Abandoned,
+            PlanOutcome::Approved,
+        ] {
+            assert!(
+                service
+                    .set_plan_outcome(None, "plans/auth.md", outcome)
+                    .is_err(),
+                "{outcome:?} on a draft"
+            );
+        }
+        // Finalization seeds the breakdown and audits the approval.
+        let plan = service
+            .finalize_plan(
+                "plans/auth.md",
+                Some(vec!["Probe".into(), "Verify".into()]),
+                100,
+            )
+            .unwrap();
+        assert_eq!(plan.outcome(), PlanOutcome::Approved);
+        assert_eq!(
+            plan.items
+                .iter()
+                .map(|item| item.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Probe", "Verify"]
+        );
+        assert_eq!(
+            plan.history.as_slice(),
+            [PlanTransition {
+                outcome: PlanOutcome::Approved,
+                at: 100,
+                actor: PlanActor::User,
+            }]
+        );
+        // The boss closes the plan; its actor lands on the trail.
+        let plan = service
+            .set_plan_outcome(Some(boss), "plans/auth.md", PlanOutcome::Completed)
+            .unwrap();
+        assert_eq!(plan.outcome(), PlanOutcome::Completed);
+        assert_eq!(plan.history.len(), 2);
+        assert_eq!(plan.history[1].outcome, PlanOutcome::Completed);
+        assert_eq!(plan.history[1].actor, PlanActor::Boss);
+        // A closed plan refuses re-close and reshaping until reopened.
+        assert!(
+            service
+                .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Abandoned)
+                .is_err()
+        );
+        assert!(
+            service
+                .update_plan_items(None, "plans/auth.md", Vec::new())
+                .is_err()
+        );
+        // Reopen returns to approved with a third audited transition.
+        let plan = service
+            .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Approved)
+            .unwrap();
+        assert_eq!(plan.outcome(), PlanOutcome::Approved);
+        assert_eq!(plan.history.len(), 3);
+        assert_eq!(plan.history[2].outcome, PlanOutcome::Approved);
+        assert_eq!(plan.history[2].actor, PlanActor::User);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plan_item_states_check_drop_and_reopen() {
+        let root = std::env::temp_dir().join(format!("boss-plan-item-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        add_plan(&service, test_plan("plans/auth.md"));
+        let plan = service
+            .update_plan_items(
+                None,
+                "plans/auth.md",
+                vec![PlanItemInput {
+                    id: None,
+                    title: "Probe".into(),
+                }],
+            )
+            .unwrap();
+        let item = plan.items[0].id;
+        // A user check-off lands on the item's audit trail.
+        let plan = service
+            .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::Done)
+            .unwrap();
+        assert_eq!(plan.items[0].state, PlanItemState::Done);
+        assert_eq!(plan.items[0].history.len(), 1);
+        assert_eq!(plan.items[0].history[0].actor, PlanActor::User);
+        service
+            .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::Dropped)
+            .unwrap();
+        // Reopen returns the item to to-do.
+        let plan = service
+            .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::ToDo)
+            .unwrap();
+        assert_eq!(plan.items[0].state, PlanItemState::ToDo);
+        assert_eq!(plan.items[0].history.len(), 3);
+        assert_eq!(plan.items[0].history[2].state, PlanItemState::ToDo);
+        // A closed plan refuses item bookkeeping until reopened.
+        service.finalize_plan("plans/auth.md", None, 100).unwrap();
+        service
+            .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Abandoned)
+            .unwrap();
+        assert!(
+            service
+                .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::Done)
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
 }

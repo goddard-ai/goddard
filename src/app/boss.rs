@@ -7808,6 +7808,8 @@ mod tests {
             idea: "Auth".into(),
             finalized_at: None,
             items: Vec::new(),
+            outcome: None,
+            history: Vec::new(),
         }];
         let states = HashMap::from([(DaemonKey::Local, state)]);
 

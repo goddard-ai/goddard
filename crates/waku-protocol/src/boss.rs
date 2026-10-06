@@ -781,6 +781,42 @@ pub enum PlanActor {
     User,
 }
 
+/// The durable outcome a plan sits in once the user approved it — set by
+/// an explicit, audited action, never derived. `Approved` doubles as the
+/// reopen target: a completed or abandoned plan returns to it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanOutcome {
+    Approved,
+    Completed,
+    Abandoned,
+}
+
+impl PlanOutcome {
+    pub fn terminal(&self) -> bool {
+        !matches!(self, PlanOutcome::Approved)
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            PlanOutcome::Approved => "approved",
+            PlanOutcome::Completed => "completed",
+            PlanOutcome::Abandoned => "abandoned",
+        }
+    }
+}
+
+/// One entry in a plan's audit trail — the outcome a transition entered,
+/// when, and who moved it. A `Completed`/`Abandoned` followed by
+/// `Approved` is a reopen.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanTransition {
+    pub outcome: PlanOutcome,
+    pub at: u64,
+    pub actor: PlanActor,
+}
+
 /// The stored state of a work-breakdown item — everything except
 /// in-progress, which the panel derives from linked live employees and
 /// the record never carries. `toDo` is also the reopen target: a done or
@@ -873,10 +909,30 @@ pub struct BossPlan {
     /// the baseline; this list is the live execution map.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<PlanItem>,
+    /// The durable outcome — `None` on drafts and on finalized records
+    /// predating the field, both of which read as open. Access through
+    /// [`BossPlan::outcome`]/[`BossPlan::lifecycle`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<PlanOutcome>,
+    /// The audited lifecycle trail — approval, closures, and reopens in
+    /// order, each with actor and time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<PlanTransition>,
 }
 
 fn new_plan_id() -> Uuid {
     Uuid::new_v4()
+}
+
+/// The plan's panel-facing lifecycle — `Planning` stays derived from
+/// `finalized_at` (an archived draft adds the session's archive status on
+/// the client); the other states are the stored outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanLifecycle {
+    Planning,
+    Approved,
+    Completed,
+    Abandoned,
 }
 
 impl BossPlan {
@@ -889,6 +945,31 @@ impl BossPlan {
             label: crate::protocol::WireTranslation::new("boss.planning_label", []),
             finalized_at: self.finalized_at,
         }
+    }
+
+    /// The current outcome — finalized records predating the field read
+    /// as approved, the state their freeze implied.
+    pub fn outcome(&self) -> PlanOutcome {
+        self.outcome.unwrap_or(PlanOutcome::Approved)
+    }
+
+    /// The lifecycle a viewer renders: a draft is still in planning, an
+    /// approved plan is open, and a marked plan is completed or abandoned.
+    /// An archived draft keeps `Planning` here — the client's session
+    /// record carries the archive flag that turns it into `archived`.
+    pub fn lifecycle(&self) -> PlanLifecycle {
+        match (self.finalized_at, self.outcome()) {
+            (None, _) => PlanLifecycle::Planning,
+            (_, PlanOutcome::Approved) => PlanLifecycle::Approved,
+            (_, PlanOutcome::Completed) => PlanLifecycle::Completed,
+            (_, PlanOutcome::Abandoned) => PlanLifecycle::Abandoned,
+        }
+    }
+
+    /// Closed outcomes refuse new work tags until reopened — the
+    /// check both the summon tag and `setPlan` apply.
+    pub fn terminal(&self) -> bool {
+        self.finalized_at.is_some() && self.outcome().terminal()
     }
 }
 
@@ -1143,6 +1224,23 @@ pub enum BossOperation {
         /// `plans/<file>.md` path.
         plan: String,
         items: Vec<PlanItemInput>,
+    },
+    /// Bookkeep one work item: mark it `done` or `dropped`, or return it
+    /// to `toDo` on reopen. `inProgress` is derived and never set.
+    /// Boss/human only.
+    SetPlanItemState {
+        plan: String,
+        /// The `PlanItem::id` to update.
+        item: Uuid,
+        state: PlanItemState,
+    },
+    /// Set a finalized plan's outcome: `completed` or `abandoned` closes
+    /// it, `approved` reopens a closed plan. Every transition lands on the
+    /// record's audit trail with the caller's actor and time. A draft has
+    /// no outcome to set. Boss/human only.
+    SetPlanOutcome {
+        plan: String,
+        outcome: PlanOutcome,
     },
     Control {
         session_id: Uuid,
@@ -1791,6 +1889,33 @@ mod tests {
     }
 
     #[test]
+    fn plan_lifecycle_operations_decode_camel_case_payloads() {
+        let item_state: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "setPlanItemState",
+            "plan": "plans/auth.md",
+            "item": "00000000-0000-0000-0000-000000000002",
+            "state": "dropped"
+        }))
+        .unwrap();
+        assert!(matches!(
+            item_state,
+            super::BossOperation::SetPlanItemState { state, .. }
+                if state == super::PlanItemState::Dropped
+        ));
+        let outcome: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "setPlanOutcome",
+            "plan": "plans/auth.md",
+            "outcome": "completed"
+        }))
+        .unwrap();
+        assert!(matches!(
+            outcome,
+            super::BossOperation::SetPlanOutcome { outcome, .. }
+                if outcome == super::PlanOutcome::Completed
+        ));
+    }
+
+    #[test]
     fn a_plan_record_predating_the_work_fields_still_decodes() {
         let plan: super::BossPlan = serde_json::from_value(serde_json::json!({
             "sessionId": "00000000-0000-0000-0000-000000000001",
@@ -1801,6 +1926,16 @@ mod tests {
         .unwrap();
         assert!(!plan.id.is_nil());
         assert!(plan.items.is_empty());
+        assert_eq!(plan.outcome(), super::PlanOutcome::Approved);
+        assert_eq!(plan.lifecycle(), super::PlanLifecycle::Approved);
+        assert!(plan.history.is_empty());
+        let draft: super::BossPlan = serde_json::from_value(serde_json::json!({
+            "sessionId": "00000000-0000-0000-0000-000000000001",
+            "planFile": "plans/draft.md",
+            "idea": "Draft"
+        }))
+        .unwrap();
+        assert_eq!(draft.lifecycle(), super::PlanLifecycle::Planning);
     }
 
     #[test]

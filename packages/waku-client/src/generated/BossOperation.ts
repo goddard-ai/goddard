@@ -9,6 +9,8 @@ import type { MemoryOperation } from "./MemoryOperation";
 import type { ModelLimit } from "./ModelLimit";
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { PlanItemInput } from "./PlanItemInput";
+import type { PlanItemState } from "./PlanItemState";
+import type { PlanOutcome } from "./PlanOutcome";
 import type { ProviderKind } from "./ProviderKind";
 import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
@@ -104,4 +106,8 @@ host?: ResourcePolicy, } | { "type": "updatePlanItems",
  * The `BossPlan::id`, its planning-session id, or its
  * `plans/<file>.md` path.
  */
-plan: string, items: Array<PlanItemInput>, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };
+plan: string, items: Array<PlanItemInput>, } | { "type": "setPlanItemState", plan: string,
+/**
+ * The `PlanItem::id` to update.
+ */
+item: string, state: PlanItemState, } | { "type": "setPlanOutcome", plan: string, outcome: PlanOutcome, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };

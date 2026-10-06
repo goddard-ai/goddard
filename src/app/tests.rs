@@ -5652,6 +5652,8 @@ fn plan_doc_host_follows_the_state_listing_the_plan() {
         idea: "Auth".into(),
         finalized_at: None,
         items: Vec::new(),
+        outcome: None,
+        history: Vec::new(),
     };
     let mut remote_state = boss_state(None, Vec::new());
     remote_state.planning.push(plan.clone());

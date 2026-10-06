@@ -5225,6 +5225,8 @@ impl WakuBackend {
                 idea: title.clone(),
                 finalized_at: None,
                 items: Vec::new(),
+                outcome: None,
+                history: Vec::new(),
             };
             let (opener, _) = localized!("boss.plan_seed_opener", path = plan_file.clone());
             let seed = format!("{}\n\n{}", prompt.trim(), opener);
