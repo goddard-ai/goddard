@@ -2568,12 +2568,13 @@ pub struct Waku {
     /// `bossSpeechRequested` ids already handled this run — reconnects and
     /// repeat broadcasts must not replay an utterance.
     speech_requests_seen: VecDeque<Uuid>,
-    /// The one live voice-scratchpad dictation session, bound to its chat.
-    voice_scratchpad: Option<voice_scratchpad::VoiceScratchpad>,
+    /// Per-chat voice-scratchpad dictation sessions, keyed like composer
+    /// drafts — only the selected chat's may own the mic tap.
+    voice_scratchpads: HashMap<Uuid, voice_scratchpad::VoiceScratchpad>,
     /// Transcript and permission events landing from the scratchpad's
     /// worker thread — drained with the rest of the pump's traffic.
-    voice_scratchpad_tx: Sender<(u64, voice_scratchpad::ScratchpadEvent)>,
-    voice_scratchpad_events: Receiver<(u64, voice_scratchpad::ScratchpadEvent)>,
+    voice_scratchpad_tx: Sender<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
+    voice_scratchpad_events: Receiver<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
     /// Pipelines in flight per reply message; the bool marks an activation
     /// waiting on the clip, which plays the moment it lands.
     briefing_pending: HashMap<Uuid, bool>,
@@ -6865,7 +6866,7 @@ impl Waku {
                 speech_waiting_for_ambient: false,
                 boss_voice_gate_tx,
                 boss_voice_gate_events,
-                voice_scratchpad: None,
+                voice_scratchpads: HashMap::new(),
                 voice_scratchpad_tx,
                 voice_scratchpad_events,
                 voice_mic_requested: false,

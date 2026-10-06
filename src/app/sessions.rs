@@ -756,6 +756,9 @@ impl Waku {
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
+        // The scratchpad's mic follows the visible chat — the outgoing
+        // session's dictation pauses here, not when its panel repaints.
+        self.sync_voice_scratchpad_capture();
         // A landing the ⌘⇧D chain aimed keeps its seen set; any other
         // activation ends the chain, so its sessions become ordinary
         // candidates again.
@@ -2125,6 +2128,9 @@ impl Waku {
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
+        // A deleted chat's scratchpad goes with it — this also pauses the
+        // mic when the removed row was the selected one.
+        self.sync_voice_scratchpad_capture();
         // A removed session can no longer journal an action — its pending
         // predictions are censored, not kept waiting.
         self.pending_action_predictions
@@ -2211,6 +2217,7 @@ impl Waku {
                 }
             } else {
                 self.state.selected_session = None;
+                self.sync_voice_scratchpad_capture();
                 self.sync_right_panel_owner(cx);
                 self.save();
                 cx.notify();
@@ -2243,6 +2250,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.state.selected_session = None;
+        self.sync_voice_scratchpad_capture();
         self.settings_page = None;
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let pending = self
@@ -2541,6 +2549,7 @@ impl Waku {
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             self.state.selected_session = None;
+            self.sync_voice_scratchpad_capture();
             self.settings_page = None;
             // The departed session's strip is already stored; whatever the
             // navigation below lands on gets its own.
@@ -2801,6 +2810,7 @@ impl Waku {
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             self.state.selected_session = None;
+            self.sync_voice_scratchpad_capture();
             self.settings_page = None;
             // The departing session's strip is already stored; whatever the
             // navigation below lands on gets its own.

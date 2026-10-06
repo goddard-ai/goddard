@@ -877,7 +877,7 @@ impl Waku {
                 // registry holds this frame's scratchpad text.
                 self.voice_scratchpad_visible()
                     .then(|| {
-                        self.voice_scratchpad.as_ref().and_then(|scratchpad| {
+                        self.selected_voice_scratchpad().and_then(|scratchpad| {
                             scratchpad.selection.selection.borrow().clipboard_text()
                         })
                     })

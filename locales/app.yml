@@ -6446,8 +6446,6 @@ voice_scratchpad.recording:
   en: Dictating — click to show the scratchpad
 voice_scratchpad.muted:
   en: Dictation muted — click to show the scratchpad
-voice_scratchpad.active_elsewhere:
-  en: Dictating in another chat
 voice_scratchpad.mute:
   en: Mute
 voice_scratchpad.unmute:

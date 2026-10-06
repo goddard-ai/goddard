@@ -5,8 +5,11 @@
 //! saying "okay next" starts a new one, a red dot marks the append point,
 //! and Enter sends the whole transcript as one message. Clicking a
 //! paragraph opens an annotation box where speech becomes bullets under
-//! that paragraph. One session runs at a time, bound to the chat it
-//! started in; Hide or navigating away keeps it recording.
+//! that paragraph. Each chat keeps its own scratchpad like a composer
+//! draft — switching chats auto-pauses the outgoing one (its socket
+//! closes; it lands muted) — while Hide keeps the same chat's session
+//! recording out of view. One mic stream runs at a time, owned by the
+//! visible chat.
 //!
 //! Audio is captured through the shared `voice_gate` engine tap in
 //! `platform.rs` — the scratchpad's sink is the one path that forwards mic
@@ -129,22 +132,26 @@ enum ScratchpadButtonState {
     Idle,
     Recording,
     Muted,
-    /// A session lives on another chat — the button dims and explains.
-    Elsewhere,
 }
 
-/// A dictation session bound to the chat it started in.
+/// A dictation session bound to the chat it started in — the
+/// `voice_scratchpads` map key carries that chat's id.
 pub(super) struct VoiceScratchpad {
-    session_id: Uuid,
     transcript: ScratchpadTranscript,
     status: ScratchpadStatus,
     muted: bool,
     hidden: bool,
+    /// The session currently owns the tap: the sink is attached and a
+    /// worker runs (or is launching) for it. Only the selected chat's
+    /// scratchpad may hold this — a switch clears it.
+    capture_live: bool,
     /// The Cancel affordance armed its confirmation.
     confirm_discard: bool,
-    /// Bumped on each (re)connect so a retired worker's events land nowhere.
+    /// Bumped on each (re)connect and on pause so a retired worker's
+    /// events land nowhere.
     generation: u64,
-    /// Flags the worker out; the audio channel disconnecting says the same.
+    /// Flags the current worker out; the audio channel disconnecting says
+    /// the same. A respawn mints a fresh flag so firing it stays final.
     stop: Arc<AtomicBool>,
     audio_tx: Sender<AudioChunk>,
     audio_rx: Receiver<AudioChunk>,
@@ -170,14 +177,14 @@ pub(super) struct VoiceScratchpad {
 }
 
 impl VoiceScratchpad {
-    fn new(session_id: Uuid, cx: &mut Context<Waku>) -> Self {
+    fn new(cx: &mut Context<Waku>) -> Self {
         let (audio_tx, audio_rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAP);
         Self {
-            session_id,
             transcript: ScratchpadTranscript::default(),
             status: ScratchpadStatus::Connecting,
             muted: false,
             hidden: false,
+            capture_live: false,
             confirm_discard: false,
             generation: 0,
             stop: Arc::new(AtomicBool::new(false)),
@@ -195,6 +202,18 @@ impl VoiceScratchpad {
             keep_focus: cx.focus_handle(),
             discard_focus: cx.focus_handle(),
         }
+    }
+
+    /// Pause the capture side: the worker exits and closes its socket,
+    /// its generation retires so late events and a credential fetch in
+    /// flight both land nowhere, and audio queued for the dead stream
+    /// drops rather than leaking into the reconnect. The transcript and
+    /// panel state survive — resume reconnects through `muted`.
+    fn stop_capture(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        self.generation = self.generation.wrapping_add(1);
+        while self.audio_rx.try_recv().is_ok() {}
+        self.capture_live = false;
     }
 }
 
@@ -1429,15 +1448,16 @@ fn dispatch_stream_part(text: &str, send: &mut impl FnMut(ScratchpadEvent)) -> b
 /// audio channel, and forwards parsed transcript events to the pump. Runs
 /// on its own thread — a blocking socket is fine when it owns nothing else.
 fn run_transcription_worker(
+    session_id: Uuid,
     generation: u64,
     key: String,
     audio: Receiver<AudioChunk>,
-    events: Sender<(u64, ScratchpadEvent)>,
+    events: Sender<(Uuid, u64, ScratchpadEvent)>,
     wake: smol::channel::Sender<()>,
     stop: Arc<AtomicBool>,
 ) {
     let mut send = |event: ScratchpadEvent| {
-        let _ = events.send((generation, event));
+        let _ = events.send((session_id, generation, event));
         signal_event_pump(&wake);
     };
     let mut socket = match connect_transcription_socket(&key) {
@@ -1524,18 +1544,27 @@ fn run_transcription_worker(
 }
 
 impl Waku {
+    /// The visible chat's scratchpad — the only one that may own capture.
+    pub(super) fn selected_voice_scratchpad(&self) -> Option<&VoiceScratchpad> {
+        self.voice_scratchpads.get(&self.state.selected_session?)
+    }
+
+    fn selected_voice_scratchpad_mut(&mut self) -> Option<&mut VoiceScratchpad> {
+        self.voice_scratchpads.get_mut(&self.state.selected_session?)
+    }
+
     /// Whether the scratchpad panel is the chat column's content right now:
-    /// a live session, not hidden, on its own chat, under the surfaces a
-    /// mounted composer implies. The experiment flag gates the whole
-    /// surface — a session only exists while it is on.
+    /// a session on this chat, not hidden, under the surfaces a mounted
+    /// composer implies. The experiment flag gates the whole surface — a
+    /// session only exists while it is on.
     pub(super) fn voice_scratchpad_visible(&self) -> bool {
         if !self.state.voice_scratchpad_enabled {
             return false;
         }
-        let Some(scratchpad) = &self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return false;
         };
-        if scratchpad.hidden || Some(scratchpad.session_id) != self.state.selected_session {
+        if scratchpad.hidden {
             return false;
         }
         // Big Picture borrows the composer for its overlay — Enter there is
@@ -1543,27 +1572,20 @@ impl Waku {
         self.composer_mounted() && !self.big_picture.is_open()
     }
 
-    /// The VS button's posture for the card under the pointer: idle, live
-    /// on this chat (recording or muted), or disabled while another chat
-    /// holds the session.
+    /// The VS button's posture for the card under the pointer: idle, or
+    /// live on this chat (recording or muted). Every chat gets its own
+    /// button state — another chat's session no longer dims it.
     fn voice_scratchpad_button_state(&self, session_id: Option<Uuid>) -> ScratchpadButtonState {
-        match &self.voice_scratchpad {
+        match session_id.and_then(|id| self.voice_scratchpads.get(&id)) {
+            Some(scratchpad) if scratchpad.muted => ScratchpadButtonState::Muted,
+            Some(_) => ScratchpadButtonState::Recording,
             None => ScratchpadButtonState::Idle,
-            Some(scratchpad) if Some(scratchpad.session_id) == session_id => {
-                if scratchpad.muted {
-                    ScratchpadButtonState::Muted
-                } else {
-                    ScratchpadButtonState::Recording
-                }
-            }
-            Some(_) => ScratchpadButtonState::Elsewhere,
         }
     }
 
     /// The VS button — a small dark pill with "VS" and a mic glyph,
-    /// immediately left of send. While its own session is live it carries
-    /// the state dot; while another chat's session is live it dims and
-    /// explains itself.
+    /// immediately left of send. While this chat's session is live it
+    /// carries the state dot.
     pub(super) fn render_voice_scratchpad_button(
         &self,
         controls: &composer::ComposerControls,
@@ -1575,7 +1597,7 @@ impl Waku {
         }
         let state = self.voice_scratchpad_button_state(session_id);
         let theme = Theme::current(cx);
-        let enabled = state != ScratchpadButtonState::Elsewhere && session_id.is_some();
+        let enabled = session_id.is_some();
         // The state dot is a pill interior element now, left of the label —
         // it reads against text where a corner badge sat over the edge.
         let dot = |color: Hsla| {
@@ -1616,7 +1638,6 @@ impl Waku {
             )
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
         let tooltip = match state {
-            ScratchpadButtonState::Elsewhere => tr!("voice_scratchpad.active_elsewhere"),
             ScratchpadButtonState::Recording => tr!("voice_scratchpad.recording"),
             ScratchpadButtonState::Muted => tr!("voice_scratchpad.muted"),
             ScratchpadButtonState::Idle => tr!("voice_scratchpad.start"),
@@ -1636,48 +1657,52 @@ impl Waku {
     }
 
     /// The VS button's click: no session starts one on this chat, a hidden
-    /// session resurfaces, a visible one hides. Buttons on other chats are
-    /// disabled — one mic stream at a time.
+    /// session resurfaces, a visible one hides. Each chat owns its
+    /// scratchpad — pressing the button here never touches another chat's.
     fn toggle_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let this_session = self.composer_session_id();
-        match &mut self.voice_scratchpad {
-            Some(scratchpad) if Some(scratchpad.session_id) == this_session => {
+        let Some(this_session) = self.composer_session_id() else {
+            return;
+        };
+        match self.voice_scratchpads.get_mut(&this_session) {
+            Some(scratchpad) => {
                 scratchpad.hidden = !scratchpad.hidden;
                 if !scratchpad.hidden {
                     scratchpad.follow_tail = true;
                 }
                 cx.notify();
             }
-            Some(_) => {}
             None => self.start_voice_scratchpad(window, cx),
         }
     }
 
     /// Start a session on the composer's chat. The panel opens immediately —
     /// permission and connection failures become its inline error state —
-    /// and capture begins behind it.
+    /// and capture begins behind it when the chat is selected. A composer
+    /// answering for another chat (Big Picture's target) creates the
+    /// scratchpad paused: capture only ever belongs to the visible chat.
     fn start_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.voice_scratchpad_enabled || self.voice_scratchpad.is_some() {
+        if !self.state.voice_scratchpad_enabled {
             return;
         }
         let Some(session_id) = self.composer_session_id() else {
             return;
         };
-        self.voice_scratchpad = Some(VoiceScratchpad::new(session_id, cx));
-        let edit_focus = self
-            .voice_scratchpad
-            .as_ref()
-            .expect("the session was just created")
-            .edit_focus
-            .clone();
-        cx.on_focus(&edit_focus, window, |this, window, cx| {
+        if self.voice_scratchpads.contains_key(&session_id) {
+            return;
+        }
+        let selected = self.state.selected_session == Some(session_id);
+        let mut scratchpad = VoiceScratchpad::new(cx);
+        scratchpad.muted = !selected;
+        let edit_focus = scratchpad.edit_focus.clone();
+        self.voice_scratchpads.insert(session_id, scratchpad);
+        cx.on_focus(&edit_focus, window, move |this, window, cx| {
             // Keyboard focus lands the caret on the append point — the
             // surface's visible focus treatment. Pointer focus arrives with
             // a settled selection and leaves the caret alone.
             if !window.last_input_was_keyboard() {
                 return;
             }
-            if let Some(scratchpad) = &mut this.voice_scratchpad
+            if let Some(scratchpad) = this.voice_scratchpads.get_mut(&session_id)
                 && scratchpad.transcript.caret.is_none()
             {
                 scratchpad.transcript.caret =
@@ -1686,33 +1711,52 @@ impl Waku {
             }
         })
         .detach();
-        match crate::platform::microphone_access() {
-            crate::platform::CaptureAccess::Granted => self.begin_voice_capture(cx),
-            crate::platform::CaptureAccess::Undetermined => {
-                let tx = self.voice_scratchpad_tx.clone();
-                let wake = self.event_wake_tx.clone();
-                crate::platform::request_microphone_access(Box::new(move |granted| {
-                    let _ = tx.try_send((0, ScratchpadEvent::MicAccess(granted)));
-                    signal_event_pump(&wake);
-                }));
-            }
-            crate::platform::CaptureAccess::Denied => {
-                if let Some(scratchpad) = &mut self.voice_scratchpad {
-                    scratchpad.status = ScratchpadStatus::MicDenied;
-                }
-            }
+        if selected {
+            self.ensure_voice_capture(session_id, cx);
         }
         // Focus stays in the composer — typing, Enter-to-send, and Esc all
         // keep their composer semantics while the panel is up.
         cx.notify();
     }
 
-    /// Attach the audio sink and open the transcription stream. Mic access
-    /// is already granted when this runs.
-    fn begin_voice_capture(&mut self, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &self.voice_scratchpad else {
+    /// Mic access ahead of capture: begin when granted, ask when the
+    /// system has not answered yet, and leave the panel's error row when
+    /// refused.
+    fn ensure_voice_capture(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        match crate::platform::microphone_access() {
+            crate::platform::CaptureAccess::Granted => {
+                self.begin_voice_capture(session_id, cx)
+            }
+            crate::platform::CaptureAccess::Undetermined => {
+                let tx = self.voice_scratchpad_tx.clone();
+                let wake = self.event_wake_tx.clone();
+                crate::platform::request_microphone_access(Box::new(move |granted| {
+                    let _ = tx.try_send((session_id, 0, ScratchpadEvent::MicAccess(granted)));
+                    signal_event_pump(&wake);
+                }));
+            }
+            crate::platform::CaptureAccess::Denied => {
+                if let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) {
+                    scratchpad.status = ScratchpadStatus::MicDenied;
+                }
+            }
+        }
+    }
+
+    /// Attach the audio sink and open the transcription stream for a
+    /// chat's session. Mic access is already granted when this runs, and
+    /// capture only ever belongs to the visible chat.
+    fn begin_voice_capture(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.state.selected_session != Some(session_id) {
+            return;
+        }
+        let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
+        // Blocks queued for a dead stream drop before the new one opens —
+        // audio buffered under an earlier socket is stale dictation, not a
+        // backlog to replay.
+        while scratchpad.audio_rx.try_recv().is_ok() {}
         let audio_tx = scratchpad.audio_tx.clone();
         crate::platform::set_voice_audio_sink(Some(Box::new(move |samples, rate| {
             // The audio thread never blocks: a full queue drops the block.
@@ -1723,15 +1767,20 @@ impl Waku {
         })));
         crate::platform::set_voice_audio_sink_muted(scratchpad.muted);
         crate::platform::start_voice_listener();
-        self.spawn_transcription_worker(cx);
+        scratchpad.capture_live = true;
+        self.spawn_transcription_worker(session_id, cx);
     }
 
     /// Fetch the gateway key on the daemon, then spin the worker thread —
     /// a fresh credential per (re)connect keeps the secret out of app state.
-    fn spawn_transcription_worker(&mut self, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+    fn spawn_transcription_worker(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
+        // Retire the previous worker before minting the next one's flag —
+        // its Arc stays fired so two workers never share a stop signal.
+        scratchpad.stop.store(true, Ordering::Relaxed);
+        scratchpad.stop = Arc::new(AtomicBool::new(false));
         scratchpad.generation = scratchpad.generation.wrapping_add(1);
         let generation = scratchpad.generation;
         scratchpad.status = ScratchpadStatus::Connecting;
@@ -1759,10 +1808,10 @@ impl Waku {
         cx.spawn(async move |this, cx| {
             let key = work.await;
             let _ = this.update(cx, |this, cx| {
-                let Some(scratchpad) = this.voice_scratchpad.as_mut() else {
+                let Some(scratchpad) = this.voice_scratchpads.get_mut(&session_id) else {
                     return;
                 };
-                if scratchpad.generation != generation {
+                if scratchpad.generation != generation || !scratchpad.capture_live {
                     return;
                 }
                 match key {
@@ -1771,7 +1820,7 @@ impl Waku {
                             .name("voice-scratchpad-transcribe".to_owned())
                             .spawn(move || {
                                 run_transcription_worker(
-                                    generation, key, audio, events, wake, stop,
+                                    session_id, generation, key, audio, events, wake, stop,
                                 );
                             })
                         {
@@ -1795,12 +1844,21 @@ impl Waku {
 
     /// Mute pauses capture at the tap — blocks stop copying before they
     /// ever reach the socket — while the session and connection stay up.
+    /// Unmuting a session whose capture stopped (an auto-pause closed its
+    /// socket) reconnects it: resume is a fresh stream, not a rewound one.
     fn set_voice_scratchpad_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
         scratchpad.muted = muted;
-        crate::platform::set_voice_audio_sink_muted(muted);
+        if scratchpad.capture_live {
+            crate::platform::set_voice_audio_sink_muted(muted);
+        } else if !muted && scratchpad.status != ScratchpadStatus::MicDenied {
+            self.ensure_voice_capture(session_id, cx);
+        }
         cx.notify();
     }
 
@@ -1812,8 +1870,7 @@ impl Waku {
     pub(super) fn voice_scratchpad_space_mutes(&self) -> bool {
         self.voice_scratchpad_visible()
             && self
-                .voice_scratchpad
-                .as_ref()
+                .selected_voice_scratchpad()
                 .is_some_and(|scratchpad| scratchpad.transcript.annotation_target.is_none())
     }
 
@@ -1821,8 +1878,7 @@ impl Waku {
     /// fires.
     pub(super) fn voice_scratchpad_space_toggle(&mut self, cx: &mut Context<Self>) {
         let muted = self
-            .voice_scratchpad
-            .as_ref()
+            .selected_voice_scratchpad()
             .is_some_and(|scratchpad| !scratchpad.muted);
         self.set_voice_scratchpad_muted(muted, cx);
     }
@@ -1830,7 +1886,7 @@ impl Waku {
     /// Cancel — inline when the transcript is thin, confirmed once it's
     /// substantial.
     fn request_cancel_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         if scratchpad.transcript.substantial() {
@@ -1847,7 +1903,7 @@ impl Waku {
     /// text selection or caret peels off next, then an annotation box
     /// closes, then Esc means Cancel — the same confirm rule as the button.
     pub(super) fn voice_scratchpad_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         if scratchpad.confirm_discard {
@@ -1887,7 +1943,7 @@ impl Waku {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         // An open annotation box owns the stream; typed text keeps its
@@ -1963,7 +2019,7 @@ impl Waku {
         spans: &[md::selection::Span],
         cx: &mut Context<Self>,
     ) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         let backward = matches!(keystroke.key.as_str(), "left" | "up" | "home");
@@ -2051,7 +2107,7 @@ impl Waku {
     /// ⌘A on the edit surface: every painted text element selected, with
     /// the model endpoints recorded so a shift-arrow can trim the grab.
     fn voice_scratchpad_select_all(&mut self, cx: &mut Context<Self>) {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         let spans = {
@@ -2075,12 +2131,15 @@ impl Waku {
     }
 
     /// Enter while the panel is up sends the whole transcript as one
-    /// message on the bound chat and ends the session — a typed draft is
+    /// message on the viewed chat and ends that session — a typed draft is
     /// untouched.
     pub(super) fn submit_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
         let text = self
-            .voice_scratchpad
-            .as_ref()
+            .voice_scratchpads
+            .get(&session_id)
             .map(|scratchpad| scratchpad.transcript.to_message())
             .unwrap_or_default()
             .trim()
@@ -2088,60 +2147,111 @@ impl Waku {
         if text.is_empty() {
             return;
         }
-        let Some(scratchpad) = self.voice_scratchpad.take() else {
-            return;
-        };
-        scratchpad.stop.store(true, Ordering::Relaxed);
-        self.teardown_voice_scratchpad(cx);
-        self.submit_composer_submission_to(
-            scratchpad.session_id,
-            ComposerSubmission::plain(text),
-            cx,
-        );
+        self.drop_voice_scratchpad(session_id);
+        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(text), cx);
     }
 
-    /// End the session and discard the transcript.
+    /// End the visible chat's session and discard its transcript.
     pub(super) fn end_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
-        let Some(scratchpad) = self.voice_scratchpad.take() else {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        self.drop_voice_scratchpad(session_id);
+        cx.notify();
+    }
+
+    /// End every chat's session — the experiment flag going off takes the
+    /// whole surface down, so nothing keeps a scratchpad that can no
+    /// longer render.
+    pub(super) fn end_all_voice_scratchpads(&mut self, cx: &mut Context<Self>) {
+        if self.voice_scratchpads.is_empty() {
+            return;
+        }
+        let mut owned_tap = false;
+        for (_, scratchpad) in self.voice_scratchpads.drain() {
+            owned_tap |= scratchpad.capture_live;
+            scratchpad.stop.store(true, Ordering::Relaxed);
+        }
+        if owned_tap {
+            self.detach_voice_sink();
+        }
+        cx.notify();
+    }
+
+    /// Remove one chat's scratchpad, tearing down the tap when it was the
+    /// one holding it.
+    fn drop_voice_scratchpad(&mut self, session_id: Uuid) {
+        let Some(scratchpad) = self.voice_scratchpads.remove(&session_id) else {
             return;
         };
         scratchpad.stop.store(true, Ordering::Relaxed);
-        self.teardown_voice_scratchpad(cx);
+        if scratchpad.capture_live {
+            self.detach_voice_sink();
+        }
     }
 
-    /// Shared teardown: the sink detaches (samples stop leaving the tap —
-    /// the worker notices the channel drop on its own), and the mic engine
-    /// returns to whatever else still wants it.
-    fn teardown_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
+    /// Selection or the session list moved: every scratchpad but the
+    /// visible chat's pauses — its worker exits and its socket closes
+    /// rather than holding a gateway connection in the background — and a
+    /// session that no longer exists loses its scratchpad with it. Paused
+    /// sessions land muted so returning shows the transcript until the
+    /// user unmutes to resume.
+    pub(super) fn sync_voice_scratchpad_capture(&mut self) {
+        let selected = self.state.selected_session;
+        let sessions = &self.state.sessions;
+        let mut detached = false;
+        self.voice_scratchpads.retain(|id, scratchpad| {
+            let session_exists = sessions.iter().any(|session| session.id == *id);
+            if !session_exists || Some(*id) != selected {
+                detached |= scratchpad.capture_live;
+                scratchpad.stop_capture();
+                scratchpad.muted = true;
+            }
+            session_exists
+        });
+        if detached {
+            self.detach_voice_sink();
+        }
+    }
+
+    /// The sink detaches (samples stop leaving the tap — the worker
+    /// notices the channel drop on its own), and the mic engine returns
+    /// to whatever else still wants it.
+    fn detach_voice_sink(&mut self) {
         crate::platform::set_voice_audio_sink(None);
         crate::platform::set_voice_audio_sink_muted(false);
         self.maybe_stop_voice_listener();
-        cx.notify();
     }
 
     /// Drain worker and permission answers into the transcript model —
     /// events stamped with a retired generation are a dead worker's mail.
     pub(super) fn drain_voice_scratchpad_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
-        while let Ok((generation, event)) = self.voice_scratchpad_events.try_recv() {
-            let Some(scratchpad) = &mut self.voice_scratchpad else {
+        while let Ok((session_id, generation, event)) = self.voice_scratchpad_events.try_recv() {
+            // The mic answer carries generation 0 — it predates any worker.
+            // A prompt answered after a switch leaves the session paused;
+            // unmuting on return connects it then.
+            if let ScratchpadEvent::MicAccess(granted) = event {
+                let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
+                    continue;
+                };
+                changed = true;
+                if !granted {
+                    scratchpad.status = ScratchpadStatus::MicDenied;
+                } else if self.state.selected_session == Some(session_id) {
+                    self.begin_voice_capture(session_id, cx);
+                }
+                continue;
+            }
+            let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
                 continue;
             };
-            // The mic answer carries generation 0 — it predates any worker.
-            let current = matches!(event, ScratchpadEvent::MicAccess(_))
-                || generation == scratchpad.generation;
-            if !current {
+            if generation != scratchpad.generation {
                 continue;
             }
             changed = true;
             match event {
-                ScratchpadEvent::MicAccess(granted) => {
-                    if granted {
-                        self.begin_voice_capture(cx);
-                    } else {
-                        scratchpad.status = ScratchpadStatus::MicDenied;
-                    }
-                }
+                ScratchpadEvent::MicAccess(_) => {}
                 ScratchpadEvent::Connected => {
                     if scratchpad.status == ScratchpadStatus::Connecting {
                         scratchpad.status = ScratchpadStatus::Live;
@@ -2177,7 +2287,7 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let lane = self.composer_lane_height.get();
-        let Some(scratchpad) = &self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
         };
         if scratchpad.follow_tail {
@@ -2242,7 +2352,7 @@ impl Waku {
                                     let at_bottom =
                                         scroll.offset().y <= px(4.0) - scroll.max_offset().y;
                                     let _ = weak.update(cx, |this, _| {
-                                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                             scratchpad.follow_tail = at_bottom;
                                         }
                                     });
@@ -2375,7 +2485,7 @@ impl Waku {
     /// The 69px top bar: title left, Mute/Hide/Cancel pills right, hairline
     /// under it.
     fn render_scratchpad_top_bar(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
-        let Some(scratchpad) = &self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div();
         };
         let muted = scratchpad.muted;
@@ -2417,8 +2527,7 @@ impl Waku {
                         theme,
                         |this, _window, cx| {
                             let muted = this
-                                .voice_scratchpad
-                                .as_ref()
+                                .selected_voice_scratchpad()
                                 .is_some_and(|scratchpad| !scratchpad.muted);
                             this.set_voice_scratchpad_muted(muted, cx);
                         },
@@ -2431,7 +2540,7 @@ impl Waku {
                         false,
                         theme,
                         |this, window, cx| {
-                            if let Some(scratchpad) = &mut this.voice_scratchpad {
+                            if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                 scratchpad.hidden = true;
                             }
                             let focus = this.composer_focus(cx);
@@ -2534,7 +2643,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(scratchpad) = &mut self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return div().into_any_element();
         };
         // Every row's focus handle exists before the paint loop — it then
@@ -2558,7 +2667,7 @@ impl Waku {
                 .collect();
             row_focuses.push((paragraph_focus, bullet_focuses));
         }
-        let Some(scratchpad) = &self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
         };
         let transcript = &scratchpad.transcript;
@@ -2585,7 +2694,7 @@ impl Waku {
             // A fresh press retires the caret — the drag re-selects and the
             // click handlers sort out annotation.
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                if let Some(scratchpad) = &mut this.voice_scratchpad
+                if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                     && scratchpad.transcript.caret.take().is_some()
                 {
                     scratchpad.transcript.caret_anchor = None;
@@ -2656,7 +2765,7 @@ impl Waku {
                         }),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(scratchpad) = &mut this.voice_scratchpad {
+                    if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                         scratchpad.transcript.annotate(index);
                     }
                     cx.stop_propagation();
@@ -2666,7 +2775,7 @@ impl Waku {
                     if !event.keystroke.modifiers.modified()
                         && matches!(event.keystroke.key.as_str(), "enter" | "space")
                     {
-                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                             scratchpad.transcript.annotate(index);
                         }
                         cx.stop_propagation();
@@ -2738,7 +2847,7 @@ impl Waku {
                         false,
                     ))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                             scratchpad.transcript.annotate_bullet(index, bullet_index);
                         }
                         cx.stop_propagation();
@@ -2748,7 +2857,7 @@ impl Waku {
                         if !event.keystroke.modifiers.modified()
                             && matches!(event.keystroke.key.as_str(), "enter" | "space")
                         {
-                            if let Some(scratchpad) = &mut this.voice_scratchpad {
+                            if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                 scratchpad.transcript.annotate_bullet(index, bullet_index);
                             }
                             cx.stop_propagation();
@@ -2797,7 +2906,7 @@ impl Waku {
             // Clicking open space leaves annotation mode and editing —
             // focus goes home to the composer so typing resumes the draft.
             .on_click(cx.listener(|this, _, window, cx| {
-                if let Some(scratchpad) = &mut this.voice_scratchpad {
+                if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                     let mut changed = false;
                     if scratchpad.transcript.annotation_target.is_some() {
                         scratchpad.transcript.exit_annotation();
@@ -2824,7 +2933,7 @@ impl Waku {
     /// stream — with its remedies beside it. `Connecting` earns no chrome;
     /// the dot's presence already reads as waiting.
     fn render_scratchpad_status(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<Div> {
-        let scratchpad = self.voice_scratchpad.as_ref()?;
+        let scratchpad = self.selected_voice_scratchpad()?;
         let (message, system_settings) = match scratchpad.status {
             ScratchpadStatus::Connecting | ScratchpadStatus::Live => return None,
             ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true),
@@ -2867,19 +2976,22 @@ impl Waku {
                         .hover(|row| row.bg(theme.overlay))
                         .child(tr!("voice_scratchpad.retry"))
                         .on_click(cx.listener(|this, _, _, cx| {
+                            let session_id = this.state.selected_session;
                             let denied = this
-                                .voice_scratchpad
-                                .as_ref()
+                                .selected_voice_scratchpad()
                                 .is_some_and(|scratchpad| {
                                     scratchpad.status == ScratchpadStatus::MicDenied
                                 });
+                            let Some(session_id) = session_id else {
+                                return;
+                            };
                             if denied {
                                 // Re-ask TCC — the prompt replays only when the
                                 // user removed access, otherwise the answer
                                 // lands immediately.
                                 match crate::platform::microphone_access() {
                                     crate::platform::CaptureAccess::Granted => {
-                                        this.begin_voice_capture(cx)
+                                        this.begin_voice_capture(session_id, cx)
                                     }
                                     crate::platform::CaptureAccess::Undetermined => {
                                         let tx = this.voice_scratchpad_tx.clone();
@@ -2887,6 +2999,7 @@ impl Waku {
                                         crate::platform::request_microphone_access(Box::new(
                                             move |granted| {
                                                 let _ = tx.try_send((
+                                                    session_id,
                                                     0,
                                                     ScratchpadEvent::MicAccess(granted),
                                                 ));
@@ -2897,7 +3010,10 @@ impl Waku {
                                     crate::platform::CaptureAccess::Denied => {}
                                 }
                             } else {
-                                this.spawn_transcription_worker(cx);
+                                // Reattach the tap too — a session paused
+                                // by a chat switch needs it back before the
+                                // respawned worker has anything to stream.
+                                this.begin_voice_capture(session_id, cx);
                             }
                         })),
                 )
@@ -2936,7 +3052,7 @@ impl Waku {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(scratchpad) = &self.voice_scratchpad else {
+        let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
         };
         let mut text = scratchpad.transcript.annotation_text.clone();
@@ -2981,7 +3097,7 @@ impl Waku {
     /// uses, armed by Cancel once the transcript is substantial.
     pub(super) fn render_scratchpad_discard(&mut self, cx: &mut Context<Self>) -> Option<Div> {
         let theme = Theme::current(cx);
-        let scratchpad = self.voice_scratchpad.as_ref()?;
+        let scratchpad = self.selected_voice_scratchpad()?;
         if !scratchpad.confirm_discard {
             return None;
         }
@@ -2998,7 +3114,7 @@ impl Waku {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
-                        if let Some(scratchpad) = &mut this.voice_scratchpad {
+                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                             scratchpad.confirm_discard = false;
                         }
                         cx.notify();
@@ -3060,7 +3176,7 @@ impl Waku {
                                         .focus_visible(|row| row.bg(theme.overlay))
                                         .child(tr!("voice_scratchpad.discard_keep"))
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(scratchpad) = &mut this.voice_scratchpad {
+                                            if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                                 scratchpad.confirm_discard = false;
                                             }
                                             cx.notify();
@@ -3074,7 +3190,7 @@ impl Waku {
                                                     )
                                                 {
                                                     if let Some(scratchpad) =
-                                                        &mut this.voice_scratchpad
+                                                        this.selected_voice_scratchpad_mut()
                                                     {
                                                         scratchpad.confirm_discard = false;
                                                     }

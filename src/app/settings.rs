@@ -7825,10 +7825,10 @@ impl Waku {
 
     fn set_voice_scratchpad_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !enabled {
-            // A live dictation session ends with its surface — the mic tap
+            // Every dictation session ends with the surface — the mic tap
             // detaches rather than recording into a panel that no longer
             // renders.
-            self.end_voice_scratchpad(cx);
+            self.end_all_voice_scratchpads(cx);
         }
         self.state.voice_scratchpad_enabled = enabled;
         self.save();
