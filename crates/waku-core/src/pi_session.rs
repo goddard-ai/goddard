@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::model::{
     AgentTurn, Message, MessageRole, ProviderKind, ProviderResumeCursor, ProviderSessionHistory,
-    ProviderSessionSummary, TurnStatus,
+    ProviderSessionSummary, TurnInterruption, TurnStatus,
 };
 
 #[derive(Debug)]
@@ -406,6 +406,7 @@ fn history_from_session(provider: ProviderKind, session: &ParsedSession) -> Prov
                 status: TurnStatus::Interrupted,
                 provider_turn_started: true,
                 provider_resume_at: None,
+                interruption: Some(TurnInterruption::Provider),
                 started_at: entry.timestamp,
                 completed_at: None,
                 checkpoint: None,

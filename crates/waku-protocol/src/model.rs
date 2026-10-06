@@ -1528,10 +1528,31 @@ pub struct AgentTurn {
     pub provider_turn_started: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_resume_at: Option<String>,
+    /// Who ended an `Interrupted` turn — the fold label reads "You
+    /// stopped" only when the person did. `None` predates the field;
+    /// those records keep the historical label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub interruption: Option<TurnInterruption>,
     pub started_at: u64,
     pub completed_at: Option<u64>,
     #[serde(default)]
     pub checkpoint: Option<Checkpoint>,
+}
+
+/// Attribution for a turn that ended `Interrupted` — the daemon's expiry,
+/// restart, and provider-death paths all settle the turn the same way a
+/// user's stop does, so the record says who acted.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnInterruption {
+    /// The user stopped the turn.
+    You,
+    /// The daemon ended the turn — an employee expiry, a supervisor
+    /// stop, or a restart that could not reattach the runtime.
+    Daemon,
+    /// The provider process exited with the turn still open.
+    Provider,
 }
 
 /// How full the provider's context window is, from the latest main-thread
@@ -2703,6 +2724,7 @@ impl AgentSession {
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
                 provider_resume_at: None,
+                interruption: None,
                 started_at,
                 completed_at: Some(completed_at),
                 checkpoint: None,
@@ -2749,6 +2771,7 @@ impl AgentSession {
             status: TurnStatus::Running,
             provider_turn_started: false,
             provider_resume_at: None,
+            interruption: None,
             started_at: now,
             completed_at: None,
             checkpoint: None,
@@ -2792,6 +2815,7 @@ impl AgentSession {
             status: TurnStatus::Running,
             provider_turn_started: false,
             provider_resume_at: None,
+            interruption: None,
             started_at: now,
             completed_at: None,
             checkpoint: None,
@@ -2886,6 +2910,7 @@ impl AgentSession {
             status: TurnStatus::Running,
             provider_turn_started: false,
             provider_resume_at: None,
+            interruption: None,
             started_at: now,
             completed_at: None,
             checkpoint: None,
@@ -3034,6 +3059,17 @@ impl AgentSession {
         let result = (turn.id, turn.turn_count);
         self.last_reply_at = Some(completed_at);
         Some(result)
+    }
+
+    /// Finish the running turn as interrupted by `who` — daemon and
+    /// provider endings record their attribution so the transcript fold
+    /// never reports somebody else's interruption as the user's stop.
+    pub fn interrupt_active_turn(&mut self, who: TurnInterruption) -> Option<(Uuid, usize)> {
+        let finished = self.finish_active_turn(TurnStatus::Interrupted)?;
+        if let Some(turn) = self.turns.last_mut() {
+            turn.interruption = Some(who);
+        }
+        Some(finished)
     }
 
     pub fn push_message(&mut self, role: MessageRole, content: impl Into<String>) -> Uuid {
@@ -3381,6 +3417,9 @@ pub enum TranscriptNoticeStatus {
     StoppedWithReason,
     /// The provider process exited mid-turn.
     Exited,
+    /// The daemon or provider interrupted the turn — `content` names the
+    /// cause. Distinct from `Stopped`, which is the user's own stop.
+    Interrupted,
     /// The agent runtime failed to start.
     StartFailed,
     /// Any other provider-reported failure.

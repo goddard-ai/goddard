@@ -5681,6 +5681,7 @@ impl Waku {
                 .filter(|turn| turn.status == TurnStatus::Running)
             {
                 turn.status = TurnStatus::Interrupted;
+                turn.interruption = Some(waku_protocol::model::TurnInterruption::Daemon);
                 turn.completed_at = Some(unix_time());
                 Some(turn.turn_count)
             } else {

@@ -4654,6 +4654,8 @@ transcript.worked_for:
   en: Worked for %{duration}
 transcript.you_stopped_after:
   en: You stopped after %{duration}
+transcript.interrupted_after:
+  en: Interrupted after %{duration}
 transcript.working_for:
   en: Working for %{duration}
 transcript.checking_changes:

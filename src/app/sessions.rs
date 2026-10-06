@@ -6411,6 +6411,16 @@ impl Waku {
                 TurnStatus::Interrupted,
                 crate::analytics::TurnOutcome::Cancelled,
             );
+            // This stop was the user's — attribute it so the fold reads
+            // "You stopped" rather than a daemon or provider interrupt.
+            if let Some(turn) = self
+                .state
+                .session_mut(session_id)
+                .and_then(|session| session.turns.last_mut())
+                .filter(|turn| turn.status == TurnStatus::Interrupted)
+            {
+                turn.interruption = Some(waku_protocol::model::TurnInterruption::You);
+            }
         }
         if has_active_turn {
             self.capture_latest_turn_checkpoint_for(session_id);

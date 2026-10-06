@@ -1812,6 +1812,7 @@ mod tests {
             status: TurnStatus::Completed,
             provider_turn_started: true,
             provider_resume_at: None,
+            interruption: None,
             started_at: 1,
             completed_at: Some(2),
             checkpoint,

@@ -130,6 +130,7 @@ mod tests {
             status: waku_protocol::model::TurnStatus::Completed,
             provider_turn_started: true,
             provider_resume_at: None,
+            interruption: None,
             started_at: unix_time(),
             completed_at: Some(unix_time()),
             checkpoint: None,

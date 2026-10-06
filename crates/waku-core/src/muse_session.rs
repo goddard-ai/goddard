@@ -221,6 +221,7 @@ fn items_to_history(items: &[Value], visible_turn_limit: usize) -> ProviderSessi
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
                 provider_resume_at: None,
+                interruption: None,
                 started_at: 0,
                 completed_at: Some(0),
                 checkpoint: None,

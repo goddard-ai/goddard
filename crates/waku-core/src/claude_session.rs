@@ -586,6 +586,7 @@ fn provider_session_history_in(
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
                 provider_resume_at: native_id.map(str::to_owned),
+                interruption: None,
                 started_at: timestamp,
                 completed_at: Some(timestamp),
                 checkpoint: None,

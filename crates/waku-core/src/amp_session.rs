@@ -140,6 +140,7 @@ fn history_from_export(export: &Value) -> anyhow::Result<ProviderSessionHistory>
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
                 provider_resume_at: None,
+                interruption: None,
                 started_at: at,
                 completed_at: Some(at),
                 checkpoint: None,

@@ -1635,7 +1635,15 @@ pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid) -> String {
         .max(1);
     let duration = format_worked_duration(seconds);
     if turn.status == TurnStatus::Interrupted {
-        tr!("transcript.you_stopped_after", duration = duration)
+        // "You stopped" is the user's own stop; a daemon or provider
+        // interruption says so rather than blaming the person. Records
+        // predating attribution keep the historical label.
+        match turn.interruption {
+            Some(waku_protocol::model::TurnInterruption::You) | None => {
+                tr!("transcript.you_stopped_after", duration = duration)
+            }
+            Some(_) => tr!("transcript.interrupted_after", duration = duration),
+        }
     } else {
         tr!("transcript.worked_for", duration = duration)
     }

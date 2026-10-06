@@ -1924,6 +1924,7 @@ fn status_notice_icon(
         TranscriptNoticeStatus::Declined => "icons/ban.svg",
         TranscriptNoticeStatus::StoppedWithReason => "icons/octagon-alert.svg",
         TranscriptNoticeStatus::Exited => "icons/unplug.svg",
+        TranscriptNoticeStatus::Interrupted => "icons/octagon-alert.svg",
         TranscriptNoticeStatus::StartFailed => "icons/circle-alert.svg",
         TranscriptNoticeStatus::Error => "icons/alert.svg",
         TranscriptNoticeStatus::Goal => "icons/goal.svg",

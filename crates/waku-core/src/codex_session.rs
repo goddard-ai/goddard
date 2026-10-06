@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::model::{
     AgentTurn, Message, MessageRole, ProviderResumeCursor, ProviderSessionHistory,
-    ProviderSessionSummary, TurnStatus,
+    ProviderSessionSummary, TurnInterruption, TurnStatus,
 };
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
@@ -317,6 +317,8 @@ fn parse_session_history(response: &Value) -> ProviderSessionHistory {
             status,
             provider_turn_started: true,
             provider_resume_at: None,
+            interruption: (status == TurnStatus::Interrupted)
+                .then_some(TurnInterruption::Provider),
             started_at,
             completed_at,
             checkpoint: None,

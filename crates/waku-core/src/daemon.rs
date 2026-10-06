@@ -7731,7 +7731,7 @@ impl WakuBackend {
                 self.task_store.hydrate(&mut state.sessions[index])?;
                 let session = &mut state.sessions[index];
                 if session.active_turn_id().is_some() {
-                    session.finish_active_turn(TurnStatus::Interrupted);
+                    session.interrupt_active_turn(crate::model::TurnInterruption::Daemon);
                 }
                 failed = session.status == SessionStatus::Failed;
                 if !failed {
@@ -7785,6 +7785,37 @@ impl WakuBackend {
             }
             (cause, ..) => cause,
         };
+        // The settle that ended the admission reads honestly in the
+        // transcript — a restart or provider exit is nobody's "you
+        // stopped". A recovered `finishing` rerun skips a row the first
+        // pass already wrote.
+        if let Some(text) = cause.notice() {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                && self.task_store.hydrate(session).is_ok()
+                && !session.messages.iter().any(|message| {
+                    matches!(
+                        &message.notice,
+                        Some(crate::model::TranscriptNotice::Status {
+                            kind: crate::model::TranscriptNoticeStatus::Interrupted,
+                        })
+                    )
+                })
+            {
+                session.push_notice_message(
+                    crate::model::MessageRole::Assistant,
+                    text,
+                    crate::model::TranscriptNotice::Status {
+                        kind: crate::model::TranscriptNoticeStatus::Interrupted,
+                    },
+                );
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+            }
+        }
         let expiry = waku_protocol::boss::EmployeeExpiry {
             cause,
             resumable: cause.resumable(),
@@ -11309,7 +11340,7 @@ fn record_boss_event(
         }
         DriverEvent::ProcessExited => {
             if session.active_turn_id().is_some() {
-                session.finish_active_turn(TurnStatus::Interrupted);
+                session.interrupt_active_turn(crate::model::TurnInterruption::Provider);
             }
             if session.status.is_busy() {
                 session.status = SessionStatus::Failed;
@@ -19066,6 +19097,64 @@ mod tests {
             employee.expiry.as_ref().unwrap().cause,
             ExpiryCause::Finished
         );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An expiry that lands mid-turn does not read as a user's stop: the
+    /// turn record attributes the interruption to the daemon and the
+    /// transcript carries the "Turn interrupted — …" row naming the cause.
+    #[test]
+    fn an_interrupted_expiry_attributes_the_turn_and_names_the_cause() {
+        use waku_protocol::boss::EmployeeSettle;
+        use waku_protocol::model::{
+            TranscriptNotice, TranscriptNoticeStatus, TurnInterruption,
+        };
+        let root = std::env::temp_dir().join(format!("boss-interrupt-{}", Uuid::new_v4()));
+        let (backend, _supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        // Reopen a turn so the restart settle lands mid-work.
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.begin_turn("still running when the daemon restarted");
+            backend.task_store.save(&mut state).unwrap();
+        }
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+            .unwrap();
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        let turn = session.turns.last().unwrap();
+        assert_eq!(turn.status, TurnStatus::Interrupted);
+        assert_eq!(turn.interruption, Some(TurnInterruption::Daemon));
+        let notice = session
+            .messages
+            .iter()
+            .find(|message| {
+                matches!(
+                    &message.notice,
+                    Some(TranscriptNotice::Status {
+                        kind: TranscriptNoticeStatus::Interrupted,
+                    })
+                )
+            })
+            .expect("the interruption wrote a notice row");
+        assert!(
+            notice.content.contains("daemon restarted"),
+            "{}",
+            notice.content
+        );
+        drop(state);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }

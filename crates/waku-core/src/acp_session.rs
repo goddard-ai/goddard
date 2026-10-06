@@ -356,6 +356,7 @@ fn history_from_updates(
                     status: TurnStatus::Completed,
                     provider_turn_started: true,
                     provider_resume_at: None,
+                    interruption: None,
                     started_at: at.unwrap_or(fallback),
                     completed_at: None,
                     checkpoint: None,
