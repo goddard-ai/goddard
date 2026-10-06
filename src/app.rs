@@ -2540,8 +2540,10 @@ pub struct Waku {
     /// the same task twice replays nothing.
     briefed_messages: HashSet<Uuid>,
     /// Finished clips keyed by the reply they voice, filled by the
-    /// settle-time prefetch so landing on a task plays instantly.
-    briefing_clips: HashMap<Uuid, Vec<u8>>,
+    /// settle-time prefetch so landing on a task plays instantly. Each
+    /// clip records the voice that rendered it — a settings change marks
+    /// it stale for a lazy revoice.
+    briefing_clips: HashMap<Uuid, voice_briefing::BriefingClip>,
     /// Insertion order for `briefing_clips` eviction — the cache is a small
     /// FIFO, not a library.
     briefing_clip_order: VecDeque<Uuid>,

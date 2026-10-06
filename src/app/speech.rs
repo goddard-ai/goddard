@@ -22,7 +22,7 @@ use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::inference::InferenceProvider;
 
 use super::piper::synthesize_piper;
-use super::voice_briefing::{speech_parameters, synthesize};
+use super::voice_briefing::{inference_credential, speech_parameters, synthesize};
 use super::*;
 
 /// The eval-decisions feature tag for clip-reuse judgments.
@@ -677,7 +677,8 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
-        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
+        let piper_voice =
+            super::piper::piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
         let client = daemon.client();
         let executor = cx.background_executor().clone();
@@ -687,26 +688,7 @@ impl Waku {
                 let engine = if tts_model.is_piper() {
                     SpeechEngine::Piper { voice: piper_voice }
                 } else {
-                    let credential = client
-                        .request(
-                            Uuid::nil(),
-                            Uuid::nil(),
-                            waku_client::Command::GetInferenceCredential { provider },
-                        )
-                        .ok()
-                        .and_then(|payload| match payload {
-                            waku_client::ResponsePayload::InferenceCredential { credential } => {
-                                credential
-                            }
-                            _ => None,
-                        })
-                        .filter(|key| !key.trim().is_empty())
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "{} has no configured credential",
-                                provider.display_name()
-                            )
-                        })?;
+                    let credential = inference_credential(&client, provider)?;
                     SpeechEngine::Gateway {
                         provider,
                         credential,

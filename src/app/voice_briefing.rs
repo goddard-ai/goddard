@@ -24,7 +24,7 @@ use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::inference::InferenceProvider;
 
-use super::piper::synthesize_piper;
+use super::piper::{piper_voice_or_default, synthesize_piper};
 use super::status_markers::tail_chars;
 use super::*;
 use crate::ui::ActivationExt;
@@ -59,6 +59,16 @@ const BRIEFED_MESSAGES_CAP: usize = 256;
 const GATE_FEATURE: &str = "voice-briefing-gate";
 const GATE_QUESTION: &str = "brief";
 const GATE_THRESHOLD: f64 = 0.5;
+
+/// A rendered briefing clip: the transcript the summary model wrote and
+/// the audio `voice` gave it. `voice` keys the clip to the engine and
+/// voice that rendered it, so a settings change marks the clip stale
+/// without touching its words.
+pub(super) struct BriefingClip {
+    audio: Vec<u8>,
+    transcript: String,
+    voice: String,
+}
 
 pub(super) fn default_voice_briefing_summary_instructions() -> String {
     format!(
@@ -108,7 +118,8 @@ impl Waku {
     }
 
     /// The activation-side half: play the clip if it is ready, ride a
-    /// prefetch already in flight, or build it on arrival.
+    /// prefetch already in flight, revoice a stale clip in place, or build
+    /// it on arrival.
     pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if !self.state.voice_briefing_autoplay {
             return;
@@ -117,26 +128,57 @@ impl Waku {
         else {
             return;
         };
-        if self.briefed_messages.contains(&message_id) {
-            return;
-        }
-        if self.briefing_clips.contains_key(&message_id) {
-            if !self.play_voice_briefing_clip(message_id, cx) {
-                self.show_toast(tr!("errors.voice_briefing_playback"));
-            }
-            return;
-        }
         if let Some(play) = self
             .briefing_pending
             .get_mut(&message_id)
             .or(self.briefing_gate_pending.get_mut(&message_id))
         {
-            // A prefetch for this reply is already running — flag it to
+            // A pipeline for this reply is already running — flag it to
             // play the moment it lands rather than starting a second.
             *play = true;
             return;
         }
+        if let Some(clip) = self.briefing_clips.get(&message_id) {
+            if clip.voice != self.voice_briefing_voice_key() {
+                // The voice changed since the latest turn's clip rendered
+                // — revoice its cached transcript on arrival. Earlier
+                // turns keep their rendered voice: they're history.
+                let transcript = clip.transcript.clone();
+                self.revoice_voice_briefing(message_id, transcript, cx);
+                return;
+            }
+            if self.briefed_messages.contains(&message_id) {
+                return;
+            }
+            if !self.play_voice_briefing_clip(message_id, cx) {
+                self.show_toast(tr!("errors.voice_briefing_playback"));
+            }
+            return;
+        }
+        if self.briefed_messages.contains(&message_id) {
+            return;
+        }
         self.queue_voice_briefing(session_id, message_id, turn_id, response, true, cx);
+    }
+
+    /// What would voice a briefing rendered now: `piper:<voice>` for the
+    /// local engine, `provider:model` for a gateway voice. A cached clip
+    /// whose key differs was rendered under an older setting.
+    fn voice_briefing_voice_key(&self) -> String {
+        let provider = self.state.voice_briefing_provider;
+        let tts_model = self.state.voice_briefing_tts_model;
+        if tts_model.is_piper() {
+            return format!(
+                "piper:{}",
+                piper_voice_or_default(&self.state.voice_briefing_piper_voice)
+            );
+        }
+        let model_id = if tts_model.is_custom() {
+            self.state.voice_briefing_tts_custom_model.trim()
+        } else {
+            tts_model.model_id_for(provider).unwrap_or_default()
+        };
+        format!("{}:{model_id}", provider.id())
     }
 
     /// Shared gate: experiment on, key and model set, the session settled
@@ -525,8 +567,8 @@ impl Waku {
     }
 
     fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {
-        let Some(duration) = self.briefing_clips.get(&message_id).and_then(|bytes| {
-            crate::platform::play_briefing_audio(bytes, self.state.completion_sound_volume)
+        let Some(duration) = self.briefing_clips.get(&message_id).and_then(|clip| {
+            crate::platform::play_briefing_audio(&clip.audio, self.state.completion_sound_volume)
         }) else {
             return false;
         };
@@ -618,6 +660,7 @@ impl Waku {
         }
         self.briefing_pending.insert(message_id, play);
         cx.notify();
+        let voice_key = self.voice_briefing_voice_key();
         let provider = self.state.voice_briefing_provider;
         let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
         let instructions = effective_voice_briefing_summary_instructions(
@@ -634,32 +677,15 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
-        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
+        let piper_voice =
+            piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
         let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
         let work = executor.spawn({
             let executor = executor.clone();
             async move {
-                // The credential lives in the daemon's secret store — the
-                // app's settings mirror only carries the configured flag.
-                let key = daemon
-                    .request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::GetInferenceCredential { provider },
-                    )
-                    .ok()
-                    .and_then(|payload| match payload {
-                        waku_client::ResponsePayload::InferenceCredential { credential } => {
-                            credential
-                        }
-                        _ => None,
-                    })
-                    .filter(|key| !key.trim().is_empty())
-                    .ok_or_else(|| {
-                        anyhow!("{} has no configured credential", provider.display_name())
-                    })?;
+                let key = inference_credential(&daemon, provider)?;
                 let transcript = summarize(
                     &http,
                     &executor,
@@ -673,57 +699,163 @@ impl Waku {
                 .context("summary generation")?;
                 // The gateway still wrote the transcript; only the voicing
                 // switches to the local engine when Piper is selected.
-                if tts_model.is_piper() {
+                let audio = if tts_model.is_piper() {
                     synthesize_piper(&http, &executor, &piper_voice, &transcript)
                         .await
-                        .context("speech generation")
+                        .context("speech generation")?
                 } else {
                     synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
                         .await
-                        .context("speech generation")
-                }
+                        .context("speech generation")?
+                };
+                anyhow::Ok((transcript, audio))
             }
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                // A cancel that landed mid-pipeline already dropped the
-                // entry — discard the clip rather than caching it.
-                let Some(play) = this.briefing_pending.remove(&message_id) else {
-                    return;
-                };
-                match result {
-                    Ok(bytes) => {
-                        this.briefing_clips.insert(message_id, bytes);
-                        this.briefing_clip_order.push_back(message_id);
-                        while this.briefing_clip_order.len() > BRIEFING_CLIPS_CAP {
-                            if let Some(oldest) = this.briefing_clip_order.pop_front() {
-                                this.briefing_clips.remove(&oldest);
-                            }
-                        }
-                        if play && !this.briefed_messages.contains(&message_id) {
-                            // AVAudioPlayer must start on the UI thread, so
-                            // the bytes ride the spawn back rather than
-                            // playing from the executor.
-                            if !this.play_voice_briefing_clip(message_id, cx) {
-                                this.show_toast(tr!("errors.voice_briefing_playback"));
-                            }
-                        }
-                    }
-                    // Backend error bodies can echo the prompt — the toast
-                    // stays generic and the detail only hits stderr.
-                    Err(error) => {
-                        eprintln!("Goddard: voice briefing failed: {error:#}");
-                        if play {
-                            this.show_toast(tr!("errors.voice_briefing"));
-                        }
-                    }
-                }
-                cx.notify();
+                this.finish_voice_briefing(message_id, voice_key, result, cx);
             });
         })
         .detach();
     }
+
+    /// Re-voice a clip's cached transcript after the voice setting changed
+    /// — same words, new voice. Only the speech half reruns: the summary
+    /// stands, and Piper needs no credential for it at all.
+    fn revoice_voice_briefing(
+        &mut self,
+        message_id: Uuid,
+        transcript: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
+            return;
+        }
+        // The revoiced clip is a fresh utterance — let it sound on landing
+        // even though an earlier voice already briefed this reply.
+        self.briefed_messages.remove(&message_id);
+        self.briefing_pending.insert(message_id, true);
+        cx.notify();
+        let voice_key = self.voice_briefing_voice_key();
+        let provider = self.state.voice_briefing_provider;
+        let tts_model = self.state.voice_briefing_tts_model;
+        let tts_model_id = match tts_model {
+            VoiceBriefingTtsModel::Custom => {
+                self.state.voice_briefing_tts_custom_model.trim().to_owned()
+            }
+            _ => tts_model
+                .model_id_for(provider)
+                .unwrap_or_default()
+                .to_owned(),
+        };
+        let piper_voice =
+            piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
+        let http = cx.http_client();
+        let daemon = self.daemon.client();
+        let executor = cx.background_executor().clone();
+        let work = executor.spawn({
+            let executor = executor.clone();
+            async move {
+                let audio = if tts_model.is_piper() {
+                    synthesize_piper(&http, &executor, &piper_voice, &transcript)
+                        .await
+                        .context("speech generation")?
+                } else {
+                    let key = inference_credential(&daemon, provider)?;
+                    synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
+                        .await
+                        .context("speech generation")?
+                };
+                anyhow::Ok((transcript, audio))
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_voice_briefing(message_id, voice_key, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Shared landing for the generate and revoice pipelines: cache the
+    /// clip under the voice that rendered it, evicting the oldest past the
+    /// cap, and sound it when the caller armed playback.
+    fn finish_voice_briefing(
+        &mut self,
+        message_id: Uuid,
+        voice_key: String,
+        result: anyhow::Result<(String, Vec<u8>)>,
+        cx: &mut Context<Self>,
+    ) {
+        // A cancel that landed mid-pipeline already dropped the entry —
+        // discard the clip rather than caching it.
+        let Some(play) = self.briefing_pending.remove(&message_id) else {
+            return;
+        };
+        match result {
+            Ok((transcript, bytes)) => {
+                // A revoice replaces the stale entry in place — keep its
+                // queue slot so a voice swap can't shuffle recency.
+                if !self.briefing_clips.contains_key(&message_id) {
+                    self.briefing_clip_order.push_back(message_id);
+                }
+                self.briefing_clips.insert(
+                    message_id,
+                    BriefingClip {
+                        audio: bytes,
+                        transcript,
+                        voice: voice_key,
+                    },
+                );
+                while self.briefing_clip_order.len() > BRIEFING_CLIPS_CAP {
+                    if let Some(oldest) = self.briefing_clip_order.pop_front() {
+                        self.briefing_clips.remove(&oldest);
+                    }
+                }
+                if play && !self.briefed_messages.contains(&message_id) {
+                    // AVAudioPlayer must start on the UI thread, so the
+                    // bytes ride the spawn back rather than playing from
+                    // the executor.
+                    if !self.play_voice_briefing_clip(message_id, cx) {
+                        self.show_toast(tr!("errors.voice_briefing_playback"));
+                    }
+                }
+            }
+            // Backend error bodies can echo the prompt — the toast stays
+            // generic and the detail only hits stderr.
+            Err(error) => {
+                eprintln!("Goddard: voice briefing failed: {error:#}");
+                if play {
+                    self.show_toast(tr!("errors.voice_briefing"));
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
+/// The provider's stored credential. It lives in the daemon's secret
+/// store — the app's settings mirror only carries the configured flag.
+/// Blocking IPC; call from a background task.
+pub(super) fn inference_credential(
+    client: &waku_client::DaemonClient,
+    provider: InferenceProvider,
+) -> anyhow::Result<String> {
+    client
+        .request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::GetInferenceCredential { provider },
+        )
+        .ok()
+        .and_then(|payload| match payload {
+            waku_client::ResponsePayload::InferenceCredential { credential } => credential,
+            _ => None,
+        })
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| anyhow!("{} has no configured credential", provider.display_name()))
 }
 
 /// Ask the provider's chat model for the spoken transcript: what the reply

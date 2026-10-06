@@ -7686,7 +7686,11 @@ impl Waku {
             },
         );
 
-        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
+        // Show the voice that would actually render — a stale or
+        // out-of-catalog setting resolves to the default rather than
+        // displaying a voice the engine will never use.
+        let piper_voice =
+            super::piper::piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let piper_handle = self.menu_handle("voice-briefing-piper-voice".to_owned(), cx);
         let piper_weak = cx.entity().downgrade();
         let piper_selector = dropdown_menu(

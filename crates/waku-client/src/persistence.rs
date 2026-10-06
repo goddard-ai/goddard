@@ -482,9 +482,10 @@ pub fn default_voice_briefing_summary_model() -> String {
 }
 
 /// The default Piper voice — an id from the rhasspy/piper-voices dataset,
-/// downloaded on demand. Lessac is Piper's reference voice.
+/// downloaded on demand. Lessac is Piper's reference voice; the catalog
+/// only offers US English voices at the high quality tier.
 pub fn default_voice_briefing_piper_voice() -> String {
-    "en_US-lessac-medium".to_owned()
+    "en_US-lessac-high".to_owned()
 }
 
 /// Briefings default to the Vercel AI Gateway — the provider the feature

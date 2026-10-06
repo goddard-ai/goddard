@@ -26,51 +26,56 @@ pub(super) struct PiperVoice {
     pub label: &'static str,
 }
 
-/// A short curated set of the dataset's English voices. A hand-edited
-/// `voice_briefing_piper_voice` still resolves — the model URL derives from
-/// any well-formed voice id.
+/// The pickable voices — US English at the dataset's high quality tier.
+/// `piper_voice_or_default` enforces the same boundary for a hand-edited
+/// or stale `voice_briefing_piper_voice`: the model URL derives from any
+/// qualifying id, and anything else falls back to the default.
 pub(super) const PIPER_VOICES: &[PiperVoice] = &[
     PiperVoice {
-        id: "en_US-lessac-medium",
+        id: "en_US-lessac-high",
         label: "Lessac (US English)",
     },
     PiperVoice {
-        id: "en_US-amy-medium",
-        label: "Amy (US English)",
+        id: "en_US-libritts-high",
+        label: "LibriTTS (US English)",
     },
     PiperVoice {
-        id: "en_US-arctic-medium",
-        label: "Arctic (US English)",
+        id: "en_US-ljspeech-high",
+        label: "LJSpeech (US English)",
     },
     PiperVoice {
-        id: "en_US-hfc_female-medium",
-        label: "HFC Female (US English)",
-    },
-    PiperVoice {
-        id: "en_US-hfc_male-medium",
-        label: "HFC Male (US English)",
-    },
-    PiperVoice {
-        id: "en_US-joe-medium",
-        label: "Joe (US English)",
-    },
-    PiperVoice {
-        id: "en_US-libritts_r-medium",
-        label: "LibriTTS R (US English)",
-    },
-    PiperVoice {
-        id: "en_GB-alan-medium",
-        label: "Alan (British English)",
-    },
-    PiperVoice {
-        id: "en_GB-semaine-medium",
-        label: "Semaine (British English)",
-    },
-    PiperVoice {
-        id: "en_GB-northern_english_male-medium",
-        label: "Northern English Male (British English)",
+        id: "en_US-ryan-high",
+        label: "Ryan (US English)",
     },
 ];
+
+/// The catalog default — Lessac is Piper's reference voice.
+const DEFAULT_PIPER_VOICE: &str = "en_US-lessac-high";
+
+/// Whether a voice id stays inside the allowed set: `en_US-<name>-high`.
+/// Broader than the picker's rows so a hand-edited setting that names
+/// another qualifying voice still resolves.
+fn piper_voice_allowed(voice: &str) -> bool {
+    let Some(("en_US", rest)) = voice.split_once('-') else {
+        return false;
+    };
+    let Some((name, "high")) = rest.rsplit_once('-') else {
+        return false;
+    };
+    !name.is_empty()
+}
+
+/// The voice to synthesize with: the configured id when it qualifies, the
+/// catalog default when it doesn't — a stale or out-of-catalog setting
+/// never reaches the engine.
+pub(super) fn piper_voice_or_default(voice: &str) -> &str {
+    let voice = voice.trim();
+    if piper_voice_allowed(voice) {
+        voice
+    } else {
+        DEFAULT_PIPER_VOICE
+    }
+}
 
 /// What the voice picker shows for the stored id — the catalog label, or
 /// the raw id when it names a voice the catalog doesn't list.
@@ -221,10 +226,7 @@ pub(super) async fn synthesize_piper(
     voice: &str,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let voice = voice.trim();
-    if voice.is_empty() {
-        bail!("no Piper voice selected");
-    }
+    let voice = piper_voice_or_default(voice);
     let (model_path, config_path) = ensure_voice(http, executor, voice).await?;
     ensure_espeak_data();
     let engine = PIPER_ENGINE.get_or_init(|| Mutex::new(None));
@@ -288,6 +290,28 @@ mod tests {
             "en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium"
         );
         assert!(voice_dataset_path("lessac").is_err());
+    }
+
+    #[test]
+    fn piper_voice_or_default_enforces_the_catalog_boundary() {
+        assert_eq!(
+            piper_voice_or_default("en_US-ryan-high"),
+            "en_US-ryan-high"
+        );
+        assert_eq!(
+            piper_voice_or_default(" en_US-ljspeech-high "),
+            "en_US-ljspeech-high"
+        );
+        // Other locales, lower tiers, and malformed ids fall back.
+        for stale in [
+            "en_US-lessac-medium",
+            "en_GB-alan-high",
+            "en_US--high",
+            "lessac",
+            "",
+        ] {
+            assert_eq!(piper_voice_or_default(stale), DEFAULT_PIPER_VOICE);
+        }
     }
 
     #[test]
