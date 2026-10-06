@@ -26,7 +26,7 @@ atoms?: Array<MessageAtom>,
  */
 hidden?: boolean,
 /**
- * The employee report this parked prompt delivers — it must survive a
+ * The report this parked prompt delivers — it must survive a
  * restart so the resumed delivery still records the turn's trigger.
  */
 report_trigger?: ReportTrigger | null,

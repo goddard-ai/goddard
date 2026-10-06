@@ -3,10 +3,11 @@ import type { ReportTriggerBoundary } from "./ReportTriggerBoundary";
 import type { ReportTriggerKind } from "./ReportTriggerKind";
 
 /**
- * The event-time record of the employee report behind a supervisor turn —
- * the transcript's "what woke this turn" marker. Everything renderable is
- * a snapshot taken at delivery: a later rename, resurrection, or status
- * change must not rewrite a marker already shown.
+ * The event-time record of the report behind a supervisor turn — an
+ * employee's outcome or a finalized plan's handoff — the transcript's
+ * "what woke this turn" marker. Everything renderable is a snapshot taken
+ * at delivery: a later rename, resurrection, or status change must not
+ * rewrite a marker already shown.
  */
 export type ReportTrigger = {
 /**
@@ -15,6 +16,7 @@ export type ReportTrigger = {
  */
 eventId: string,
 /**
- * The reporting employee's session — the marker's navigation target.
+ * The reporting session — an employee's, or the planning session a
+ * finalized plan hands off from — the marker's navigation target.
  */
 employee: string, employeeName: string, jobTitle: string, kind: ReportTriggerKind, boundary: ReportTriggerBoundary, };

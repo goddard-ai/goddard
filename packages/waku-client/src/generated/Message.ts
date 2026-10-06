@@ -41,8 +41,9 @@ context_mark?: ContextMark | null,
  */
 hidden?: boolean,
 /**
- * The employee report this hidden prompt delivered — the transcript's
- * turn-trigger record. `None` for every other message: human prompts,
+ * The report this hidden prompt delivered — an employee's outcome or
+ * a finalized plan's handoff; the transcript's turn-trigger record.
+ * `None` for every other message: human prompts,
  * visible task-to-task sends, nudges, and context injections carry no
  * marker.
  */

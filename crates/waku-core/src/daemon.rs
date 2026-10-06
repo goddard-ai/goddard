@@ -5518,10 +5518,14 @@ impl WakuBackend {
                 "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,
             );
-            if let Err(error) = self.queue_agent_prompt_hidden(
+            let trigger = crate::model::ReportTrigger::plan_finalized(&finalized);
+            if let Err(error) = self.queue_agent_prompt_with_id(
                 boss_session,
                 handoff,
                 Some(plan.session_id),
+                true,
+                None,
+                Some(trigger),
                 events,
             ) {
                 eprintln!("could not hand the finalized plan to the boss chat: {error:#}");
@@ -20283,6 +20287,17 @@ mod tests {
                 .expect("the boss chat holds the parked handoff");
             assert!(handoff.content.contains("finalized its design"));
             assert!(handoff.content.contains("plans/auth.md"));
+            let trigger = handoff
+                .report_trigger
+                .as_ref()
+                .expect("the handoff records its turn trigger");
+            assert_eq!(
+                trigger.kind,
+                crate::model::ReportTriggerKind::PlanFinalized
+            );
+            assert_eq!(trigger.employee, plan.session_id);
+            assert_eq!(trigger.employee_name, "Auth");
+            assert_eq!(trigger.job_title, "plans/auth.md");
         }
         // The document is frozen and re-finalizing is refused.
         assert!(

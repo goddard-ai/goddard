@@ -31,7 +31,8 @@ use super::{
     TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
     active_navigation_turn_index, activity_group_is_live, activity_header_title,
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_group,
+    assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_entry_label,
+    boss_trigger_entry_tooltip, boss_trigger_group,
     compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
     fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
     format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
@@ -6982,6 +6983,39 @@ fn adjacent_steer_reports_share_one_marker_until_output_separates() {
     assert_eq!(
         boss_trigger_burst_label(&triggers),
         "2 employee updates · 1 blocker"
+    );
+}
+
+/// A finalized plan's handoff marker names the plan — its idea in the
+/// label, the frozen document in the tooltip.
+#[test]
+fn a_plan_trigger_labels_the_finalized_design() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut trigger = report_trigger(
+        ReportTriggerKind::PlanFinalized,
+        ReportTriggerBoundary::Opening,
+    );
+    trigger.employee_name = "Auth migration".into();
+    trigger.job_title = "plans/auth.md".into();
+
+    assert_eq!(
+        boss_trigger_entry_label(&trigger, false),
+        "Auth migration finalized its design"
+    );
+    assert_eq!(
+        boss_trigger_entry_tooltip(&trigger, false),
+        "Auth migration finalized its design · plans/auth.md"
+    );
+
+    let second = crate::model::ReportTrigger {
+        employee: Uuid::new_v4(),
+        employee_name: "Billing".into(),
+        job_title: "plans/billing.md".into(),
+        ..trigger.clone()
+    };
+    assert_eq!(
+        boss_trigger_burst_label(&[trigger, second]),
+        "2 plans finalized"
     );
 }
 

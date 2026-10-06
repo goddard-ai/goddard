@@ -1922,6 +1922,7 @@ pub(super) fn boss_trigger_status(
         ReportTriggerKind::Blocker
         | ReportTriggerKind::FinishedWithBlocker
         | ReportTriggerKind::Interrupted => ("icons/circle-alert.svg", theme.warning),
+        ReportTriggerKind::PlanFinalized => ("icons/file-text.svg", theme.text_tertiary),
     }
 }
 
@@ -1961,7 +1962,10 @@ pub(super) fn boss_trigger_entry_label(
 ) -> String {
     use crate::model::ReportTriggerKind;
     let name = if trigger.employee_name.is_empty() {
-        tr!("boss.trigger_employee")
+        match trigger.kind {
+            ReportTriggerKind::PlanFinalized => tr!("boss.trigger_plan"),
+            _ => tr!("boss.trigger_employee"),
+        }
     } else {
         trigger.employee_name.clone()
     };
@@ -1974,6 +1978,9 @@ pub(super) fn boss_trigger_entry_label(
         }
         ReportTriggerKind::Interrupted => {
             tr!("boss.trigger_interrupted", name = name)
+        }
+        ReportTriggerKind::PlanFinalized => {
+            tr!("boss.trigger_plan_finalized", name = name)
         }
     };
     if during_turn {
@@ -2015,6 +2022,9 @@ pub(super) fn boss_trigger_burst_label(group: &[crate::model::ReportTrigger]) ->
     }
     if distinct && all(ReportTriggerKind::Failed) {
         return tr!("boss.trigger_employees_failed", count = count);
+    }
+    if distinct && all(ReportTriggerKind::PlanFinalized) {
+        return tr!("boss.trigger_plans_finalized", count = count);
     }
     let mut label = tr!("boss.trigger_updates", count = count);
     let failed = group

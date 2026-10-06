@@ -1403,7 +1403,7 @@ pub struct QueuedMessage {
     /// the internal "continue" nudge parked behind a busy session.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
-    /// The employee report this parked prompt delivers — it must survive a
+    /// The report this parked prompt delivers — it must survive a
     /// restart so the resumed delivery still records the turn's trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_trigger: Option<ReportTrigger>,
@@ -3745,7 +3745,8 @@ pub struct ContextMark {
     pub focus: Option<String>,
 }
 
-/// The outcome an employee's report carried to its supervisor.
+/// The outcome the report behind a supervisor turn carried — an
+/// employee's result or a finalized plan's handoff.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ReportTriggerKind {
@@ -3762,6 +3763,9 @@ pub enum ReportTriggerKind {
     /// daemon restarted, or the settle left prompts parked or an ask
     /// unanswered. The record's `expiry` names the cause.
     Interrupted,
+    /// A planning session's approved design landed on the boss chat — the
+    /// marker stands in for the implementation handoff prompt.
+    PlanFinalized,
 }
 
 /// Where the report landed relative to the turn it reached.
@@ -3775,17 +3779,19 @@ pub enum ReportTriggerBoundary {
     Steer,
 }
 
-/// The event-time record of the employee report behind a supervisor turn —
-/// the transcript's "what woke this turn" marker. Everything renderable is
-/// a snapshot taken at delivery: a later rename, resurrection, or status
-/// change must not rewrite a marker already shown.
+/// The event-time record of the report behind a supervisor turn — an
+/// employee's outcome or a finalized plan's handoff — the transcript's
+/// "what woke this turn" marker. Everything renderable is a snapshot taken
+/// at delivery: a later rename, resurrection, or status change must not
+/// rewrite a marker already shown.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportTrigger {
     /// The delivery's dedupe identity — the parked queued entry's id for a
     /// queued report, a fresh id for a steer that never parked.
     pub event_id: Uuid,
-    /// The reporting employee's session — the marker's navigation target.
+    /// The reporting session — an employee's, or the planning session a
+    /// finalized plan hands off from — the marker's navigation target.
     pub employee: Uuid,
     pub employee_name: String,
     pub job_title: String,
@@ -3803,6 +3809,19 @@ impl ReportTrigger {
             employee_name: employee.identity.name.clone(),
             job_title: employee.job_title.clone(),
             kind,
+            boundary: ReportTriggerBoundary::Opening,
+        }
+    }
+
+    /// A snapshot for a finalized plan's handoff: the planning session is
+    /// the navigation target, its idea and plan file the label.
+    pub fn plan_finalized(plan: &crate::boss::BossPlan) -> Self {
+        Self {
+            event_id: Uuid::new_v4(),
+            employee: plan.session_id,
+            employee_name: plan.idea.clone(),
+            job_title: plan.plan_file.clone(),
+            kind: ReportTriggerKind::PlanFinalized,
             boundary: ReportTriggerBoundary::Opening,
         }
     }
@@ -3844,8 +3863,9 @@ pub struct Message {
     /// record so every projection carries the same ids.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
-    /// The employee report this hidden prompt delivered — the transcript's
-    /// turn-trigger record. `None` for every other message: human prompts,
+    /// The report this hidden prompt delivered — an employee's outcome or
+    /// a finalized plan's handoff; the transcript's turn-trigger record.
+    /// `None` for every other message: human prompts,
     /// visible task-to-task sends, nudges, and context injections carry no
     /// marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]

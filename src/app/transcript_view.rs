@@ -3523,7 +3523,12 @@ impl Waku {
         let tooltip = if openable {
             boss_trigger_entry_tooltip(trigger, during_turn)
         } else {
-            tr!("boss.trigger_unavailable")
+            match trigger.kind {
+                crate::model::ReportTriggerKind::PlanFinalized => {
+                    tr!("boss.trigger_plan_unavailable")
+                }
+                _ => tr!("boss.trigger_unavailable"),
+            }
         };
         entry = entry.tooltip(Tooltip::text(tooltip));
         if openable {

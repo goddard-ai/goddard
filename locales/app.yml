@@ -6230,6 +6230,14 @@ boss.trigger_updates_blocker_one:
   en: "%{count} blocker"
 boss.trigger_updates_blocker_many:
   en: "%{count} blockers"
+boss.trigger_plan:
+  en: Plan
+boss.trigger_plan_finalized:
+  en: "%{name} finalized its design"
+boss.trigger_plans_finalized:
+  en: "%{count} plans finalized"
+boss.trigger_plan_unavailable:
+  en: Planning session unavailable
 boss.trigger_unavailable:
   en: Employee transcript unavailable
 boss.command_placeholder:
