@@ -417,6 +417,7 @@ impl Waku {
         // Reveal the terminal's new home — under a folded group the row
         // hides and the vanished tab reads as a kill after all.
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.reveal_sidebar_terminal(terminal_id);
         self.show_toast(tr!("terminal.moved_to_group"));
         self.save();
         cx.notify();
@@ -781,7 +782,6 @@ impl Waku {
                 terminal.set_custom_title(Some(title), cx)
             });
         }
-        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         self.save();
         cx.notify();
     }
@@ -861,6 +861,11 @@ impl Waku {
         self.spawn_terminal_entity(terminal_id, working_directory, cx);
         self.analytics
             .track(crate::analytics::Event::TerminalOpened { kind });
+        // Every terminal lists a row in the Terminals group — unfold it
+        // and scroll the fresh row on screen so a creation lands nowhere
+        // the user cannot see.
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.reveal_sidebar_terminal(terminal_id);
         self.save();
         cx.notify();
         Some(terminal_id)
@@ -1226,8 +1231,6 @@ impl Waku {
             cx.notify();
             return;
         }
-        // Expand the group so the new row — and the selection — is visible.
-        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         // The terminal on screen seeds the spawn directory: the full-width
         // selection in terminal mode, or the visible right panel's active
         // tab while its session is selected.

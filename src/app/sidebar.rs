@@ -3364,6 +3364,19 @@ impl Waku {
         }
     }
 
+    /// Keep a terminal row visible without disturbing the sidebar when it
+    /// is already fully inside the viewport.
+    pub(super) fn reveal_sidebar_terminal(&self, terminal_id: Uuid) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        self.sync_sidebar_rows(&rows);
+        if let Some(index) = rows
+            .iter()
+            .position(|row| *row == SidebarRow::Terminal(terminal_id))
+        {
+            reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
+        }
+    }
+
     /// A dormant task keeps its group on selection — but the selected row
     /// has to exist to highlight. Under Date grouping dormant sessions sit
     /// in the Dormant section, collapsed by default, so it expands; under
@@ -4911,10 +4924,9 @@ impl Waku {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
             // The Terminals group's compose button opens a global terminal
-            // in the home directory, expanding the group so the new row —
-            // and the selection — is visible.
+            // in the home directory; creation unfolds the group and
+            // scrolls the new row — and the selection — on screen.
             SidebarGroup::Terminals => {
-                self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
                 if let Some(home) = dirs::home_dir()
                     && let Some(terminal_id) = self.create_terminal(home, None, None, cx)
                 {
