@@ -228,6 +228,11 @@ fn connect_socket(
         stream,
         deadline: Some(deadline),
     };
+    // `client_tls_with_config` builds `ClientConfig::builder()`, which
+    // panics when no process crypto provider is installed and the crate's
+    // features can't pick one — this graph enables both aws-lc-rs and ring.
+    // A repeat install errors benignly.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     // Socket timeouts turn a stalled handshake step into a `WouldBlock` —
     // `Interrupted` — resumable while the deadline still has budget, so the
     // exchange can never outlive it no matter how the peer dribbles.

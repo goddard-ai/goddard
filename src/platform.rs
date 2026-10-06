@@ -244,14 +244,16 @@ mod voice_gate {
         if channel_count == 0 {
             return None;
         }
-        // Planar layout: one contiguous channel of `frames` floats per
-        // channel pointer. A mono tap mixes by averaging.
+        // Planar buffers give each channel its own chunk with stride 1;
+        // interleaved buffers share one chunk — channel pointers sit at
+        // their own offset and frames step `stride` samples apart.
+        let stride = unsafe { buffer.stride() } as usize;
         let mut mono = Vec::with_capacity(frames);
         for frame in 0..frames {
             let mut sum = 0.0f32;
             for channel in 0..channel_count {
                 let data = unsafe { *channels.add(channel) }.as_ptr();
-                sum += unsafe { *data.add(frame) };
+                sum += unsafe { *data.add(frame * stride) };
             }
             mono.push(sum / channel_count as f32);
         }

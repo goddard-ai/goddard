@@ -557,6 +557,12 @@ impl PcmResampler {
 /// handshake share socket timeouts, then the socket drops to its short
 /// read poll.
 fn connect_transcription_socket(key: &str) -> anyhow::Result<WebSocket<MaybeTlsStream<TcpStream>>> {
+    // tungstenite builds `ClientConfig::builder()`, which panics when no
+    // process crypto provider is installed and the crate's features can't
+    // pick one — this graph enables both aws-lc-rs and ring. The app's
+    // other rustls users pass explicit configs, so nothing installs a
+    // default before this point; a repeat install errors benignly.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let url = url::Url::parse(TRANSCRIPTION_URL)?;
     let host = url
         .host_str()

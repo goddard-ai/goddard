@@ -18,6 +18,9 @@ tungstenite = { version = "0.30", default-features = false, features = [
     "handshake",
     "rustls-tls-native-roots",
 ] }
+# `client_tls_with_config` panics without a process crypto provider — both
+# aws-lc-rs and ring are enabled in this graph — so connect installs one.
+rustls = "0.23"
 tokio = { version = "1", features = ["rt", "macros"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
