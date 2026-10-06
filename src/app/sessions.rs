@@ -4265,6 +4265,30 @@ impl Waku {
         {
             return;
         }
+        // The scratchpad claims a bare Space as its pause key while it
+        // owns the chat column — the same toggle the Mute pill fires — so
+        // it never lands in the draft under the panel. A live transcript
+        // caret consumed it a level deeper; here, the scratchpad's own
+        // composer is the one typing-owned surface that yields, since the
+        // field is the resting focus while dictating. Key repeat is kept
+        // out so holding Space can't strobe the tap.
+        if !event.is_held
+            && !event.keystroke.modifiers.modified()
+            && event.keystroke.key == "space"
+            && self.voice_scratchpad_space_mutes()
+        {
+            let foreign_field = !self.composer.read(cx).focus().is_focused(window)
+                && window.context_stack().iter().any(|context| {
+                    TYPING_OWNED_CONTEXTS
+                        .iter()
+                        .any(|owned| context.contains(owned))
+                });
+            if !foreign_field {
+                self.voice_scratchpad_space_toggle(cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
         if window.context_stack().iter().any(|context| {
             TYPING_OWNED_CONTEXTS
                 .iter()

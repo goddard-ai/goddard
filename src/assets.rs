@@ -229,6 +229,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "map",
     "maximize",
     "message-square",
+    "mic",
     "minimize",
     "minus",
     "monitor",

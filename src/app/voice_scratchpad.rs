@@ -1566,27 +1566,37 @@ impl Waku {
         let state = self.voice_scratchpad_button_state(session_id);
         let theme = Theme::current(cx);
         let enabled = state != ScratchpadButtonState::Elsewhere && session_id.is_some();
+        // The state dot is a pill interior element now, left of the label —
+        // it reads against text where a corner badge sat over the edge.
         let dot = |color: Hsla| {
             div()
-                .absolute()
-                .top(px(-2.0))
-                .right(px(-2.0))
                 .size(px(7.0))
+                .flex_none()
                 .rounded_full()
+                .mr(px(2.0))
                 .bg(color)
         };
+        // The frame's insets: label 9px in, mic 2px off the label, 7px pad
+        // right — and a 9px berth before send, the row's 4px gap plus the
+        // margin here.
         let pill = div()
             .id(controls.chip_id("voice-scratchpad"))
             .h(px(20.0))
             .flex_none()
+            .mr(px(5.0))
             .rounded_full()
-            .relative()
             .flex()
             .items_center()
-            .gap(px(1.0))
-            .pl(px(8.0))
-            .pr(px(4.0))
-            .bg(theme.inverse)
+            .gap(px(2.0))
+            .pl(px(9.0))
+            .pr(px(7.0))
+            .bg(theme.inverse);
+        let pill = match state {
+            ScratchpadButtonState::Recording => pill.child(dot(rgb(RECORDING_RED).into())),
+            ScratchpadButtonState::Muted => pill.child(dot(theme.text_tertiary)),
+            _ => pill,
+        };
+        let pill = pill
             .child(
                 div()
                     .text_size(sp(9.0))
@@ -1595,11 +1605,6 @@ impl Waku {
                     .child("VS"),
             )
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
-        let pill = match state {
-            ScratchpadButtonState::Recording => pill.child(dot(rgb(RECORDING_RED).into())),
-            ScratchpadButtonState::Muted => pill.child(dot(theme.text_tertiary)),
-            _ => pill,
-        };
         let tooltip = match state {
             ScratchpadButtonState::Elsewhere => tr!("voice_scratchpad.active_elsewhere"),
             ScratchpadButtonState::Recording => tr!("voice_scratchpad.recording"),
@@ -1787,6 +1792,29 @@ impl Waku {
         scratchpad.muted = muted;
         crate::platform::set_voice_audio_sink_muted(muted);
         cx.notify();
+    }
+
+    /// Whether a bare Space is the scratchpad's pause key right now: the
+    /// panel owns the chat column and no annotation box has reclaimed
+    /// typing for the composer draft. The transcript's live caret consumes
+    /// Space a level deeper, so a space that lands as text never reaches
+    /// the caller this gate answers for.
+    pub(super) fn voice_scratchpad_space_mutes(&self) -> bool {
+        self.voice_scratchpad_visible()
+            && self
+                .voice_scratchpad
+                .as_ref()
+                .is_some_and(|scratchpad| scratchpad.transcript.annotation_target.is_none())
+    }
+
+    /// Space's pause effect — the same toggle the top bar's Mute pill
+    /// fires.
+    pub(super) fn voice_scratchpad_space_toggle(&mut self, cx: &mut Context<Self>) {
+        let muted = self
+            .voice_scratchpad
+            .as_ref()
+            .is_some_and(|scratchpad| !scratchpad.muted);
+        self.set_voice_scratchpad_muted(muted, cx);
     }
 
     /// Cancel — inline when the transcript is thin, confirmed once it's
