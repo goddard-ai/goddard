@@ -1,0 +1,1 @@
+- Archived boss chats keep their tool and command output instead of being stripped to skeletons after a week — rotations no longer erase the output context recent boss chats still reference.

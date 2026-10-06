@@ -1789,6 +1789,12 @@ impl StateStore {
     /// number of rows rewritten — the caller keeps scheduling batches while
     /// it stays nonzero.
     ///
+    /// Boss chats are exempt: `boss_project` names the Boss-owned project a
+    /// boss chat lives in, and a row there without a `planning` marker is a
+    /// chat — rotation archives it while the user still reads its command
+    /// output, so it keeps full detail for the archive's life. Employee and
+    /// planning sessions prune like any task; `Uuid::nil` exempts nothing.
+    ///
     /// Runs under the storage lock like a save rather than on a private
     /// connection, so the batch transaction never races the writer
     /// `write_batch` holds. `limit` bounds the lock hold: detail blobs run
@@ -1803,6 +1809,7 @@ impl StateStore {
         &self,
         archived_before: u64,
         limit: usize,
+        boss_project: Uuid,
     ) -> io::Result<usize> {
         let mut guard = self.storage.lock();
         if guard.is_none() {
@@ -1828,14 +1835,22 @@ impl StateStore {
                  WHERE sessions.archived_at IS NOT NULL
                    AND sessions.archived_at < ?1
                    AND instr(detail.data, '\"details_pruned\"') = 0
+                   AND (sessions.project_id <> ?2 OR sessions.planning IS NOT NULL)
                  ORDER BY sessions.archived_at
-                 LIMIT ?2",
+                 LIMIT ?3",
             )
             .and_then(|mut statement| {
                 statement
-                    .query_map(params![archived_before as i64, limit as i64], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?
+                    .query_map(
+                        params![
+                            archived_before as i64,
+                            boss_project.to_string(),
+                            limit as i64
+                        ],
+                        |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        },
+                    )?
                     .collect()
             })
             .map_err(to_io_error)?;
@@ -5192,9 +5207,19 @@ mod tests {
         store.save(&mut state).unwrap();
 
         let cutoff = crate::model::unix_time() - 7 * 24 * 60 * 60;
-        assert_eq!(store.prune_archived_session_details(cutoff, 8).unwrap(), 1);
+        assert_eq!(
+            store
+                .prune_archived_session_details(cutoff, 8, Uuid::nil())
+                .unwrap(),
+            1
+        );
         // A second sweep finds nothing eligible.
-        assert_eq!(store.prune_archived_session_details(cutoff, 8).unwrap(), 0);
+        assert_eq!(
+            store
+                .prune_archived_session_details(cutoff, 8, Uuid::nil())
+                .unwrap(),
+            0
+        );
 
         // The stored blob dropped the payloads and carries the marker.
         let connection = Connection::open(directory.join("app.db")).unwrap();
@@ -5251,6 +5276,86 @@ mod tests {
             .find(|session| session.id == active_id)
             .unwrap();
         assert!(!active.details_pruned);
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// A boss chat lives in the Boss-owned project with no `planning` marker:
+    /// rotation archives it while the user still reads its tool output, so the
+    /// sweep leaves its payloads alone. Planning sessions in the same project
+    /// and employee chats elsewhere still prune.
+    #[test]
+    fn archive_prune_keeps_boss_chat_payloads() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let boss_project = Uuid::new_v4();
+        let archived_session = |project_id: Uuid| {
+            let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+            session.begin_turn("work");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            session.transcript_blocks.push(TranscriptBlock {
+                after_message: 1,
+                turn_id: None,
+                activities: vec![
+                    ActivityItem::new(None, ActivityKind::Tool, "Ran command", None, true)
+                        .with_output(Some("boss keeps this output".into())),
+                ],
+            });
+            session.boss_managed = true;
+            session.archived_at = Some(1_000_000);
+            session
+        };
+        let boss_chat = archived_session(boss_project);
+        let boss_chat_id = boss_chat.id;
+        state.sessions.push(boss_chat);
+        let mut planning = archived_session(boss_project);
+        planning.planning = Some(SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_protocol::WireTranslation::new("boss.planning_label", []),
+            finalized_at: Some(1_000_000),
+        });
+        let planning_id = planning.id;
+        state.sessions.push(planning);
+        let employee = archived_session(state.projects[0].id);
+        let employee_id = employee.id;
+        state.sessions.push(employee);
+        store.save(&mut state).unwrap();
+
+        let cutoff = crate::model::unix_time() - 7 * 24 * 60 * 60;
+        assert_eq!(
+            store
+                .prune_archived_session_details(cutoff, 8, boss_project)
+                .unwrap(),
+            2,
+            "the planning and employee sessions prune; the boss chat does not"
+        );
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        for session in restored.sessions.iter_mut() {
+            reopened.hydrate(session).unwrap();
+        }
+        let chat = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == boss_chat_id)
+            .unwrap();
+        assert!(!chat.details_pruned);
+        assert_eq!(
+            chat.transcript_blocks[0].activities[0].output.as_deref(),
+            Some("boss keeps this output")
+        );
+        for id in [planning_id, employee_id] {
+            assert!(
+                restored
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+                    .unwrap()
+                    .details_pruned
+            );
+        }
         fs::remove_dir_all(directory).ok();
     }
 

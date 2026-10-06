@@ -197,7 +197,9 @@ const ARCHIVED_SESSION_RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 /// Past this window [`WakuBackend::start_archive_detail_prune`] rewrites the
 /// stored session so activities survive only as skeletons — kind, title and
 /// status stay, while tool output, arguments, reasoning, diffs and images
-/// go. Messages are a separate table and are never pruned.
+/// go. Messages are a separate table and are never pruned. Boss chats are
+/// exempt: rotation archives a chat the user still reads, so a chat in the
+/// Boss project keeps its payloads until the outer purge removes it.
 const ARCHIVED_DETAIL_RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 /// Detail rows rewritten per prune batch. Bound so a batch transaction
@@ -1578,6 +1580,7 @@ impl WakuBackend {
             return;
         }
         let store = Arc::clone(&self.task_store);
+        let boss = Arc::clone(&self.boss);
         let running = Arc::clone(&self.archive_detail_prune_running);
         let _ = std::thread::Builder::new()
             .name("waku-archive-prune".to_owned())
@@ -1585,7 +1588,15 @@ impl WakuBackend {
                 let cutoff =
                     crate::model::unix_time().saturating_sub(ARCHIVED_DETAIL_RETENTION_SECONDS);
                 loop {
-                    match store.prune_archived_session_details(cutoff, ARCHIVE_PRUNE_BATCH) {
+                    // Read per batch: the Boss document only exists once the
+                    // experiment activates, and an identity read before then
+                    // would prune chats the exemption covers.
+                    let boss_project = boss.document().identity.id;
+                    match store.prune_archived_session_details(
+                        cutoff,
+                        ARCHIVE_PRUNE_BATCH,
+                        boss_project,
+                    ) {
                         Ok(0) => break,
                         Ok(_) => std::thread::yield_now(),
                         Err(error) => {
