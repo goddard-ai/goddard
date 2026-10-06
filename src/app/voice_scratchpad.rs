@@ -81,7 +81,9 @@ pub(super) enum ScratchpadEvent {
     Final(String),
     /// A `transcript-final` part — the segment's whole text.
     FinalSegment(String),
-    /// The whole provisional suffix — replaces the current interim.
+    /// The whole provisional suffix — replaces the current interim and
+    /// runs the same command scan, so "okay next" breaks on the partial
+    /// rather than waiting for the segment to finalize.
     Partial(String),
     /// The stream failed or ended on its own — the transcript stays and
     /// the panel offers Retry.
@@ -196,6 +198,12 @@ pub(super) struct ScratchpadTranscript {
     /// compares against it — the folded text can't serve, since the
     /// command filter removes "okay next" spans before they land.
     finalized_tail: String,
+    /// Words committed early out of interim partials — a spoken "okay
+    /// next" folds its span the moment the recognizer emits it, ahead
+    /// of the finalized delivery. The stream re-delivers those words
+    /// later, so finals and partials both strip this credit rather
+    /// than append the span twice or fire the command again.
+    interim_folded: VecDeque<String>,
 }
 
 impl ScratchpadTranscript {
@@ -215,12 +223,12 @@ impl ScratchpadTranscript {
     /// commits the box as a bullet and keeps the box open for the next one;
     /// otherwise it closes the current paragraph.
     fn append_finalized(&mut self, segment: &str) {
-        // Finalized text supersedes whatever interim sat at its target.
-        if self.annotation_target.is_some() {
-            self.annotation_interim.clear();
-        } else {
-            self.interim.clear();
-        }
+        // Words an interim fold already committed arrive again here —
+        // strip them so the early "okay next" split can't double-append.
+        let rest = self.strip_folded(segment, true);
+        // The delivery supersedes the interim's leading words; its
+        // still-provisional tail stays dimmed rather than flashing away.
+        self.retract_interim(rest, rest.len() != segment.len());
         self.finalized_tail.push_str(segment);
         if self.finalized_tail.len() > FINALIZED_TAIL_CAP {
             let cut = self.finalized_tail.len() - FINALIZED_TAIL_CAP;
@@ -229,7 +237,7 @@ impl ScratchpadTranscript {
                 .unwrap_or(self.finalized_tail.len());
             self.finalized_tail.drain(..boundary);
         }
-        let mut rest = segment;
+        let mut rest = rest;
         loop {
             // The command can straddle this chunk's leading edge — the
             // append point's trailing word pairs with the chunk's first.
@@ -299,10 +307,21 @@ impl ScratchpadTranscript {
             return;
         }
         if self.tail_delivered(text) {
-            self.interim.clear();
-            self.annotation_interim.clear();
+            // A fully re-delivered segment drains any folded credit the
+            // delivery skipped over — leftover words would sit at the
+            // queue's front stripping unrelated speech later.
+            self.interim_folded.clear();
+            self.retract_interim(text, false);
         } else {
-            self.append_finalized(text);
+            // Deltas may have committed the segment's head already —
+            // strip that overlap before the fold sees it.
+            let rest = self.strip_delivered(text);
+            if rest.trim().is_empty() {
+                self.interim_folded.clear();
+                self.retract_interim(text, false);
+            } else {
+                self.append_finalized(rest);
+            }
         }
     }
 
@@ -316,13 +335,128 @@ impl ScratchpadTranscript {
             && tail_words[tail_words.len() - text_words.len()..] == text_words[..]
     }
 
-    /// The provisional suffix at the active append point — each partial
-    /// replaces it whole rather than appending.
+    /// The provisional suffix at the active append point. Each partial
+    /// replaces it whole — after dropping words the finalized stream or
+    /// an earlier fold already owns, and after consuming any "okay next"
+    /// the recognizer has emitted: the paragraph break lands when the
+    /// command is spoken, not when the segment finalizes.
     fn set_interim(&mut self, text: String) {
+        let mut rest = self.strip_delivered(&text);
+        rest = self.strip_folded(rest, false);
+        loop {
+            // The command can straddle the seam between committed text
+            // and the partial — the same check the finalized fold runs.
+            if let Some(after) = seam_command(self.append_point_text(), rest) {
+                self.strip_append_point_word();
+                self.commit_next();
+                self.fold_span(&rest[..rest.len() - after.len()]);
+                rest = after;
+                continue;
+            }
+            match split_next_command(rest) {
+                None => break,
+                Some((before, after)) => {
+                    self.push_text(before);
+                    self.commit_next();
+                    self.fold_span(&rest[..rest.len() - after.len()]);
+                    rest = after;
+                }
+            }
+        }
+        let rest = rest.to_owned();
         if self.annotation_target.is_some() {
-            self.annotation_interim = text;
+            self.annotation_interim = rest;
         } else {
-            self.interim = text;
+            self.interim = rest;
+        }
+    }
+
+    /// Drop `text`'s leading words the finalized stream already owns.
+    /// Partials repeat the provisional span and `transcript-final`
+    /// repeats deltas, so an incoming chunk's head can overlap
+    /// `finalized_tail`'s end — the largest such overlap goes.
+    fn strip_delivered<'a>(&self, text: &'a str) -> &'a str {
+        let spans = word_spans(text);
+        let tail = word_spans(&self.finalized_tail);
+        for start in 0..tail.len() {
+            let overlap = tail.len() - start;
+            if overlap > spans.len() {
+                continue;
+            }
+            if (0..overlap).all(|i| {
+                text[spans[i].0..spans[i].1].eq_ignore_ascii_case(
+                    &self.finalized_tail[tail[start + i].0..tail[start + i].1],
+                )
+            }) {
+                return text[spans[overlap - 1].1..].trim_start();
+            }
+        }
+        text
+    }
+
+    /// Drop `text`'s leading words that interim folds already committed.
+    /// Finalized deliveries drain the credit; partials only peek — the
+    /// folded words still owe the stream a delivery.
+    fn strip_folded<'a>(&mut self, text: &'a str, drain: bool) -> &'a str {
+        let spans = word_spans(text);
+        let mut matched = 0;
+        while matched < spans.len()
+            && matched < self.interim_folded.len()
+            && self.interim_folded[matched]
+                .eq_ignore_ascii_case(&text[spans[matched].0..spans[matched].1])
+        {
+            matched += 1;
+        }
+        if drain {
+            self.interim_folded.drain(..matched);
+        }
+        if matched == 0 {
+            text
+        } else {
+            text[spans[matched - 1].1..].trim_start()
+        }
+    }
+
+    /// Record a partial span committed into the transcript — the
+    /// finalized stream re-delivers it, so the words become strip
+    /// credit against the next deliveries.
+    fn fold_span(&mut self, span: &str) {
+        for (start, end) in word_spans(span) {
+            self.interim_folded.push_back(span[start..end].to_owned());
+        }
+    }
+
+    /// A delivery superseded the interim's leading words — drop the
+    /// matched prefix and keep the still-provisional tail dimmed
+    /// instead of flashing the whole suffix away between a final and
+    /// the next partial. A mismatched head means the recognizer
+    /// revised the suffix (clear it), unless folded credit says this
+    /// delivery hasn't reached the provisional span yet.
+    fn retract_interim(&mut self, delivered: &str, folded_drained: bool) {
+        let slot = if self.annotation_target.is_some() {
+            &mut self.annotation_interim
+        } else {
+            &mut self.interim
+        };
+        if slot.is_empty() {
+            return;
+        }
+        let spans = word_spans(slot);
+        let delivered_spans = word_spans(delivered);
+        let mut matched = 0;
+        while matched < spans.len()
+            && matched < delivered_spans.len()
+            && slot[spans[matched].0..spans[matched].1].eq_ignore_ascii_case(
+                &delivered[delivered_spans[matched].0..delivered_spans[matched].1],
+            )
+        {
+            matched += 1;
+        }
+        if matched > 0 {
+            let kept = slot[spans[matched - 1].1..].trim_start().to_owned();
+            *slot = kept;
+        } else if !folded_drained {
+            slot.clear();
         }
     }
 
@@ -342,11 +476,11 @@ impl ScratchpadTranscript {
     /// "Okay next": inside an annotation box it commits the box's content
     /// as a bullet under its paragraph and the box reopens empty; otherwise
     /// it closes the current paragraph — a redundant command on an empty
-    /// one moves nothing.
+    /// one moves nothing. The provisional suffix survives: it sits past
+    /// the consumed command and belongs to the new append point.
     fn commit_next(&mut self) {
         if let Some(target) = self.annotation_target {
             let bullet = std::mem::take(&mut self.annotation_text).trim().to_owned();
-            self.annotation_interim.clear();
             if !bullet.is_empty()
                 && let Some(paragraph) = self.paragraphs.get_mut(target)
             {
@@ -354,17 +488,19 @@ impl ScratchpadTranscript {
             }
             return;
         }
-        self.interim.clear();
         let current = self.current();
         if !current.text.is_empty() || !current.bullets.is_empty() {
             self.paragraphs.push(ScratchpadParagraph::default());
         }
     }
 
-    /// Open the annotation box on a paragraph; an open box moves.
+    /// Open the annotation box on a paragraph; an open box moves. The
+    /// provisional suffix retargets with the append point — leaving it
+    /// behind would pin stale dimmed text on the last row.
     fn annotate(&mut self, index: usize) {
         if index < self.paragraphs.len() {
             self.annotation_target = Some(index);
+            self.annotation_interim = std::mem::take(&mut self.interim);
         }
     }
 
@@ -423,24 +559,49 @@ impl ScratchpadTranscript {
     }
 }
 
-/// Append a word run to `text` with a single separating space.
+/// Append a word run to `text` with a single separating space. A run
+/// opening with sentence punctuation solidifies onto the previous word —
+/// chunk boundaries decide where spaces land, so a period split onto its
+/// own chunk would otherwise land as "the sentence ."
 fn append_word_text(text: &mut String, words: &str) {
     let words = words.trim();
     if words.is_empty() {
         return;
     }
     if !text.is_empty() && !text.ends_with(char::is_whitespace) {
+        let mut punct_end = 0;
+        for (index, c) in words.char_indices() {
+            if is_sentence_punct(c) {
+                punct_end = index + c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        text.push_str(&words[..punct_end]);
+        let words = words[punct_end..].trim_start();
+        if words.is_empty() {
+            return;
+        }
         text.push(' ');
+        text.push_str(words);
+        return;
     }
     text.push_str(words);
 }
 
-/// Split `text` around the next "okay next" command — `"ok"`, `"okay"`, and
-/// comma-separated spellings all count. Returns the text before and after
-/// the command's consumed span; surrounding punctuation and whitespace go
-/// with the command rather than into either side.
-fn split_next_command(text: &str) -> Option<(&str, &str)> {
-    // Word boundaries first: maximal alphanumeric runs.
+/// Punctuation that binds left — a leading run of it joins the previous
+/// word with no space. `"` is excluded: at a chunk head it opens a quote
+/// as often as it closes one.
+fn is_sentence_punct(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | '!' | '?' | ';' | ':' | '…' | '\'' | '’' | ')' | ']' | '}' | '%'
+    )
+}
+
+/// `text`'s words as byte spans — maximal alphanumeric runs, the
+/// boundaries the command scan and the stream-dedup compares share.
+fn word_spans(text: &str) -> Vec<(usize, usize)> {
     let mut words: Vec<(usize, usize)> = Vec::new();
     let mut word_start = None;
     for (index, c) in text.char_indices() {
@@ -453,6 +614,15 @@ fn split_next_command(text: &str) -> Option<(&str, &str)> {
     if let Some(start) = word_start {
         words.push((start, text.len()));
     }
+    words
+}
+
+/// Split `text` around the next "okay next" command — `"ok"`, `"okay"`, and
+/// comma-separated spellings all count. Returns the text before and after
+/// the command's consumed span; surrounding punctuation and whitespace go
+/// with the command rather than into either side.
+fn split_next_command(text: &str) -> Option<(&str, &str)> {
+    let words = word_spans(text);
     for pair in words.windows(2) {
         let (a_start, a_end) = pair[0];
         let (b_start, b_end) = pair[1];
@@ -1131,6 +1301,9 @@ impl Waku {
                 }
                 ScratchpadEvent::Failed => {
                     scratchpad.status = ScratchpadStatus::ConnectionLost;
+                    // The stream that owed the folded words a delivery is
+                    // dead — a reconnect's finals must not strip against it.
+                    scratchpad.transcript.interim_folded.clear();
                 }
             }
         }
@@ -2116,6 +2289,105 @@ mod tests {
         transcript.append_finalized("hello");
         transcript.set_interim("wor".to_owned());
         assert_eq!(transcript.to_message(), "hello wor");
+    }
+
+    #[test]
+    fn interim_command_breaks_the_paragraph_early() {
+        // The paragraph break lands on the partial carrying the command —
+        // the finalized segment re-delivers the consumed span and must
+        // neither append it again nor break a second time.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.set_interim("first".to_owned());
+        transcript.set_interim("first point okay next".to_owned());
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[0].text, "first point");
+        transcript.set_interim("first point okay next second".to_owned());
+        assert_eq!(transcript.interim, "second");
+        transcript.apply_final_segment("first point okay next second idea");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[1].text, "second idea");
+        assert_eq!(transcript.to_message(), "first point\n\nsecond idea");
+    }
+
+    #[test]
+    fn interim_command_breaks_early_over_deltas() {
+        // Same early split, but the folded span returns as word-level
+        // deltas — each strips its folded credit piecewise.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.set_interim("first point okay next second".to_owned());
+        assert_eq!(transcript.paragraphs.len(), 2);
+        transcript.append_finalized("first point ");
+        transcript.append_finalized("okay next ");
+        transcript.append_finalized("second idea");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[0].text, "first point");
+        assert_eq!(transcript.paragraphs[1].text, "second idea");
+        assert_eq!(transcript.to_message(), "first point\n\nsecond idea");
+    }
+
+    #[test]
+    fn interim_command_straddles_the_finalized_seam() {
+        // "okay" already committed when the partial opens with "next" —
+        // the seam check runs on partials too.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("first point okay");
+        transcript.set_interim("next, moving on".to_owned());
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert_eq!(transcript.paragraphs[0].text, "first point");
+        assert_eq!(transcript.interim, "moving on");
+        transcript.append_finalized("next moving on");
+        assert_eq!(transcript.paragraphs[1].text, "moving on");
+        assert_eq!(transcript.to_message(), "first point\n\nmoving on");
+    }
+
+    #[test]
+    fn interim_drops_words_the_stream_already_finalized() {
+        // A partial's head can repeat words a delta just committed —
+        // the delivered overlap strips off instead of duplicating.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the sentence");
+        transcript.set_interim("the sentence trails".to_owned());
+        assert_eq!(transcript.interim, "trails");
+        assert_eq!(transcript.to_message(), "the sentence trails");
+    }
+
+    #[test]
+    fn interim_command_commits_the_annotation_bullet() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.set_interim("fix the login okay next".to_owned());
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["fix the login"]);
+        transcript.apply_final_segment("fix the login okay next check the redirect");
+        assert_eq!(transcript.annotation_text, "check the redirect");
+    }
+
+    #[test]
+    fn punctuation_solidifies_onto_the_prior_word() {
+        // Delta chunking can split a period or comma onto its own chunk —
+        // it attaches to the last word, not after a fresh space.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the sentence");
+        transcript.append_finalized(".");
+        transcript.append_finalized("and a clause");
+        transcript.append_finalized(", too");
+        assert_eq!(transcript.to_message(), "the sentence. and a clause, too");
+    }
+
+    #[test]
+    fn interim_keeps_its_undelivered_tail() {
+        // Finalizing the interim's head leaves the still-provisional
+        // tail dimmed in place — clearing it flashed the suffix away
+        // until the next partial repainted it.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.set_interim("the sentence trails".to_owned());
+        transcript.append_finalized("the sentence");
+        assert_eq!(transcript.interim, "trails");
+        assert_eq!(transcript.to_message(), "the sentence trails");
+        // A delivery that rewrites the interim's head supersedes it.
+        transcript.set_interim("old guess".to_owned());
+        transcript.append_finalized("new words");
+        assert!(transcript.interim.is_empty());
     }
 
     #[test]
