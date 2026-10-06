@@ -124,6 +124,37 @@ fn automatic_briefing_allowed(
 }
 
 impl Waku {
+    fn viewed_briefing_session(&self) -> Option<Uuid> {
+        if self.settings_page.is_some() || self.selected_terminal.is_some() {
+            return None;
+        }
+        match self.navigation_location() {
+            Some(NavigationLocation::Task(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub(super) fn sync_voice_briefing_navigation(&mut self) {
+        let viewed = self.viewed_briefing_session();
+        if viewed == self.briefing_viewed_session {
+            return;
+        }
+        self.briefing_viewed_session = viewed;
+        // Pausing is terminal for the chrome. A manual replay remains possible.
+        if self
+            .voice_briefing_playback
+            .is_some_and(|p| p.message_id.is_some())
+        {
+            crate::platform::pause_briefing_audio();
+            self.voice_briefing_playback = None;
+            self.voice_briefing_playback_generation =
+                self.voice_briefing_playback_generation.wrapping_add(1);
+        }
+        self.briefing_queue.waiting = None;
+        self.briefing_pending.clear();
+        self.briefing_gate_pending.clear();
+    }
+
     /// The settle-side half: a reply that finishes off screen gets its
     /// clip built now, so landing on the task plays instantly. Runs only
     /// under automatic playback — manual mode leaves generation to the

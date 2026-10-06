@@ -3769,6 +3769,7 @@ impl Waku {
     /// sessions land muted so returning shows the transcript until the
     /// user unmutes to resume.
     pub(super) fn sync_voice_scratchpad_capture(&mut self) {
+        self.sync_voice_briefing_navigation();
         let selected = self.state.selected_session;
         let sessions = &self.state.sessions;
         let mut detached = false;
