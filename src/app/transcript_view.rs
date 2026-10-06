@@ -223,6 +223,7 @@ impl Waku {
         chat_viewport_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.begin_transcript_frame();
         self.prefetch_checkpoint_refs(cx);
         self.resolve_transcript_commit_refs(cx);
         self.sync_transcript_rows();

@@ -1657,7 +1657,7 @@ impl Waku {
         &self,
         message_id: Uuid,
     ) -> Option<Rc<Vec<TranscriptAnnotation>>> {
-        self.refresh_transcript_row_kinds();
+        self.refresh_transcript_row_kinds_for_frame();
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.annotation_ref_sets_fingerprint.get() != fingerprint {
             let mut resolved = HashMap::new();

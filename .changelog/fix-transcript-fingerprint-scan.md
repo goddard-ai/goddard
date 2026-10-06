@@ -1,0 +1,1 @@
+- Long transcripts scroll more smoothly — the app was rescanning the whole session once per visible row on every frame; it now scans once per frame.

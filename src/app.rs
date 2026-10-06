@@ -3950,6 +3950,14 @@ pub struct Waku {
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
     /// the first fold. See `transcript_rows_fingerprint`.
     transcript_row_kinds_fingerprint: Cell<Option<u64>>,
+    /// Bumped at the top of `render_transcript`; `transcript_frame_scan`
+    /// records the epoch its fingerprint was scanned in so the row builders
+    /// reuse one scan per frame instead of rescanning per visible row.
+    transcript_frame_epoch: Cell<u64>,
+    /// `(epoch, fingerprint)` of the latest `transcript_rows_fingerprint`
+    /// scan. Nothing can mutate the session mid-draw, so a scan at the
+    /// current epoch stays valid until `render_transcript` bumps it.
+    transcript_frame_scan: Cell<Option<(u64, u64)>>,
     /// The session whose last fold included the working indicator — the
     /// settle transition that arms the fade is "same session, indicator
     /// dropped". `None` once the row retires or the session switches.
@@ -7455,6 +7463,8 @@ impl Waku {
                 project_location_generation: Cell::new(0),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
+                transcript_frame_epoch: Cell::new(0),
+                transcript_frame_scan: Cell::new(None),
                 working_indicator_session: Cell::new(None),
                 working_indicator_fade: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),

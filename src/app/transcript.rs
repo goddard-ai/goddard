@@ -15,15 +15,52 @@ impl Waku {
     /// already cached. The fingerprint is one allocation-free linear pass, so a
     /// settled transcript now costs a scan instead of a fold.
     pub(super) fn refresh_transcript_row_kinds(&self) -> usize {
-        let fingerprint = self
-            .selected_session()
+        let fingerprint = self.scan_transcript_rows_fingerprint();
+        self.transcript_frame_scan
+            .set(Some((self.transcript_frame_epoch.get(), fingerprint)));
+        self.fold_transcript_row_kinds_if_stale(fingerprint)
+    }
+
+    /// `refresh_transcript_row_kinds` inside a `render_transcript` pass.
+    ///
+    /// The row builders reach this once per visible row per frame, and the
+    /// fingerprint scan is O(transcript) — so after the pass's first scan the
+    /// rest reuse `transcript_frame_scan`. `render_transcript` bumps
+    /// `transcript_frame_epoch` at its top, and nothing can mutate the
+    /// session mid-draw, so the fingerprint cannot move until the next pass.
+    pub(super) fn refresh_transcript_row_kinds_for_frame(&self) -> usize {
+        let epoch = self.transcript_frame_epoch.get();
+        let fingerprint = match self.transcript_frame_scan.get() {
+            Some((scan_epoch, fingerprint)) if scan_epoch == epoch => fingerprint,
+            _ => {
+                let fingerprint = self.scan_transcript_rows_fingerprint();
+                self.transcript_frame_scan.set(Some((epoch, fingerprint)));
+                fingerprint
+            }
+        };
+        self.fold_transcript_row_kinds_if_stale(fingerprint)
+    }
+
+    /// Start a `render_transcript` pass: the first
+    /// `refresh_transcript_row_kinds` of the pass scans and later
+    /// `refresh_transcript_row_kinds_for_frame` calls reuse that scan.
+    pub(super) fn begin_transcript_frame(&self) {
+        self.transcript_frame_epoch
+            .set(self.transcript_frame_epoch.get().wrapping_add(1));
+    }
+
+    fn scan_transcript_rows_fingerprint(&self) -> u64 {
+        self.selected_session()
             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
                 transcript_rows_fingerprint(
                     session,
                     &self.expanded_turns,
                     self.blocked_checkpoint_turn(session.id),
                 )
-            });
+            })
+    }
+
+    fn fold_transcript_row_kinds_if_stale(&self, fingerprint: u64) -> usize {
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
             let session = self.selected_session();
@@ -73,7 +110,7 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> (Option<SharedString>, Option<u64>) {
-        self.refresh_transcript_row_kinds();
+        self.refresh_transcript_row_kinds_for_frame();
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.assistant_footer_fingerprint.get() != fingerprint {
             self.assistant_footer_cache.borrow_mut().clear();
@@ -104,7 +141,7 @@ impl Waku {
     /// sent, a response snippet is read only after its turn stopped running,
     /// and completions, rewinds, and refolds all move the fingerprint.
     pub(super) fn navigation_turns(&self) -> Rc<Vec<TranscriptNavigationTurn>> {
-        self.refresh_transcript_row_kinds();
+        self.refresh_transcript_row_kinds_for_frame();
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.transcript_navigation_turns_fingerprint.get() != fingerprint {
             let turns = self

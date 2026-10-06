@@ -1,0 +1,1 @@
+- The built-in browser no longer redraws the whole window at the display's refresh rate for the duration of a page load; the progress bar updates at about 30 fps while loading and stops scheduling frames once the load finishes or the tab unmounts.

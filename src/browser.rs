@@ -36,6 +36,7 @@ use gpui::{AsyncApp, ForegroundExecutor, WeakEntity};
 use crate::input::{InputEvent, TextInput};
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::icon;
+use crate::ui::motion;
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
 use crate::{
@@ -2486,8 +2487,11 @@ impl Render for BrowserView {
         self.reconcile_focus(window, cx);
         if self.loading {
             // `estimatedProgress` moves without any observable notification;
-            // while a load is in flight the toolbar redraws with the frames.
-            window.request_animation_frame();
+            // the pulse clock keeps the toolbar redrawing while a load is in
+            // flight — ~30 fps rather than display rate for what is only a
+            // progress bar — and parks itself once the load ends or the
+            // surface unmounts.
+            motion::pulse_lease(window.current_view(), cx);
         }
 
         let body = if let Some(error) = self.host_error.clone() {
