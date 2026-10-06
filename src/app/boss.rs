@@ -7568,6 +7568,8 @@ mod tests {
             queued_at: None,
             request_id: None,
             request_fingerprint: None,
+            plan_id: None,
+            item_id: None,
         }
     }
 
@@ -7728,6 +7730,8 @@ mod tests {
             queued_at: (lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued).then_some(1),
             request_id: None,
             request_fingerprint: None,
+            plan_id: None,
+            item_id: None,
         }
     }
 

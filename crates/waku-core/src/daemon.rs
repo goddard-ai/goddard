@@ -6965,6 +6965,8 @@ impl WakuBackend {
                 group_id,
                 priority,
                 goal_id,
+                plan,
+                item,
                 request_id,
             } => self.boss.with_operation_lock(|| self.summon_employee(
                     caller,
@@ -6986,12 +6988,21 @@ impl WakuBackend {
                     group_id,
                     priority,
                     goal_id,
+                    plan,
+                    item,
                     request_id,
                     events,
                 )),
             BossOperation::Control { session_id, action } => {
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
+                    // Re-tagging is pure bookkeeping — it applies in every
+                    // lifecycle state, queued and finished included.
+                    if let EmployeeControl::SetPlan { plan, item } = &action {
+                        self.boss
+                            .set_employee_plan(session_id, plan.clone(), *item)?;
+                        return Ok(BossResult::Saved);
+                    }
                     use waku_protocol::boss::EmployeeLifecycle;
                     match self.boss.employee_lifecycle(session_id) {
                         Some(EmployeeLifecycle::Queued) => {
@@ -7312,7 +7323,8 @@ impl WakuBackend {
                         EmployeeControl::SetModel { .. }
                         | EmployeeControl::SetPermissions { .. }
                         | EmployeeControl::SetWorkspace { .. }
-                        | EmployeeControl::SetResources { .. } => {
+                        | EmployeeControl::SetResources { .. }
+                        | EmployeeControl::SetPlan { .. } => {
                             unreachable!("handled above")
                         }
                     }
@@ -8717,6 +8729,8 @@ impl WakuBackend {
         group_id: Option<String>,
         priority: Option<i64>,
         goal_id: Option<Uuid>,
+        plan: Option<String>,
+        item: Option<Uuid>,
         request_id: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
@@ -8746,6 +8760,7 @@ impl WakuBackend {
             "workGoal": work_goal, "icon": icon, "resources": resources,
             "allowBurst": allow_burst, "groupId": group_id,
             "priority": priority, "goalId": goal_id,
+            "plan": plan, "item": item,
         }))?;
         if let Some(request_id) = request_id
             && let Some(existing) = self
@@ -8762,6 +8777,13 @@ impl WakuBackend {
             }
             bail!("requestId was already used for a different summon");
         }
+        // The plan tag resolves at admission — unknown or closed plans and
+        // unknown or finished items fail here rather than landing untagged.
+        let plan_tag = match (&plan, item) {
+            (Some(reference), item) => Some(self.boss.plan_assignment(reference, item)?),
+            (None, Some(_)) => bail!("a summon item tag requires a plan"),
+            (None, None) => None,
+        };
         if let Some(adopt) = &adopt_worktree {
             self.resolve_worktree_adoption(Path::new(&project), adopt, None)?;
         }
@@ -8828,6 +8850,10 @@ impl WakuBackend {
         };
         employee.request_id = request_id;
         employee.request_fingerprint = request_id.map(|_| fingerprint);
+        if let Some((plan_id, item_id)) = plan_tag {
+            employee.plan_id = Some(plan_id);
+            employee.item_id = item_id;
+        }
         let employee_name = employee.identity.name.clone();
         let employee_title = employee.job_title.clone();
         // The summon marker freezes the identity the card shows — name,
@@ -9082,6 +9108,10 @@ impl WakuBackend {
                 self.boss
                     .set_employee_permissions(caller, session_id, permissions)?;
                 self.boss.reset_context(session_id);
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetPlan { plan, item } => {
+                self.boss.set_employee_plan(session_id, plan, item)?;
                 Ok(BossResult::Saved)
             }
         }
@@ -16818,6 +16848,8 @@ mod tests {
                 group_id: None,
                 priority: None,
                 goal_id: None,
+                plan: None,
+                item: None,
                 request_id: None,
             },
             &EventSink::detached(),
@@ -16897,6 +16929,8 @@ mod tests {
                 group_id: None,
                 priority: None,
                 goal_id: None,
+                plan: None,
+                item: None,
                 request_id: None,
             },
             &EventSink::detached(),
@@ -17030,6 +17064,8 @@ mod tests {
                     group_id: None,
                     priority: None,
                     goal_id: None,
+                    plan: None,
+                    item: None,
                     request_id: None,
                 },
                 &EventSink::detached(),
@@ -17312,6 +17348,8 @@ mod tests {
                     group_id: None,
                     priority: None,
                     goal_id: None,
+                    plan: None,
+                    item: None,
                     request_id: None,
                 },
                 &EventSink::detached(),
@@ -17463,6 +17501,8 @@ mod tests {
             group_id: None,
             priority: None,
             goal_id: None,
+            plan: None,
+            item: None,
             request_id: None,
         }
     }
@@ -19944,4 +19984,337 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(root);
     }
+    /// Build a summon op over the shared fixture — `plan`/`item` vary,
+    /// everything else stays on the valid baseline the other summon
+    /// tests use.
+    fn summon_with_tag(
+        persona: Uuid,
+        project: &Path,
+        plan: Option<String>,
+        item: Option<Uuid>,
+        request_id: Option<Uuid>,
+    ) -> waku_protocol::boss::BossOperation {
+        waku_protocol::boss::BossOperation::Summon {
+            persona_id: persona,
+            job_title: "Tagged job".into(),
+            prompt: "Summarize the diff".into(),
+            project: project.display().to_string(),
+            provider: Some(ProviderKind::Codex),
+            model: None,
+            reasoning_effort: None,
+            workspace: None,
+            base_branch: None,
+            adopt_worktree: None,
+            permissions: None,
+            work_goal: waku_protocol::boss::EmployeeGoal::Errand,
+            icon: None,
+            resources: None,
+            allow_burst: false,
+            group_id: None,
+            priority: None,
+            goal_id: None,
+            plan,
+            item,
+            request_id,
+        }
+    }
+
+    /// A plan record pushed straight into the Boss document — the
+    /// daemon path tests drive the service, not `createPlan`.
+    fn boss_plan(plan_file: &str, items: &[&str]) -> waku_protocol::boss::BossPlan {
+        use waku_protocol::boss::{PlanItem, PlanItemState};
+        waku_protocol::boss::BossPlan {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            plan_file: plan_file.into(),
+            idea: "Plan".into(),
+            finalized_at: None,
+            items: items
+                .iter()
+                .map(|title| PlanItem {
+                    id: Uuid::new_v4(),
+                    title: (*title).into(),
+                    state: PlanItemState::ToDo,
+                    history: Vec::new(),
+                })
+                .collect(),
+            outcome: None,
+            history: Vec::new(),
+        }
+    }
+
+    /// Summon tagging resolves the plan and item at admission: the
+    /// stored link is the pair the group view consumes. The missing
+    /// provider binary fails the launch after the roster record lands,
+    /// the same path the worktree summon test relies on.
+    #[test]
+    fn boss_summon_plan_tag_persists_and_validates_references() {
+        use waku_protocol::boss::PlanOutcome;
+        let root = std::env::temp_dir().join(format!("boss-summon-plan-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (backend, boss) = surface_test_backend(&root);
+        backend.boss.set_session_id(boss).unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let events = EventSink::detached();
+
+        // A still-open draft plan tags; the item link rides along.
+        let plan = boss_plan("plans/auth.md", &["Probe", "Verify"]);
+        let plan_id = plan.id;
+        let plan_session = plan.session_id;
+        let item = plan.items[0].id;
+        backend.boss.add_plan(plan).unwrap();
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(
+                persona,
+                &project,
+                Some("auth.md".into()),
+                Some(item),
+                None,
+            ),
+            &events,
+        );
+        assert!(result.is_err(), "the launch fails; admission tagged first");
+        let employee = &backend.boss.document().employees[0];
+        assert_eq!(employee.plan_id, Some(plan_id));
+        assert_eq!(employee.item_id, Some(item));
+
+        // Unknown plans, orphan items, and unknown items fail admission.
+        let count = || backend.boss.document().employees.len();
+        for (plan, item, want) in [
+            (Some("plans/missing.md".into()), None, "unknown plan"),
+            (None, Some(item), "requires a plan"),
+            (
+                Some("auth.md".into()),
+                Some(Uuid::new_v4()),
+                "unknown work item",
+            ),
+        ] {
+            let result = backend.handle_boss_operation(
+                Some(boss),
+                summon_with_tag(persona, &project, plan, item, None),
+                &events,
+            );
+            let message = result.unwrap_err().to_string();
+            assert!(message.contains(want), "{message} should mention {want}");
+            assert_eq!(count(), 1, "{want} added no employee");
+        }
+
+        // Marking the item done rejects new tags for it; the plan still
+        // tags unallocated.
+        backend
+            .boss
+            .set_plan_item_state(
+                Some(boss),
+                "plans/auth.md",
+                item,
+                waku_protocol::boss::PlanItemState::Done,
+            )
+            .unwrap();
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(
+                persona,
+                &project,
+                Some("auth.md".into()),
+                Some(item),
+                None,
+            ),
+            &events,
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("reopen it to tag work")
+        );
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(persona, &project, Some("auth.md".into()), None, None),
+            &events,
+        );
+        assert!(result.is_err(), "the launch fails; the tag still landed");
+        let employee = &backend.boss.document().employees[1];
+        assert_eq!(employee.plan_id, Some(plan_id));
+        assert_eq!(employee.item_id, None);
+
+        // A closed plan refuses every tag until reopened. Approving the
+        // draft first moves it into the outcome lifecycle.
+        backend
+            .boss
+            .set_plan_finalized_at(plan_session, 1)
+            .unwrap();
+        backend
+            .boss
+            .set_plan_outcome(Some(boss), "plans/auth.md", PlanOutcome::Abandoned)
+            .unwrap();
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(persona, &project, Some("auth.md".into()), None, None),
+            &events,
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("abandoned")
+        );
+        assert_eq!(count(), 2);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `requestId` reuse with a different plan tag is a different summon —
+    /// the fingerprint covers the tag.
+    #[test]
+    fn boss_summon_request_id_fingerprint_covers_the_plan_tag() {
+        let root = std::env::temp_dir().join(format!("boss-summon-fp-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (backend, boss) = surface_test_backend(&root);
+        backend.boss.set_session_id(boss).unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let events = EventSink::detached();
+        backend
+            .boss
+            .add_plan(boss_plan("plans/auth.md", &[]))
+            .unwrap();
+        backend
+            .boss
+            .add_plan(boss_plan("plans/billing.md", &[]))
+            .unwrap();
+
+        let request_id = Uuid::new_v4();
+        let first = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(
+                persona,
+                &project,
+                Some("auth.md".into()),
+                None,
+                Some(request_id),
+            ),
+            &events,
+        );
+        assert!(first.is_err(), "the launch fails; the record stands");
+        // The identical retry returns the original, tag and all.
+        let retry = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(
+                persona,
+                &project,
+                Some("auth.md".into()),
+                None,
+                Some(request_id),
+            ),
+            &events,
+        );
+        assert!(matches!(
+            retry.unwrap(),
+            waku_protocol::boss::BossResult::Summoned { .. }
+        ));
+        assert_eq!(backend.boss.document().employees.len(), 1);
+        // Same request id, different plan — a different summon.
+        let conflict = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(
+                persona,
+                &project,
+                Some("billing.md".into()),
+                None,
+                Some(request_id),
+            ),
+            &events,
+        );
+        assert!(
+            conflict
+                .unwrap_err()
+                .to_string()
+                .contains("already used")
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `control`'s `setPlan` re-tags an admitted employee through the
+    /// same validation a summon tag gets.
+    #[test]
+    fn boss_control_set_plan_retags_an_admitted_employee() {
+        use waku_protocol::boss::{BossOperation, EmployeeControl};
+        let root = std::env::temp_dir().join(format!("boss-retag-{}", Uuid::new_v4()));
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let (backend, boss) = surface_test_backend(&root);
+        backend.boss.set_session_id(boss).unwrap();
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings.provider_binary_overrides.insert(
+            ProviderKind::Codex,
+            root.join("missing-codex").display().to_string(),
+        );
+        backend.settings.replace(daemon_settings).unwrap();
+        let persona = backend.boss.document().personas[1].id;
+        let events = EventSink::detached();
+        let plan = boss_plan("plans/auth.md", &["Probe"]);
+        let item = plan.items[0].id;
+        backend.boss.add_plan(plan).unwrap();
+        backend
+            .boss
+            .add_plan(boss_plan("plans/billing.md", &[]))
+            .unwrap();
+
+        let _ = backend.handle_boss_operation(
+            Some(boss),
+            summon_with_tag(persona, &project, None, None, None),
+            &events,
+        );
+        let employee = backend.boss.document().employees[0].session_id;
+        let control = |action: EmployeeControl| {
+            backend.handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id: employee,
+                    action,
+                },
+                &events,
+            )
+        };
+        // Tag to plan + item, then re-tag to another plan — the item
+        // link drops because it wasn't restated.
+        control(EmployeeControl::SetPlan {
+            plan: Some(Some("auth.md".into())),
+            item: Some(Some(item)),
+        })
+        .unwrap();
+        let record = &backend.boss.document().employees[0];
+        assert_eq!(record.item_id, Some(item));
+        control(EmployeeControl::SetPlan {
+            plan: Some(Some("billing.md".into())),
+            item: None,
+        })
+        .unwrap();
+        let record = &backend.boss.document().employees[0];
+        assert_eq!(
+            record.plan_id,
+            backend.boss.plan_for_file("plans/billing.md").map(|plan| plan.id)
+        );
+        assert_eq!(record.item_id, None);
+        // An item on another plan does not relink through this plan.
+        assert!(
+            control(EmployeeControl::SetPlan {
+                plan: None,
+                item: Some(Some(item)),
+            })
+            .is_err()
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
 }

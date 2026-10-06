@@ -734,6 +734,8 @@ mod tests {
             queued_at: None,
             request_id: None,
             request_fingerprint: None,
+            plan_id: None,
+            item_id: None,
         }
     }
 

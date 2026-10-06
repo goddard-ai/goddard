@@ -49,7 +49,7 @@ exist only during this script invocation; use named memory buckets for durable s
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,requestId?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,plan?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's
@@ -63,14 +63,17 @@ exist only during this script invocation; use named memory buckets for durable s
                                             member finishes, fails, or is cancelled
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
-                        setWorkspace|setResources,...})
+                        setWorkspace|setResources|setPlan,...})
                                             setWorkspace takes workspace:
                                             \"local\"|\"worktree\" plus baseBranch
                                             for worktree — stops, rebinds, resumes;
                                             setResources takes a resource map like
                                             summon — a waiting ticket re-admits on
                                             the new set, a running employee swaps
-                                            once capacity frees; prompt takes an
+                                            once capacity frees; setPlan re-tags
+                                            the employee's plan and item links —
+                                            omit keeps, () clears, a value re-tags;
+                                            prompt takes an
                                             optional delivery — \"interrupt\" (the
                                             default) steers into an open turn and
                                             queues otherwise, \"queue\" parks behind

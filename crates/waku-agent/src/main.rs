@@ -267,7 +267,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent read TASK_ID --turn 3".to_owned(),
         ),
         "boss summon" => (
-            json!({"--persona":{"required":true,"type":"exact visible persona name or UUID"},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key"}),
+            json!({"--persona":{"required":true,"type":"exact visible persona name or UUID"},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md — tags the assignment to the plan's Goals group","optional":true},"--item":{"type":"work item UUID inside --plan; requires --plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key"}),
             json!({"json":{"type":"summoned","sessionId":"employee UUID","state":"queued|dispatching|working","admission":{"provider":"resolved provider","model":"resolved model","reasoningEffort":"resolved effort or null","queuePosition":"optional queue position","blockedBy":"admission blockers"}}}),
             "goddard-agent boss summon --persona Researcher --title 'Review diff' --file brief.md"
                 .to_owned(),
@@ -321,6 +321,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucketIds":{"type":"string[]","optional":true,"notes":"Boss-created bucket IDs; project bucket access is automatic"},"integrationIds":{"type":"string[]","optional":true},"summonEmployees":{"type":"boolean","optional":true},"computerUse":{"type":"boolean","optional":true}}}}),
             json!({"json":{"type":"saved"}}),
             "goddard-agent boss employee permissions EMPLOYEE_ID --json '{\"bucketIds\":[\"operating-rules\"]}'".to_owned(),
+        ),
+        "boss employee plan" => (
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"plan":{"type":"plan id, planning-session id, or plans/<file>.md; null clears the tag","optional":true},"item":{"type":"work item UUID inside the plan; null drops to unallocated","optional":true}}}}),
+            json!({"json":{"type":"saved"}}),
+            "goddard-agent boss employee plan EMPLOYEE_ID --json '{\"plan\":\"plans/session.md\"}'".to_owned(),
         ),
         "boss employee workspace" => (
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"workspace":{"required":true,"enum":["local","worktree"]},"baseBranch":{"requiredWhen":"workspace=worktree"}}}}),
@@ -758,6 +763,7 @@ fn schema() -> serde_json::Value {
         "boss employee icon",
         "boss employee model",
         "boss employee permissions",
+        "boss employee plan",
         "boss employee workspace",
         "boss employee resources",
         "boss persona list",
@@ -1656,6 +1662,25 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 icon,
             })?)
         }
+        ("employee", "plan") => {
+            let (pos, opts) = flags(args, &["json", "json-file"], true)?;
+            if pos.len() != 1 {
+                bail!("usage: boss employee plan EMPLOYEE_ID --json JSON");
+            }
+            let id: Uuid = pos[0].parse().context("invalid employee ID")?;
+            let input: serde_json::Value = serde_json::from_str(&json_input(&opts)?)
+                .context("invalid setPlan payload")?;
+            let mut action = serde_json::Map::new();
+            action.insert("type".into(), json!("setPlan"));
+            for key in ["plan", "item"] {
+                if let Some(value) = input.get(key) {
+                    action.insert(key.into(), value.clone());
+                }
+            }
+            let op: Op =
+                serde_json::from_value(json!({"type":"control","sessionId":id,"action":action}))?;
+            print_boss(boss_request(op)?)
+        }
         ("employee", "permissions" | "workspace" | "resources") => {
             let (pos, opts) = flags(args, &["json", "json-file"], true)?;
             if pos.len() != 1 {
@@ -1881,6 +1906,8 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
             "model",
             "effort",
             "work-goal",
+            "plan",
+            "item",
             "workspace",
             "base-branch",
             "adopt-worktree",
@@ -1948,7 +1975,7 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
         "project":project, "provider":opts.get("provider"), "model":opts.get("model"),
         "reasoningEffort":opts.get("effort"), "workspace":workspace, "baseBranch":opts.get("base-branch"),
         "adoptWorktree":opts.get("adopt-worktree"), "workGoal":opts.get("work-goal").map(String::as_str).unwrap_or("errand"),
-        "icon":icon, "requestId":opts.get("request-id")
+        "icon":icon, "plan":opts.get("plan"), "item":opts.get("item"), "requestId":opts.get("request-id")
     }))?;
     match boss_request(operation)? {
         waku_protocol::boss::BossResult::Summoned {

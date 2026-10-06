@@ -783,6 +783,71 @@ impl BossService {
         Ok(finalized.unwrap())
     }
 
+    /// Resolve a summon or `setPlan` `plan`+`item` tag to the link ids —
+    /// or the reason the tag is invalid. Unknown plans and plans with a
+    /// closed outcome fail, as do unknown items and items already done
+    /// or dropped; a still-open draft plan tags fine.
+    pub fn plan_assignment(
+        &self,
+        plan: &str,
+        item: Option<Uuid>,
+    ) -> anyhow::Result<(Uuid, Option<Uuid>)> {
+        resolve_plan_assignment(&self.state.lock(), plan, item)
+    }
+
+    /// Re-tag an employee's plan and item links — the mutable half of the
+    /// summon tag, applied through `control`'s `setPlan`. Each field is
+    /// tri-state: `None` keeps the current link, `Some(None)` clears it,
+    /// `Some(Some(_))` re-tags with the same validation a summon tag
+    /// gets. Re-tagging the plan without restating the item drops the
+    /// employee to the plan's unallocated list.
+    pub fn set_employee_plan(
+        &self,
+        session_id: Uuid,
+        plan: Option<Option<String>>,
+        item: Option<Option<Uuid>>,
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            let plan_id = match &plan {
+                Some(Some(reference)) => {
+                    Some(Some(resolve_plan_assignment(state, reference, None)?.0))
+                }
+                Some(None) => Some(None),
+                None => None,
+            };
+            let current = state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|entry| entry.session_id == session_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("not a Boss employee"))?;
+            let effective_plan = plan_id.unwrap_or(current.plan_id);
+            let item_id = match item {
+                Some(Some(item)) => {
+                    let plan = effective_plan.ok_or_else(|| {
+                        anyhow!("setPlan needs a plan before it can link an item")
+                    })?;
+                    resolve_plan_assignment(state, &plan.to_string(), Some(item))?.1
+                }
+                Some(None) => None,
+                // A re-tag without a restated item clears the item link;
+                // an untouched plan keeps whatever item it had.
+                None if plan_id.is_some() => None,
+                None => current.item_id,
+            };
+            let employee = state
+                .employees
+                .iter_mut()
+                .chain(state.retired_employees.iter_mut())
+                .find(|entry| entry.session_id == session_id)
+                .expect("employee presence checked above");
+            employee.plan_id = effective_plan;
+            employee.item_id = item_id;
+            Ok(())
+        })
+    }
+
     /// `updatePlanItems` — replace a plan's ordered work breakdown. An
     /// entry naming an existing item id renames and repositions it; an
     /// entry without one appends a new `toDo` item; an item the list
@@ -1173,6 +1238,8 @@ impl BossService {
             queued_at: None,
             request_id: None,
             request_fingerprint: None,
+            plan_id: None,
+            item_id: None,
         })
     }
 
@@ -3384,6 +3451,44 @@ fn plan_mut<'a>(state: &'a mut BossState, reference: &str) -> anyhow::Result<&'a
     Ok(&mut state.planning[index])
 }
 
+/// Resolve a `plan`+`item` tag against the registry — the stored
+/// `planId`/`itemId` pair, or the reason the tag is invalid.
+fn resolve_plan_assignment(
+    state: &BossState,
+    reference: &str,
+    item: Option<Uuid>,
+) -> anyhow::Result<(Uuid, Option<Uuid>)> {
+    let plan =
+        find_plan(&state.planning, reference).ok_or_else(|| anyhow!("unknown plan {reference}"))?;
+    if plan.terminal() {
+        bail!(
+            "plan {} is {}; reopen it to tag work",
+            plan.plan_file,
+            plan.outcome().label()
+        );
+    }
+    let item = match item {
+        Some(item) => {
+            let entry = plan
+                .items
+                .iter()
+                .find(|known| known.id == item)
+                .ok_or_else(|| anyhow!("unknown work item {item} in plan {}", plan.plan_file))?;
+            match entry.state {
+                PlanItemState::ToDo => Some(item),
+                state => bail!(
+                    "work item \"{}\" in plan {} is {}; reopen it to tag work",
+                    entry.title,
+                    plan.plan_file,
+                    state.label()
+                ),
+            }
+        }
+        None => None,
+    };
+    Ok((plan.id, item))
+}
+
 /// Stamp an approved plan: freeze time, outcome, and the approval audit
 /// entry — always the user's act, since every finalization passes a
 /// user-facing approval — and, when the caller declared one, the work
@@ -4601,6 +4706,8 @@ mod tests {
                     queued_at: None,
                     request_id: None,
                     request_fingerprint: None,
+                    plan_id: None,
+                    item_id: None,
                 });
                 state
                     .employees
@@ -4660,6 +4767,8 @@ mod tests {
                     queued_at: None,
                     request_id: None,
                     request_fingerprint: None,
+                    plan_id: None,
+                    item_id: None,
                 });
                 Ok(())
             })
@@ -4943,6 +5052,8 @@ mod tests {
                     queued_at: None,
                     request_id: None,
                     request_fingerprint: None,
+                    plan_id: None,
+                    item_id: None,
                 });
                 Ok(())
             })
@@ -5403,6 +5514,8 @@ mod tests {
                     queued_at: None,
                     request_id: None,
                     request_fingerprint: None,
+                    plan_id: None,
+                    item_id: None,
                 });
                 Ok(())
             })
@@ -5830,6 +5943,8 @@ mod tests {
                     queued_at: None,
                     request_id: None,
                     request_fingerprint: None,
+                    plan_id: None,
+                    item_id: None,
                 });
                 Ok(())
             })
@@ -7338,6 +7453,146 @@ mod memory_op_tests {
                 .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::Done)
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plan_tag_resolution_accepts_ids_and_file_spellings() {
+        let root = std::env::temp_dir().join(format!("boss-plan-tag-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let plan = test_plan("plans/auth.md");
+        let id = plan.id;
+        let session = plan.session_id;
+        add_plan(&service, plan);
+        // Drafts tag — a planning session's research employees are plan work.
+        for reference in [
+            "plans/auth.md",
+            "auth.md",
+            "memory/plans/auth.md",
+            &id.to_string(),
+            &session.to_string(),
+        ] {
+            assert_eq!(
+                service.plan_assignment(reference, None).unwrap(),
+                (id, None),
+                "{reference}"
+            );
+        }
+        assert!(service.plan_assignment("plans/missing.md", None).is_err());
+        assert!(service.plan_assignment(&Uuid::new_v4().to_string(), None).is_err());
+        // Done or dropped items and closed plans refuse new tags.
+        let plan = service
+            .update_plan_items(
+                None,
+                "plans/auth.md",
+                vec![PlanItemInput {
+                    id: None,
+                    title: "Probe".into(),
+                }],
+            )
+            .unwrap();
+        let item = plan.items[0].id;
+        service
+            .set_plan_item_state(None, "plans/auth.md", item, PlanItemState::Done)
+            .unwrap();
+        assert!(
+            service
+                .plan_assignment("plans/auth.md", Some(item))
+                .is_err()
+        );
+        assert!(
+            service
+                .plan_assignment("plans/auth.md", Some(Uuid::new_v4()))
+                .is_err()
+        );
+        service.finalize_plan("plans/auth.md", None, 10).unwrap();
+        service
+            .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Abandoned)
+            .unwrap();
+        assert!(service.plan_assignment("plans/auth.md", None).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn set_employee_plan_retags_relinks_and_clears() {
+        let root = std::env::temp_dir().join(format!("boss-employee-plan-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        add_plan(&service, test_plan("plans/auth.md"));
+        let other = add_plan(&service, test_plan("plans/billing.md"));
+        let plan = service
+            .update_plan_items(
+                Some(boss),
+                "plans/auth.md",
+                vec![PlanItemInput {
+                    id: None,
+                    title: "Probe".into(),
+                }],
+            )
+            .unwrap();
+        let item = plan.items[0].id;
+        let employee = service
+            .prepare_employee(
+                boss,
+                service.document().personas[0].id,
+                "Job".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let session = employee.session_id;
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        // An item link needs a plan — the employee has none yet.
+        assert!(
+            service
+                .set_employee_plan(session, None, Some(Some(item)))
+                .is_err()
+        );
+        // Tag plan + item, then re-link the item only.
+        service
+            .set_employee_plan(session, Some(Some("auth.md".into())), Some(Some(item)))
+            .unwrap();
+        let employee = service.employee(session).unwrap();
+        assert_eq!(employee.plan_id, Some(plan.id));
+        assert_eq!(employee.item_id, Some(item));
+        // Clearing just the item keeps the plan — the employee reads as
+        // unallocated plan work.
+        service
+            .set_employee_plan(session, None, Some(None))
+            .unwrap();
+        let employee = service.employee(session).unwrap();
+        assert_eq!(employee.plan_id, Some(plan.id));
+        assert_eq!(employee.item_id, None);
+        // Re-tagging the plan without restating the item drops to
+        // unallocated.
+        service
+            .set_employee_plan(session, Some(Some("auth.md".into())), Some(Some(item)))
+            .unwrap();
+        service
+            .set_employee_plan(session, Some(Some(other.to_string())), None)
+            .unwrap();
+        let employee = service.employee(session).unwrap();
+        assert_eq!(employee.plan_id, Some(other));
+        assert_eq!(employee.item_id, None);
+        // An explicit null clears the tag outright.
+        service
+            .set_employee_plan(session, Some(None), None)
+            .unwrap();
+        let employee = service.employee(session).unwrap();
+        assert_eq!(employee.plan_id, None);
+        assert_eq!(employee.item_id, None);
         fs::remove_dir_all(root).unwrap();
     }
 

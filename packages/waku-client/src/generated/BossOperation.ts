@@ -92,6 +92,22 @@ priority?: number,
  */
 goalId?: string,
 /**
+ * Tag the assignment to a plan — the `BossPlan::id`, its
+ * planning-session id, or its `plans/<file>.md` path. An unknown
+ * plan or a plan with a closed outcome fails the summon rather
+ * than landing untagged; a still-open draft tags fine. The tag
+ * is the durable, user-visible grouping — orthogonal to
+ * `work_goal`, `goal_id`, and `group_id`.
+ */
+plan?: string,
+/**
+ * The `PlanItem::id` inside `plan` the assignment serves —
+ * requires `plan`; an unknown or already done/dropped item
+ * fails the summon. Omitted lists the employee under the plan's
+ * unallocated work.
+ */
+item?: string,
+/**
  * Idempotency key: a retry that lost its response returns the
  * original employee rather than a duplicate. Reusing the id with
  * different summon fields is an error.

@@ -82,4 +82,15 @@ requestId?: string,
  * Canonical fingerprint of the summon fields `request_id` covers —
  * reusing the id with different fields is an error.
  */
-requestFingerprint?: string, };
+requestFingerprint?: string,
+/**
+ * The plan this assignment serves — a `BossPlan::id`. Set at summon
+ * or re-tagged through `control`'s `setPlan`; `None` lists the
+ * employee outside every plan group.
+ */
+planId?: string,
+/**
+ * The `PlanItem::id` inside `plan_id` the assignment serves — `None`
+ * leaves the employee unallocated at the bottom of its plan group.
+ */
+itemId?: string, };

@@ -720,6 +720,17 @@ pub struct BossEmployee {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub request_fingerprint: Option<String>,
+    /// The plan this assignment serves — a `BossPlan::id`. Set at summon
+    /// or re-tagged through `control`'s `setPlan`; `None` lists the
+    /// employee outside every plan group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_id: Option<Uuid>,
+    /// The `PlanItem::id` inside `plan_id` the assignment serves — `None`
+    /// leaves the employee unallocated at the bottom of its plan group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub item_id: Option<Uuid>,
 }
 
 impl BossEmployee {
@@ -1191,6 +1202,22 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         goal_id: Option<Uuid>,
+        /// Tag the assignment to a plan — the `BossPlan::id`, its
+        /// planning-session id, or its `plans/<file>.md` path. An unknown
+        /// plan or a plan with a closed outcome fails the summon rather
+        /// than landing untagged; a still-open draft tags fine. The tag
+        /// is the durable, user-visible grouping — orthogonal to
+        /// `work_goal`, `goal_id`, and `group_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        plan: Option<String>,
+        /// The `PlanItem::id` inside `plan` the assignment serves —
+        /// requires `plan`; an unknown or already done/dropped item
+        /// fails the summon. Omitted lists the employee under the plan's
+        /// unallocated work.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        item: Option<Uuid>,
         /// Idempotency key: a retry that lost its response returns the
         /// original employee rather than a duplicate. Reusing the id with
         /// different summon fields is an error.
@@ -1635,6 +1662,29 @@ pub enum EmployeeControl {
     SetResources {
         resources: crate::resources::ResourceSet,
     },
+    /// Re-tag the employee's plan and item links — the mutable half of
+    /// the summon tag, so a mis-tagged employee moves groups without a
+    /// resummon. Both fields are tri-state: an absent field keeps the
+    /// current link, `null` clears it, and a value re-tags. Re-tagging
+    /// the plan without restating `item` drops the employee to the plan's
+    /// unallocated list; an `item` set resolves against the employee's
+    /// effective plan and validates like the summon tag.
+    SetPlan {
+        #[serde(
+            default,
+            deserialize_with = "double_option::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[ts(optional)]
+        plan: Option<Option<String>>,
+        #[serde(
+            default,
+            deserialize_with = "double_option::deserialize",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[ts(optional)]
+        item: Option<Option<Uuid>>,
+    },
     Stop,
 }
 
@@ -1894,6 +1944,59 @@ mod tests {
                     && items.len() == 2
                     && items[0].id.is_none()
                     && items[1].id == Some(Uuid::from_u128(2))
+        ));
+    }
+
+    #[test]
+    fn plan_tag_and_retag_operations_decode_camel_case_payloads() {
+        let summon: super::BossOperation = serde_json::from_value(serde_json::json!({
+            "type": "summon",
+            "personaId": "00000000-0000-0000-0000-000000000001",
+            "jobTitle": "Worker",
+            "prompt": "Do work",
+            "project": "/tmp",
+            "plan": "plans/auth.md",
+            "item": "00000000-0000-0000-0000-000000000002"
+        }))
+        .unwrap();
+        assert!(matches!(
+            summon,
+            super::BossOperation::Summon { plan, item, .. }
+                if plan.as_deref() == Some("plans/auth.md")
+                    && item == Some(Uuid::from_u128(2))
+        ));
+        // Absent keeps the link, null clears it, a value re-tags.
+        let retag: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setPlan",
+            "plan": "plans/auth.md",
+            "item": "00000000-0000-0000-0000-000000000002"
+        }))
+        .unwrap();
+        assert!(matches!(
+            retag,
+            EmployeeControl::SetPlan { plan, item }
+                if plan == Some(Some("plans/auth.md".to_owned()))
+                    && item == Some(Some(Uuid::from_u128(2)))
+        ));
+        let clear: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setPlan",
+            "plan": null,
+            "item": null
+        }))
+        .unwrap();
+        assert!(matches!(
+            clear,
+            EmployeeControl::SetPlan { plan, item }
+                if plan == Some(None) && item == Some(None)
+        ));
+        let keep: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setPlan"
+        }))
+        .unwrap();
+        assert!(matches!(
+            keep,
+            EmployeeControl::SetPlan { plan, item }
+                if plan.is_none() && item.is_none()
         ));
     }
 

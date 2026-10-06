@@ -26,4 +26,4 @@ jobTitle?: string, } | { "type": "setModel", provider: ProviderKind, model: stri
  * The ref the new worktree detaches at; required when `workspace`
  * is `worktree`, ignored for `local`.
  */
-baseBranch: string | null, } | { "type": "setResources", resources: ResourceSet, } | { "type": "stop" };
+baseBranch: string | null, } | { "type": "setResources", resources: ResourceSet, } | { "type": "setPlan", plan?: string | null, item?: string | null, } | { "type": "stop" };
