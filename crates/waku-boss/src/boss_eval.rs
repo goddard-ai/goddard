@@ -82,6 +82,11 @@ exist only during this script invocation; use named memory buckets for durable s
                                             optional jobTitle that retitles the
                                             job when the steer redirects the
                                             assignment — label only, no prompt
+  resume(sessionId)                         revive an expired employee in place —
+                                            queues a synthesized \"verify and
+                                            continue\" prompt behind whatever
+                                            parked at expiry; transcript,
+                                            workspace, and cursor survive
   transcript(sessionId[, turn])             transcript map
   readFile(path)                            #{path, content}
   writeFile(path, content)
@@ -398,6 +403,19 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
                     "sessionId": session_id.as_str(),
                     "action": action,
                 }),
+            )
+            .and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("resume", {
+        let tx = tx.clone();
+        move |session_id: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                tagged(
+                    "resume",
+                    serde_json::json!({ "sessionId": session_id.as_str() }),
+                ),
             )
             .and_then(unwrap_result)
         }

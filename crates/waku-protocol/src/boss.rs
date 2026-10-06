@@ -492,6 +492,15 @@ pub struct SummonTicket {
     /// daemon policy; it never gates recovery.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interruptions: Vec<InterruptionRecord>,
+    /// How many times this ticket was resumed after an interruption —
+    /// the boss's read on whether the job is stuck in a crash loop.
+    #[serde(default)]
+    pub resume_count: u32,
+    /// The settle cause the latest resume answered — None until the
+    /// ticket has been resumed once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub last_resumed_cause: Option<ExpiryCause>,
 }
 
 /// Why an accepted ticket cannot dispatch yet — a wait reason, never an
@@ -1420,6 +1429,12 @@ pub enum BossOperation {
         session_id: Uuid,
         action: EmployeeControl,
     },
+    /// Revive an expired employee in place — re-admit its ticket through
+    /// the ordinary queue with a synthesized "verify and continue" prompt
+    /// so the transcript, workspace, and provider cursor all survive.
+    /// Same caller gate as `control`: the human, the boss, or the
+    /// employee's supervisor. A record that is not expired refuses.
+    Resume { session_id: Uuid },
     /// An employee flags that its job needs supervisor attention — a
     /// blocker, a decision, or a failure. The report interrupts the
     /// supervisor's running turn when the runtime can take it and stays on

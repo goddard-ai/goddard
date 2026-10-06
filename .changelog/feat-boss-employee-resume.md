@@ -1,0 +1,1 @@
+- Supervisors can revive an interrupted employee with `goddard-agent boss resume EMPLOYEE_ID` (or the `resume(sessionId)` eval binding): the employee requeues with its transcript, workspace, and provider cursor intact plus a "verify and continue" prompt, behind whatever follow-ups parked before it expired.

@@ -2588,6 +2588,7 @@ impl BossService {
             | BossOperation::Automation { .. }
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
+            | BossOperation::Resume { .. }
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::Speak { .. }
@@ -6771,6 +6772,8 @@ mod memory_op_tests {
             blocked_by: Vec::new(),
             dispatch_event: None,
             interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
         };
         let member = |title: &str| {
             service
@@ -6881,6 +6884,8 @@ mod memory_op_tests {
             blocked_by: Vec::new(),
             dispatch_event: None,
             interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
         };
         let builds = |count: u32| waku_protocol::resources::ResourceSet {
             native_builds: count,
@@ -7138,6 +7143,8 @@ mod memory_op_tests {
             blocked_by: Vec::new(),
             dispatch_event: None,
             interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
         };
         let member = |title: &str| {
             service

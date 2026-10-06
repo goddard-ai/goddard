@@ -7331,6 +7331,15 @@ impl WakuBackend {
                     Ok(BossResult::Saved)
                 })
             },
+            BossOperation::Resume { session_id } => {
+                self.boss.with_operation_lock(|| {
+                    // Same gate `control` uses — the human, the boss, or
+                    // the employee's own supervisor decides.
+                    self.boss.require_control(caller, session_id)?;
+                    self.resume_employee(session_id)?;
+                    Ok(BossResult::Saved)
+                })
+            }
             BossOperation::ReportBlocker { message } => {
                 let caller =
                     caller.ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;
@@ -8847,6 +8856,8 @@ impl WakuBackend {
             blocked_by: Vec::new(),
             dispatch_event: None,
             interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
         };
         employee.request_id = request_id;
         employee.request_fingerprint = request_id.map(|_| fingerprint);
@@ -9209,6 +9220,38 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// `resume`: re-admit an interrupted employee in place. The resume is
+    /// the ordinary requeue — same capacity admission, same parked-prompt
+    /// merge, same adopted-worktree refusal — with the ticket adjusting
+    /// to carry a synthesized "verify and continue" prompt behind
+    /// whatever parked at expiry, plus the resume count and the cause it
+    /// answered. A live record refuses: prompts reach it directly.
+    fn resume_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let employee = self
+            .boss
+            .employee_including_retired(session_id)
+            .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
+        if !employee.expired {
+            bail!("employee {session_id} is still live — prompt it instead of resuming");
+        }
+        let expiry = employee.expiry.as_ref();
+        let cause = expiry
+            .map(|expiry| expiry.cause)
+            .unwrap_or(waku_protocol::boss::ExpiryCause::Finished);
+        let mut prompt = format!(
+            "You were interrupted — {}. Verify the state of your partial work before continuing where it left off.",
+            cause.describe()
+        );
+        if let Some(question) = expiry.and_then(|expiry| expiry.pending_question.as_deref()) {
+            prompt.push_str(&format!(" Your unanswered question was: \"{question}\""));
+        }
+        self.requeue_employee(session_id, |ticket, _started| {
+            ticket.pending_prompts.push(prompt.clone());
+            ticket.resume_count = ticket.resume_count.saturating_add(1);
+            ticket.last_resumed_cause = Some(cause);
+        })
+    }
+
     /// A synthesized ticket for employees whose records predate admission
     /// tickets — a pre-queue summon requeuing for a prompt or a model
     /// change. `requeue_employee` keeps a real ticket when one exists;
@@ -9305,6 +9348,8 @@ impl WakuBackend {
                 blocked_by: Vec::new(),
                 dispatch_event: None,
                 interruptions: Vec::new(),
+                resume_count: 0,
+                last_resumed_cause: None,
             },
             started,
         ))
@@ -18515,6 +18560,223 @@ mod tests {
         // not as a fresh envelope.
         assert_eq!(ticket.pending_prompts, vec!["try again".to_owned()]);
         drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `resume` re-admits the expired ticket through the ordinary queue:
+    /// the synthesized prompt names the interruption it answers, the
+    /// ticket counts the resume against that cause, and the record's
+    /// expiry clears with the rest of the old admission's flags.
+    #[test]
+    fn a_resume_requeues_the_expired_employee_with_its_cause() {
+        use waku_protocol::boss::{BossOperation, EmployeeLifecycle, ExpiryCause};
+        let root = std::env::temp_dir().join(format!("boss-resume-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+
+        // The first summon grants and fails at launch — expired record
+        // classified `failed`.
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "revive",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        let session_id = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .unwrap()
+            .id;
+        assert_eq!(
+            backend
+                .boss
+                .employee(session_id)
+                .unwrap()
+                .expiry
+                .unwrap()
+                .cause,
+            ExpiryCause::Failed
+        );
+
+        // Close the pool so the resume waits in the queue where the
+        // ticket's adjustments are readable.
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Resume { session_id },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        assert!(!employee.expired);
+        assert!(employee.expiry.is_none());
+        let ticket = employee.ticket.as_ref().unwrap();
+        assert_eq!(ticket.generation, 2);
+        assert_eq!(ticket.resume_count, 1);
+        assert_eq!(ticket.last_resumed_cause, Some(ExpiryCause::Failed));
+        assert_eq!(ticket.interruptions.len(), 1);
+        let prompt = ticket.pending_prompts.last().unwrap();
+        assert!(prompt.contains("interrupted"), "{prompt}");
+        assert!(prompt.contains("failed turn"), "{prompt}");
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Resume is for expired records — a queued or working employee takes
+    /// its next input as a prompt, not a revive.
+    #[test]
+    fn a_resume_refuses_a_live_employee() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("boss-resume-live-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "still queued",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let session_id = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .unwrap()
+            .id;
+        let error = backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Resume { session_id },
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("still live"), "{error:#}");
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The adopted-worktree refusal survives resume: a finished employee
+    /// whose checkout a later summon owns comes back as an error, not a
+    /// resume into somebody else's worktree.
+    #[test]
+    fn a_resume_refuses_an_adopted_worktree() {
+        use waku_protocol::boss::{BossOperation, EmployeeSettle};
+        let root =
+            std::env::temp_dir().join(format!("boss-resume-adopted-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.workspace = crate::model::SessionWorkspace::Worktree {
+                path: root.join("worktree"),
+                name: "worktree".into(),
+                branch: Some("wip".into()),
+                base_branch: Some("main".into()),
+                adopted_by: Some(Uuid::new_v4()),
+            };
+            backend.task_store.save(&mut state).unwrap();
+        }
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+            .unwrap();
+        let error = backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Resume {
+                    session_id: employee_id,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("adopted"), "{error:#}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A resume keeps prompts parked at expiry ahead of its continuation
+    /// note — the ordinary ticket merge does the ordering.
+    #[test]
+    fn a_resume_drains_parked_prompts_first() {
+        use waku_protocol::boss::{
+            BossOperation, EmployeeControl, EmployeeLifecycle, EmployeeSettle,
+        };
+        let root = std::env::temp_dir().join(format!("boss-resume-parked-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, _parent, _child) =
+            employee_finish_fixture(&root);
+        // Pin a model so the synthesized ticket takes a pool the test
+        // can close.
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.model = Some("gpt-5.5".into());
+            backend.task_store.save(&mut state).unwrap();
+        }
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: "queued while working".into(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend
+            .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+            .unwrap();
+        // Close the pool so the resume queues instead of dispatching —
+        // the parked prompt and the resume note read off the ticket.
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Resume {
+                    session_id: employee_id,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let employee = backend.boss.employee(employee_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        let pending = &employee.ticket.as_ref().unwrap().pending_prompts;
+        assert_eq!(pending.len(), 2, "{pending:?}");
+        assert_eq!(pending[0], "queued while working");
+        assert!(pending[1].contains("interrupted"), "{}", pending[1]);
         let _ = std::fs::remove_dir_all(root);
     }
 

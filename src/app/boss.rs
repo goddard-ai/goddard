@@ -7651,6 +7651,8 @@ mod tests {
             blocked_by,
             dispatch_event: None,
             interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
         }
     }
 

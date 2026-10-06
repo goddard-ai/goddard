@@ -62,6 +62,7 @@ USAGE
     goddard-agent boss summon --persona NAME --title TITLE --file BRIEF.md
     goddard-agent boss prompt EMPLOYEE_ID --file BRIEF.md
     goddard-agent boss transcript EMPLOYEE_ID [--turn N]
+    goddard-agent boss resume EMPLOYEE_ID     Revive an expired employee — transcript and worktree intact
     goddard-agent boss roster [--all]
     goddard-agent read [TASK_ID] [--turn N]
     goddard-agent prompt TASK_ID (--text TEXT | --file PATH|-)
@@ -301,6 +302,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"}}),
             json!({"json":"BossResult::Saved after the employee is stopped"}),
             "goddard-agent boss stop EMPLOYEE_ID".to_owned(),
+        ),
+        "boss resume" => (
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"}}),
+            json!({"json":"BossResult::Saved after the expired employee requeues"}),
+            "goddard-agent boss resume EMPLOYEE_ID".to_owned(),
         ),
         "boss employee rename" => (
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"NAME":{"positional":true,"required":true,"type":"employee display name"}}),
@@ -759,6 +765,7 @@ fn schema() -> serde_json::Value {
         "boss view",
         "boss context",
         "boss stop",
+        "boss resume",
         "boss employee rename",
         "boss employee icon",
         "boss employee model",
@@ -1350,7 +1357,7 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
         "summon" => boss_summon(args),
         "file" | "persona" | "memory" | "plan" | "deliverable" | "speak" | "automation"
         | "resource-policy" | "open" | "browse" | "terminal" | "rename" | "avatar"
-        | "report-blocker" | "employee" | "stop" => boss_admin(action, args),
+        | "report-blocker" | "employee" | "stop" | "resume" => boss_admin(action, args),
         _ => unreachable!(),
     }
 }
@@ -1361,6 +1368,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
     if matches!(
         group,
         "rename" | "avatar" | "speak" | "report-blocker" | "open" | "browse" | "terminal" | "stop"
+        | "resume"
     ) {
         args.insert(0, group.to_owned());
         return boss_admin_leaf(&args);
@@ -1787,6 +1795,13 @@ fn boss_admin_leaf(args: &[String]) -> anyhow::Result<()> {
                 json!({"type":"control","sessionId":args[1],"action":{"type":"stop"}}),
             )?;
             print_boss(boss_request(operation)?)
+        }
+        "resume" => {
+            if args.len() != 2 {
+                bail!("usage: boss resume EMPLOYEE_ID");
+            }
+            let session_id = args[1].parse().context("invalid employee ID")?;
+            print_boss(boss_request(Op::Resume { session_id })?)
         }
         "rename" => {
             if args.len() != 2 {
