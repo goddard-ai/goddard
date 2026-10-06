@@ -103,6 +103,9 @@ const TITLE_BOTTOM_GAP: f32 = 30.0;
 /// shoulder still engages — the frame's squircles. `rounded_full` saturates
 /// and stays a plain circular capsule.
 const PILL_RADIUS: f32 = 15.5;
+/// The composer's VP pill uses the same unsaturated-radius trick at the
+/// frame's new 24px height.
+const VP_PILL_RADIUS: f32 = 11.5;
 /// The annotation bullet marker — a drawn disc reads heavier than the "•"
 /// text glyph, which renders as a ~4px speck at body size.
 const BULLET_SIZE: f32 = 6.0;
@@ -1784,20 +1787,20 @@ impl Waku {
                 .mr(px(2.0))
                 .bg(color)
         };
-        // The frame's insets: label 9px in, mic 2px off the label, 7px pad
-        // right — and a 9px berth before send, the row's 4px gap plus the
+        // The frame's insets: label 12px in, mic 1px off the label, 9px pad
+        // right — and a 12px berth before send, the row's 4px gap plus the
         // margin here.
         let pill = div()
             .id(controls.chip_id("voice-scratchpad"))
-            .h(px(20.0))
+            .h(px(24.0))
             .flex_none()
-            .mr(px(5.0))
-            .rounded_full()
+            .mr(px(8.0))
+            .rounded(px(VP_PILL_RADIUS))
             .flex()
             .items_center()
-            .gap(px(2.0))
-            .pl(px(9.0))
-            .pr(px(7.0))
+            .gap(px(1.0))
+            .pl(px(12.0))
+            .pr(px(9.0))
             .bg(theme.inverse);
         let pill = match state {
             ScratchpadButtonState::Recording => pill.child(dot(rgb(RECORDING_RED).into())),
@@ -2758,8 +2761,8 @@ impl Waku {
     }
 
     /// One control-row pill: Mute wears the solid dark treatment with an
-    /// enabled hairline, Hide and Cancel the card's solid fill, borderless —
-    /// the frame's fills.
+    /// enabled hairline, Hide and Cancel the card's solid fill, borderless
+    /// but lifted by the frame's 1px/4px drop shadow — the frame's fills.
     fn scratchpad_pill(
         &self,
         id: &'static str,
@@ -2792,7 +2795,12 @@ impl Waku {
                     .bg(theme.inverse)
                     .text_color(theme.on_inverse)
             })
-            .when(!primary, |pill| pill.bg(theme.composer).text_color(theme.text))
+            .when(!primary, |pill| {
+                pill.bg(theme.composer).text_color(theme.text).shadow(vec![
+                    gpui::BoxShadow::new(px(0.0), px(1.0), gpui::black().opacity(0.043))
+                        .blur_radius(px(4.0)),
+                ])
+            })
             .focus_visible(|pill| pill.border(hairline()).border_color(theme.accent))
             .hover(|pill| pill.opacity(0.88))
             .active(|pill| pill.opacity(0.75))
@@ -3440,11 +3448,11 @@ impl Waku {
     }
 }
 
-/// Bottom padding under the transcript rows — enough room for the last
-/// paragraph to scroll clear of the cover's opaque band, plus a line of
-/// air.
+/// Bottom padding under the transcript rows — the cover's whole height plus
+/// the controls' own 12px clearance, so the last paragraph and the live row
+/// rest fully above the fade, clear of the floating pills.
 fn lane_padding(lane: f32) -> f32 {
-    (lane - FOOTER_STRIP + GRADIENT_RISE) * (1.0 - GRADIENT_FADE_END) + 16.0
+    lane - FOOTER_STRIP + GRADIENT_RISE + CONTROLS_CLEARANCE
 }
 
 /// The caret quad for `offset` in the registered element `key` — an accent
