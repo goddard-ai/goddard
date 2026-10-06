@@ -932,6 +932,13 @@ impl WakuBackend {
             backend.archive_sessions(sessions)?;
             Ok(true)
         }));
+        let backend = Arc::downgrade(self);
+        self.boss.set_project_catalog(Arc::new(move || {
+            backend
+                .upgrade()
+                .map(|backend| backend.task_state.lock().projects.clone())
+                .unwrap_or_default()
+        }));
     }
 
     /// Point the `waku-link` ALPN at the daemon's metadata and pairing

@@ -27,3 +27,7 @@ pub type SessionBusy = Arc<dyn Fn(uuid::Uuid) -> bool + Send + Sync>;
 
 /// Daemon-owned session archival used by finalized-plan expiry.
 pub type ArchiveSessions = Arc<dyn Fn(&[uuid::Uuid]) -> anyhow::Result<bool> + Send + Sync>;
+
+/// The daemon's registered project list, read on demand so operations like
+/// memory-bucket resolution can turn a project name into its canonical path.
+pub type ProjectCatalog = Arc<dyn Fn() -> Vec<waku_protocol::model::Project> + Send + Sync>;

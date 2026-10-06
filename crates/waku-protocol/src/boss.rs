@@ -956,27 +956,47 @@ pub enum MemoryOperation {
         #[serde(default)]
         purpose: String,
     },
+    /// `bucket` is an explicit bucket id; `project` names a registered
+    /// project or an absolute project root and resolves to that project's
+    /// shared bucket. When both are absent, an employee caller's assigned
+    /// project bucket is used. `bucket` and `project` are mutually
+    /// exclusive.
     Overview {
-        bucket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
     },
     Record {
-        bucket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
         kind: MemoryNoteKind,
         text: String,
         retry_key: String,
     },
     SubmitSummary {
-        bucket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
         start: u64,
         end: u64,
         text: String,
     },
     Scan {
-        bucket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
         query: String,
     },
     ZoomBucket {
-        bucket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
         start: u64,
         end: u64,
     },

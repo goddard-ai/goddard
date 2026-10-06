@@ -50,6 +50,76 @@ fn project_bucket_id(path: &Path) -> String {
     format!("project-{key}")
 }
 
+/// Resolve a `--project` reference — a registered project's name or id, or
+/// an absolute project root — to a canonical directory path.
+fn resolve_project_reference(
+    projects: &[waku_protocol::model::Project],
+    reference: &str,
+) -> anyhow::Result<PathBuf> {
+    if let Some(id) = waku_protocol::persistence::resolve_named_search_project(projects, reference)
+        && let Some(project) = projects.iter().find(|project| project.id == id)
+    {
+        return Ok(project.path.clone());
+    }
+    let path = PathBuf::from(reference);
+    anyhow::ensure!(
+        path.is_absolute(),
+        "project `{reference}` is unknown to the daemon"
+    );
+    fs::canonicalize(&path).with_context(|| format!("project `{reference}` does not exist"))
+}
+
+/// Pick the concrete bucket a memory operation targets. `project` resolves
+/// through the registered-project catalog or an absolute path; an absent
+/// pair falls back to the caller's assigned project. The returned path is
+/// the project root when the target is project-derived so the caller can
+/// lazily materialize the bucket.
+fn resolve_memory_bucket(
+    bucket: &Option<String>,
+    project: &Option<String>,
+    own_project: Option<&Path>,
+    projects: &[waku_protocol::model::Project],
+) -> anyhow::Result<(String, Option<PathBuf>)> {
+    match (bucket, project) {
+        (Some(_), Some(_)) => bail!("pass a bucket or a project, not both"),
+        (_, Some(reference)) => {
+            let path = resolve_project_reference(projects, reference)?;
+            Ok((project_bucket_id(&path), Some(path)))
+        }
+        (Some(bucket), None) => Ok((bucket.clone(), None)),
+        (None, None) => own_project
+            .map(|path| (project_bucket_id(path), Some(path.to_path_buf())))
+            .ok_or_else(|| anyhow!("memory operation needs a bucket or a project")),
+    }
+}
+
+/// The `(bucket, project)` selectors of the bucket-addressed memory ops.
+fn memory_bucket_ref(
+    operation: &waku_protocol::boss::MemoryOperation,
+) -> Option<(&Option<String>, &Option<String>)> {
+    use waku_protocol::boss::MemoryOperation;
+    match operation {
+        MemoryOperation::Overview {
+            bucket, project, ..
+        }
+        | MemoryOperation::Record {
+            bucket, project, ..
+        }
+        | MemoryOperation::SubmitSummary {
+            bucket, project, ..
+        }
+        | MemoryOperation::Scan {
+            bucket, project, ..
+        }
+        | MemoryOperation::ZoomBucket {
+            bucket, project, ..
+        } => Some((bucket, project)),
+        MemoryOperation::ListBuckets
+        | MemoryOperation::CreateBucket { .. }
+        | MemoryOperation::MigrateLegacy { .. } => None,
+    }
+}
+
 const LEGACY_MEMORY_FILE_BYTES: u64 = 256 * 1024;
 const LEGACY_MEMORY_NOTE_LIMIT: usize = 256;
 const LEGACY_MEMORY_TOTAL_BYTES: usize = 2 * 1024 * 1024;
@@ -280,6 +350,7 @@ pub struct BossService {
     injected: Mutex<std::collections::HashSet<Uuid>>,
     router: Mutex<BossRouter>,
     evals: Mutex<BossEval>,
+    project_catalog: Mutex<Option<crate::ProjectCatalog>>,
 }
 
 impl BossService {
@@ -302,6 +373,7 @@ impl BossService {
             injected: Mutex::new(std::collections::HashSet::new()),
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
+            project_catalog: Mutex::new(None),
         }
     }
 
@@ -422,6 +494,7 @@ impl BossService {
             injected: Mutex::new(std::collections::HashSet::new()),
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
+            project_catalog: Mutex::new(None),
         };
         service.migrate_plan_documents();
         service.save(&service.state.lock())?;
@@ -597,6 +670,13 @@ impl BossService {
 
     pub fn set_archive_sessions(&self, archive: crate::ArchiveSessions) {
         *self.archive_sessions.lock() = Some(archive);
+    }
+
+    /// Install the daemon's registered-project lookup without retaining the
+    /// daemon itself. Used to resolve `--project` references in memory
+    /// operations; absent, only an employee's own project resolves.
+    pub fn set_project_catalog(&self, catalog: crate::ProjectCatalog) {
+        *self.project_catalog.lock() = Some(catalog);
     }
 
     /// Serialize a host-side operation with Boss mutations without exposing
@@ -1077,7 +1157,7 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; you can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -1088,7 +1168,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every named memory bucket, but their contents are never loaded automatically. Choose the relevant bucket and use its explicit overview, zoom, scan, record, and summary operations. Record concise, useful notes directly in the appropriate bucket; notes survive sessions, employees, and model changes. Project-assigned employees have automatic read and insert access to that project's shared bucket. Personal buckets remain private unless you grant them deliberately. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every named memory bucket, but their contents are never loaded automatically. Choose the relevant bucket — a project's name resolves to its shared bucket — and use its explicit overview, zoom, scan, record, and summary operations. Record concise, useful notes directly in the appropriate bucket; notes survive sessions, employees, and model changes. Project-assigned employees have automatic read and insert access to that project's shared bucket. Personal buckets remain private unless you grant them deliberately. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -2250,16 +2330,44 @@ impl BossService {
                         .iter()
                         .any(|employee| employee.session_id == *caller && !employee.expired)
                 });
-                let project_bucket_id = active_employee
-                    .and_then(|session| self.projects.lock().get(&session).cloned())
-                    .map(|path| project_bucket_id(&path));
-                if let Some(bucket_id) = &project_bucket_id
-                    && !known_buckets.iter().any(|bucket| bucket.id == *bucket_id)
+                let own_project_path =
+                    active_employee.and_then(|session| self.projects.lock().get(&session).cloned());
+                let own_bucket_id = own_project_path.as_deref().map(project_bucket_id);
+                // `project` references resolve through the registered-project
+                // catalog; an absent target defaults to the caller's project.
+                let (resolved_bucket, resolved_project) = match memory_bucket_ref(&operation) {
+                    Some((bucket, project)) => {
+                        let catalog = self
+                            .project_catalog
+                            .lock()
+                            .as_ref()
+                            .map(|get| get())
+                            .unwrap_or_default();
+                        let (id, path) = resolve_memory_bucket(
+                            bucket,
+                            project,
+                            own_project_path.as_deref(),
+                            &catalog,
+                        )?;
+                        (Some(id), path)
+                    }
+                    None => (None, None),
+                };
+                // Project buckets materialize on first touch: the caller's own
+                // always, an explicitly named one only for the boss — an
+                // employee naming a foreign project must not mint it.
+                for path in [
+                    own_project_path,
+                    resolved_project.filter(|_| boss_principal),
+                ]
+                .into_iter()
+                .flatten()
                 {
-                    let context_path = caller
-                        .and_then(|session| self.projects.lock().get(&session).cloned())
-                        .unwrap_or_default();
-                    let name = context_path
+                    let bucket_id = project_bucket_id(&path);
+                    if known_buckets.iter().any(|bucket| bucket.id == bucket_id) {
+                        continue;
+                    }
+                    let name = path
                         .file_name()
                         .and_then(|part| part.to_str())
                         .unwrap_or("Project")
@@ -2268,7 +2376,7 @@ impl BossService {
                         id: bucket_id.clone(),
                         name,
                         purpose: "Shared project memory".into(),
-                        project_id: Some(bucket_id.clone()),
+                        project_id: Some(bucket_id),
                     };
                     buckets.create_bucket(&bucket)?;
                     known_buckets.push(bucket);
@@ -2286,9 +2394,9 @@ impl BossService {
                 let visible_buckets = known_buckets
                     .iter()
                     .filter(|bucket| {
-                    boss_principal
-                        || Some(bucket.id.as_str()) == project_bucket_id.as_deref()
-                        || granted_bucket_ids.contains(&bucket.id)
+                        boss_principal
+                            || Some(bucket.id.as_str()) == own_bucket_id.as_deref()
+                            || granted_bucket_ids.contains(&bucket.id)
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -2338,7 +2446,10 @@ impl BossService {
                         buckets.create_bucket(&created)?;
                         bucket_list.push(serde_json::to_value(created)?);
                     }
-                    MemoryOperation::Overview { bucket: bucket_id } => {
+                    MemoryOperation::Overview { .. } => {
+                        let bucket_id = resolved_bucket
+                            .clone()
+                            .expect("bucket-addressed ops resolve a target");
                         bucket = Some(bucket_id.clone());
                         let result = buckets.overview(&bucket_access, &principal, &bucket_id)?;
                         compression = result
@@ -2349,11 +2460,14 @@ impl BossService {
                         overview = Some(serde_json::to_value(result)?);
                     }
                     MemoryOperation::Record {
-                        bucket: bucket_id,
                         kind,
                         text,
                         retry_key,
+                        ..
                     } => {
+                        let bucket_id = resolved_bucket
+                            .clone()
+                            .expect("bucket-addressed ops resolve a target");
                         bucket = Some(bucket_id.clone());
                         let kind = match kind {
                             waku_protocol::boss::MemoryNoteKind::Fact => {
@@ -2378,11 +2492,11 @@ impl BossService {
                         compression = result.compression.map(serde_json::to_value).transpose()?;
                     }
                     MemoryOperation::SubmitSummary {
-                        bucket: bucket_id,
-                        start,
-                        end,
-                        text,
+                        start, end, text, ..
                     } => {
+                        let bucket_id = resolved_bucket
+                            .clone()
+                            .expect("bucket-addressed ops resolve a target");
                         bucket = Some(bucket_id.clone());
                         compression = buckets
                             .submit_summary(
@@ -2396,10 +2510,10 @@ impl BossService {
                             .map(serde_json::to_value)
                             .transpose()?;
                     }
-                    MemoryOperation::Scan {
-                        bucket: bucket_id,
-                        query,
-                    } => {
+                    MemoryOperation::Scan { query, .. } => {
+                        let bucket_id = resolved_bucket
+                            .clone()
+                            .expect("bucket-addressed ops resolve a target");
                         bucket = Some(bucket_id.clone());
                         notes = buckets
                             .search(&bucket_access, &principal, &bucket_id, &query)?
@@ -2407,11 +2521,10 @@ impl BossService {
                             .map(serde_json::to_value)
                             .collect::<std::result::Result<Vec<_>, _>>()?;
                     }
-                    MemoryOperation::ZoomBucket {
-                        bucket: bucket_id,
-                        start,
-                        end,
-                    } => {
+                    MemoryOperation::ZoomBucket { start, end, .. } => {
+                        let bucket_id = resolved_bucket
+                            .clone()
+                            .expect("bucket-addressed ops resolve a target");
                         bucket = Some(bucket_id.clone());
                         notes = buckets
                             .zoom(&bucket_access, &principal, &bucket_id, start, end)?
@@ -2448,7 +2561,7 @@ impl BossService {
                                 );
                                 let result = buckets.insert(
                                     &bucket_access,
-                            &principal,
+                                    &principal,
                                     &bucket_id,
                                     waku_memory_engine::buckets::NoteKind::Observation,
                                     &text,
@@ -2456,8 +2569,8 @@ impl BossService {
                                 )?;
                                 compression =
                                     result.compression.map(serde_json::to_value).transpose()?;
-                    }
-                    }
+                            }
+                        }
                         bucket = Some(bucket_id.clone());
                         migration = Some(MemoryMigrationReport {
                             bucket: bucket_id,
@@ -5441,7 +5554,8 @@ mod memory_op_tests {
                 Some(employee_id),
                 BossOperation::Memory {
                     operation: MemoryOperation::Record {
-                        bucket: project_bucket,
+                        bucket: Some(project_bucket),
+                        project: None,
                         kind: waku_protocol::boss::MemoryNoteKind::Fact,
                         text: "Project access needs no special grant".into(),
                         retry_key: "project-note".into(),
@@ -5458,7 +5572,10 @@ mod memory_op_tests {
                 .handle(
                     Some(employee_id),
                     BossOperation::Memory {
-                        operation: MemoryOperation::Overview { bucket: private }
+                        operation: MemoryOperation::Overview {
+                            bucket: Some(private),
+                            project: None,
+                        }
                     },
                 )
                 .unwrap_err()
@@ -5479,6 +5596,197 @@ mod memory_op_tests {
                 .unwrap_err()
                 .to_string()
                 .contains("only the Boss")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `project` resolves registered names and absolute roots to the
+    /// project bucket; an absent selector lands on the caller's project.
+    #[test]
+    fn project_memory_resolves_names_paths_and_the_callers_own_project() {
+        let root = std::env::temp_dir().join(format!("boss-project-memory-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let own = root.join("own-repo");
+        let foreign = root.join("foreign-repo");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(&foreign).unwrap();
+        let registered = |name: &str, path: &Path| waku_protocol::model::Project {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            path: path.to_path_buf(),
+            bookmark: None,
+            created_at: 0,
+            temporary: false,
+            starred: false,
+            friend_peer_id: None,
+            kind: None,
+            resolved_name: None,
+        };
+        let catalog = vec![
+            registered("own-repo", &own),
+            registered("foreign-repo", &foreign),
+        ];
+        service.set_project_catalog(std::sync::Arc::new(move || catalog.clone()));
+        let persona = service.document().personas[1].id;
+        let employee = service
+            .prepare_employee(
+                boss,
+                persona,
+                "Review".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let employee_id = employee.session_id;
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        service.set_project_context(employee_id, own.clone());
+
+        // No selector writes to the employee's assigned project bucket.
+        let BossResult::Memory {
+            bucket: Some(echoed),
+            ..
+        } = service
+            .handle(
+                Some(employee_id),
+                BossOperation::Memory {
+                    operation: MemoryOperation::Record {
+                        bucket: None,
+                        project: None,
+                        kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                        text: "default bucket".into(),
+                        retry_key: "default-1".into(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("an unqualified record lands in the employee's project bucket")
+        };
+        assert_eq!(echoed, project_bucket_id(&own));
+
+        // A registered project name resolves case-insensitively to the same
+        // bucket — here the employee's own.
+        let BossResult::Memory {
+            bucket: Some(echoed),
+            ..
+        } = service
+            .handle(
+                Some(employee_id),
+                BossOperation::Memory {
+                    operation: MemoryOperation::Overview {
+                        bucket: None,
+                        project: Some("Own-Repo".into()),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("a project name resolves to its shared bucket")
+        };
+        assert_eq!(echoed, project_bucket_id(&own));
+
+        // A foreign project stays out of the employee's reach — resolving it
+        // does not mint or grant the bucket.
+        assert!(
+            service
+                .handle(
+                    Some(employee_id),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview {
+                            bucket: None,
+                            project: Some("foreign-repo".into()),
+                        },
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("unknown memory bucket")
+        );
+
+        // The boss reaches any registered project by name or by absolute
+        // path; the first touch materializes the bucket for both spellings.
+        for reference in [
+            "foreign-repo".to_owned(),
+            foreign.to_string_lossy().into_owned(),
+        ] {
+            let BossResult::Memory {
+                bucket: Some(echoed),
+                ..
+            } = service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview {
+                            bucket: None,
+                            project: Some(reference),
+                        },
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("the boss resolves a project reference to its bucket")
+            };
+            assert_eq!(echoed, project_bucket_id(&foreign));
+        }
+
+        // Misspellings and ambiguous selectors fail loudly.
+        assert!(
+            service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview {
+                            bucket: None,
+                            project: Some("nope".into()),
+                        },
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("unknown to the daemon")
+        );
+        assert!(
+            service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview {
+                            bucket: Some("project-x".into()),
+                            project: Some("own-repo".into()),
+                        },
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("not both")
+        );
+        assert!(
+            service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview {
+                            bucket: None,
+                            project: None,
+                        },
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("needs a bucket or a project")
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -5572,7 +5880,8 @@ mod memory_op_tests {
                 Some(boss),
                 BossOperation::Memory {
                     operation: MemoryOperation::Scan {
-                        bucket: bucket.clone(),
+                        bucket: Some(bucket.clone()),
+                        project: None,
                         query: "dev".into(),
                     },
                 },
@@ -5588,7 +5897,8 @@ mod memory_op_tests {
                 Some(boss),
                 BossOperation::Memory {
                     operation: MemoryOperation::Scan {
-                        bucket: bucket.clone(),
+                        bucket: Some(bucket.clone()),
+                        project: None,
                         query: "dev".into(),
                     },
                 },

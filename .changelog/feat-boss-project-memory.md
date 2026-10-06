@@ -1,0 +1,1 @@
+- Boss memory operations now address projects directly: `goddard-agent boss memory` accepts a registered project name or absolute path via `--project` instead of requiring the opaque `project-<hash>` bucket id, and employees omit the bucket entirely to reach their assigned project's shared bucket.
