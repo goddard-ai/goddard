@@ -15,6 +15,17 @@ pub struct ResourceSet {
     #[serde(default)]
     pub desktop_input: u32,
 }
+impl ResourceSet {
+    /// Whether the set names any host capacity at all. An admission
+    /// ticket may carry an empty set — it claims a model slot only — so
+    /// such a reservation holds nothing a nested request could borrow.
+    pub fn is_empty(&self) -> bool {
+        self.exclusive.is_empty()
+            && self.resident_devices == 0
+            && self.native_builds == 0
+            && self.desktop_input == 0
+    }
+}
 
 /// A daemon-owned model-slot claim an admission reservation carries.
 /// Namespaced by stable daemon (boss) identity so one host broker

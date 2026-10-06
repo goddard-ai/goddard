@@ -146,21 +146,30 @@ impl Broker {
                 if wait_seconds > 86400 {
                     bail!("wait_seconds must be at most 86400");
                 }
-                if let Some(id) = parent {
-                    let r = ledger
-                        .reservations
-                        .iter()
-                        .find(|r| r.id == id && r.task == task)
-                        .context("parent reservation is not owned by this task")?;
-                    if r.cancelled
-                        || r.released
-                        || r.granted_at.is_none()
-                        || !subset(&resources, &r.resources)
-                    {
-                        bail!(
-                            "nested reservation must use an active parent's resource subset; acquire the full set at the outermost command"
-                        );
+                // A granted parent with an empty set — a model-claim-only
+                // admission ticket — holds nothing a subset could borrow,
+                // so the request falls through to a top-level acquisition.
+                let borrows = match parent {
+                    Some(id) => {
+                        let r = ledger
+                            .reservations
+                            .iter()
+                            .find(|r| r.id == id && r.task == task)
+                            .context("parent reservation is not owned by this task")?;
+                        if r.cancelled
+                            || r.released
+                            || r.granted_at.is_none()
+                            || (!r.resources.is_empty() && !subset(&resources, &r.resources))
+                        {
+                            bail!(
+                                "nested reservation must use an active parent's resource subset; acquire the full set at the outermost command"
+                            );
+                        }
+                        (!r.resources.is_empty()).then_some(id)
                     }
+                    None => None,
+                };
+                if let Some(id) = borrows {
                     request_id = Some(id);
                     borrowed = true;
                 } else {
@@ -168,7 +177,12 @@ impl Broker {
                     if ledger
                         .reservations
                         .iter()
-                        .any(|r| r.task == task && r.granted_at.is_some() && !r.released)
+                        .any(|r| {
+                            r.task == task
+                                && r.granted_at.is_some()
+                                && !r.released
+                                && !r.resources.is_empty()
+                        })
                     {
                         bail!(
                             "task already holds resources; pass parent for subset reuse or release before acquiring a new set"
@@ -1185,6 +1199,93 @@ mod tests {
                 .transaction(task, acquisition(build(), None), Observation::default())
                 .is_err()
         );
+    }
+
+    /// An employee admitted with an empty declared set holds only a model
+    /// claim: the ticket id its session inherits is not a resource parent,
+    /// so first-use `resource` calls acquire their own set top-level
+    /// instead of borrowing a subset that does not exist.
+    #[test]
+    fn model_only_admission_passes_inherited_acquires_through_to_top_level() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let claim = || AdmissionClaim {
+            daemon: Uuid::new_v4(),
+            provider: "codex".into(),
+            model: "gpt-5.5".into(),
+            live_limit: u32::MAX,
+            hard_cap: u32::MAX,
+            allow_burst: false,
+        };
+        let ticket = h
+            .broker
+            .try_admission(
+                task,
+                Uuid::new_v4(),
+                ResourceSet::default(),
+                "ticket".into(),
+                claim(),
+            )
+            .unwrap();
+        assert!(ticket.granted);
+        let ticket_id = ticket
+            .status
+            .reservations
+            .iter()
+            .find(|r| r.granted_at.is_some())
+            .unwrap()
+            .id;
+
+        // The inherited ticket id passes through to a real acquisition.
+        let first = h.op(task, acquisition(build(), Some(ticket_id)));
+        let first_id = id(&first);
+        assert_ne!(first_id, ticket_id);
+        assert!(!first.borrowed);
+        assert!(granted(&first, first_id));
+
+        // Runs nested under the real reservation still borrow its subset,
+        // and a second top-level set still cannot expand mid-hold.
+        let nested = h.op(task, acquisition(build(), Some(first_id)));
+        assert!(nested.borrowed);
+        assert_eq!(id(&nested), first_id);
+        assert!(
+            h.broker
+                .transaction(
+                    task,
+                    acquisition(
+                        ResourceSet {
+                            desktop_input: 1,
+                            ..Default::default()
+                        },
+                        Some(ticket_id),
+                    ),
+                    Observation::default()
+                )
+                .is_err()
+        );
+
+        // An empty ticket also does not block a plain top-level acquire.
+        let other = Uuid::new_v4();
+        h.broker
+            .try_admission(
+                other,
+                Uuid::new_v4(),
+                ResourceSet::default(),
+                "ticket".into(),
+                claim(),
+            )
+            .unwrap();
+        let direct = h.op(
+            other,
+            acquisition(
+                ResourceSet {
+                    desktop_input: 1,
+                    ..Default::default()
+                },
+                None,
+            ),
+        );
+        assert!(granted(&direct, id(&direct)));
     }
 
     /// A re-admission under a fresh id is the daemon's swap: the
