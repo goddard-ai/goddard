@@ -39,6 +39,7 @@ uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-base = { path = "../waku-base" }
 waku-exec = { path = "../waku-exec" }
 waku-git = { path = "../waku-git" }
+waku-sessions = { path = "../waku-sessions" }
 waku-localization = { path = "../waku-localization" }
 waku-boss = { path = "../waku-boss" }
 waku-protocol = { path = "../waku-protocol" }
@@ -69,6 +70,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+waku-sessions = { path = "../waku-sessions", features = ["test-support"] }
 waku-client = { path = "../waku-client" }
 
 [build-dependencies]

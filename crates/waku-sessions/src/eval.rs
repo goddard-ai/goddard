@@ -145,7 +145,7 @@ impl EvalDecisionRecord {
 
 /// Where the decision log lives: beside the daemon's `settings.json`.
 pub fn default_log_path() -> PathBuf {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(path) = test_support::log_path() {
         return path;
     }
@@ -345,7 +345,7 @@ impl std::error::Error for EvaluationHttpStatus {}
 
 /// Retry one service-unavailable response without exceeding the caller's
 /// total timeout budget. Provider-switch is the only caller that opts in.
-pub(crate) fn evaluate_with_timeout_retry_503(
+pub fn evaluate_with_timeout_retry_503(
     settings: &EvalSettings,
     state: &Value,
     questions: &BTreeMap<String, EvalQuestion>,
@@ -524,7 +524,7 @@ fn curl_post_json(
     body: &[u8],
     timeout_secs: u64,
 ) -> anyhow::Result<(u16, Vec<u8>)> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(response) = test_support::post(body) {
         return response;
     }
@@ -619,8 +619,8 @@ fn split_status_and_body(raw: &[u8]) -> anyhow::Result<(u16, Vec<u8>)> {
 /// Substitute only the external HTTP response, keeping request construction,
 /// answer decoding, and the caller's policy real. Each fixture belongs to its
 /// test thread and owns its decision-log directory, including during unwind.
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::*;
     use std::cell::RefCell;
 
@@ -635,7 +635,7 @@ pub(crate) mod test_support {
         static BACKEND: RefCell<Option<Backend>> = const { RefCell::new(None) };
     }
 
-    pub(crate) fn with_http_response<T>(
+    pub fn with_http_response<T>(
         response: impl FnOnce(Value) -> anyhow::Result<(u16, Vec<u8>)> + 'static,
         run: impl FnOnce() -> T,
     ) -> T {

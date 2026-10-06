@@ -312,7 +312,7 @@ pub fn fork_session_at_turn(
 /// turns and hand back a cursor for the continuing conversation". Revert is
 /// real headroom — it survives reconnect via `Session.Info.revert` and carries
 /// per-file patches — and wants its own affordance rather than this one.
-pub(crate) fn fork_session_removing_turns(
+pub fn fork_session_removing_turns(
     endpoint: &Endpoint,
     session_id: &str,
     turns_to_remove: usize,
@@ -467,9 +467,7 @@ fn retained_turn_count(total_turns: usize, turns_to_remove: usize) -> anyhow::Re
 /// Attach-only, so a launch with no service running answers empties and
 /// `model_catalog` falls back to its disk cache rather than starting the
 /// user's daemon just to refresh a picker.
-pub(crate) fn discover_catalog(
-    binary: &Path,
-) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
+pub fn discover_catalog(binary: &Path) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
     let Ok(Some(service)) = opencode_service::attached(binary) else {
         return (Vec::new(), None);
     };
@@ -498,12 +496,12 @@ fn catalog_models(models: &[ModelInfo]) -> Vec<ProviderModel> {
             let name = model.name.trim();
             let name = if name.is_empty() { id } else { name };
             let catalog = ProviderModel::new(format!("{provider}/{id}"), name)
-                .sub_provider(crate::model_catalog::display_name_from_slug(provider));
+                .sub_provider(crate::model_options::display_name_from_slug(provider));
             // A model's variants ARE its reasoning-effort ladder: the ids are
             // `low`/`medium`/`high`/`max`/`minimal`/`xhigh`/`none`/`thinking`,
             // and the chosen one rides on `ModelRef::variant`. Dropping them
             // left the effort control empty for every OpenCode model.
-            Some(crate::model_catalog::with_variant_efforts(
+            Some(crate::model_options::with_variant_efforts(
                 catalog,
                 model.variants.iter().map(|variant| variant.id.as_str()),
             ))

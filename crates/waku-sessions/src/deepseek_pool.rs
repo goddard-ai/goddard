@@ -16,7 +16,7 @@ use crate::deepseek_session::DeepSeekServer;
 const SERVER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
-pub(crate) struct PooledDeepSeekServer {
+pub struct PooledDeepSeekServer {
     inner: Arc<PoolInner>,
 }
 
@@ -49,7 +49,7 @@ impl PooledDeepSeekServer {
     /// Wraps a host a session started for itself. The scoped agent surface
     /// bakes per-session configuration into the host environment, so those
     /// sessions cannot share the resident host and keep this path.
-    pub(crate) fn dedicated(server: DeepSeekServer) -> Self {
+    pub fn dedicated(server: DeepSeekServer) -> Self {
         Self {
             inner: Arc::new(PoolInner {
                 server,
@@ -95,7 +95,7 @@ fn pool() -> &'static Mutex<HashMap<PathBuf, Arc<PoolSlot>>> {
 
 /// Returns the resident Harness Host for `binary`, starting it when needed.
 /// Blocking by design; driver construction already runs off the UI thread.
-pub(crate) fn acquire(binary: &Path) -> anyhow::Result<PooledDeepSeekServer> {
+pub fn acquire(binary: &Path) -> anyhow::Result<PooledDeepSeekServer> {
     acquire_with_start(binary, || DeepSeekServer::start(binary))
 }
 

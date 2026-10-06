@@ -41,7 +41,7 @@ fn events_path(session_id: &str) -> Option<PathBuf> {
 
 /// Remove a session's `session-state/<id>/` directory. A session that never
 /// wrote one is already gone, so a missing directory is success.
-pub(crate) fn delete_session(session_id: &str) -> anyhow::Result<()> {
+pub fn delete_session(session_id: &str) -> anyhow::Result<()> {
     // The same id check `events_path` applies — the id must name a directory
     // verbatim, never a path.
     if session_id.is_empty()

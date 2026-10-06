@@ -20,11 +20,7 @@ const REQUEST_ID: &str = "waku-initialize-catalog";
 /// Return Claude Code's initialization response for the requested settings
 /// scope. A project-aware command probe supplies its cwd and all setting
 /// sources; the global model probe intentionally reads only user settings.
-pub(crate) fn initialize(
-    binary: &Path,
-    cwd: Option<&Path>,
-    setting_sources: &str,
-) -> Option<Value> {
+pub fn initialize(binary: &Path, cwd: Option<&Path>, setting_sources: &str) -> Option<Value> {
     let request = json!({
         "type": "control_request",
         "request_id": REQUEST_ID,

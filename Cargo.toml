@@ -10,7 +10,7 @@ name = "goddard"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map", "crates/waku-localization", "crates/waku-boss", "crates/waku-base", "crates/waku-exec", "crates/waku-git"]
+members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map", "crates/waku-localization", "crates/waku-boss", "crates/waku-base", "crates/waku-exec", "crates/waku-git", "crates/waku-sessions"]
 default-members = [
   ".",
   "crates/waku-client",
@@ -22,6 +22,7 @@ default-members = [
   "crates/waku-base",
   "crates/waku-exec",
   "crates/waku-git",
+  "crates/waku-sessions",
 ]
 resolver = "2"
 

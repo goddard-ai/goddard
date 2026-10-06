@@ -44,7 +44,7 @@ const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// What a subscribed session receives.
 #[derive(Clone, Debug)]
-pub(crate) enum MuseFrame {
+pub enum MuseFrame {
     /// One live notification or acknowledged server-initiated request, as
     /// `{method, params}`.
     Event { method: String, params: Value },
@@ -56,7 +56,7 @@ pub(crate) enum MuseFrame {
 /// A failed `muse serve` call: either a wire error object or a local
 /// transport failure.
 #[derive(Debug)]
-pub(crate) enum MuseError {
+pub enum MuseError {
     /// The host's JSON-RPC error object (`code`, `message`, optional `data`).
     Rpc(Value),
     /// The call never completed — write failure, timeout, or a dead host.
@@ -96,7 +96,7 @@ impl std::fmt::Display for MuseError {
 
 /// The shared host. All of a session's commands go through [`Self::call`];
 /// its events arrive on a [`MuseSubscription`].
-pub(crate) struct MuseHost {
+pub struct MuseHost {
     child: StdMutex<Child>,
     /// `None` once shutdown closes the pipe — the EOF the host exits on.
     writer: StdMutex<Option<ChildStdin>>,
@@ -109,7 +109,7 @@ pub(crate) struct MuseHost {
 
 /// The pool handle whose last drop kills the host.
 #[derive(Clone)]
-pub(crate) struct MuseService {
+pub struct MuseService {
     inner: Arc<MuseHost>,
     slot: Option<Weak<PoolSlot>>,
 }
@@ -129,7 +129,7 @@ impl MuseService {
     /// SUBSCRIBE BEFORE the lifecycle call that opens the session: the host
     /// auto-subscribes this connection at `session/start` / `session/resume`
     /// and can emit that session's first event before its response lands.
-    pub(crate) fn subscribe(&self, session_id: &str) -> MuseSubscription {
+    pub fn subscribe(&self, session_id: &str) -> MuseSubscription {
         let (tx, rx) = unbounded();
         let subscriber_id = self.inner.next_subscriber.fetch_add(1, Ordering::Relaxed) as usize;
         self.inner
@@ -211,7 +211,7 @@ fn pool() -> &'static StdMutex<HashMap<PathBuf, Arc<PoolSlot>>> {
 ///
 /// Blocking (process start plus the `initialize` handshake), so callers must
 /// already be off the UI thread.
-pub(crate) fn acquire(binary: &Path) -> anyhow::Result<MuseService> {
+pub fn acquire(binary: &Path) -> anyhow::Result<MuseService> {
     let slot = {
         let mut pool = pool().lock().unwrap();
         Arc::clone(pool.entry(binary.to_path_buf()).or_default())
@@ -275,7 +275,7 @@ pub(crate) fn acquire(binary: &Path) -> anyhow::Result<MuseService> {
 ///
 /// Read-only probes — the session catalog, `model/list` — reuse a running
 /// host rather than paying a spawn; `None` never starts one.
-pub(crate) fn attached(binary: &Path) -> Option<MuseService> {
+pub fn attached(binary: &Path) -> Option<MuseService> {
     let slot = pool().lock().unwrap().get(binary).cloned()?;
     let host = {
         let state = slot.state.lock().unwrap();
@@ -389,18 +389,18 @@ impl MuseHost {
 
     /// Whether the reader still sees a live host. A dead host answers no
     /// further commands; the pool replaces it for the next `acquire`.
-    pub(crate) fn is_alive(&self) -> bool {
+    pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Relaxed)
     }
 
     /// UUIDv7, the only command-id shape the host accepts.
-    pub(crate) fn mint_command_id(&self) -> String {
+    pub fn mint_command_id(&self) -> String {
         Uuid::now_v7().to_string()
     }
 
     /// One call to the host, blocking the calling thread until the response
     /// arrives, the timeout elapses, or the host dies. NOT for the UI thread.
-    pub(crate) fn call(&self, method: &str, params: Value) -> Result<Value, MuseError> {
+    pub fn call(&self, method: &str, params: Value) -> Result<Value, MuseError> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = unbounded();
         self.pending.lock().unwrap().insert(id, tx);
@@ -433,7 +433,7 @@ impl MuseHost {
     }
 
     /// Client-to-server notification; no response follows.
-    pub(crate) fn notify(&self, method: &str, params: Value) -> Result<(), std::io::Error> {
+    pub fn notify(&self, method: &str, params: Value) -> Result<(), std::io::Error> {
         self.send(&json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -574,7 +574,7 @@ impl MuseHost {
 }
 
 /// A session's event stream; dropping it detaches the session from the hub.
-pub(crate) struct MuseSubscription {
+pub struct MuseSubscription {
     host: Weak<MuseHost>,
     session_id: String,
     subscriber_id: usize,
@@ -584,8 +584,8 @@ pub(crate) struct MuseSubscription {
 impl MuseSubscription {
     /// An orphan subscription with no host: the channel never produces, and
     /// drop cannot reach a hub. Tests use it to build a `WorkerState`.
-    #[cfg(test)]
-    pub(crate) fn detached() -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn detached() -> Self {
         let (_tx, rx) = unbounded();
         Self {
             host: Weak::new(),
@@ -647,8 +647,8 @@ fn log(message: &str) {
     eprintln!("waku-muse: {message}");
 }
 
-#[cfg(all(test, unix))]
-pub(crate) mod test_support {
+#[cfg(all(any(test, feature = "test-support"), unix))]
+pub mod test_support {
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
     use std::path::{Path, PathBuf};
@@ -660,7 +660,7 @@ pub(crate) mod test_support {
     /// object, `view/page` with `"cursor": null`, `view/unsubscribe` with no
     /// request id, `session/read` without `excludeItems: false` — are
     /// appended to `<dir>/violations.log`; tests assert it never appears.
-    pub(crate) fn fake_muse(directory: &Path) -> PathBuf {
+    pub fn fake_muse(directory: &Path) -> PathBuf {
         let binary = directory.join("muse");
         fs::write(
             &binary,

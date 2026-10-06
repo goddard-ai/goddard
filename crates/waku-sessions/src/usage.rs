@@ -2462,7 +2462,7 @@ fn parse_credentials(payload: &str) -> anyhow::Result<OauthCredentials> {
 /// One HTTP response as `curl -D -` reported it: status, the raw header
 /// block, and the body. Callers that poll read header values out of
 /// `headers`; everyone else takes status and body through `http_get`.
-pub(crate) struct HttpResponse {
+pub struct HttpResponse {
     pub status: u16,
     pub headers: String,
     pub body: String,
@@ -2470,7 +2470,7 @@ pub(crate) struct HttpResponse {
 
 /// GET `url` keeping the response headers — the notifications poll reads
 /// `Last-Modified` and `X-Poll-Interval` out of them.
-pub(crate) fn http_get_response(url: &str, headers: &[String]) -> anyhow::Result<HttpResponse> {
+pub fn http_get_response(url: &str, headers: &[String]) -> anyhow::Result<HttpResponse> {
     let raw = curl_get(url, headers)?;
     split_response(&raw)
 }

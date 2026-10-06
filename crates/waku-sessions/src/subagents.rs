@@ -23,13 +23,13 @@ use waku_protocol::routing::{RouteClassMap, TaskClass};
 
 /// Agent names carrying this prefix are Goddard-defined; the transcript's
 /// background-work rows attribute their runs to us with no extra plumbing.
-pub(crate) const NAME_PREFIX: &str = "goddard-";
+pub const NAME_PREFIX: &str = "goddard-";
 
 /// How much of the Goddard subagent contract the provider can enforce at
 /// launch. This stays in the daemon because it describes the provider driver,
 /// not user settings or persisted session state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SupportLevel {
+pub enum SupportLevel {
     /// The provider accepts Goddard's definitions and can deny write tools on
     /// read-only helpers.
     Supported,
@@ -40,7 +40,7 @@ pub(crate) enum SupportLevel {
     Unsupported,
 }
 
-pub(crate) fn support_for(provider: ProviderKind) -> SupportLevel {
+pub fn support_for(provider: ProviderKind) -> SupportLevel {
     match provider {
         ProviderKind::Claude | ProviderKind::Copilot | ProviderKind::Pi => SupportLevel::Supported,
         ProviderKind::Codex | ProviderKind::OpenCode => SupportLevel::Advisory,
@@ -128,7 +128,7 @@ fn class_baseline(class: TaskClass) -> (String, String, bool) {
 /// map first, then the global routing class map — an entry applies only
 /// when it names this session's provider, so a class mapped elsewhere keeps
 /// the provider's default model.
-pub(crate) fn spec_for(
+pub fn spec_for(
     provider: ProviderKind,
     provider_classes: Option<&RouteClassMap>,
     classes: &RouteClassMap,
@@ -162,7 +162,7 @@ pub(crate) fn spec_for(
 /// The routing hint for harnesses that take injected agent definitions: a
 /// short system-prompt appendix telling the session's model what it can
 /// delegate and to whom.
-pub(crate) fn routing_hint(spec: &SubagentSpec) -> Option<String> {
+pub fn routing_hint(spec: &SubagentSpec) -> Option<String> {
     if spec.agents.is_empty() {
         return None;
     }
@@ -185,7 +185,7 @@ pub(crate) fn routing_hint(spec: &SubagentSpec) -> Option<String> {
 
 /// Claude's `--agents` flag payload: one JSON object mapping agent name to
 /// its definition.
-pub(crate) fn claude_agents_json(spec: &SubagentSpec) -> Option<String> {
+pub fn claude_agents_json(spec: &SubagentSpec) -> Option<String> {
     if spec.agents.is_empty() {
         return None;
     }
@@ -215,7 +215,7 @@ pub(crate) fn claude_agents_json(spec: &SubagentSpec) -> Option<String> {
 /// The adopted OpenCode service cannot register agents over its API, so the
 /// hint is a session instruction entry naming whatever subagent-mode agents
 /// the user's own config already defines.
-pub(crate) fn opencode_hint(available_subagents: &[String]) -> String {
+pub fn opencode_hint(available_subagents: &[String]) -> String {
     let roster = if available_subagents.is_empty() {
         "No subagent agents are currently configured.".to_owned()
     } else {
@@ -243,7 +243,7 @@ pub(crate) fn opencode_hint(available_subagents: &[String]) -> String {
 /// entry. Per-agent model/effort map straight through. Copilot's built-in
 /// read-only tools have stable names, so the allowlist is a hard boundary for
 /// the explorer tiers rather than a prompt-only instruction.
-pub(crate) fn copilot_custom_agents(
+pub fn copilot_custom_agents(
     spec: &SubagentSpec,
 ) -> Option<Vec<github_copilot_sdk::types::CustomAgentConfig>> {
     if spec.agents.is_empty() {
@@ -280,7 +280,7 @@ pub(crate) fn copilot_custom_agents(
 /// `spawn_agent` roles and carries the session's resolved tier settings into
 /// each call. The native explorer role is still advisory: Goddard cannot
 /// install a per-spawn tool policy through the app-server API.
-pub(crate) fn codex_hint(spec: &SubagentSpec) -> Option<String> {
+pub fn codex_hint(spec: &SubagentSpec) -> Option<String> {
     if spec.agents.is_empty() {
         return None;
     }
@@ -324,7 +324,7 @@ pub(crate) fn codex_hint(spec: &SubagentSpec) -> Option<String> {
 /// Pi's delegate tool ships as an extension file written into daemon-owned
 /// storage at launch. The tool reads the spec from `GODDARD_SUBAGENTS` so the
 /// same source serves every tier set.
-pub(crate) const PI_EXTENSION_SOURCE: &str = r#"import { spawn } from "node:child_process";
+pub const PI_EXTENSION_SOURCE: &str = r#"import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -396,7 +396,7 @@ export default function goddardSubagents(pi: ExtensionAPI) {
 "#;
 
 /// Writes the Pi extension under `directory`, which the caller owns.
-pub(crate) fn write_pi_extension(directory: &Path) -> anyhow::Result<PathBuf> {
+pub fn write_pi_extension(directory: &Path) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("could not create {}", directory.display()))?;
     let path = directory.join("goddard-subagents.ts");

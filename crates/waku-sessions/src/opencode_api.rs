@@ -53,7 +53,7 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
 const FORK_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The result of every call in this module.
-pub(crate) type Result<T> = std::result::Result<T, ApiError>;
+pub type Result<T> = std::result::Result<T, ApiError>;
 
 /// A failed call, split by what the caller can actually do about it.
 ///
@@ -61,7 +61,7 @@ pub(crate) type Result<T> = std::result::Result<T, ApiError>;
 /// "this session is gone" from "this workspace does not resolve", so they are
 /// recovered instead of being flattened into prose.
 #[derive(Debug)]
-pub(crate) enum ApiError {
+pub enum ApiError {
     /// The service answered with its own structured error body, which always
     /// carries `_tag` and `message`.
     Tagged {
@@ -77,7 +77,7 @@ pub(crate) enum ApiError {
 }
 
 impl ApiError {
-    pub(crate) fn status(&self) -> Option<u16> {
+    pub fn status(&self) -> Option<u16> {
         match self {
             Self::Tagged { status, .. } | Self::Http { status, .. } => Some(*status),
             Self::Transport(_) => None,
@@ -85,20 +85,20 @@ impl ApiError {
     }
 
     #[cfg(test)]
-    pub(crate) fn tag(&self) -> Option<&str> {
+    pub fn tag(&self) -> Option<&str> {
         match self {
             Self::Tagged { tag, .. } => Some(tag),
             _ => None,
         }
     }
 
-    pub(crate) fn is_not_found(&self) -> bool {
+    pub fn is_not_found(&self) -> bool {
         self.status() == Some(404)
     }
 
     /// No service there to act on the call: it is down, or still stopping or
     /// starting, which it answers with a 503 of its own.
-    pub(crate) fn is_unavailable(&self) -> bool {
+    pub fn is_unavailable(&self) -> bool {
         matches!(self, Self::Transport(_)) || self.status() == Some(503)
     }
 
@@ -106,7 +106,7 @@ impl ApiError {
     /// answers HTTP 500 with an EMPTY body. That is a bad workspace, not a
     /// server fault, and treating it as the latter would retry forever.
     #[cfg(test)]
-    pub(crate) fn is_unresolvable_location(&self) -> bool {
+    pub fn is_unresolvable_location(&self) -> bool {
         matches!(self, Self::Http { status: 500, body } if body.trim().is_empty())
     }
 }
@@ -144,7 +144,7 @@ impl From<anyhow::Error> for ApiError {
 /// Page order. The server defaults to `desc` on both `/api/session` and
 /// `/message`, so transcript hydration must ask for `asc` explicitly.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Order {
+pub enum Order {
     Asc,
     Desc,
 }
@@ -161,7 +161,7 @@ impl Order {
 /// How the service admits a prompt into a session that is already draining.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Delivery {
+pub enum Delivery {
     Steer,
     Queue,
 }
@@ -169,7 +169,7 @@ pub(crate) enum Delivery {
 /// `GET /api/info`. The answer also lists connection URLs and the service's
 /// temporary directory, which nothing here needs.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct ServerInfo {
+pub struct ServerInfo {
     pub version: String,
     pub pid: u32,
 }
@@ -180,7 +180,7 @@ pub(crate) struct ServerInfo {
 /// it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(tag = "status", rename_all = "lowercase")]
-pub(crate) enum MigrationStatus {
+pub enum MigrationStatus {
     Required,
     Running,
     Completed,
@@ -194,7 +194,7 @@ pub(crate) enum MigrationStatus {
 /// There is no `modelID` here — that field exists only on [`ModelInfo`], and
 /// mistaking the two produces a reference the server rejects.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ModelRef {
+pub struct ModelRef {
     pub id: String,
     #[serde(rename = "providerID")]
     pub provider_id: String,
@@ -207,7 +207,7 @@ pub(crate) struct ModelRef {
 /// One service process serves every workspace precisely because each session
 /// carries its own location; the process itself sits in `$HOME`.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct LocationRef {
+pub struct LocationRef {
     pub directory: String,
     #[serde(
         rename = "workspaceID",
@@ -218,13 +218,13 @@ pub(crate) struct LocationRef {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct TokenCache {
+pub struct TokenCache {
     pub read: f64,
     pub write: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct TokenUsage {
+pub struct TokenUsage {
     pub input: f64,
     pub output: f64,
     /// Reported separately rather than folded into output.
@@ -233,7 +233,7 @@ pub(crate) struct TokenUsage {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct SessionTime {
+pub struct SessionTime {
     pub created: f64,
     pub updated: f64,
     #[serde(default)]
@@ -246,7 +246,7 @@ pub(crate) struct SessionTime {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SessionOutcome {
+pub enum SessionOutcome {
     Succeeded,
     Failed,
     Interrupted,
@@ -255,7 +255,7 @@ pub(crate) enum SessionOutcome {
 /// The fork boundary as the server reports it, which always carries a message
 /// id — including for `through`, where the request names none.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct ForkBoundary {
+pub struct ForkBoundary {
     #[serde(rename = "type")]
     pub kind: ForkBoundaryKind,
     #[serde(rename = "messageID")]
@@ -264,13 +264,13 @@ pub(crate) struct ForkBoundary {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ForkBoundaryKind {
+pub enum ForkBoundaryKind {
     Before,
     Through,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct SessionFork {
+pub struct SessionFork {
     #[serde(rename = "sessionID")]
     pub session_id: String,
     pub boundary: ForkBoundary,
@@ -278,14 +278,14 @@ pub(crate) struct SessionFork {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum FileDiffStatus {
+pub enum FileDiffStatus {
     Added,
     Deleted,
     Modified,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct FileDiff {
+pub struct FileDiff {
     pub file: String,
     pub patch: String,
     pub additions: u32,
@@ -294,7 +294,7 @@ pub(crate) struct FileDiff {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct SessionRevert {
+pub struct SessionRevert {
     #[serde(rename = "messageID")]
     pub message_id: String,
     #[serde(rename = "partID", default)]
@@ -306,7 +306,7 @@ pub(crate) struct SessionRevert {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct SessionInfo {
+pub struct SessionInfo {
     pub id: String,
     #[serde(rename = "projectID")]
     pub project_id: String,
@@ -333,7 +333,7 @@ pub(crate) struct SessionInfo {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct StructuredError {
+pub struct StructuredError {
     #[serde(rename = "type")]
     pub kind: String,
     pub message: String,
@@ -345,7 +345,7 @@ pub(crate) struct StructuredError {
 /// parts carry `created`/`ran`/`completed`; a single struct covers both
 /// because serde ignores the members a given shape does not send.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct Timing {
+pub struct Timing {
     pub created: f64,
     #[serde(default)]
     pub streamed: Option<f64>,
@@ -357,7 +357,7 @@ pub(crate) struct Timing {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub(crate) enum ToolContent {
+pub enum ToolContent {
     Text {
         text: String,
     },
@@ -375,7 +375,7 @@ pub(crate) enum ToolContent {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "status", rename_all = "lowercase")]
-pub(crate) enum ToolState {
+pub enum ToolState {
     /// `input` is a raw JSON STRING while the call is still streaming and an
     /// OBJECT from `running` onwards. Typing it as anything but a `Value`
     /// fails to decode exactly the frames a live tool call emits.
@@ -405,7 +405,7 @@ pub(crate) enum ToolState {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub(crate) enum AssistantContent {
+pub enum AssistantContent {
     Text {
         text: String,
         #[serde(default)]
@@ -432,7 +432,7 @@ pub(crate) enum AssistantContent {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum ShellStatus {
+pub enum ShellStatus {
     Running,
     Exited,
     Timeout,
@@ -441,7 +441,7 @@ pub(crate) enum ShellStatus {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ShellOutput {
+pub struct ShellOutput {
     pub output: String,
     pub cursor: u64,
     pub size: u64,
@@ -450,7 +450,7 @@ pub(crate) struct ShellOutput {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum CompactionStatus {
+pub enum CompactionStatus {
     Running,
     Completed,
     Failed,
@@ -458,7 +458,7 @@ pub(crate) enum CompactionStatus {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum CompactionReason {
+pub enum CompactionReason {
     Auto,
     Manual,
 }
@@ -473,7 +473,7 @@ pub(crate) enum CompactionReason {
     rename_all = "kebab-case",
     rename_all_fields = "camelCase"
 )]
-pub(crate) enum MessageInfo {
+pub enum MessageInfo {
     AgentSwitched {
         id: String,
         time: Timing,
@@ -585,7 +585,7 @@ pub(crate) enum MessageInfo {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct SessionExport {
+pub struct SessionExport {
     pub info: SessionInfo,
     pub messages: Vec<MessageInfo>,
 }
@@ -597,7 +597,7 @@ pub(crate) struct SessionExport {
 /// nobody reads would turn every such reshuffle into a prompt that cannot
 /// start.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct InboxUser {
+pub struct InboxUser {
     pub id: String,
     #[serde(rename = "sessionID")]
     pub session_id: String,
@@ -608,7 +608,7 @@ pub(crate) struct InboxUser {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct PermissionSource {
+pub struct PermissionSource {
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(rename = "messageID")]
@@ -617,7 +617,7 @@ pub(crate) struct PermissionSource {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct PermissionRequest {
+pub struct PermissionRequest {
     pub id: String,
     #[serde(rename = "sessionID")]
     pub session_id: String,
@@ -635,7 +635,7 @@ pub(crate) struct PermissionRequest {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum PermissionReply {
+pub enum PermissionReply {
     Once,
     /// Never sent — [`reply_permission`] rejects it — but kept so the wire
     /// vocabulary and that guard stay explicit.
@@ -649,7 +649,7 @@ pub(crate) enum PermissionReply {
 /// them back in that form.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
-pub(crate) enum FormValue {
+pub enum FormValue {
     Bool(bool),
     Number(f64),
     List(Vec<String>),
@@ -659,10 +659,10 @@ pub(crate) enum FormValue {
 /// A form answer, keyed by [`FormField`]'s `key`.
 ///
 /// Ordered rather than hashed so a replayed answer serializes identically.
-pub(crate) type FormAnswer = BTreeMap<String, FormValue>;
+pub type FormAnswer = BTreeMap<String, FormValue>;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct FormOption {
+pub struct FormOption {
     pub value: String,
     pub label: String,
     #[serde(default)]
@@ -675,7 +675,7 @@ pub(crate) struct FormOption {
     rename_all = "lowercase",
     rename_all_fields = "camelCase"
 )]
-pub(crate) enum FormField {
+pub enum FormField {
     String {
         key: String,
         #[serde(default)]
@@ -765,7 +765,7 @@ pub(crate) enum FormField {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct FormInfo {
+pub struct FormInfo {
     pub id: String,
     #[serde(rename = "sessionID")]
     pub session_id: String,
@@ -777,7 +777,7 @@ pub(crate) struct FormInfo {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct ModelCapabilities {
+pub struct ModelCapabilities {
     #[serde(default)]
     pub tools: bool,
     #[serde(default)]
@@ -787,7 +787,7 @@ pub(crate) struct ModelCapabilities {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
-pub(crate) struct ModelLimit {
+pub struct ModelLimit {
     pub context: i64,
     pub output: i64,
     #[serde(default)]
@@ -795,12 +795,12 @@ pub(crate) struct ModelLimit {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct ModelVariant {
+pub struct ModelVariant {
     pub id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct ModelInfo {
+pub struct ModelInfo {
     pub id: String,
     #[serde(rename = "modelID")]
     pub model_id: String,
@@ -824,14 +824,14 @@ pub(crate) struct ModelInfo {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum AgentMode {
+pub enum AgentMode {
     Primary,
     Subagent,
     All,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct AgentInfo {
+pub struct AgentInfo {
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -843,13 +843,13 @@ pub(crate) struct AgentInfo {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct CommandInfo {
+pub struct CommandInfo {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
 }
 
-pub(crate) fn server_info(endpoint: &Endpoint) -> Result<ServerInfo> {
+pub fn server_info(endpoint: &Endpoint) -> Result<ServerInfo> {
     // Bare payload: server info is one of the routes with no `{ data }`
     // envelope.
     let response = request(endpoint, "GET", "/api/info", None, INFO_TIMEOUT)?;
@@ -857,7 +857,7 @@ pub(crate) fn server_info(endpoint: &Endpoint) -> Result<ServerInfo> {
 }
 
 /// Bare payload, like server info. A build without the route answers 404.
-pub(crate) fn v1_migration_status(endpoint: &Endpoint) -> Result<MigrationStatus> {
+pub fn v1_migration_status(endpoint: &Endpoint) -> Result<MigrationStatus> {
     let response = request(
         endpoint,
         "GET",
@@ -876,7 +876,7 @@ pub(crate) fn v1_migration_status(endpoint: &Endpoint) -> Result<MigrationStatus
 /// refuses an id OpenCode could not have minted with "OpenCode's free tier can
 /// only be used from within OpenCode" — verified against 2.0.22, where every
 /// free model rejected `ses_` plus a hex UUID and accepted this format.
-pub(crate) fn new_session_id() -> String {
+pub fn new_session_id() -> String {
     const ALPHABET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     // OpenCode counts ids minted within one millisecond so they still sort.
     static LAST: Mutex<(u64, u64)> = Mutex::new((0, 0));
@@ -911,7 +911,7 @@ pub(crate) fn new_session_id() -> String {
 /// `directory` must be the canonicalized workspace path with no trailing
 /// slash, and the very same string has to be used for `?directory=` when
 /// listing — the server compares those by exact string equality.
-pub(crate) fn create_session(
+pub fn create_session(
     endpoint: &Endpoint,
     id: &str,
     agent: Option<&str>,
@@ -940,13 +940,13 @@ pub(crate) fn create_session(
     decode(data(response, "session")?, "session")
 }
 
-pub(crate) fn get_session(endpoint: &Endpoint, session: &str) -> Result<SessionInfo> {
+pub fn get_session(endpoint: &Endpoint, session: &str) -> Result<SessionInfo> {
     let path = format!("/api/session/{}", encode_path_segment(session));
     let response = request(endpoint, "GET", &path, None, REQUEST_TIMEOUT)?;
     decode(data(response, "session")?, "session")
 }
 
-pub(crate) fn delete_session(endpoint: &Endpoint, session: &str) -> Result<()> {
+pub fn delete_session(endpoint: &Endpoint, session: &str) -> Result<()> {
     let path = format!("/api/session/{}", encode_path_segment(session));
     request(endpoint, "DELETE", &path, None, REQUEST_TIMEOUT)?;
     Ok(())
@@ -954,12 +954,7 @@ pub(crate) fn delete_session(endpoint: &Endpoint, session: &str) -> Result<()> {
 
 /// Runtime-only MCP registration, scoped to one location. This never writes
 /// the shared service's configuration files.
-pub(crate) fn add_mcp(
-    endpoint: &Endpoint,
-    directory: &str,
-    server: &str,
-    config: &Value,
-) -> Result<()> {
+pub fn add_mcp(endpoint: &Endpoint, directory: &str, server: &str, config: &Value) -> Result<()> {
     let path = format!(
         "/api/experimental/mcp/{}{}",
         encode_path_segment(server),
@@ -975,11 +970,11 @@ pub(crate) fn add_mcp(
     Ok(())
 }
 
-pub(crate) fn list_mcp(endpoint: &Endpoint, directory: &str) -> Result<Vec<Value>> {
+pub fn list_mcp(endpoint: &Endpoint, directory: &str) -> Result<Vec<Value>> {
     catalogue(endpoint, "/api/mcp", Some(directory), "MCP servers")
 }
 
-pub(crate) fn remove_mcp(endpoint: &Endpoint, directory: &str, server: &str) -> Result<()> {
+pub fn remove_mcp(endpoint: &Endpoint, directory: &str, server: &str) -> Result<()> {
     let path = format!(
         "/api/experimental/mcp/{}{}",
         encode_path_segment(server),
@@ -989,7 +984,7 @@ pub(crate) fn remove_mcp(endpoint: &Endpoint, directory: &str, server: &str) -> 
     Ok(())
 }
 
-pub(crate) fn put_instruction_entry(
+pub fn put_instruction_entry(
     endpoint: &Endpoint,
     session: &str,
     key: &str,
@@ -1010,11 +1005,7 @@ pub(crate) fn put_instruction_entry(
     Ok(())
 }
 
-pub(crate) fn remove_instruction_entry(
-    endpoint: &Endpoint,
-    session: &str,
-    key: &str,
-) -> Result<()> {
+pub fn remove_instruction_entry(endpoint: &Endpoint, session: &str, key: &str) -> Result<()> {
     let path = format!(
         "/api/experimental/session/{}/instructions/entries/{}",
         encode_path_segment(session),
@@ -1026,7 +1017,7 @@ pub(crate) fn remove_instruction_entry(
 
 /// Lists sessions newest-first by default, returning the cursor for the next
 /// page or `None` once the listing is exhausted.
-pub(crate) fn list_sessions(
+pub fn list_sessions(
     endpoint: &Endpoint,
     directory: Option<&str>,
     parent_id: Option<&str>,
@@ -1042,7 +1033,7 @@ pub(crate) fn list_sessions(
     page(response, "session list")
 }
 
-pub(crate) fn list_messages(
+pub fn list_messages(
     endpoint: &Endpoint,
     session: &str,
     order: Order,
@@ -1058,11 +1049,7 @@ pub(crate) fn list_messages(
     page(response, "message list")
 }
 
-pub(crate) fn export_session(
-    endpoint: &Endpoint,
-    session: &str,
-    sanitize: bool,
-) -> Result<SessionExport> {
+pub fn export_session(endpoint: &Endpoint, session: &str, sanitize: bool) -> Result<SessionExport> {
     let path = format!(
         "/api/experimental/session/{}/export?sanitize={sanitize}",
         encode_path_segment(session)
@@ -1076,7 +1063,7 @@ pub(crate) fn export_session(
 /// Leaving `delivery` unset lets the server choose, which is what an idle
 /// session wants; a busy session needs the caller to say whether the prompt
 /// steers the running turn or queues behind it.
-pub(crate) fn prompt(
+pub fn prompt(
     endpoint: &Endpoint,
     session: &str,
     text: &str,
@@ -1094,7 +1081,7 @@ pub(crate) fn prompt(
 /// Execute a registered command with provider-owned template expansion and
 /// agent/model selection. Unlike /prompt, this route acknowledges with 204;
 /// execution and completion arrive on the session event stream.
-pub(crate) fn command(
+pub fn command(
     endpoint: &Endpoint,
     session: &str,
     name: &str,
@@ -1114,7 +1101,7 @@ pub(crate) fn command(
 /// the admitted item by default, so it runs at the next step boundary rather
 /// than waiting behind queued prompts; progress and the outcome arrive on
 /// the event stream as `session.compaction.*` events.
-pub(crate) fn compact(endpoint: &Endpoint, session: &str) -> Result<()> {
+pub fn compact(endpoint: &Endpoint, session: &str) -> Result<()> {
     let path = format!("/api/session/{}/compact", encode_path_segment(session));
     let body = json!({"delivery": "steer"});
     request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
@@ -1126,7 +1113,7 @@ pub(crate) fn compact(endpoint: &Endpoint, session: &str) -> Result<()> {
 /// The entries are left as raw JSON because the union also carries synthetic,
 /// compaction and move payloads Goddard has no use for; callers filter on `type`
 /// and decode only what they recognize.
-pub(crate) fn list_inbox(endpoint: &Endpoint, session: &str) -> Result<Vec<Value>> {
+pub fn list_inbox(endpoint: &Endpoint, session: &str) -> Result<Vec<Value>> {
     let path = format!("/api/session/{}/inbox", encode_path_segment(session));
     let response = request(endpoint, "GET", &path, None, REQUEST_TIMEOUT)?;
     decode(data(response, "inbox")?, "inbox")
@@ -1134,7 +1121,7 @@ pub(crate) fn list_inbox(endpoint: &Endpoint, session: &str) -> Result<Vec<Value
 
 /// Moves an undelivered entry between steering the running turn and waiting
 /// for it to finish.
-pub(crate) fn set_inbox_delivery(
+pub fn set_inbox_delivery(
     endpoint: &Endpoint,
     session: &str,
     inbox_id: &str,
@@ -1154,7 +1141,7 @@ pub(crate) fn set_inbox_delivery(
 ///
 /// The route takes no body and answers a BARE `{ interrupted }` — it is inside
 /// `/api/session` but outside the `{ data }` envelope.
-pub(crate) fn interrupt(endpoint: &Endpoint, session: &str) -> Result<bool> {
+pub fn interrupt(endpoint: &Endpoint, session: &str) -> Result<bool> {
     let path = format!("/api/session/{}/interrupt", encode_path_segment(session));
     let response = request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
     #[derive(Deserialize)]
@@ -1167,11 +1154,7 @@ pub(crate) fn interrupt(endpoint: &Endpoint, session: &str) -> Result<bool> {
 
 /// Copies the session's history into a new one. `before` names the first
 /// message left out; without it the whole history is copied.
-pub(crate) fn fork(
-    endpoint: &Endpoint,
-    session: &str,
-    before: Option<&str>,
-) -> Result<SessionInfo> {
+pub fn fork(endpoint: &Endpoint, session: &str, before: Option<&str>) -> Result<SessionInfo> {
     let path = format!("/api/session/{}/fork", encode_path_segment(session));
     let body = match before {
         Some(message_id) => json!({ "before": message_id }),
@@ -1181,24 +1164,21 @@ pub(crate) fn fork(
     decode(data(response, "fork")?, "fork")
 }
 
-pub(crate) fn switch_model(endpoint: &Endpoint, session: &str, model: &ModelRef) -> Result<()> {
+pub fn switch_model(endpoint: &Endpoint, session: &str, model: &ModelRef) -> Result<()> {
     let path = format!("/api/session/{}/model", encode_path_segment(session));
     let body = json!({ "model": model });
     request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
     Ok(())
 }
 
-pub(crate) fn switch_agent(endpoint: &Endpoint, session: &str, agent: &str) -> Result<()> {
+pub fn switch_agent(endpoint: &Endpoint, session: &str, agent: &str) -> Result<()> {
     let path = format!("/api/session/{}/agent", encode_path_segment(session));
     let body = json!({ "agent": agent });
     request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
     Ok(())
 }
 
-pub(crate) fn list_permissions(
-    endpoint: &Endpoint,
-    session: &str,
-) -> Result<Vec<PermissionRequest>> {
+pub fn list_permissions(endpoint: &Endpoint, session: &str) -> Result<Vec<PermissionRequest>> {
     let path = format!("/api/session/{}/permission", encode_path_segment(session));
     let response = request(endpoint, "GET", &path, None, REQUEST_TIMEOUT)?;
     decode(data(response, "permission list")?, "permission list")
@@ -1209,7 +1189,7 @@ pub(crate) fn list_permissions(
 /// `always` is rejected here, not upstream: it writes a persistent allow rule
 /// into the user's own OpenCode permission config, which is a decision Goddard
 /// has no mandate to make on the user's behalf from a transcript button.
-pub(crate) fn reply_permission(
+pub fn reply_permission(
     endpoint: &Endpoint,
     session: &str,
     request_id: &str,
@@ -1230,13 +1210,13 @@ pub(crate) fn reply_permission(
     Ok(())
 }
 
-pub(crate) fn list_forms(endpoint: &Endpoint, session: &str) -> Result<Vec<FormInfo>> {
+pub fn list_forms(endpoint: &Endpoint, session: &str) -> Result<Vec<FormInfo>> {
     let path = format!("/api/session/{}/form", encode_path_segment(session));
     let response = request(endpoint, "GET", &path, None, REQUEST_TIMEOUT)?;
     decode(data(response, "form list")?, "form list")
 }
 
-pub(crate) fn reply_form(
+pub fn reply_form(
     endpoint: &Endpoint,
     session: &str,
     form_id: &str,
@@ -1256,7 +1236,7 @@ pub(crate) fn reply_form(
 ///
 /// The payload is keyed BY session id, so the set is its keys; the values only
 /// say `running`, which is the same thing membership already says.
-pub(crate) fn active_sessions(endpoint: &Endpoint) -> Result<HashSet<String>> {
+pub fn active_sessions(endpoint: &Endpoint) -> Result<HashSet<String>> {
     let response = request(
         endpoint,
         "GET",
@@ -1273,18 +1253,15 @@ pub(crate) fn active_sessions(endpoint: &Endpoint) -> Result<HashSet<String>> {
     Ok(active.into_iter().map(|(id, _)| id).collect())
 }
 
-pub(crate) fn list_models(endpoint: &Endpoint, directory: Option<&str>) -> Result<Vec<ModelInfo>> {
+pub fn list_models(endpoint: &Endpoint, directory: Option<&str>) -> Result<Vec<ModelInfo>> {
     catalogue(endpoint, "/api/model", directory, "model catalogue")
 }
 
-pub(crate) fn list_agents(endpoint: &Endpoint, directory: Option<&str>) -> Result<Vec<AgentInfo>> {
+pub fn list_agents(endpoint: &Endpoint, directory: Option<&str>) -> Result<Vec<AgentInfo>> {
     catalogue(endpoint, "/api/agent", directory, "agent catalogue")
 }
 
-pub(crate) fn list_commands(
-    endpoint: &Endpoint,
-    directory: Option<&str>,
-) -> Result<Vec<CommandInfo>> {
+pub fn list_commands(endpoint: &Endpoint, directory: Option<&str>) -> Result<Vec<CommandInfo>> {
     // A cold location publishes its registry in stages: first empty, then
     // built-ins, then configured commands and skills. Wait for those plugins
     // to finish before caching the list. The budget also bounds older builds

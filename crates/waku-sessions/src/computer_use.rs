@@ -310,7 +310,7 @@ fn packaged_file(path: &Path, name: &str) -> anyhow::Result<PathBuf> {
 /// directory, a swapped app bundle — and each executable-relative lookup
 /// then fails at once. Resolvers refresh their staged copy whenever the
 /// packaged source exists and fall back to the last copy when it is gone.
-pub(crate) fn runtime_install_root() -> anyhow::Result<PathBuf> {
+pub fn runtime_install_root() -> anyhow::Result<PathBuf> {
     Ok(dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .ok_or_else(|| anyhow!("application support directory is unavailable"))?
@@ -323,11 +323,7 @@ pub(crate) fn runtime_install_root() -> anyhow::Result<PathBuf> {
 /// a failed refresh); without it, the last staged copy answers. `key` names
 /// a small file whose bytes version a staged directory — a helper bundle's
 /// build fingerprint, a skills tree's entry document.
-pub(crate) fn staged_resource(
-    packaged: Option<&Path>,
-    name: &str,
-    key: Option<&Path>,
-) -> Option<PathBuf> {
+pub fn staged_resource(packaged: Option<&Path>, name: &str, key: Option<&Path>) -> Option<PathBuf> {
     let staged = runtime_install_root().ok().map(|root| root.join(name));
     resolve_staged(packaged, staged.as_deref(), key)
 }
@@ -361,7 +357,8 @@ fn resolve_staged(
 fn refresh_staged(source: &Path, staged: &Path, key: Option<&Path>) -> anyhow::Result<()> {
     if source.is_dir() {
         let key = key.context("a staged directory needs a key file to compare")?;
-        if fs::read(staged.join(key)).is_ok_and(|staged| Some(staged) == fs::read(source.join(key)).ok())
+        if fs::read(staged.join(key))
+            .is_ok_and(|staged| Some(staged) == fs::read(source.join(key)).ok())
         {
             return Ok(());
         }
@@ -370,8 +367,7 @@ fn refresh_staged(source: &Path, staged: &Path, key: Option<&Path>) -> anyhow::R
             .ok()
             .zip(fs::metadata(staged).ok())
             .is_some_and(|(source, staged)| {
-                source.len() == staged.len()
-                    && source.modified().ok() == staged.modified().ok()
+                source.len() == staged.len() && source.modified().ok() == staged.modified().ok()
             });
         if unchanged {
             return Ok(());
@@ -406,7 +402,7 @@ fn refresh_staged(source: &Path, staged: &Path, key: Option<&Path>) -> anyhow::R
 /// exist. Runs once at daemon startup so a later loss of the executable's
 /// directory leaves working fallbacks; resolvers also stage lazily on each
 /// call, so this only narrows the unprotected window after boot.
-pub(crate) fn stage_runtime_resources() {
+pub fn stage_runtime_resources() {
     let _ = crate::agent::agent_cli_path();
     let _ = js_repl_server_path();
     let _ = mcp_server_command();
@@ -430,7 +426,7 @@ pub fn js_repl_server_path() -> anyhow::Result<PathBuf> {
         .ok_or_else(|| anyhow!("Goddard JavaScript REPL is missing from this Goddard build"))
 }
 
-pub(crate) fn helper_install_root() -> anyhow::Result<PathBuf> {
+pub fn helper_install_root() -> anyhow::Result<PathBuf> {
     Ok(dirs::data_dir()
         .ok_or_else(|| anyhow!("Application Support directory is unavailable"))?
         .join("Goddard")

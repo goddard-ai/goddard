@@ -11529,6 +11529,7 @@ dependencies = [
  "waku-localization",
  "waku-protocol",
  "waku-repo-map",
+ "waku-sessions",
  "waku-share",
  "windows-sys 0.61.2",
  "zip 8.6.0",
@@ -11632,6 +11633,37 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "uuid",
+]
+
+[[package]]
+name = "waku-sessions"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "crossbeam-channel",
+ "dirs 6.0.0",
+ "dunce",
+ "github-copilot-sdk",
+ "libc",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "smol",
+ "subtle",
+ "tokio",
+ "toml 0.8.23",
+ "url",
+ "uuid",
+ "waku-base",
+ "waku-exec",
+ "waku-git",
+ "waku-localization",
+ "waku-protocol",
 ]
 
 [[package]]

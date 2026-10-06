@@ -14,6 +14,7 @@ mod muse;
 mod opencode;
 mod opencode_computer_use;
 mod pi;
+pub(crate) mod session_import;
 mod support;
 mod title_refresh;
 

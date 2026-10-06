@@ -2,7 +2,7 @@
 //!
 //! When `agent_tools_enabled` is on, the daemon mints one bearer token per
 //! provider runtime and hands it to the session's harness through the launch
-//! environment (`GODDARD_AGENT_TOKEN`, see [`crate::driver`]). The token never
+//! environment (`GODDARD_AGENT_TOKEN`). The token never
 //! leaves daemon memory: it authenticates a WebSocket client exactly like the
 //! master token but authorizes only `agentCreateSession` and `agentPrompt`,
 //! and it dies with the runtime that carried it.
@@ -658,7 +658,7 @@ impl AgentState {
     }
 
     /// Test hook: the parked permission's request id while one waits.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn parked_permission_request(&self, session_id: Uuid) -> Option<String> {
         self.pending_permissions
             .lock()
@@ -1148,7 +1148,12 @@ mod tests {
         let session = Uuid::new_v4();
 
         let (answered, answered_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), answered));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-one".into(),
+            "a question".into(),
+            answered
+        ));
         assert!(state.resolve_user_input(
             session,
             &Command::RespondUserInput {
@@ -1170,7 +1175,12 @@ mod tests {
         );
 
         let (clarified, clarified_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-two".into(), "a question".into(), clarified));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-two".into(),
+            "a question".into(),
+            clarified
+        ));
         assert!(state.resolve_user_input(
             session,
             &Command::ClarifyUserInput {
@@ -1186,7 +1196,12 @@ mod tests {
         );
 
         let (dismissed, dismissed_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-three".into(), "a question".into(), dismissed));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-three".into(),
+            "a question".into(),
+            dismissed
+        ));
         assert!(state.resolve_user_input(
             session,
             &Command::CancelUserInput {
@@ -1207,7 +1222,12 @@ mod tests {
 
         state.remove_ask(session, "agent-ask-one");
         let (third, _third_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-three".into(), "a question".into(), third));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-three".into(),
+            "a question".into(),
+            third
+        ));
     }
 
     #[test]
@@ -1215,7 +1235,12 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, _rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-mine".into(), "a question".into(), settled));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-mine".into(),
+            "a question".into(),
+            settled
+        ));
 
         // A request id the daemon never parked — including one from another
         // session — is not consumed here.
@@ -1238,7 +1263,12 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, settle_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), settled));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-one".into(),
+            "a question".into(),
+            settled
+        ));
 
         state.note_driver_event(
             session,
@@ -1256,7 +1286,12 @@ mod tests {
         let state = AgentState::default();
         let session = Uuid::new_v4();
         let (settled, settle_rx) = crossbeam_channel::bounded(1);
-        assert!(state.try_park_ask(session, "agent-ask-one".into(), "a question".into(), settled));
+        assert!(state.try_park_ask(
+            session,
+            "agent-ask-one".into(),
+            "a question".into(),
+            settled
+        ));
 
         state.revoke_session(session);
         assert_eq!(settle_rx.recv().unwrap(), AgentAskOutcome::Cancelled);

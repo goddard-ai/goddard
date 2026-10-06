@@ -264,16 +264,16 @@ fn items_to_history(items: &[Value], visible_turn_limit: usize) -> ProviderSessi
 /// provider-turn indexes, but only `completed` is a legal `session/fork`
 /// boundary.
 #[derive(Clone)]
-pub(crate) struct FinishedTurn {
-    pub(crate) turn_id: String,
-    pub(crate) completed: bool,
+pub struct FinishedTurn {
+    pub turn_id: String,
+    pub completed: bool,
 }
 
 /// The `session/fork` cut point for "keep the first `retained` finished
 /// turns": the nearest `completed` turn at or before that edge. A failed
 /// or cancelled edge cannot be a boundary, so the cut snaps back to the
 /// last completed turn — never keeps a turn meant to be dropped.
-pub(crate) fn fork_boundary_id(finished: &[FinishedTurn], retained: usize) -> Option<String> {
+pub fn fork_boundary_id(finished: &[FinishedTurn], retained: usize) -> Option<String> {
     finished
         .get(..retained)?
         .iter()
@@ -328,7 +328,7 @@ pub fn fork_session_at_turn(
 
 /// Every turn that finished, in view order, from `turn/completed` events —
 /// all terminals, so the list lines up with Goddard's provider-turn count.
-pub(crate) fn finished_turns(
+pub fn finished_turns(
     service: &MuseService,
     session_id: &str,
 ) -> anyhow::Result<Vec<FinishedTurn>> {
@@ -380,9 +380,7 @@ pub(crate) fn finished_turns(
 
 /// The live `model/list` catalog, or the last-good cache the catalog layer
 /// falls back to when no host is running.
-pub(crate) fn discover_catalog(
-    binary: &Path,
-) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
+pub fn discover_catalog(binary: &Path) -> (Vec<ProviderModel>, Option<Vec<ProviderAgentPreset>>) {
     let Some(service) = muse_service::attached(binary) else {
         return (Vec::new(), None);
     };

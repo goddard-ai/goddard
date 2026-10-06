@@ -144,7 +144,7 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
 
 /// Create the fork outside the source session's resident app-server. Returning
 /// only after this process exits makes the cursor immediately resumable.
-pub(crate) fn fork_session_at_turn(
+pub fn fork_session_at_turn(
     binary: &Path,
     cwd: &Path,
     thread_id: &str,
@@ -317,8 +317,7 @@ fn parse_session_history(response: &Value) -> ProviderSessionHistory {
             status,
             provider_turn_started: true,
             provider_resume_at: None,
-            interruption: (status == TurnStatus::Interrupted)
-                .then_some(TurnInterruption::Provider),
+            interruption: (status == TurnStatus::Interrupted).then_some(TurnInterruption::Provider),
             started_at,
             completed_at,
             checkpoint: None,

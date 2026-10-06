@@ -17,7 +17,7 @@ use anyhow::Context as _;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::Value;
 
-pub(crate) fn generated_title(
+pub fn generated_title(
     session_id: &str,
     placeholder: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
@@ -27,7 +27,7 @@ pub(crate) fn generated_title(
     generated_title_from(&path, session_id, placeholder)
 }
 
-pub(crate) fn generated_title_from(
+pub fn generated_title_from(
     db_path: &Path,
     session_id: &str,
     placeholder: Option<&str>,
@@ -54,11 +54,11 @@ pub(crate) fn generated_title_from(
 /// True when `title` is empty, Devin's "Untitled" stub, or the first prompt
 /// Devin writes before generation finishes. Those are misses, not titles:
 /// latching them would hide the generated name that lands a moment later.
-pub(crate) fn is_placeholder_title(title: &str, prompt: Option<&str>) -> bool {
+pub fn is_placeholder_title(title: &str, prompt: Option<&str>) -> bool {
     distinct_title(title, prompt).is_none()
 }
 
-pub(crate) fn title_from_notification(method: &str, params: &Value) -> Option<String> {
+pub fn title_from_notification(method: &str, params: &Value) -> Option<String> {
     if !is_title_notification(method) {
         return None;
     }

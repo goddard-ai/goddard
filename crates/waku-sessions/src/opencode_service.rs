@@ -82,7 +82,7 @@ const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(2);
 /// against *its* build, and Goddard is not an OpenCode build, so equality there
 /// would reject every perfectly healthy service.
 #[derive(Clone, Deserialize)]
-pub(crate) struct ServiceRegistration {
+pub struct ServiceRegistration {
     pub id: String,
     #[serde(default)]
     pub version: Option<String>,
@@ -107,7 +107,7 @@ impl std::fmt::Debug for ServiceRegistration {
 }
 
 /// `${XDG_STATE_HOME:-$HOME/.local/state}/opencode/service.json`.
-pub(crate) fn registration_path() -> PathBuf {
+pub fn registration_path() -> PathBuf {
     state_directory().join(REGISTRATION_FILE)
 }
 
@@ -125,7 +125,7 @@ fn state_directory() -> PathBuf {
 /// Read-only by contract; see the module doc. Absence is an ordinary answer —
 /// the user simply has no service running — so this returns `None` rather than
 /// an error.
-pub(crate) fn read_registration() -> Option<ServiceRegistration> {
+pub fn read_registration() -> Option<ServiceRegistration> {
     read_registration_file(&registration_path()).or_else(channel_registration)
 }
 
@@ -160,7 +160,7 @@ fn read_registration_file(path: &Path) -> Option<ServiceRegistration> {
 /// `/api/info` answers 200 only once the service is ready — 503 while it is
 /// starting or stopping, 500 when it failed — so a service that is still
 /// coming up fails here and is simply polled again.
-pub(crate) fn probe(registration: &ServiceRegistration) -> anyhow::Result<Endpoint> {
+pub fn probe(registration: &ServiceRegistration) -> anyhow::Result<Endpoint> {
     let endpoint = Endpoint::basic(&registration.url, SERVICE_USER, &registration.password)?;
     let info = opencode_api::server_info(&endpoint)
         .context("the OpenCode service did not answer its info route")?;
@@ -202,14 +202,14 @@ fn accept_info(registration: &ServiceRegistration, info: &ServerInfo) -> anyhow:
 /// wrapper from `deepseek_session`, because the dev watcher SIGTERMs Goddard
 /// without running destructors.
 #[allow(dead_code)]
-pub(crate) enum Ownership {
+pub enum Ownership {
     Adopted { pid: u32 },
     Private(StdMutex<std::process::Child>),
 }
 
 /// What a subscriber receives.
 #[derive(Clone, Debug)]
-pub(crate) enum HubFrame {
+pub enum HubFrame {
     /// One `/api/event` envelope, verbatim.
     Event(Value),
     /// The stream came back after a break. Drivers reconcile against the
@@ -222,7 +222,7 @@ pub(crate) enum HubFrame {
 
 /// Fan-out from the one event stream to the sessions Goddard owns.
 #[derive(Default)]
-pub(crate) struct EventHub {
+pub struct EventHub {
     subscribers: Mutex<HashMap<String, Vec<(usize, Sender<HubFrame>)>>>,
     next_id: AtomicUsize,
 }
@@ -369,7 +369,7 @@ struct V2Event {
 }
 
 /// The one adopted service, and everything hanging off its event stream.
-pub(crate) struct OpenCodeService {
+pub struct OpenCodeService {
     /// Swapped in place when a CLI upgrade replaces the service: the upgrade
     /// version-checks incumbency and takes over with a new url, pid and
     /// password, which must not look like a dead provider to live sessions.
@@ -415,25 +415,25 @@ impl OpenCodeService {
         })
     }
 
-    pub(crate) fn endpoint(&self) -> Endpoint {
+    pub fn endpoint(&self) -> Endpoint {
         self.endpoint.read().clone()
     }
 
     /// Bumped once per stream break, so a driver can tell a reconciliation
     /// answer for the current connection from one for a superseded pass.
-    pub(crate) fn generation(&self) -> u64 {
+    pub fn generation(&self) -> u64 {
         self.generation.load(Ordering::Acquire)
     }
 
     /// A miss means "not known yet", never "unlimited".
-    pub(crate) fn model_context_window(&self, key: &str) -> Option<u64> {
+    pub fn model_context_window(&self, key: &str) -> Option<u64> {
         self.model_windows.read().get(key).copied()
     }
 
     /// The pid of the adopted service, for reporting only. Goddard never signals
     /// it: see the module doc.
     #[allow(dead_code)]
-    pub(crate) fn pid(&self) -> Option<u32> {
+    pub fn pid(&self) -> Option<u32> {
         match self.ownership {
             Ownership::Adopted { pid } => Some(pid),
             Ownership::Private(_) => None,
@@ -443,7 +443,7 @@ impl OpenCodeService {
     /// Starts watching one session. Subscribe BEFORE creating the session:
     /// the service can emit that session's first event before `POST
     /// /api/session` has even answered.
-    pub(crate) fn subscribe(self: &Arc<Self>, session_id: &str) -> Subscription {
+    pub fn subscribe(self: &Arc<Self>, session_id: &str) -> Subscription {
         let (rx_id, rx) = self.hub.subscribe(session_id);
         if self.subscribers.fetch_add(1, Ordering::AcqRel) == 0 {
             self.ensure_reader();
@@ -496,7 +496,7 @@ impl OpenCodeService {
 /// Dropping it stops the fan-out for that session, and dropping the last one
 /// parks the reader. The service object itself is permanent either way — it is
 /// never a lease over the user's process.
-pub(crate) struct Subscription {
+pub struct Subscription {
     service: Arc<OpenCodeService>,
     session_id: String,
     rx_id: usize,
@@ -537,14 +537,14 @@ fn slot() -> &'static (StdMutex<SlotState>, Condvar) {
 ///
 /// The only entry point allowed to spawn, and reached only from driver start.
 /// Blocking: discovery, an HTTP probe, and up to a 20s start poll.
-pub(crate) fn shared(binary: &Path) -> anyhow::Result<Arc<OpenCodeService>> {
+pub fn shared(binary: &Path) -> anyhow::Result<Arc<OpenCodeService>> {
     acquire(binary, true)?.ok_or_else(|| anyhow!("the OpenCode background service is not running"))
 }
 
 /// Returns the shared service only if one is already healthy, NEVER starting
 /// it. Opening the Resume picker or refreshing the model catalog must not
 /// start the user's background daemon.
-pub(crate) fn attached(binary: &Path) -> anyhow::Result<Option<Arc<OpenCodeService>>> {
+pub fn attached(binary: &Path) -> anyhow::Result<Option<Arc<OpenCodeService>>> {
     acquire(binary, false)
 }
 
