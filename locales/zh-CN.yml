@@ -1,5 +1,24 @@
 _version: 1
 
+settings.composer_dictation: 编辑器语音听写
+settings.composer_dictation_description: 使用麦克风录制短句，Whistle 会离线转写并插入到光标位置
+settings.composer_dictation_downloading: 正在下载…
+settings.composer_dictation_model_ready: Whistle 模型已就绪
+settings.composer_dictation_download: 下载模型
+settings.composer_dictation_unavailable: 此 Mac 无法使用 Whistle 语音听写
+settings.composer_dictation_download_failed: Whistle 模型下载失败
+settings.composer_dictation_download_error: 无法下载 Whistle 模型：%{error}
+composer.dictation_start: 开始听写
+composer.dictation_stop: 停止听写
+composer.dictation_recording: 正在录音
+composer.dictation_transcribing: 正在转写
+composer.dictation_downloading: 正在下载模型
+composer.dictation_mic_denied: 麦克风访问已关闭。请在系统设置中启用后再使用语音听写。
+composer.dictation_capture_failed: 无法启动麦克风录音。
+composer.dictation_no_audio: 未录到音频。开始录音后请再讲话。
+composer.dictation_not_recognized: 未识别到语音。
+composer.dictation_unexpected_response: 守护进程返回了意外的转写响应。
+
 auto_prompts.title: 自动提示词
 auto_prompts.description: 当 Jev 判断已完成的任务回合符合条件时，自动发送后续提示词。
 auto_prompts.add: 添加自动提示词

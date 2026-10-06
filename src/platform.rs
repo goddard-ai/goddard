@@ -109,12 +109,11 @@ pub fn request_speech_recognition_access(done: Box<dyn Fn(bool) + Send + Sync + 
         return;
     }
     let done = std::sync::Mutex::new(Some(done));
-    let handler =
-        block2::RcBlock::new(move |status: SFSpeechRecognizerAuthorizationStatus| {
-            if let Some(done) = done.lock().unwrap().take() {
-                done(status == SFSpeechRecognizerAuthorizationStatus::Authorized);
-            }
-        });
+    let handler = block2::RcBlock::new(move |status: SFSpeechRecognizerAuthorizationStatus| {
+        if let Some(done) = done.lock().unwrap().take() {
+            done(status == SFSpeechRecognizerAuthorizationStatus::Authorized);
+        }
+    });
     unsafe { SFSpeechRecognizer::requestAuthorization(&handler) };
 }
 
@@ -146,8 +145,8 @@ mod voice_gate {
     use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
     use objc2_foundation::{NSArray, NSError, NSString};
     use objc2_speech::{
-        SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult,
-        SFSpeechRecognitionTask, SFSpeechRecognitionTaskHint, SFSpeechRecognizer,
+        SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
+        SFSpeechRecognitionTaskHint, SFSpeechRecognizer,
     };
 
     use super::ConsentSignal;
@@ -171,6 +170,11 @@ mod voice_gate {
     struct Feed(Option<Retained<SFSpeechAudioBufferRecognitionRequest>>);
     unsafe impl Send for Feed {}
     static CONSENT_FEED: Mutex<Feed> = Mutex::new(Feed(None));
+
+    /// Temporary PCM captured only while the user has explicitly started
+    /// dictation. The audio I/O callback uses `try_lock` and drops samples if
+    /// the consumer is briefly busy.
+    static DICTATION_CAPTURE: Mutex<Option<(u32, Vec<f32>)>> = Mutex::new(None);
 
     type ConsentHook = Box<dyn Fn(ConsentSignal) + Send + Sync>;
     static CONSENT_HOOK: Mutex<Option<ConsentHook>> = Mutex::new(None);
@@ -222,11 +226,9 @@ mod voice_gate {
         if energy.sqrt() >= AMBIENT_RMS_THRESHOLD {
             AMBIENT_WINDOWS.store(AMBIENT_RELEASE_WINDOWS, Ordering::Relaxed);
         } else {
-            let _ = AMBIENT_WINDOWS.fetch_update(
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-                |windows| Some(windows.saturating_sub(1)),
-            );
+            let _ = AMBIENT_WINDOWS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |windows| {
+                Some(windows.saturating_sub(1))
+            });
         }
     }
 
@@ -296,6 +298,7 @@ mod voice_gate {
             let tap = RcBlock::new(
                 |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
                     let buffer = unsafe { buffer.as_ref() };
+                    capture_dictation(buffer);
                     if let Ok(feed) = CONSENT_FEED.try_lock()
                         && let Some(request) = feed.0.as_ref()
                     {
@@ -325,6 +328,71 @@ mod voice_gate {
         })
     }
 
+    fn capture_dictation(buffer: &AVAudioPCMBuffer) {
+        let frames = unsafe { buffer.frameLength() } as usize;
+        let channel_data = unsafe { buffer.floatChannelData() };
+        if frames == 0 || channel_data.is_null() {
+            return;
+        }
+        let format = unsafe { buffer.format() };
+        let rate = unsafe { format.sampleRate() }.round().max(1.0) as u32;
+        let channels = unsafe { format.channelCount() }.max(1) as usize;
+        let mut capture = match DICTATION_CAPTURE.try_lock() {
+            Ok(capture) => capture,
+            Err(_) => return,
+        };
+        let Some((sample_rate, samples)) = capture.as_mut() else {
+            return;
+        };
+        *sample_rate = rate;
+        let available = ((*sample_rate as usize).saturating_mul(30)).saturating_sub(samples.len());
+        let count = frames.min(available);
+        if count == 0 {
+            return;
+        }
+        for frame in 0..count {
+            let mono = (0..channels)
+                .map(|channel| unsafe { *(*channel_data.add(channel)).as_ptr().add(frame) })
+                .sum::<f32>()
+                / channels as f32;
+            samples.push(mono.clamp(-1.0, 1.0));
+        }
+    }
+
+    pub fn begin_dictation() -> bool {
+        if !start() {
+            return false;
+        }
+        let Ok(mut capture) = DICTATION_CAPTURE.lock() else {
+            return false;
+        };
+        *capture = Some((48_000, Vec::with_capacity(48_000 * 8)));
+        true
+    }
+
+    pub fn finish_dictation() -> Option<Vec<i16>> {
+        let (rate, samples) = DICTATION_CAPTURE.lock().ok()?.take()?;
+        if samples.is_empty() {
+            return None;
+        }
+        let count = samples.len().saturating_mul(16_000) / rate as usize;
+        if count == 0 {
+            return None;
+        }
+        Some(
+            (0..count)
+                .map(|index| {
+                    let source = index as f64 * rate as f64 / 16_000.0;
+                    let left = (source.floor() as usize).min(samples.len() - 1);
+                    let right = (left + 1).min(samples.len() - 1);
+                    let fraction = (source - left as f64) as f32;
+                    let sample = samples[left] * (1.0 - fraction) + samples[right] * fraction;
+                    (sample * i16::MAX as f32).round() as i16
+                })
+                .collect(),
+        )
+    }
+
     /// Stop the engine and any consent session, and reset the VAD window.
     pub fn stop() {
         end_consent();
@@ -351,7 +419,8 @@ mod voice_gate {
     /// keep the engine running when nothing is playing.
     pub fn consent_active() -> bool {
         VOICE_LISTENER.with_borrow(|slot| {
-            slot.as_ref().is_some_and(|listener| listener.consent.is_some())
+            slot.as_ref()
+                .is_some_and(|listener| listener.consent.is_some())
         })
     }
 
@@ -369,7 +438,8 @@ mod voice_gate {
                 return true;
             }
             use objc2::AnyThread;
-            let Some(recognizer) = (unsafe { SFSpeechRecognizer::init(SFSpeechRecognizer::alloc()) })
+            let Some(recognizer) =
+                (unsafe { SFSpeechRecognizer::init(SFSpeechRecognizer::alloc()) })
             else {
                 return false;
             };
@@ -413,9 +483,8 @@ mod voice_gate {
                     hook(signal);
                 },
             );
-            let task = unsafe {
-                recognizer.recognitionTaskWithRequest_resultHandler(&request, &handler)
-            };
+            let task =
+                unsafe { recognizer.recognitionTaskWithRequest_resultHandler(&request, &handler) };
             CONSENT_HEARD.store(false, Ordering::Relaxed);
             *CONSENT_HOOK.lock().unwrap() = Some(hook);
             CONSENT_FEED.lock().unwrap().0 = Some(request.clone());
@@ -502,9 +571,7 @@ pub fn consent_recognition_active() -> bool {
 /// Begin on-device recognition of the spoken consent phrase. `hook` is
 /// invoked off the UI thread for each `ConsentSignal`.
 #[cfg(target_os = "macos")]
-pub fn begin_consent_recognition(
-    hook: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>,
-) -> bool {
+pub fn begin_consent_recognition(hook: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>) -> bool {
     voice_gate::begin_consent(hook)
 }
 
@@ -546,6 +613,16 @@ pub fn voice_audio_sink_active() -> bool {
     false
 }
 
+#[cfg(target_os = "macos")]
+pub fn begin_dictation_capture() -> bool {
+    voice_gate::begin_dictation()
+}
+
+#[cfg(target_os = "macos")]
+pub fn finish_dictation_capture() -> Option<Vec<i16>> {
+    voice_gate::finish_dictation()
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn microphone_access() -> CaptureAccess {
     CaptureAccess::Denied
@@ -572,6 +649,16 @@ pub fn start_voice_listener() -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
+pub fn begin_dictation_capture() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn finish_dictation_capture() -> Option<Vec<i16>> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn stop_voice_listener() {}
 
 #[cfg(not(target_os = "macos"))]
@@ -585,9 +672,7 @@ pub fn consent_recognition_active() -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn begin_consent_recognition(
-    _: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>,
-) -> bool {
+pub fn begin_consent_recognition(_: Box<dyn Fn(ConsentSignal) + Send + Sync + 'static>) -> bool {
     false
 }
 

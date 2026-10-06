@@ -1,0 +1,1 @@
+- Record up to 30 seconds in the desktop composer and insert an offline Whistle transcription at the caret; the first use downloads the model.

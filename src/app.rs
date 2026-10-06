@@ -863,8 +863,7 @@ fn sidebar_slide_right_panel_widths(
         right_panel_width,
     )
     .1;
-    let rendered =
-        content.min((viewport_width - sidebar_rendered - MAIN_PANEL_MIN_WIDTH).max(0.0));
+    let rendered = content.min((viewport_width - sidebar_rendered - MAIN_PANEL_MIN_WIDTH).max(0.0));
     (rendered, content)
 }
 
@@ -900,7 +899,10 @@ enum RightPanelSurface {
     /// A planning session's plan document, read through its boss daemon and
     /// rendered read-only. The tab opens itself with the session and never
     /// closes — `plan_file` is the daemon-normalized `plans/<name>.md`.
-    Plan { session_id: Uuid, plan_file: String },
+    Plan {
+        session_id: Uuid,
+        plan_file: String,
+    },
     /// The employee roster and goal status for the owning Boss chat.
     Goals,
 }
@@ -1867,8 +1869,12 @@ enum SessionActivationTransition {
     /// The activation serves another location's hop — a deliverable page's
     /// restore re-lands its boss chat underneath — so it records nothing.
     Silent,
-    Back { from: NavigationLocation },
-    Forward { from: NavigationLocation },
+    Back {
+        from: NavigationLocation,
+    },
+    Forward {
+        from: NavigationLocation,
+    },
 }
 
 /// The watcher-facing dev flag file's `auto_restart` value — `false` when
@@ -2536,6 +2542,10 @@ pub struct Waku {
     boss_voice_gate_events: Receiver<VoiceGateEvent>,
     /// TCC prompts fire once per run; their answers arrive as pump events.
     voice_mic_requested: bool,
+    dictation_state: DictationState,
+    dictation_pending_permission: bool,
+    whistle_model_downloaded: bool,
+    whistle_model_download_pending: bool,
     speech_auth_requested: bool,
     /// Consent-task restarts used this session, and the generation of the
     /// current consent listen window — each gated utterance bumps it.
@@ -3284,8 +3294,7 @@ pub struct Waku {
         RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
     /// Stable keyboard focus for each deliverable row's hover-revealed pin
     /// control.
-    sidebar_deliverable_pin_focuses:
-        RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
+    sidebar_deliverable_pin_focuses: RefCell<HashMap<(waku_client::DaemonKey, Uuid), FocusHandle>>,
     /// Stable keyboard focus for each deliverable row's hover-revealed archive
     /// control.
     sidebar_deliverable_archive_focuses:
@@ -4173,6 +4182,16 @@ pub struct Waku {
     fps_last_frame: Instant,
     fps_frame_count: u64,
     fps_value: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) enum DictationState {
+    #[default]
+    Idle,
+    ModelDownloading,
+    Recording,
+    Transcribing,
+    Error(String),
 }
 
 mod action_predictions;
@@ -6506,15 +6525,19 @@ impl Waku {
                 }
             })
             .detach();
-            cx.subscribe(&boss_memory_search, |this: &mut Self, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Edited) {
-                    cx.notify();
-                    // Searching is asynchronous. The Brain list is a bounded
-                    // UI surface, but all directory discovery stays in the
-                    // Boss request worker.
-                    this.ensure_boss_memory_search(cx);
-                }
-            }).detach();
+            cx.subscribe(
+                &boss_memory_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                        // Searching is asynchronous. The Brain list is a bounded
+                        // UI surface, but all directory discovery stays in the
+                        // Boss request worker.
+                        this.ensure_boss_memory_search(cx);
+                    }
+                },
+            )
+            .detach();
             cx.subscribe(&memory_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -6854,6 +6877,10 @@ impl Waku {
                 voice_scratchpad_tx,
                 voice_scratchpad_events,
                 voice_mic_requested: false,
+                dictation_state: DictationState::Idle,
+                dictation_pending_permission: false,
+                whistle_model_downloaded: false,
+                whistle_model_download_pending: false,
                 speech_auth_requested: false,
                 voice_consent_restarts: 0,
                 voice_consent_timer_gen: 0,

@@ -133,6 +133,7 @@ pub mod terminal;
 pub mod theme;
 pub mod usage;
 pub mod usage_history;
+pub mod whistle;
 pub mod workspace;
 pub mod worktree;
 

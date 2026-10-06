@@ -1993,6 +1993,48 @@ impl Waku {
                 theme,
                 search,
             ),
+            if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+                setting_card(
+                    "icons/mic.svg",
+                    tr!("settings.composer_dictation"),
+                    tr!("settings.composer_dictation_description"),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(toggle_switch(
+                            "composer-dictation-toggle",
+                            self.state.composer_dictation_enabled,
+                            false,
+                            theme,
+                            cx,
+                            {
+                                let enabled = self.state.composer_dictation_enabled;
+                                move |this, _, cx| this.set_composer_dictation_enabled(!enabled, cx)
+                            },
+                        ))
+                        .child(settings_button(
+                            "download-whistle-model",
+                            if self.whistle_model_download_pending {
+                                tr!("settings.composer_dictation_downloading")
+                            } else if self.whistle_model_downloaded {
+                                tr!("settings.composer_dictation_model_ready")
+                            } else {
+                                tr!("settings.composer_dictation_download")
+                            },
+                            !self.whistle_model_download_pending,
+                            false,
+                            true,
+                            theme,
+                            cx,
+                            |this, _, cx| this.download_whistle_model(cx),
+                        )),
+                    theme,
+                    search,
+                )
+            } else {
+                None
+            },
         ]
         .into_iter()
         .flatten()
@@ -11792,6 +11834,57 @@ impl Waku {
         self.state.composer_enter_steers = enabled;
         crate::input::install_composer_enter_swap(enabled, cx);
         self.save();
+        cx.notify();
+    }
+
+    fn set_composer_dictation_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.composer_dictation_enabled == enabled {
+            return;
+        }
+        self.state.composer_dictation_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn download_whistle_model(&mut self, cx: &mut Context<Self>) {
+        if self.whistle_model_download_pending {
+            return;
+        }
+        self.whistle_model_download_pending = true;
+        cx.notify();
+        let client = self.daemon.client();
+        let work = cx.background_executor().spawn(async move {
+            client.request(
+                Uuid::nil(),
+                Uuid::nil(),
+                waku_client::Command::DownloadWhistleModel,
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.whistle_model_download_pending = false;
+                match result {
+                    Ok(waku_client::ResponsePayload::WhistleStatus {
+                        available: true,
+                        downloaded: true,
+                    }) => {
+                        this.whistle_model_downloaded = true;
+                        this.show_toast(tr!("settings.composer_dictation_model_ready"));
+                    }
+                    Ok(waku_client::ResponsePayload::WhistleStatus { .. }) => {
+                        this.show_toast(tr!("settings.composer_dictation_unavailable"));
+                    }
+                    Ok(_) => this.show_toast(tr!("settings.composer_dictation_download_failed")),
+                    Err(error) => this.show_toast(tr!(
+                        "settings.composer_dictation_download_error",
+                        error = error.to_string()
+                    )),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 

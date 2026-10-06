@@ -1707,6 +1707,42 @@ settings.composer_enter_steers:
   en: Enter steers the running turn
 settings.composer_enter_steers_description:
   en: In the composer, Enter steers the draft into the running turn and %{modifier}Enter queues it. Shift+Enter still inserts a line break
+settings.composer_dictation:
+  en: Composer dictation
+settings.composer_dictation_description:
+  en: Record a short phrase with the microphone control and insert the offline transcription at the composer caret
+settings.composer_dictation_downloading:
+  en: Downloading…
+settings.composer_dictation_model_ready:
+  en: Whistle model ready
+settings.composer_dictation_download:
+  en: Download model
+settings.composer_dictation_unavailable:
+  en: Whistle dictation is unavailable on this Mac
+settings.composer_dictation_download_failed:
+  en: Whistle model download failed
+settings.composer_dictation_download_error:
+  en: "Could not download Whistle model: %{error}"
+composer.dictation_start:
+  en: Start dictation
+composer.dictation_stop:
+  en: Stop dictation
+composer.dictation_recording:
+  en: Recording
+composer.dictation_transcribing:
+  en: Transcribing
+composer.dictation_downloading:
+  en: Downloading model
+composer.dictation_mic_denied:
+  en: Microphone access is disabled. Enable it in System Settings to dictate.
+composer.dictation_capture_failed:
+  en: Could not start microphone capture.
+composer.dictation_no_audio:
+  en: No audio was captured. Try speaking after recording starts.
+composer.dictation_not_recognized:
+  en: No speech was recognized.
+composer.dictation_unexpected_response:
+  en: Daemon returned an unexpected transcription response.
 settings.sidebar_draft_preview_color:
   en: Draft preview color
 settings.sidebar_draft_preview_color_description:

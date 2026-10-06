@@ -2350,7 +2350,9 @@ fn command_targets_runtime(command: &Command) -> bool {
 fn is_subprocess_heavy(command: &Command) -> bool {
     matches!(
         command,
-        Command::ProbeProvider { .. }
+        Command::Transcribe { .. }
+            | Command::DownloadWhistleModel
+            | Command::ProbeProvider { .. }
             | Command::FetchPlanUsage { .. }
             | Command::LoadUsageHistory { .. }
             | Command::ListProviderSessions { .. }
@@ -2377,7 +2379,10 @@ fn is_subprocess_heavy(command: &Command) -> bool {
 }
 
 fn is_health_check(command: &Command) -> bool {
-    matches!(command, Command::GetSettings | Command::GetDaemonStats)
+    matches!(
+        command,
+        Command::GetSettings | Command::GetDaemonStats | Command::GetWhistleStatus
+    )
 }
 
 fn run_runtime_mailbox(
@@ -2645,6 +2650,9 @@ fn command_kind(command: &Command) -> &'static str {
         Command::FetchPlanUsage { .. } => "fetchPlanUsage",
         Command::ConsumeCodexResetCredit { .. } => "consumeCodexResetCredit",
         Command::ProbeComputerPermissions { .. } => "probeComputerPermissions",
+        Command::Transcribe { .. } => "transcribe",
+        Command::GetWhistleStatus => "getWhistleStatus",
+        Command::DownloadWhistleModel => "downloadWhistleModel",
         Command::LoadUsageHistory { .. } => "loadUsageHistory",
         Command::LoadSkills { .. } => "loadSkills",
         Command::SetSkillsEnabled { .. } => "setSkillsEnabled",

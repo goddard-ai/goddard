@@ -269,6 +269,7 @@ export type { UserInputQuestion } from "./UserInputQuestion";
 export type { WaveMember } from "./WaveMember";
 export type { WaveMemberOutcome } from "./WaveMemberOutcome";
 export type { WaveNotification } from "./WaveNotification";
+export type { WhistleWord } from "./WhistleWord";
 export type { WireComputerToolRequest } from "./WireComputerToolRequest";
 export type { WireDriverEvent } from "./WireDriverEvent";
 export type { WireDriverStartOptions } from "./WireDriverStartOptions";

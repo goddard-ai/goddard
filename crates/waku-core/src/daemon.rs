@@ -2490,6 +2490,33 @@ impl Backend for WakuBackend {
                     timeout_secs,
                 )?,
             }),
+            Command::GetWhistleStatus => {
+                let (available, downloaded) = crate::whistle::status();
+                Ok(ResponsePayload::WhistleStatus {
+                    available,
+                    downloaded,
+                })
+            }
+            Command::DownloadWhistleModel => {
+                crate::whistle::download_model()?;
+                let (available, downloaded) = crate::whistle::status();
+                Ok(ResponsePayload::WhistleStatus {
+                    available,
+                    downloaded,
+                })
+            }
+            Command::Transcribe {
+                pcm,
+                language,
+                keywords,
+            } => {
+                let (text, language, words) = crate::whistle::transcribe(pcm, language, keywords)?;
+                Ok(ResponsePayload::Transcription {
+                    text,
+                    language,
+                    words,
+                })
+            }
             Command::TestEvalConnection { settings } => {
                 // The probe's staged fields are unsaved edits — they win over
                 // the stored credential, which fills whatever the pane left
@@ -10452,6 +10479,9 @@ fn handle_driver_command(
         | Command::ConsumeCodexResetCredit { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::Evaluate { .. }
+        | Command::Transcribe { .. }
+        | Command::GetWhistleStatus
+        | Command::DownloadWhistleModel
         | Command::TestEvalConnection { .. }
         | Command::GetInferenceCredential { .. }
         | Command::RouteTask { .. }

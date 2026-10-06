@@ -29,7 +29,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -155,6 +155,18 @@ pub struct SessionDetailTail {
     rename_all_fields = "camelCase"
 )]
 pub enum Command {
+    /// Transcribe one bounded 16 kHz mono PCM clip with the daemon-owned
+    /// Whistle engine. Samples are signed 16-bit PCM to keep the wire payload
+    /// bounded; the daemon converts them to float for Needle.
+    Transcribe {
+        pcm: Vec<i16>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keywords: Option<String>,
+    },
+    GetWhistleStatus,
+    DownloadWhistleModel,
     /// Boss operations use the scoped caller identity for authorization.
     Boss {
         operation: crate::boss::BossOperation,
@@ -1323,6 +1335,15 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    WhistleStatus {
+        available: bool,
+        downloaded: bool,
+    },
+    Transcription {
+        text: String,
+        language: String,
+        words: Vec<WhistleWord>,
+    },
     AgentMergeSubmitted {
         sha: String,
     },
@@ -1562,6 +1583,16 @@ pub enum ResponsePayload {
     },
 }
 
+/// A word and its timing from a Whistle transcription.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WhistleWord {
+    pub word: String,
+    pub start: f32,
+    pub end: f32,
+    pub probability: f32,
+}
+
 /// The i18n key and `%{name}` substitution values behind a user-facing
 /// string, shipped alongside the English fallback so each client can render
 /// the text in its own locale. Emitters build the pair with `localized!`.
@@ -1759,7 +1790,36 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 17);
+        assert_eq!(PROTOCOL_VERSION, 18);
+    }
+
+    #[test]
+    fn whistle_commands_and_transcription_round_trip() {
+        let command = Command::Transcribe {
+            pcm: vec![-8, 0, 9],
+            language: Some("en".into()),
+            keywords: Some("Goddard".into()),
+        };
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["type"], "transcribe");
+        assert_eq!(json["pcm"], serde_json::json!([-8, 0, 9]));
+        assert_eq!(json["language"], "en");
+        serde_json::from_value::<Command>(json).unwrap();
+
+        let response = ResponsePayload::Transcription {
+            text: "hello world".into(),
+            language: "en".into(),
+            words: vec![WhistleWord {
+                word: "hello".into(),
+                start: 0.0,
+                end: 0.4,
+                probability: 0.98,
+            }],
+        };
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(json["type"], "transcription");
+        assert_eq!(json["words"][0]["start"], 0.0);
+        serde_json::from_value::<ResponsePayload>(json).unwrap();
     }
 
     #[test]
@@ -1768,7 +1828,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 17);
+        assert_eq!(PROTOCOL_VERSION, 18);
     }
 
     #[test]

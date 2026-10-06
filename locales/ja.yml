@@ -1,5 +1,24 @@
 _version: 1
 
+settings.composer_dictation: コンポーザーの音声入力
+settings.composer_dictation_description: マイクで短く話すと、Whistle がオフラインで文字起こしし、カーソル位置に挿入します
+settings.composer_dictation_downloading: ダウンロード中…
+settings.composer_dictation_model_ready: Whistle モデルの準備完了
+settings.composer_dictation_download: モデルをダウンロード
+settings.composer_dictation_unavailable: この Mac では Whistle 音声入力を利用できません
+settings.composer_dictation_download_failed: Whistle モデルをダウンロードできませんでした
+settings.composer_dictation_download_error: "Whistle モデルをダウンロードできませんでした: %{error}"
+composer.dictation_start: 音声入力を開始
+composer.dictation_stop: 音声入力を停止
+composer.dictation_recording: 録音中
+composer.dictation_transcribing: 文字起こし中
+composer.dictation_downloading: モデルをダウンロード中
+composer.dictation_mic_denied: マイクへのアクセスが無効です。音声入力するにはシステム設定で有効にしてください。
+composer.dictation_capture_failed: マイクを起動できませんでした。
+composer.dictation_no_audio: 音声を録音できませんでした。録音開始後に話してください。
+composer.dictation_not_recognized: 音声を認識できませんでした。
+composer.dictation_unexpected_response: デーモンから予期しない文字起こし応答がありました。
+
 auto_prompts.title: 自動プロンプト
 auto_prompts.description: 完了したタスクの内容が条件に合うと、Jev がフォローアップを送信します。
 auto_prompts.add: 自動プロンプトを追加

@@ -5921,6 +5921,94 @@ impl Waku {
                     .children(self.render_composer_incognito_chip(&controls, cx))
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
+                    .when(
+                        interactive
+                            && matches!(surface, ComposerCard::Main)
+                            && cfg!(all(target_os = "macos", target_arch = "aarch64"))
+                            && self.state.composer_dictation_enabled,
+                        |row| {
+                            let (label, tooltip, recording) = match &self.dictation_state {
+                                DictationState::Idle => {
+                                    (None, tr!("composer.dictation_start"), false)
+                                }
+                                DictationState::ModelDownloading => (
+                                    Some(tr!("composer.dictation_downloading")),
+                                    tr!("composer.dictation_downloading"),
+                                    false,
+                                ),
+                                DictationState::Recording => (
+                                    Some(tr!("composer.dictation_recording")),
+                                    tr!("composer.dictation_stop"),
+                                    true,
+                                ),
+                                DictationState::Transcribing => (
+                                    Some(tr!("composer.dictation_transcribing")),
+                                    tr!("composer.dictation_transcribing"),
+                                    false,
+                                ),
+                                DictationState::Error(error) => {
+                                    (Some(error.clone()), error.clone(), false)
+                                }
+                            };
+                            row.child(
+                                div()
+                                    .id(controls.chip_id("dictation"))
+                                    .tab_index(0)
+                                    .w(px(28.0))
+                                    .h(px(28.0))
+                                    .flex_none()
+                                    .rounded_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_default()
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .active(|element| element.bg(theme.overlay_strong))
+                                    .aria_label(tooltip.clone())
+                                    .tooltip(Tooltip::text(tooltip))
+                                    .when(
+                                        !matches!(
+                                            &self.dictation_state,
+                                            DictationState::ModelDownloading
+                                                | DictationState::Transcribing
+                                        ),
+                                        |element| {
+                                            element.on_activation(cx, |this, _, cx| {
+                                                this.toggle_dictation(cx);
+                                            })
+                                        },
+                                    )
+                                    .child(icon(
+                                        if recording {
+                                            "icons/square.svg"
+                                        } else {
+                                            "icons/mic.svg"
+                                        },
+                                        14.0,
+                                        if recording {
+                                            theme.danger
+                                        } else {
+                                            theme.text_secondary
+                                        },
+                                    )),
+                            )
+                            .when_some(label, |row, label| {
+                                row.child(
+                                    div()
+                                        .max_w(px(180.0))
+                                        .truncate()
+                                        .text_size(sp(11.5))
+                                        .text_color(if recording {
+                                            theme.danger
+                                        } else {
+                                            theme.text_secondary
+                                        })
+                                        .child(label),
+                                )
+                            })
+                        },
+                    )
                     .child(div().flex_1())
                     // The VS button lives on the main card only — one
                     // dictation session at a time, bound to that chat.

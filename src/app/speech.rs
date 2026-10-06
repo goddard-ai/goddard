@@ -355,9 +355,7 @@ async fn resolve_speech_clips(
                 credential,
                 model_id,
             } => synthesize(http, executor, *provider, credential, model_id, part).await?,
-            SpeechEngine::Piper { voice } => {
-                synthesize_piper(http, executor, voice, part).await?
-            }
+            SpeechEngine::Piper { voice } => synthesize_piper(http, executor, voice, part).await?,
         };
         let id = Uuid::new_v4();
         let clip = SpeechClip {
@@ -391,6 +389,150 @@ async fn resolve_speech_clips(
 }
 
 impl Waku {
+    pub(super) fn toggle_dictation(&mut self, cx: &mut Context<Self>) {
+        match &self.dictation_state {
+            super::DictationState::Recording => self.finish_dictation(cx),
+            super::DictationState::Transcribing | super::DictationState::ModelDownloading => {}
+            _ => self.prepare_dictation(cx),
+        }
+    }
+
+    fn prepare_dictation(&mut self, cx: &mut Context<Self>) {
+        self.dictation_state = super::DictationState::ModelDownloading;
+        cx.notify();
+        let client = self.daemon.client();
+        let work = cx.background_executor().spawn(async move {
+            let status = client.request(
+                Uuid::nil(),
+                Uuid::nil(),
+                waku_client::Command::GetWhistleStatus,
+            )?;
+            let (available, downloaded) = match status {
+                waku_client::ResponsePayload::WhistleStatus {
+                    available,
+                    downloaded,
+                } => (available, downloaded),
+                _ => anyhow::bail!("daemon returned an unexpected Whistle status"),
+            };
+            anyhow::ensure!(available, "Whistle dictation is unavailable on this Mac");
+            if downloaded {
+                return Ok::<_, anyhow::Error>(());
+            }
+            match client.request(
+                Uuid::nil(),
+                Uuid::nil(),
+                waku_client::Command::DownloadWhistleModel,
+            )? {
+                waku_client::ResponsePayload::WhistleStatus {
+                    downloaded: true, ..
+                } => Ok(()),
+                _ => anyhow::bail!("Whistle model download did not complete"),
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(()) => {
+                    this.whistle_model_downloaded = true;
+                    this.start_dictation_permission_or_capture(cx);
+                }
+                Err(error) => {
+                    this.dictation_state = super::DictationState::Error(error.to_string());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn start_dictation_permission_or_capture(&mut self, cx: &mut Context<Self>) {
+        match crate::platform::microphone_access() {
+            crate::platform::CaptureAccess::Granted => self.begin_dictation_capture(cx),
+            crate::platform::CaptureAccess::Undetermined => {
+                self.dictation_pending_permission = true;
+                self.request_voice_mic_access();
+            }
+            crate::platform::CaptureAccess::Denied => {
+                self.dictation_state =
+                    super::DictationState::Error(tr!("composer.dictation_mic_denied"));
+                cx.notify();
+            }
+        }
+    }
+
+    fn begin_dictation_capture(&mut self, cx: &mut Context<Self>) {
+        crate::platform::end_consent_recognition();
+        self.dictation_state = if crate::platform::begin_dictation_capture() {
+            super::DictationState::Recording
+        } else {
+            super::DictationState::Error(tr!("composer.dictation_capture_failed"))
+        };
+        cx.notify();
+        if matches!(&self.dictation_state, super::DictationState::Recording) {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(30))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if matches!(&this.dictation_state, super::DictationState::Recording) {
+                        this.finish_dictation(cx);
+                    }
+                });
+            })
+            .detach();
+        }
+    }
+
+    fn finish_dictation(&mut self, cx: &mut Context<Self>) {
+        let Some(pcm) = crate::platform::finish_dictation_capture() else {
+            self.dictation_state = super::DictationState::Error(tr!("composer.dictation_no_audio"));
+            self.maybe_stop_voice_listener();
+            cx.notify();
+            return;
+        };
+        self.maybe_stop_voice_listener();
+        self.dictation_state = super::DictationState::Transcribing;
+        cx.notify();
+        let client = self.daemon.client();
+        let work = cx.background_executor().spawn(async move {
+            client.request(
+                Uuid::nil(),
+                Uuid::nil(),
+                waku_client::Command::Transcribe {
+                    pcm,
+                    language: None,
+                    keywords: None,
+                },
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(waku_client::ResponsePayload::Transcription { text, .. }) => {
+                    if !text.trim().is_empty() {
+                        this.composer
+                            .update(cx, |input, cx| input.insert_text(&text, cx));
+                        this.dictation_state = super::DictationState::Idle;
+                    } else {
+                        this.dictation_state =
+                            super::DictationState::Error(tr!("composer.dictation_not_recognized"));
+                    }
+                    cx.notify();
+                }
+                Ok(_) => {
+                    this.dictation_state =
+                        super::DictationState::Error(tr!("composer.dictation_unexpected_response"));
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.dictation_state = super::DictationState::Error(error.to_string());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// `bossSpeechRequested` broadcasts — each becomes a resolve-and-play
     /// pipeline when this client's voice feature can voice it.
     pub(super) fn drain_speech_events(&mut self, cx: &mut Context<Self>) -> bool {
@@ -553,9 +695,9 @@ impl Waku {
                         )
                         .ok()
                         .and_then(|payload| match payload {
-                            waku_client::ResponsePayload::InferenceCredential {
-                                credential,
-                            } => credential,
+                            waku_client::ResponsePayload::InferenceCredential { credential } => {
+                                credential
+                            }
                             _ => None,
                         })
                         .filter(|key| !key.trim().is_empty())
@@ -801,11 +943,21 @@ impl Waku {
                 }
                 VoiceGateEvent::MicAccess(true) => {
                     crate::platform::start_voice_listener();
+                    if self.dictation_pending_permission {
+                        self.dictation_pending_permission = false;
+                        self.begin_dictation_capture(cx);
+                    }
                     if !self.pending_boss_speech.is_empty() {
                         self.arm_voice_consent(cx);
                     }
                 }
                 VoiceGateEvent::MicAccess(false) => {
+                    if self.dictation_pending_permission {
+                        self.dictation_pending_permission = false;
+                        self.dictation_state = super::DictationState::Error(
+                            tr!("composer.dictation_mic_denied"),
+                        );
+                    }
                     // No mic means nothing to gate with — speak as today.
                     self.replay_pending_boss_speech(cx);
                 }
@@ -933,7 +1085,11 @@ mod tests {
         let now = unix_time();
         let mut library = SpeechLibrary::default();
         for index in 0..SPEECH_EXPIRY_THRESHOLD + 5 {
-            library.push(&dir, clip_expiring(&format!("phrase {index}"), now + index as u64), now);
+            library.push(
+                &dir,
+                clip_expiring(&format!("phrase {index}"), now + index as u64),
+                now,
+            );
         }
         assert_eq!(library.clips.len(), SPEECH_EXPIRY_THRESHOLD);
         assert_eq!(library.clips[0].text, "phrase 5");
@@ -977,7 +1133,11 @@ mod tests {
         // Crossing the threshold prunes the expired entry and its file
         // while every live clip survives.
         for index in 0..SPEECH_EXPIRY_THRESHOLD {
-            library.push(&dir, clip_expiring(&format!("live {index}"), now + 100), now);
+            library.push(
+                &dir,
+                clip_expiring(&format!("live {index}"), now + 100),
+                now,
+            );
         }
         assert_eq!(library.clips.len(), SPEECH_EXPIRY_THRESHOLD);
         assert!(!library.clips.iter().any(|clip| clip.text == "stale"));

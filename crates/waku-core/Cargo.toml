@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Headless provider, persistence, and workspace runtime for Goddard"
 license = "GPL-3.0-only"
+build = "build.rs"
 readme = "README.md"
 
 [dependencies]
@@ -67,3 +68,6 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 waku-client = { path = "../waku-client" }
+
+[build-dependencies]
+sha2 = "0.10"
