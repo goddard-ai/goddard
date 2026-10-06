@@ -1,0 +1,1 @@
+- Launching the app with `GODDARD_DAEMON_ADDRESS` set but `GODDARD_DAEMON_TOKEN` missing no longer panics — the launch reports the incomplete pair and exits cleanly, and the dev watcher now starts a local daemon instead of adopting an external daemon it has no token for.

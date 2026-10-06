@@ -16,12 +16,12 @@ pub fn start_process() -> anyhow::Result<waku_client::DaemonSupervisor> {
             return waku_client::DaemonSupervisor::connect(address.trim(), token);
         }
         (Some(_), None) => bail!(
-            "{} is set but {} is missing",
+            "{} is set but {} is missing; set both or neither",
             waku_client::DAEMON_ADDRESS_ENV,
             waku_client::DAEMON_TOKEN_ENV
         ),
         (None, Some(_)) => bail!(
-            "{} is set but {} is missing",
+            "{} is set but {} is missing; set both or neither",
             waku_client::DAEMON_TOKEN_ENV,
             waku_client::DAEMON_ADDRESS_ENV
         ),

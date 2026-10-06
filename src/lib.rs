@@ -357,8 +357,13 @@ pub fn run() {
     // daemon migrates the data directory it owns. Failures are non-fatal: the
     // app runs on whatever did migrate and retries the rest next launch.
     let migration = waku_protocol::migration::migrate_home_directory();
-    let daemon = crate::daemon::start_process()
-        .unwrap_or_else(|error| panic!("failed to start Goddard daemon: {error:#}"));
+    // A panic here aborts the launch before GPUI exists, so daemon startup
+    // failures — including a stray GODDARD_DAEMON_ADDRESS without its token
+    // inherited from an agent terminal — report on stderr and exit cleanly.
+    let daemon = crate::daemon::start_process().unwrap_or_else(|error| {
+        eprintln!("failed to start Goddard daemon: {error:#}");
+        std::process::exit(1);
+    });
     // The platform's open-URL callback carries no app context, so each
     // `goddard://` link queues here until the window's drain task picks it
     // up — including a link that launched the app, which can arrive before

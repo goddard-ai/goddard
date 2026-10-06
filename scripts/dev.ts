@@ -68,7 +68,21 @@ const daemonTokenPath = join(targetDir, "debug", "goddard-daemon-token");
 // Written next to the token so scripts (and humans) can read the current
 // daemon address + token after the watcher log has scrolled away.
 const daemonInfoPath = join(targetDir, "debug", "goddard-daemon.json");
-const externalDaemonAddress = process.env.GODDARD_DAEMON_ADDRESS;
+// Adopting an external daemon needs its GODDARD_DAEMON_TOKEN as well — a
+// lone address (usually a stray inherited variable) leaves every client
+// rejected, so the pair counts as unset and the watcher spawns locally.
+const externalDaemonAddress =
+  process.env.GODDARD_DAEMON_TOKEN !== undefined
+    ? process.env.GODDARD_DAEMON_ADDRESS
+    : undefined;
+if (
+  process.env.GODDARD_DAEMON_ADDRESS !== undefined &&
+  externalDaemonAddress === undefined
+) {
+  console.warn(
+    "[goddard-dev] GODDARD_DAEMON_ADDRESS is set but GODDARD_DAEMON_TOKEN is unset; starting a local daemon instead.",
+  );
+}
 // Bind host for the spawned daemon. Default loopback; set to 0.0.0.0 (or a
 // Tailscale/LAN address) to make the dev daemon reachable from a phone.
 const daemonBindHost = process.env.GODDARD_DAEMON_BIND ?? "127.0.0.1";
@@ -1035,11 +1049,6 @@ function readDaemonReady(
 // instead of spawning its own, and never restarts it.
 async function ensureDaemon(): Promise<void> {
   if (externalDaemonAddress) {
-    if (process.env.GODDARD_DAEMON_TOKEN === undefined) {
-      console.warn(
-        "[goddard-dev] GODDARD_DAEMON_TOKEN is unset; the external daemon will likely reject the app.",
-      );
-    }
     daemonAddress = externalDaemonAddress;
     writeDaemonInfo();
     console.log(
