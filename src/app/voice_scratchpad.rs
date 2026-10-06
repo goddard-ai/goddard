@@ -54,9 +54,17 @@ const CANCEL_CONFIRM_CHARS: usize = 280;
 /// The scratchpad card matches the composer card's width.
 const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
 const CARD_RADIUS: f32 = 24.0;
-/// The gradient cover runs behind the composer — its visible fade depth on
-/// top of whatever the lane measures.
-const GRADIENT_VISIBLE: f32 = 41.0;
+/// The gradient cover's fade band above the lane — the frame runs the fade
+/// over ~45px at the top of the cover.
+const GRADIENT_FADE: f32 = 45.0;
+/// The fully opaque buffer between the fade's end and the composer's top
+/// edge — transcript text is gone well before it meets the card.
+const GRADIENT_SOLID: f32 = 55.0;
+/// The workspace footer's strip under the composer card — 4px top pad,
+/// 28px row, 8px bottom pad in `render_workspace_footer`. The panel's bottom
+/// edge stops at the composer card's, leaving that strip — and the screen
+/// edge — outside the card.
+const FOOTER_STRIP: f32 = 40.0;
 /// The hint line floats this far above the composer's top edge.
 const HINT_CLEARANCE: f32 = 34.0;
 const TOP_BAR_HEIGHT: f32 = 69.0;
@@ -1330,6 +1338,9 @@ impl Waku {
         let scrollbar = scratchpad.scrollbar.clone();
         let selection = scratchpad.selection.clone();
         let weak = cx.entity().downgrade();
+        // The card underlaps the composer lane only as far as the composer
+        // card's own bottom edge — the footer's strip stays outside it.
+        let overlap = lane - FOOTER_STRIP;
         div()
             .flex_1()
             .min_h_0()
@@ -1338,7 +1349,7 @@ impl Waku {
             // The card runs through the composer lane: the negative margin
             // pulls the slot's height over the lane's, and the lane —
             // painted after — sits on top of the card's bottom edge.
-            .mb(px(-lane))
+            .mb(px(-overlap))
             .child(
                 div()
                     .w_full()
@@ -1382,17 +1393,24 @@ impl Waku {
                     )
                     .child(
                         // The gradient cover's solid half hides behind the
-                        // composer; only its fade reaches into the content.
+                        // composer. Painted after the scroll element so it
+                        // obscures whatever scrolls beneath it — the frame
+                        // fades the transcript into the window surface, not
+                        // the card.
                         div()
                             .absolute()
                             .left_0()
                             .right_0()
                             .bottom_0()
-                            .h(px(lane + GRADIENT_VISIBLE))
+                            .h(px(overlap + GRADIENT_FADE + GRADIENT_SOLID))
                             .bg(linear_gradient(
                                 180.0,
-                                linear_color_stop(theme.composer.opacity(0.0), 0.0),
-                                linear_color_stop(theme.composer, 1.0),
+                                linear_color_stop(theme.surface.opacity(0.0), 0.0),
+                                linear_color_stop(
+                                    theme.surface,
+                                    GRADIENT_FADE
+                                        / (overlap + GRADIENT_FADE + GRADIENT_SOLID).max(1.0),
+                                ),
                             )),
                     )
                     .child({
@@ -1413,7 +1431,7 @@ impl Waku {
                         div()
                             .absolute()
                             .left(px(24.0))
-                            .bottom(px(lane + HINT_CLEARANCE))
+                            .bottom(px(overlap + HINT_CLEARANCE))
                             .text_size(sp(14.0))
                             .child(
                                 gpui::StyledText::new(format!("{prefix}{command}{suffix}"))
@@ -1428,7 +1446,7 @@ impl Waku {
                         div()
                             .absolute()
                             .top(px(TOP_BAR_HEIGHT))
-                            .bottom(px(lane))
+                            .bottom(px(overlap))
                             .right_0()
                             .child(scrollbar::vertical(&scroll, &scrollbar)),
                     )
@@ -1449,7 +1467,7 @@ impl Waku {
                         .top(px(TOP_BAR_HEIGHT))
                         .left_0()
                         .right_0()
-                        .bottom(px(lane)),
+                        .bottom(px(overlap)),
                     ),
             )
             .into_any_element()
@@ -1466,13 +1484,18 @@ impl Waku {
             .h(px(TOP_BAR_HEIGHT))
             .flex_none()
             .px(px(24.0))
+            // The frame pins the label row 24px from the card's top — the
+            // same inset as the sides — not centered in the bar.
+            .pt(px(24.0))
             .flex()
-            .items_center()
+            .items_start()
             .border_b(hairline())
             .border_color(theme.separator)
             .child(
                 div()
                     .text_size(sp(14.0))
+                    // The frame's two stacked label lines fit 16px apiece.
+                    .line_height(sp(16.0))
                     .font_weight(FontWeight::EXTRA_BOLD)
                     .text_color(theme.text_tertiary)
                     .child(tr!("voice_scratchpad.title")),
@@ -1635,7 +1658,9 @@ impl Waku {
                 );
             }
             first_drawn = false;
-            let show_dot = is_current && !annotated;
+            // The dot marks the point speech actually lands: the live row
+            // while no annotation bubble is open, the bubble while one is.
+            let show_dot = is_current && annotation_target.is_none();
             let flat = scratchpad_paragraph_text(
                 paragraph,
                 is_current && !annotated,
@@ -1668,7 +1693,7 @@ impl Waku {
                             false,
                         ))
                         .when(show_dot, |row| {
-                            row.child(scratchpad_dot(muted, status, theme))
+                            row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         }),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1749,7 +1774,7 @@ impl Waku {
                                 theme.selection,
                                 false,
                             ))
-                            .child(scratchpad_dot(muted, status, theme)),
+                            .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
                     ),
             );
         }
@@ -1907,12 +1932,17 @@ impl Waku {
             .items_start()
             // Clicks inside the box don't re-target the paragraph.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(scratchpad_dot(scratchpad.muted, scratchpad.status, theme))
+            .child(scratchpad_dot_on_line(
+                13.0,
+                scratchpad.muted,
+                scratchpad.status,
+                theme,
+            ))
             .child(div().min_w_0().flex_1().child(text));
         deferred(FloatingSurface::anchored_to_parent(
             box_content.into_any_element(),
             MenuAlign::BelowLeft,
-            px(6.0),
+            px(4.0),
             px(8.0),
         ))
         .into_any_element()
@@ -2065,10 +2095,11 @@ impl Waku {
     }
 }
 
-/// Bottom padding under the transcript rows — enough room for the hint line
-/// plus whatever the composer lane overlaps.
+/// Bottom padding under the transcript rows — enough room for the last
+/// paragraph to scroll clear of the gradient's solid band, plus a line of
+/// air.
 fn lane_padding(lane: f32) -> f32 {
-    lane + GRADIENT_VISIBLE + 30.0
+    lane - FOOTER_STRIP + GRADIENT_SOLID + 16.0
 }
 
 /// A paragraph's FlatText: finalized speech in ink, the interim suffix
@@ -2121,8 +2152,8 @@ fn scratchpad_paragraph_text(
     }
 }
 
-/// The glowing record dot: solid core plus a tight pink halo on a soft
-/// under-shadow — the design's pink drop-shadow read.
+/// The glowing record dot: the frame's solid core and hairline, with its
+/// pink glow painted as the design's inner shadow.
 fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> Div {
     let live = !muted
         && !matches!(
@@ -2147,8 +2178,24 @@ fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> Div {
         .border(px(1.0))
         .border_color(gpui::black().opacity(0.10))
         .shadow(vec![
-            gpui::BoxShadow::new(px(0.0), px(2.0), glow.opacity(0.5)).blur_radius(px(4.0)),
+            gpui::BoxShadow::new(px(0.0), px(2.0), glow)
+                .blur_radius(px(4.0))
+                .inset(),
         ])
+}
+
+/// The dot's offset centers it on the first text line — GPUI's default phi
+/// line height leaves `(size × φ − 15) / 2` of leading over a 15px dot.
+fn scratchpad_dot_on_line(
+    text_size: f32,
+    muted: bool,
+    status: ScratchpadStatus,
+    theme: &Theme,
+) -> Div {
+    div()
+        .flex_none()
+        .mt(px((text_size * 1.618_034 - 15.0).max(0.0) / 2.0))
+        .child(scratchpad_dot(muted, status, theme))
 }
 
 #[cfg(test)]

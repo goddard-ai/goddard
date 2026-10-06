@@ -6219,7 +6219,7 @@ boss.plans:
 boss.plans_hint:
   en: Finalized design docs stay readable here after their planning session archives.
 voice_scratchpad.title:
-  en: Voice Scratchpad
+  en: "Voice\nScratchpad"
 voice_scratchpad.start:
   en: Start voice dictation
 voice_scratchpad.recording:
