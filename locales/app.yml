@@ -980,9 +980,9 @@ experiments.voice_briefing_time_remaining:
 experiments.voice_briefing_gate_needs_eval:
   en: No eval backend is configured — the gate never runs, so every briefing generates. Set one up on the Jev page.
 experiments.voice_scratchpad_title:
-  en: Voice scratchpad
+  en: VoicePad
 experiments.voice_scratchpad_description:
-  en: A VS button beside send opens a dictation scratchpad that transcribes your mic into a message — Enter sends the transcript, Esc discards it. Uses the Vercel AI Gateway credential under Inference providers.
+  en: A VP button beside send opens a dictation scratchpad that transcribes your mic into a message — Enter sends the transcript, Esc discards it. Uses the Vercel AI Gateway credential under Inference providers.
 experiments.memory_title:
   en: Project memory
 experiments.composer_drafts_title:
@@ -6439,7 +6439,9 @@ boss.deliverable_dormant:
 boss.deliverable_archived_tag:
   en: archived
 voice_scratchpad.title:
-  en: "Voice\nScratchpad"
+  en: VoicePad
+voice_scratchpad.short_title:
+  en: VP
 voice_scratchpad.start:
   en: Start voice dictation
 voice_scratchpad.recording:
@@ -6459,7 +6461,7 @@ voice_scratchpad.hint_prefix:
 voice_scratchpad.hint_command:
   en: Ok, next
 voice_scratchpad.hint_suffix:
-  en: "” to go to next paragraph"
+  en: "” to go to next paragraph • Press enter to send"
 voice_scratchpad.annotation_hint:
   en: Dictating an annotation…
 voice_scratchpad.discard_title:
@@ -6469,7 +6471,7 @@ voice_scratchpad.discard_keep:
 voice_scratchpad.discard:
   en: Discard
 voice_scratchpad.mic_denied:
-  en: Microphone access is needed for Voice Scratchpad
+  en: Microphone access is needed for VoicePad
 voice_scratchpad.retry:
   en: Retry
 voice_scratchpad.open_settings:

@@ -6062,7 +6062,7 @@ impl Waku {
                         },
                     )
                     .child(div().flex_1())
-                    // The VS button lives on the main card only — one
+                    // The VP button lives on the main card only — one
                     // dictation session at a time, bound to that chat.
                     .children(if interactive {
                         self.render_voice_scratchpad_button(

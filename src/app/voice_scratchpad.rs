@@ -1,4 +1,4 @@
-//! Voice Scratchpad — press the VS mic button beside send in the composer
+//! VoicePad — press the VP mic button beside send in the composer
 //! and dictate. A card replaces the chat content while a streaming
 //! transcription session (`microsoft/mai-transcribe-2-streaming` over the
 //! AI gateway's WebSocket endpoint) appends speech to a current paragraph;
@@ -69,18 +69,20 @@ const GRADIENT_SOLID: f32 = 55.0;
 /// edge stops at the composer card's, leaving that strip — and the screen
 /// edge — outside the card.
 const FOOTER_STRIP: f32 = 40.0;
-/// The hint line floats this far above the composer's top edge.
-const HINT_CLEARANCE: f32 = 34.0;
+/// The hint line's bottom edge floats this far above the composer's top
+/// edge.
+const HINT_CLEARANCE: f32 = 16.0;
 /// The control row's bottom edge floats this far above the composer
 /// card's top edge — the frame's 12px gap.
 const CONTROLS_CLEARANCE: f32 = 12.0;
 /// The control row's right edge sits this far inside the card's right
 /// edge — the frame's 18px inset.
 const CONTROLS_INSET: f32 = 18.0;
-const TOP_BAR_HEIGHT: f32 = 69.0;
-/// The separator under the top bar is inset to the frame's inner content
-/// group — 15px from the card's left edge, 12px from the right.
-const TOP_BAR_HAIRLINE_INSET: (f32, f32) = (15.0, 12.0);
+/// The title's inset from the card's top edge — it scrolls with the
+/// transcript as the column's first row.
+const TITLE_TOP_INSET: f32 = 24.0;
+/// The gap under the title before the first transcript row.
+const TITLE_BOTTOM_GAP: f32 = 30.0;
 /// A radius below half the 32px pill height keeps the corner unsaturated so
 /// the renderer's smoothed-corner shoulder engages — the frame's squircles.
 /// `rounded_full` saturates and stays a plain circular capsule.
@@ -132,7 +134,7 @@ enum ScratchpadStatus {
     ConnectionLost,
 }
 
-/// The VS button's posture for one composer card.
+/// The VP button's posture for one composer card.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ScratchpadButtonState {
     Idle,
@@ -175,8 +177,13 @@ pub(super) struct VoiceScratchpad {
     /// paragraph, `b{index}-{bullet}` for a bullet — created lazily the
     /// way the sidebar's group rows are.
     row_focuses: HashMap<String, FocusHandle>,
+    // The pill handles stay live for the floating controls row — the top
+    // bar that hosted it is gone.
+    #[allow(dead_code)]
     mute_focus: FocusHandle,
+    #[allow(dead_code)]
     hide_focus: FocusHandle,
+    #[allow(dead_code)]
     cancel_focus: FocusHandle,
     keep_focus: FocusHandle,
     discard_focus: FocusHandle,
@@ -1578,7 +1585,7 @@ impl Waku {
         self.composer_mounted() && !self.big_picture.is_open()
     }
 
-    /// The VS button's posture for the card under the pointer: idle, or
+    /// The VP button's posture for the card under the pointer: idle, or
     /// live on this chat (recording or muted). Every chat gets its own
     /// button state — another chat's session no longer dims it.
     fn voice_scratchpad_button_state(&self, session_id: Option<Uuid>) -> ScratchpadButtonState {
@@ -1589,7 +1596,7 @@ impl Waku {
         }
     }
 
-    /// The VS button — a small dark pill with "VS" and a mic glyph,
+    /// The VP button — a small dark pill with "VP" and a mic glyph,
     /// immediately left of send. While this chat's session is live it
     /// carries the state dot.
     pub(super) fn render_voice_scratchpad_button(
@@ -1640,7 +1647,7 @@ impl Waku {
                     .text_size(sp(9.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme.on_inverse)
-                    .child("VS"),
+                    .child(tr!("voice_scratchpad.short_title")),
             )
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
         let tooltip = match state {
@@ -1662,7 +1669,7 @@ impl Waku {
         )
     }
 
-    /// The VS button's click: no session starts one on this chat, a hidden
+    /// The VP button's click: no session starts one on this chat, a hidden
     /// session resurfaces, a visible one hides. Each chat owns its
     /// scratchpad — pressing the button here never touches another chat's.
     fn toggle_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2340,7 +2347,6 @@ impl Waku {
                     .rounded(px(CARD_RADIUS))
                     .bg(theme.composer)
                     .overflow_hidden()
-                    .child(self.render_scratchpad_top_bar(&theme, cx))
                     .child(
                         div()
                             .id("vs-content-scroll")
@@ -2422,7 +2428,7 @@ impl Waku {
                             .absolute()
                             .left(px(24.0))
                             .bottom(px(overlap + HINT_CLEARANCE))
-                            .text_size(sp(14.0))
+                            .text_size(sp(12.0))
                             .child(
                                 gpui::StyledText::new(format!("{prefix}{command}{suffix}"))
                                     .with_runs(vec![
@@ -2435,7 +2441,7 @@ impl Waku {
                     .child(
                         div()
                             .absolute()
-                            .top(px(TOP_BAR_HEIGHT))
+                            .top_0()
                             .bottom(px(overlap))
                             .right_0()
                             .child(scrollbar::vertical(&scroll, &scrollbar)),
@@ -2479,7 +2485,7 @@ impl Waku {
                             },
                         )
                         .absolute()
-                        .top(px(TOP_BAR_HEIGHT))
+                        .top_0()
                         .left_0()
                         .right_0()
                         .bottom(px(overlap)),
@@ -2493,44 +2499,6 @@ impl Waku {
                     ),
             )
             .into_any_element()
-    }
-
-    /// The 69px top bar: title left, hairline under it.
-    fn render_scratchpad_top_bar(&self, theme: &Theme, _cx: &mut Context<Self>) -> Div {
-        if self.selected_voice_scratchpad().is_none() {
-            return div();
-        }
-        div()
-            .h(px(TOP_BAR_HEIGHT))
-            .flex_none()
-            .relative()
-            .px(px(24.0))
-            // The frame pins the label row 24px from the card's top — the
-            // same inset as the sides — not centered in the bar.
-            .pt(px(24.0))
-            .flex()
-            .items_start()
-            .child(
-                div()
-                    .text_size(sp(14.0))
-                    // The frame's two stacked label lines fit 16px apiece at
-                    // 14pt semibold.
-                    .line_height(sp(16.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("voice_scratchpad.title")),
-            )
-            .child(
-                // The frame's separator under the bar is a full pixel inset
-                // to the content group's edges — not a full-bleed hairline.
-                div()
-                    .absolute()
-                    .bottom_0()
-                    .left(px(TOP_BAR_HAIRLINE_INSET.0))
-                    .right(px(TOP_BAR_HAIRLINE_INSET.1))
-                    .h(px(1.0))
-                    .bg(theme.separator),
-            )
     }
 
     /// The fixed control row — Mute/Hide/Cancel pills anchored 12px above
@@ -2707,7 +2675,7 @@ impl Waku {
             .track_focus(&edit_focus)
             .tab_index(0)
             .px(px(24.0))
-            .pt(px(18.0))
+            .pt(px(TITLE_TOP_INSET))
             // Room for the hint line plus the composer overlap.
             .pb(px(lane_padding(self.composer_lane_height.get())))
             .text_size(sp(14.0))
@@ -2726,6 +2694,18 @@ impl Waku {
             // Painted before any row, so the frame's selection registry
             // holds exactly the text elements this frame put on screen.
             .child(md::render::frame_reset(selection.clone()))
+            .child(
+                // The "VoicePad" header is the column's first row — it
+                // scrolls off with the transcript instead of pinning.
+                div()
+                    .w_full()
+                    .mb(px(TITLE_BOTTOM_GAP))
+                    .text_size(sp(14.0))
+                    .line_height(sp(16.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.text_tertiary.opacity(0.6))
+                    .child(tr!("voice_scratchpad.title")),
+            )
             .children(status_row);
         let mut first_drawn = true;
         for (index, paragraph) in transcript.paragraphs.iter().enumerate() {
