@@ -1838,14 +1838,25 @@ fn registered_project_mut<'a>(
     state: &'a mut PersistedState,
     reference: &str,
 ) -> anyhow::Result<&'a mut Project> {
-    if let Some(id) =
-        waku_protocol::persistence::resolve_named_search_project(&state.projects, reference)
+    if let Ok(id) = Uuid::parse_str(reference)
+        && let Some(position) = state.projects.iter().position(|project| project.id == id)
     {
-        return state
-            .projects
-            .iter_mut()
-            .find(|project| project.id == id)
-            .ok_or_else(|| anyhow!("project `{reference}` is not registered"));
+        return Ok(&mut state.projects[position]);
+    }
+    // An ad-hoc temporary project can share the registered project's
+    // basename — a boss reference names the registered row.
+    if let Some(position) = state
+        .projects
+        .iter()
+        .position(|project| !project.temporary && project.name.eq_ignore_ascii_case(reference))
+        .or_else(|| {
+            state
+                .projects
+                .iter()
+                .position(|project| project.name.eq_ignore_ascii_case(reference))
+        })
+    {
+        return Ok(&mut state.projects[position]);
     }
     let reference_path = PathBuf::from(reference);
     anyhow::ensure!(
@@ -1854,12 +1865,14 @@ fn registered_project_mut<'a>(
     );
     let canonical = dunce::canonicalize(&reference_path)
         .with_context(|| format!("project `{}` does not exist", reference_path.display()))?;
+    // A path inside the registered root or a linked worktree of its
+    // repository still names the project — the same ownership rule
+    // `project_for_path` applies to session working directories.
+    let owned = project_for_path(&state.projects, &canonical).map(|project| project.id);
     state
         .projects
         .iter_mut()
-        .find(|project| {
-            dunce::canonicalize(&project.path).unwrap_or_else(|_| project.path.clone()) == canonical
-        })
+        .find(|project| Some(project.id) == owned)
         .ok_or_else(|| {
             anyhow!(
                 "project `{}` is not registered with the daemon",
@@ -1884,6 +1897,19 @@ fn project_for_path<'a>(projects: &'a [Project], cwd: &Path) -> Option<&'a Proje
     projects.iter().find(|project| {
         crate::worktree::git_common_dir(&project.path).is_some_and(|dir| dir == common)
     })
+}
+
+/// Fields only the daemon writes: the submissions opt-in and QA-branch
+/// override land through boss ops, the special-project markers through
+/// friend delivery, and `resolved_name` through name disambiguation — it is
+/// never serialized to a client at all. A client's `Project` literal
+/// carries defaults for all of them, so a client save must not write them.
+fn preserve_daemon_project_fields(existing: &Project, incoming: &mut Project) {
+    incoming.submissions_enabled = existing.submissions_enabled;
+    incoming.qa_branch = existing.qa_branch.clone();
+    incoming.kind = existing.kind;
+    incoming.friend_peer_id = existing.friend_peer_id.clone();
+    incoming.resolved_name = existing.resolved_name.clone();
 }
 
 /// Refresh a friend's display name across their delivered sessions —
@@ -2789,7 +2815,7 @@ impl Backend for WakuBackend {
                 }
                 let mut state = self.task_state.lock();
                 let removed_project_ids = self.removed_project_ids.lock();
-                for project in projects {
+                for mut project in projects {
                     if removed_project_ids.contains(&project.id) {
                         continue;
                     }
@@ -2798,6 +2824,7 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == project.id)
                     {
+                        preserve_daemon_project_fields(existing, &mut project);
                         *existing = project;
                     } else {
                         state.projects.push(project);
@@ -20033,6 +20060,160 @@ mod tests {
                 .submissions_enabled
         );
 
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A client `SaveTaskState` echoes each project as a `Project` literal —
+    /// daemon-owned fields arrive as defaults and must not overwrite the
+    /// submissions opt-in, the QA-branch override, or the legacy friend
+    /// marker a boss op or friend delivery wrote on the row.
+    #[test]
+    fn client_state_save_preserves_daemon_project_fields() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("waku-project-merge-{}", Uuid::new_v4()));
+        let project_dir = root.join("project");
+        std::fs::create_dir_all(&project_dir).unwrap();
+
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend.boss.set_session_id(supervisor).unwrap();
+        let project = Project::from_path(dunce::canonicalize(&project_dir).unwrap());
+        let project_id = project.id;
+        {
+            let mut state = backend.task_state.lock();
+            state.projects.push(project.clone());
+            state
+                .projects
+                .iter_mut()
+                .find(|row| row.id == project_id)
+                .unwrap()
+                .friend_peer_id = Some("peer".into());
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        // The boss opts the project in and overrides its QA branch.
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectSubmissions {
+                    project: "project".into(),
+                    enabled: true,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectQaBranch {
+                    project: "project".into(),
+                    branch: Some("release".into()),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+
+        // The client's save echoes the row with its own edit — a star —
+        // and defaults for every field it does not own.
+        let mut echoed = project.clone();
+        echoed.starred = true;
+        backend
+            .handle(
+                waku_protocol::Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: vec![echoed],
+                        live_session_ids: Vec::new(),
+                        sessions: Vec::new(),
+                        session_tails: Vec::new(),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+
+        let state = backend.task_state.lock();
+        let row = state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .unwrap();
+        assert!(
+            row.submissions_enabled,
+            "a client save must not revert the submissions opt-in"
+        );
+        assert_eq!(row.qa_branch.as_deref(), Some("release"));
+        assert_eq!(row.friend_peer_id.as_deref(), Some("peer"));
+        assert!(row.starred, "client-owned edits still apply");
+
+        drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A boss `project` reference resolves through the same ownership rule
+    /// `project_for_path` applies — a path beneath the registered root
+    /// names the project — and a same-named temporary row never shadows
+    /// the registered one.
+    #[test]
+    fn registered_project_reference_covers_descendants_and_skips_temporaries() {
+        use waku_protocol::boss::BossOperation;
+        let root = std::env::temp_dir().join(format!("waku-project-ref-{}", Uuid::new_v4()));
+        let project_dir = root.join("project");
+        let nested = project_dir.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let (backend, supervisor) = surface_test_backend(&root);
+        backend.boss.set_session_id(supervisor).unwrap();
+        // A temporary ad-hoc project shares the basename and sorts first.
+        let mut temporary = Project::from_path(root.join("elsewhere"));
+        temporary.name = "project".into();
+        temporary.temporary = true;
+        let project = Project::from_path(dunce::canonicalize(&project_dir).unwrap());
+        let project_id = project.id;
+        {
+            let mut state = backend.task_state.lock();
+            state.projects.push(temporary);
+            state.projects.push(project);
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        // The name resolves the registered row, not the temporary.
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectSubmissions {
+                    project: "project".into(),
+                    enabled: true,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        // A path beneath the registered root names the project too.
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::SetProjectQaBranch {
+                    project: nested.to_string_lossy().into_owned(),
+                    branch: Some("release".into()),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+
+        let state = backend.task_state.lock();
+        let row = state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .unwrap();
+        assert!(row.submissions_enabled);
+        assert_eq!(row.qa_branch.as_deref(), Some("release"));
+
+        drop(state);
         drop(backend);
         let _ = std::fs::remove_dir_all(root);
     }
