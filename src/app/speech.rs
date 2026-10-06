@@ -973,12 +973,14 @@ impl Waku {
     }
 
     /// The mic goes off when nothing is queued for playback, no consent
-    /// session is still listening, and no dictation session holds the tap —
-    /// gated items alone never hold it open.
+    /// session is still listening, and no dictation — scratchpad sink or
+    /// composer capture — holds the tap; gated items alone never hold it
+    /// open.
     pub(super) fn maybe_stop_voice_listener(&mut self) {
         if self.speech_clip_queue.is_empty()
             && self.voice_briefing_playback.is_none()
             && !crate::platform::consent_recognition_active()
+            && !crate::platform::dictation_capture_active()
             && !crate::platform::voice_audio_sink_active()
         {
             crate::platform::stop_voice_listener();

@@ -182,11 +182,10 @@ mod voice_gate {
     /// The dictation scratchpad's consumer for captured audio. Unlike the
     /// consent feed these samples leave the process — they stream to the
     /// transcription gateway — so the sink is registered only while a
-    /// scratchpad session is live and the muted flag drops blocks in the
-    /// tap itself, before any copy leaves the audio engine.
+    /// scratchpad owns capture; mute and cancel tear it down rather than
+    /// gating the tap.
     type AudioSink = Box<dyn Fn(&[f32], f64) + Send + Sync>;
     static AUDIO_SINK: Mutex<Option<AudioSink>> = Mutex::new(None);
-    static AUDIO_SINK_MUTED: AtomicBool = AtomicBool::new(false);
 
     /// The recognizer objects — created and retired on the main thread only.
     /// The recognizer is only held, never called: the task may not retain it.
@@ -305,8 +304,7 @@ mod voice_gate {
                         unsafe { request.appendAudioPCMBuffer(buffer) };
                     }
                     observe_ambient_level(buffer);
-                    if !AUDIO_SINK_MUTED.load(Ordering::Relaxed)
-                        && let Ok(sink) = AUDIO_SINK.try_lock()
+                    if let Ok(sink) = AUDIO_SINK.try_lock()
                         && let Some(sink) = sink.as_ref()
                         && let Some((mono, rate)) = mono_samples(buffer)
                     {
@@ -500,24 +498,21 @@ mod voice_gate {
     /// Hand captured mic audio to the dictation scratchpad: `sink` gets mono
     /// f32 samples plus the buffer's rate on the audio thread, so it must be
     /// cheap and never block — the app copies into a bounded channel and
-    /// drops blocks when it's full. `None` detaches the sink; detaching also
-    /// clears the mute flag so a new session can't inherit one.
+    /// drops blocks when it's full. `None` detaches the sink.
     pub fn set_audio_sink(sink: Option<AudioSink>) {
-        AUDIO_SINK_MUTED.store(false, Ordering::Relaxed);
         *AUDIO_SINK.lock().unwrap() = sink;
-    }
-
-    /// Mute drops tap blocks before they copy — capture pauses but the
-    /// session stays live. Not retroactive: blocks already handed to the
-    /// sink still stream.
-    pub fn set_audio_sink_muted(muted: bool) {
-        AUDIO_SINK_MUTED.store(muted, Ordering::Relaxed);
     }
 
     /// Whether a dictation sink is registered — the engine should stay up
     /// for it even while nothing else needs the mic.
     pub fn audio_sink_active() -> bool {
         AUDIO_SINK.lock().unwrap().is_some()
+    }
+
+    /// Whether a composer dictation capture is holding PCM — another
+    /// consumer the engine should stay up for.
+    pub fn dictation_active() -> bool {
+        DICTATION_CAPTURE.lock().unwrap().is_some()
     }
 
     /// End the consent session but leave the engine running — playback still
@@ -590,26 +585,29 @@ pub fn set_voice_audio_sink(sink: Option<Box<dyn Fn(&[f32], f64) + Send + Sync +
     voice_gate::set_audio_sink(sink)
 }
 
-/// Suspend audio delivery to the dictation sink without ending the session.
-#[cfg(target_os = "macos")]
-pub fn set_voice_audio_sink_muted(muted: bool) {
-    voice_gate::set_audio_sink_muted(muted)
-}
-
 /// Whether the dictation sink is attached — keeps the mic engine alive.
 #[cfg(target_os = "macos")]
 pub fn voice_audio_sink_active() -> bool {
     voice_gate::audio_sink_active()
 }
 
+/// Whether a composer dictation capture is mid-record — keeps the mic
+/// engine alive until it finishes.
+#[cfg(target_os = "macos")]
+pub fn dictation_capture_active() -> bool {
+    voice_gate::dictation_active()
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn set_voice_audio_sink(_: Option<Box<dyn Fn(&[f32], f64) + Send + Sync + 'static>>) {}
 
 #[cfg(not(target_os = "macos"))]
-pub fn set_voice_audio_sink_muted(_: bool) {}
+pub fn voice_audio_sink_active() -> bool {
+    false
+}
 
 #[cfg(not(target_os = "macos"))]
-pub fn voice_audio_sink_active() -> bool {
+pub fn dictation_capture_active() -> bool {
     false
 }
 

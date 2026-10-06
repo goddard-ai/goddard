@@ -13,7 +13,8 @@
 //!
 //! Audio is captured through the shared `voice_gate` engine tap in
 //! `platform.rs` — the scratchpad's sink is the one path that forwards mic
-//! samples off the machine, and it exists only while a session is live.
+//! samples off the machine, and it exists only while a session owns
+//! capture: mute, cancel, and a chat switch all tear it down.
 
 use std::io;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -222,7 +223,7 @@ pub(super) struct VoiceScratchpad {
     hidden: bool,
     /// The session currently owns the tap: the sink is attached and a
     /// worker runs (or is launching) for it. Only the selected chat's
-    /// scratchpad may hold this — a switch clears it.
+    /// unmuted scratchpad may hold this — a switch or a mute clears it.
     capture_live: bool,
     /// The Cancel affordance armed its confirmation.
     confirm_discard: bool,
@@ -657,10 +658,11 @@ impl ScratchpadTranscript {
 
     /// Commit the provisional suffix in place — muting and the silence
     /// auto-stop keep words already dictated instead of stranding them
-    /// gray. `fold` records them as strip credit while the stream may
-    /// still re-deliver them (mute); a stopped stream owes no delivery,
-    /// so the auto-stop commits without credit.
-    fn solidify_interim(&mut self, fold: bool) {
+    /// gray. Both retire the stream that heard them, so the fold credit
+    /// it owed dies with it: a reconnect owes no re-delivery, and stale
+    /// credit would only eat the next session's opening words.
+    fn solidify_interim(&mut self) {
+        self.interim_folded.clear();
         let interim = if self.annotation_target.is_some() {
             std::mem::take(&mut self.annotation_interim)
         } else {
@@ -668,9 +670,6 @@ impl ScratchpadTranscript {
         };
         if interim.is_empty() {
             return;
-        }
-        if fold {
-            self.fold_span(&interim);
         }
         self.push_text(&interim);
         // Committed interim is finished dictation too — any sentence it
@@ -2017,6 +2016,13 @@ fn run_transcription_worker(
                 continue;
             }
         };
+        // A stop that landed during the handshake owns this socket's
+        // whole life — close it rather than open a stream for a dead
+        // session.
+        if stop.load(Ordering::Relaxed) {
+            let _ = socket.close(None);
+            return;
+        }
         send(ScratchpadEvent::Connected);
         produced_output.set(false);
         let connected_at = Instant::now();
@@ -2366,6 +2372,11 @@ impl Waku {
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
+        // A mute that landed while the permission prompt was in flight
+        // leaves capture off — only an unmuted session owns the tap.
+        if scratchpad.muted {
+            return;
+        }
         // Blocks queued for a dead stream drop before the new one opens —
         // audio buffered under an earlier socket is stale dictation, not a
         // backlog to replay.
@@ -2378,7 +2389,6 @@ impl Waku {
                 rate,
             });
         })));
-        crate::platform::set_voice_audio_sink_muted(scratchpad.muted);
         crate::platform::start_voice_listener();
         scratchpad.capture_live = true;
         self.spawn_transcription_worker(session_id, cx);
@@ -2455,13 +2465,13 @@ impl Waku {
         .detach();
     }
 
-    /// Mute pauses capture at the tap — blocks stop copying before they
-    /// ever reach the socket — while the session and connection stay up.
-    /// Words already dictated commit first: the pending interim lands as
-    /// solid text with fold credit, so the stream's re-delivery strips
-    /// rather than doubling it. Unmuting a session whose capture stopped
-    /// (an auto-pause closed its socket) reconnects it: resume is a fresh
-    /// stream, not a rewound one.
+    /// Mute ends the stream itself, not just the tap: the worker flags
+    /// out and closes its socket — the gateway bills per streaming hour —
+    /// and the sink detaches so the mic engine can stand down. Words
+    /// already dictated commit first, without fold credit: the dead
+    /// stream owes no re-delivery. Unmuting reconnects through the same
+    /// resume path a chat switch or the silence auto-stop leaves — the
+    /// transcript and the muted flag survive in between.
     fn set_voice_scratchpad_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;
@@ -2470,12 +2480,21 @@ impl Waku {
             return;
         };
         scratchpad.muted = muted;
-        if muted {
-            scratchpad.transcript.solidify_interim(true);
+        let (detach_sink, resume) = if muted {
+            scratchpad.transcript.solidify_interim();
+            let detach = scratchpad.capture_live;
+            scratchpad.stop_capture();
+            (detach, false)
+        } else {
+            (
+                false,
+                !scratchpad.capture_live && scratchpad.status != ScratchpadStatus::MicDenied,
+            )
+        };
+        if detach_sink {
+            self.detach_voice_sink();
         }
-        if scratchpad.capture_live {
-            crate::platform::set_voice_audio_sink_muted(muted);
-        } else if !muted && scratchpad.status != ScratchpadStatus::MicDenied {
+        if resume {
             self.ensure_voice_capture(session_id, cx);
         }
         // A muted stream goes quiet — spans the solidify just closed
@@ -2841,7 +2860,6 @@ impl Waku {
     /// to whatever else still wants it.
     fn detach_voice_sink(&mut self) {
         crate::platform::set_voice_audio_sink(None);
-        crate::platform::set_voice_audio_sink_muted(false);
         self.maybe_stop_voice_listener();
     }
 
@@ -3060,8 +3078,7 @@ impl Waku {
                     // still hanging gray commits without fold credit (the
                     // dead stream owes no delivery), and leftover credit
                     // clears for the same reason as `Failed`.
-                    scratchpad.transcript.solidify_interim(false);
-                    scratchpad.transcript.interim_folded.clear();
+                    scratchpad.transcript.solidify_interim();
                     scratchpad.muted = true;
                     scratchpad.status = ScratchpadStatus::Live;
                     detach_sink |= scratchpad.capture_live;
@@ -4477,16 +4494,17 @@ mod tests {
 
     #[test]
     fn mute_solidifies_the_pending_interim() {
-        // Muting commits the gray suffix in place, and the fold credit
-        // makes the stream's re-delivery strip instead of doubling it.
+        // Muting commits the gray suffix in place — with no fold credit,
+        // since the torn-down stream owes no re-delivery: speech opening
+        // on the same words after the reconnect appends in full.
         let mut transcript = ScratchpadTranscript::default();
         transcript.append_finalized("the sentence");
         transcript.set_interim("still forming".to_owned());
-        transcript.solidify_interim(true);
+        transcript.solidify_interim();
         assert!(transcript.interim.is_empty());
         assert_eq!(transcript.to_message(), "the sentence still forming");
-        transcript.apply_final_segment("still forming");
-        assert_eq!(transcript.to_message(), "the sentence still forming");
+        transcript.set_interim("still forming, continued".to_owned());
+        assert_eq!(transcript.interim, "still forming, continued");
     }
 
     #[test]
@@ -4495,7 +4513,7 @@ mod tests {
         // no strip credit, so a reconnect's speech appends in full.
         let mut transcript = ScratchpadTranscript::default();
         transcript.set_interim("half a thought".to_owned());
-        transcript.solidify_interim(false);
+        transcript.solidify_interim();
         assert!(transcript.interim.is_empty());
         assert_eq!(transcript.to_message(), "half a thought");
         transcript.append_finalized("half a thought again");
@@ -4510,7 +4528,7 @@ mod tests {
         transcript.append_finalized("the plan");
         transcript.annotate(0);
         transcript.set_interim("note forming".to_owned());
-        transcript.solidify_interim(true);
+        transcript.solidify_interim();
         assert!(transcript.annotation_interim.is_empty());
         assert_eq!(transcript.annotation_text, "note forming");
         assert_eq!(transcript.to_message(), "the plan\n- note forming");
