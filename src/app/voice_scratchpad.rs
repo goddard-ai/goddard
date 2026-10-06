@@ -5,7 +5,10 @@
 //! saying "okay next" starts a new one, a red dot marks the append point,
 //! and Enter sends the whole transcript as one message. Clicking a
 //! paragraph opens an annotation box where speech becomes bullets under
-//! that paragraph. Each chat keeps its own scratchpad like a composer
+//! that paragraph — a box on a bullet nests one level deeper — and
+//! saying "okay, let's make an edit" turns the rest of the box's
+//! dictation into a rewrite instruction for the annotated paragraph.
+//! Each chat keeps its own scratchpad like a composer
 //! draft — switching chats auto-pauses the outgoing one (its socket
 //! closes; it lands muted) — while Hide keeps the same chat's session
 //! recording out of view. One mic stream runs at a time, owned by the
@@ -114,6 +117,16 @@ const VP_PILL_RADIUS: f32 = 11.5;
 /// The annotation bullet marker — a drawn disc reads heavier than the "•"
 /// text glyph, which renders as a ~4px speck at body size.
 const BULLET_SIZE: f32 = 6.0;
+/// Each nesting level steps in by one marker column — the disc plus its
+/// gap — so a child's disc sits under its parent's text.
+const BULLET_INDENT: f32 = BULLET_SIZE + 8.0;
+/// The deepest bullet level — nine rows of indentation counting the
+/// paragraph's own bullets; further annotation keeps landing at the cap,
+/// reading as siblings of the deepest row.
+const MAX_BULLET_DEPTH: usize = 8;
+/// The spoken edit phrase never runs longer than this once tokenized —
+/// "okay let's make an edit" as six words when "let's" splits.
+const EDIT_COMMAND_MAX_WORDS: usize = 6;
 const RECORDING_RED: u32 = 0xF0344E;
 const RECORDING_GLOW: u32 = 0xFF85B6;
 /// The live record dot's breathing cycle — one full opacity sweep,
@@ -135,6 +148,9 @@ const CLEANUP_MORPH: Duration = Duration::from_millis(240);
 /// The cleanup call's whole brief: fix dictation artifacts without
 /// rewriting. The span it sees is raw speech-to-text, never a draft.
 const CLEANUP_INSTRUCTIONS: &str = "Clean up raw dictated speech-to-text. Remove filler words (um, uh, ah), false starts, and stuttered repetitions; fix obvious transcription errors; add light punctuation and capitalization. Keep the speaker's words and meaning exactly — rewrite as little as possible, never summarize, reorder, or answer. Reply with only the cleaned text — no quotes or commentary.";
+/// The voice-edit call's brief: the annotation box's instruction applies
+/// to the paragraph it hangs under — a deliberate rewrite, not a scrub.
+const EDIT_INSTRUCTIONS: &str = "Apply the editing instruction to the text. Change only what the instruction asks for and keep the rest as written. Reply with only the rewritten text — no quotes or commentary.";
 
 /// One tap block of mono-mixed PCM plus its sample rate.
 struct AudioChunk {
@@ -177,11 +193,15 @@ pub(super) enum ScratchpadEvent {
     /// rewrite, `None` when the call failed and the raw text keeps
     /// standing. Either way the span's in-flight marker clears; a late
     /// answer still verifies against the raw text before it lands.
+    /// `edit` marks an explicit voice-edit rewrite — it may land over a
+    /// paragraph the typed-edit guard protects, since the spoken
+    /// instruction sanctions the change.
     Cleaned {
         target: CleanTarget,
         start: usize,
         raw: String,
         cleaned: Option<String>,
+        edit: bool,
     },
 }
 
@@ -196,11 +216,14 @@ pub(super) enum CleanTarget {
 /// A completed dictated span queued for the cleanup model — the byte
 /// offset it occupied when it closed plus its raw text; both verify again
 /// when the answer lands, so a shifted or edited span is left alone.
+/// `edit` carries a spoken rewrite instruction — the call applies it to
+/// `raw` (the target's whole text) instead of scrubbing it.
 #[derive(Clone)]
 pub(super) struct CleanupRequest {
     pub target: CleanTarget,
     pub start: usize,
     pub raw: String,
+    pub edit: Option<String>,
 }
 
 /// Where the capture side of a session stands. `Connecting` also covers
@@ -680,19 +703,48 @@ fn scratchpad_fade_key(target: CleanTarget) -> String {
 }
 
 /// One dictated paragraph and the bullet annotations parked under it.
+/// `bullets` stays a flat list in paint order — `depth` counts how far a
+/// row nests under the bullet that spawned it.
 #[derive(Default)]
 struct ScratchpadParagraph {
     text: String,
-    bullets: Vec<String>,
+    bullets: Vec<ScratchpadBullet>,
     /// A manual edit touched this paragraph — the cleanup model leaves
     /// its spans alone rather than overwrite the user's words.
     edited: bool,
 }
 
+/// One annotation row — `depth` 0 hangs off the paragraph itself, each
+/// bullet-annotated commit nests one deeper up to [`MAX_BULLET_DEPTH`].
+#[derive(Clone, Debug)]
+struct ScratchpadBullet {
+    text: String,
+    depth: usize,
+}
+
+/// Test assertions compare a bullet list against bare strings.
+impl PartialEq<&str> for ScratchpadBullet {
+    fn eq(&self, other: &&str) -> bool {
+        self.text == *other
+    }
+}
+
+/// The flat index just past `bullet`'s whole subtree — where a child of
+/// it lands.
+fn descendant_end(bullets: &[ScratchpadBullet], bullet: usize) -> usize {
+    let depth = bullets[bullet].depth;
+    bullet
+        + 1
+        + bullets[bullet + 1..]
+            .iter()
+            .take_while(|next| next.depth > depth)
+            .count()
+}
+
 /// Where an open annotation box writes: a paragraph's bullet list as a
-/// whole, or — after a bullet click — the slot right after that bullet,
-/// advancing once per commit so consecutive "okay next" bullets land in
-/// order under it.
+/// whole, or — after a bullet click — the child slot at the end of that
+/// bullet's subtree, advancing once per commit so consecutive "okay
+/// next" bullets land in order under it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AnnotationTarget {
     Paragraph(usize),
@@ -701,6 +753,14 @@ enum AnnotationTarget {
         bullet: usize,
         insert: usize,
     },
+}
+
+/// A spoken command the dictation fold consumes.
+enum ScratchpadCommand {
+    /// "Okay next" — commit the append point and move on.
+    Next,
+    /// "Okay, let's make an edit" — arm the annotation box's rewrite.
+    Edit,
 }
 
 /// A transcript buffer a caret or edit addresses — a paragraph's body or
@@ -733,6 +793,11 @@ pub(super) struct ScratchpadTranscript {
     annotation_text: String,
     /// Interim speech while annotating — provisional until it settles.
     annotation_interim: String,
+    /// Armed by a spoken "okay, let's make an edit" in a paragraph's box:
+    /// `(paragraph, offset)` — the byte offset into `annotation_text`
+    /// where the instruction begins. Dictation past it rewrites that
+    /// paragraph at commit instead of landing as a bullet.
+    annotation_edit: Option<(usize, usize)>,
     /// Interim speech at the main append point.
     interim: String,
     /// When the live interim last changed on screen — the hysteresis
@@ -817,14 +882,28 @@ impl ScratchpadTranscript {
                 rest = after;
                 continue;
             }
-            match split_next_command(rest) {
+            if self.edit_armable()
+                && let Some((taken, after)) =
+                    seam_edit_command(self.append_point_text(), rest)
+            {
+                self.strip_append_point_words(taken);
+                self.arm_edit();
+                rest = after;
+                continue;
+            }
+            match self.split_command(rest) {
                 None => {
                     self.push_text(rest);
                     break;
                 }
-                Some((before, after)) => {
+                Some((ScratchpadCommand::Next, before, after)) => {
                     self.push_text(before);
                     self.commit_next();
+                    rest = after;
+                }
+                Some((ScratchpadCommand::Edit, before, after)) => {
+                    self.push_text(before);
+                    self.arm_edit();
                     rest = after;
                 }
             }
@@ -853,8 +932,12 @@ impl ScratchpadTranscript {
             return;
         };
         if let Some((start, raw)) = clean_span(text, from, end) {
-            self.cleanup_requests
-                .push(CleanupRequest { target, start, raw });
+            self.cleanup_requests.push(CleanupRequest {
+                target,
+                start,
+                raw,
+                edit: None,
+            });
         }
         if self.annotation_target.is_some() {
             self.annotation_clean_from = end;
@@ -876,6 +959,7 @@ impl ScratchpadTranscript {
                     target: CleanTarget::Annotation,
                     start,
                     raw,
+                    edit: None,
                 },
             );
             if let Some(request) = request {
@@ -897,6 +981,7 @@ impl ScratchpadTranscript {
             target: CleanTarget::Node(ScratchpadNode::Paragraph(index)),
             start,
             raw,
+            edit: None,
         });
         if let Some(request) = request {
             self.cleanup_requests.push(request);
@@ -948,6 +1033,53 @@ impl ScratchpadTranscript {
             .unwrap_or(0);
         text.truncate(word_start);
         text.truncate(text.trim_end().len());
+    }
+
+    /// Remove the append point's trailing `count` words — a multi-word
+    /// command consumed them — each with the punctuation it carried.
+    fn strip_append_point_words(&mut self, count: usize) {
+        for _ in 0..count {
+            self.strip_append_point_word();
+        }
+    }
+
+    /// Whether the edit phrase can arm right now: a paragraph's
+    /// annotation box is open and hasn't already heard it. On a bullet's
+    /// box or the live row the same words are plain speech.
+    fn edit_armable(&self) -> bool {
+        matches!(self.annotation_target, Some(AnnotationTarget::Paragraph(_)))
+            && self.annotation_edit.is_none()
+    }
+
+    /// The edit phrase just consumed — dictation past this point is the
+    /// rewrite instruction for the annotated paragraph, recorded as the
+    /// split offset inside the box's text.
+    fn arm_edit(&mut self) {
+        if let Some(AnnotationTarget::Paragraph(index)) = self.annotation_target {
+            self.annotation_edit = Some((index, self.annotation_text.len()));
+        }
+    }
+
+    /// The earliest voice command in `text` — "okay next" anywhere, plus
+    /// "okay, let's make an edit" while it can still arm. Returns which
+    /// fired and the text on either side of its consumed span.
+    fn split_command<'a>(
+        &self,
+        text: &'a str,
+    ) -> Option<(ScratchpadCommand, &'a str, &'a str)> {
+        let mut hit = next_command_span(text).map(|span| (ScratchpadCommand::Next, span));
+        if self.edit_armable()
+            && let Some(span) = edit_command_span(text)
+            && hit.as_ref().is_none_or(|(_, (start, _))| span.0 < *start)
+        {
+            hit = Some((ScratchpadCommand::Edit, span));
+        }
+        let (command, (start, end)) = hit?;
+        Some((
+            command,
+            text[..start].trim_end(),
+            text[end..].trim_start_matches(|c: char| !c.is_alphanumeric()),
+        ))
     }
 
     /// A `transcript-final` part: the segment's complete text. Models that
@@ -1015,11 +1147,24 @@ impl ScratchpadTranscript {
                 rest = after;
                 continue;
             }
-            match split_next_command(rest) {
+            if self.edit_armable()
+                && let Some((taken, after)) =
+                    seam_edit_command(self.append_point_text(), rest)
+            {
+                self.strip_append_point_words(taken);
+                self.arm_edit();
+                self.fold_span(&rest[..rest.len() - after.len()]);
+                rest = after;
+                continue;
+            }
+            match self.split_command(rest) {
                 None => break,
-                Some((before, after)) => {
+                Some((command, before, after)) => {
                     self.push_text(before);
-                    self.commit_next();
+                    match command {
+                        ScratchpadCommand::Next => self.commit_next(),
+                        ScratchpadCommand::Edit => self.arm_edit(),
+                    }
                     self.fold_span(&rest[..rest.len() - after.len()]);
                     rest = after;
                 }
@@ -1222,20 +1367,27 @@ impl ScratchpadTranscript {
     }
 
     /// "Okay next": inside an annotation box it commits the box's content
-    /// as a bullet at the box's slot — under its paragraph, or right after
-    /// its bullet — and the box reopens empty; otherwise it closes the
+    /// as a bullet at the box's slot — under its paragraph, or nested
+    /// under its bullet — and the box reopens empty; otherwise it closes the
     /// current paragraph — a redundant command on an empty one moves
     /// nothing. The provisional suffix survives: it sits past the
     /// consumed command and belongs to the new append point.
     fn commit_next(&mut self) {
         match self.annotation_target {
+            // An armed edit ends the box on the first commit — the
+            // instruction tail dispatches the paragraph rewrite instead
+            // of landing as a bullet.
+            Some(_) if self.annotation_edit.is_some() => self.commit_annotation(),
             Some(AnnotationTarget::Paragraph(target)) => {
                 let bullet = std::mem::take(&mut self.annotation_text).trim().to_owned();
                 self.annotation_clean_from = 0;
                 if !bullet.is_empty()
                     && let Some(paragraph) = self.paragraphs.get_mut(target)
                 {
-                    paragraph.bullets.push(bullet.clone());
+                    paragraph.bullets.push(ScratchpadBullet {
+                        text: bullet.clone(),
+                        depth: 0,
+                    });
                     // The box's whole text just became a bullet — clean it
                     // where it landed, not in the emptied box.
                     self.cleanup_requests.push(CleanupRequest {
@@ -1245,6 +1397,7 @@ impl ScratchpadTranscript {
                         )),
                         start: 0,
                         raw: bullet,
+                        edit: None,
                     });
                 }
             }
@@ -1256,15 +1409,8 @@ impl ScratchpadTranscript {
                 let text = std::mem::take(&mut self.annotation_text).trim().to_owned();
                 self.annotation_clean_from = 0;
                 if !text.is_empty()
-                    && let Some(target) = self.paragraphs.get_mut(paragraph)
+                    && let Some(at) = self.land_sub_bullet(paragraph, bullet, insert, text)
                 {
-                    let at = insert.min(target.bullets.len());
-                    target.bullets.insert(at, text.clone());
-                    self.cleanup_requests.push(CleanupRequest {
-                        target: CleanTarget::Node(ScratchpadNode::Bullet(paragraph, at)),
-                        start: 0,
-                        raw: text,
-                    });
                     self.annotation_target = Some(AnnotationTarget::Bullet {
                         paragraph,
                         bullet,
@@ -1317,21 +1463,21 @@ impl ScratchpadTranscript {
         true
     }
 
-    /// Open the annotation box on a bullet — its commits land as sibling
-    /// bullets right after it, matching how paragraphs nest theirs. The
+    /// Open the annotation box on a bullet — its commits land as the
+    /// bullet's children, the slot starting at the end of its subtree so
+    /// consecutive "okay next" bullets keep speech order under it. The
     /// provisional suffix retargets with the append point, same as a
     /// paragraph box.
     fn annotate_bullet(&mut self, paragraph: usize, bullet: usize) {
-        if self
-            .paragraphs
-            .get(paragraph)
-            .is_some_and(|target| bullet < target.bullets.len())
+        if let Some(target) = self.paragraphs.get(paragraph)
+            && bullet < target.bullets.len()
         {
+            let insert = descendant_end(&target.bullets, bullet);
             self.flush_open_tail();
             self.annotation_target = Some(AnnotationTarget::Bullet {
                 paragraph,
                 bullet,
-                insert: bullet + 1,
+                insert,
             });
             self.annotation_interim = std::mem::take(&mut self.interim);
             self.caret = None;
@@ -1347,28 +1493,68 @@ impl ScratchpadTranscript {
     }
 
     /// Finish annotating the way "okay next" would — the box's content
-    /// lands as a bullet at its slot — then close, leaving the append
-    /// point back on the live row. The still-provisional tail goes in
-    /// with it, folded as strip credit so the stream's re-delivery of
-    /// those words doesn't append them a second time.
+    /// lands as a bullet at its slot, or an armed edit dispatches its
+    /// instruction tail as the paragraph's rewrite — then close, leaving
+    /// the append point back on the live row. The still-provisional tail
+    /// goes in with it, folded as strip credit so the stream's
+    /// re-delivery of those words doesn't append them a second time.
     fn commit_annotation(&mut self) {
         let Some(target) = self.annotation_target.take() else {
             return;
         };
-        let mut text = std::mem::take(&mut self.annotation_text).trim().to_owned();
+        let text = std::mem::take(&mut self.annotation_text);
         let interim = std::mem::take(&mut self.annotation_interim)
             .trim()
             .to_owned();
         self.fold_span(&interim);
-        append_word_text(&mut text, &interim);
         self.annotation_clean_from = 0;
+        // An armed edit splits the box at the phrase: the tail is the
+        // rewrite instruction for its paragraph — it dispatches to the
+        // cleanup pipeline and never lands as a bullet. Words spoken
+        // before the phrase still commit at the box's slot.
+        let (text, edit) = match self.annotation_edit.take() {
+            Some((paragraph, from)) => {
+                let mut instruction = text.get(from..).unwrap_or_default().to_owned();
+                append_word_text(&mut instruction, &interim);
+                (
+                    text.get(..from).unwrap_or_default().to_owned(),
+                    Some((paragraph, instruction)),
+                )
+            }
+            None => {
+                let mut text = text;
+                append_word_text(&mut text, &interim);
+                (text, None)
+            }
+        };
+        if let Some((index, instruction)) = edit {
+            let instruction = instruction.trim();
+            if !instruction.is_empty()
+                && let Some(paragraph) = self.paragraphs.get(index)
+                && !paragraph.text.is_empty()
+            {
+                // The rewrite rides the cleanup path whole — the answer
+                // verifies the paragraph still holds this exact text
+                // before it lands with the morph.
+                self.cleanup_requests.push(CleanupRequest {
+                    target: CleanTarget::Node(ScratchpadNode::Paragraph(index)),
+                    start: 0,
+                    raw: paragraph.text.clone(),
+                    edit: Some(instruction.to_owned()),
+                });
+            }
+        }
+        let text = text.trim().to_owned();
         if text.is_empty() {
             return;
         }
         match target {
             AnnotationTarget::Paragraph(index) => {
                 if let Some(paragraph) = self.paragraphs.get_mut(index) {
-                    paragraph.bullets.push(text.clone());
+                    paragraph.bullets.push(ScratchpadBullet {
+                        text: text.clone(),
+                        depth: 0,
+                    });
                     // Click-out commits the same bullet "okay next" would —
                     // clean it where it landed.
                     self.cleanup_requests.push(CleanupRequest {
@@ -1378,23 +1564,52 @@ impl ScratchpadTranscript {
                         )),
                         start: 0,
                         raw: text,
+                        edit: None,
                     });
                 }
             }
             AnnotationTarget::Bullet {
-                paragraph, insert, ..
+                paragraph,
+                bullet,
+                insert,
             } => {
-                if let Some(target_paragraph) = self.paragraphs.get_mut(paragraph) {
-                    let at = insert.min(target_paragraph.bullets.len());
-                    target_paragraph.bullets.insert(at, text.clone());
-                    self.cleanup_requests.push(CleanupRequest {
-                        target: CleanTarget::Node(ScratchpadNode::Bullet(paragraph, at)),
-                        start: 0,
-                        raw: text,
-                    });
-                }
+                self.land_sub_bullet(paragraph, bullet, insert, text);
             }
         }
+    }
+
+    /// Land `text` as a child of `paragraph`'s `bullet` at the box's
+    /// `insert` slot — one level deeper, capped at [`MAX_BULLET_DEPTH`],
+    /// where further commits keep landing as siblings. Returns where it
+    /// landed, `None` when the paragraph is gone.
+    fn land_sub_bullet(
+        &mut self,
+        paragraph: usize,
+        parent: usize,
+        insert: usize,
+        text: String,
+    ) -> Option<usize> {
+        let target = self.paragraphs.get_mut(paragraph)?;
+        let depth = target
+            .bullets
+            .get(parent)
+            .map(|parent| (parent.depth + 1).min(MAX_BULLET_DEPTH))
+            .unwrap_or(0);
+        let at = insert.min(target.bullets.len());
+        target.bullets.insert(
+            at,
+            ScratchpadBullet {
+                text: text.clone(),
+                depth,
+            },
+        );
+        self.cleanup_requests.push(CleanupRequest {
+            target: CleanTarget::Node(ScratchpadNode::Bullet(paragraph, at)),
+            start: 0,
+            raw: text,
+            edit: None,
+        });
+        Some(at)
     }
 
     /// Whether `target` has a cleanup call queued or in flight — the
@@ -1427,7 +1642,7 @@ impl ScratchpadTranscript {
                 .paragraphs
                 .get(paragraph)
                 .and_then(|paragraph| paragraph.bullets.get(bullet))
-                .map(|bullet| bullet.as_str())
+                .map(|bullet| bullet.text.as_str())
                 .unwrap_or_default(),
         }
     }
@@ -1447,7 +1662,8 @@ impl ScratchpadTranscript {
             ScratchpadNode::Bullet(paragraph, bullet) => self
                 .paragraphs
                 .get_mut(paragraph)
-                .and_then(|paragraph| paragraph.bullets.get_mut(bullet)),
+                .and_then(|paragraph| paragraph.bullets.get_mut(bullet))
+                .map(|bullet| &mut bullet.text),
         }
     }
 
@@ -1466,8 +1682,8 @@ impl ScratchpadTranscript {
         let mut nodes = Vec::new();
         for (index, paragraph) in self.paragraphs.iter().enumerate() {
             nodes.push((ScratchpadNode::Paragraph(index), paragraph.text.len()));
-            for (bullet, text) in paragraph.bullets.iter().enumerate() {
-                nodes.push((ScratchpadNode::Bullet(index, bullet), text.len()));
+            for (bullet, row) in paragraph.bullets.iter().enumerate() {
+                nodes.push((ScratchpadNode::Bullet(index, bullet), row.text.len()));
             }
         }
         if nodes.is_empty() {
@@ -1663,7 +1879,7 @@ impl ScratchpadTranscript {
         // Bottom-up so removals only renumber what came after them.
         for paragraph in (0..self.paragraphs.len()).rev() {
             for bullet in (0..self.paragraphs[paragraph].bullets.len()).rev() {
-                if !self.paragraphs[paragraph].bullets[bullet].is_empty() {
+                if !self.paragraphs[paragraph].bullets[bullet].text.is_empty() {
                     continue;
                 }
                 self.paragraphs[paragraph].bullets.remove(bullet);
@@ -1688,6 +1904,17 @@ impl ScratchpadTranscript {
                         caret.node = ScratchpadNode::Bullet(paragraph, b - 1);
                     }
                 }
+            }
+            // A removed row orphans its children — clamp each depth to
+            // its previous row's + 1 so survivors promote instead of
+            // dangling off nothing.
+            let mut depth = None;
+            for bullet in &mut self.paragraphs[paragraph].bullets {
+                bullet.depth = match depth {
+                    Some(previous) => bullet.depth.min(previous + 1),
+                    None => 0,
+                };
+                depth = Some(bullet.depth);
             }
             if self.paragraphs[paragraph].text.is_empty()
                 && self.paragraphs[paragraph].bullets.is_empty()
@@ -1726,20 +1953,45 @@ impl ScratchpadTranscript {
             let mut bullets = paragraph.bullets.clone();
             let pending_slot = match self.annotation_target {
                 Some(AnnotationTarget::Paragraph(target)) if target == index => {
-                    Some(bullets.len())
+                    Some((bullets.len(), 0))
                 }
                 Some(AnnotationTarget::Bullet {
                     paragraph: target,
+                    bullet,
                     insert,
-                    ..
-                }) if target == index => Some(insert.min(bullets.len())),
+                }) if target == index => {
+                    let depth = bullets
+                        .get(bullet)
+                        .map(|bullet| (bullet.depth + 1).min(MAX_BULLET_DEPTH))
+                        .unwrap_or(0);
+                    Some((insert.min(bullets.len()), depth))
+                }
                 _ => None,
             };
-            if let Some(slot) = pending_slot {
-                let mut pending = self.annotation_text.trim().to_owned();
-                append_word_text(&mut pending, self.annotation_interim.trim());
+            if let Some((slot, depth)) = pending_slot {
+                // An armed edit's tail is an instruction, not a bullet —
+                // it stays out of the message, interim included.
+                let pending = match self.annotation_edit {
+                    Some((_, from)) => self
+                        .annotation_text
+                        .get(..from)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned(),
+                    None => {
+                        let mut pending = self.annotation_text.trim().to_owned();
+                        append_word_text(&mut pending, self.annotation_interim.trim());
+                        pending.trim().to_owned()
+                    }
+                };
                 if !pending.is_empty() {
-                    bullets.insert(slot, pending);
+                    bullets.insert(
+                        slot,
+                        ScratchpadBullet {
+                            text: pending,
+                            depth,
+                        },
+                    );
                 }
             }
             if self.annotation_target.is_none() && index + 1 == self.paragraphs.len() {
@@ -1754,8 +2006,11 @@ impl ScratchpadTranscript {
             out.push_str(&text);
             for bullet in &bullets {
                 out.push('\n');
+                for _ in 0..bullet.depth {
+                    out.push_str("  ");
+                }
                 out.push_str("- ");
-                out.push_str(bullet.trim());
+                out.push_str(bullet.text.trim());
             }
         }
         out
@@ -1764,25 +2019,29 @@ impl ScratchpadTranscript {
     /// The cleanup model's answer for one flushed span: replace it only
     /// when the buffer still holds the exact raw text — at the recorded
     /// offset, or uniquely elsewhere once later replacements shifted
-    /// things. An edited paragraph or a missing match keeps the raw text.
+    /// things. An edited paragraph or a missing match keeps the raw text;
+    /// `edit` marks a spoken rewrite instruction, which the typed-edit
+    /// guard doesn't protect against — the instruction sanctions it.
     fn apply_cleanup(
         &mut self,
         target: CleanTarget,
         start: usize,
         raw: &str,
         cleaned: &str,
+        edit: bool,
     ) -> bool {
-        let edited = match target {
-            CleanTarget::Annotation => false,
-            CleanTarget::Node(ScratchpadNode::Paragraph(index)) => self
-                .paragraphs
-                .get(index)
-                .is_none_or(|paragraph| paragraph.edited),
-            CleanTarget::Node(ScratchpadNode::Bullet(index, bullet)) => self
-                .paragraphs
-                .get(index)
-                .is_none_or(|paragraph| paragraph.edited || bullet >= paragraph.bullets.len()),
-        };
+        let edited = !edit
+            && match target {
+                CleanTarget::Annotation => false,
+                CleanTarget::Node(ScratchpadNode::Paragraph(index)) => self
+                    .paragraphs
+                    .get(index)
+                    .is_none_or(|paragraph| paragraph.edited),
+                CleanTarget::Node(ScratchpadNode::Bullet(index, bullet)) => self
+                    .paragraphs
+                    .get(index)
+                    .is_none_or(|paragraph| paragraph.edited || bullet >= paragraph.bullets.len()),
+            };
         if edited {
             return false;
         }
@@ -1790,19 +2049,25 @@ impl ScratchpadTranscript {
             CleanTarget::Annotation => self.annotation_text.as_str(),
             CleanTarget::Node(node) => self.node_text(node),
         };
-        let span = start
-            .checked_add(raw.len())
-            .filter(|&end| text.get(start..end) == Some(raw))
-            .map(|end| start..end)
-            .or_else(|| {
-                // Earlier answers already rewrote neighbors — the span
-                // still applies when the raw text survives exactly once.
-                let mut hits = text.match_indices(raw);
-                match (hits.next(), hits.next()) {
-                    (Some((at, _)), None) => Some(at..at + raw.len()),
-                    _ => None,
-                }
-            });
+        let span = if edit {
+            // A spoken rewrite covered the target's whole text — anything
+            // but an exact match means the buffer moved past it.
+            (text == raw).then(|| 0..raw.len())
+        } else {
+            start
+                .checked_add(raw.len())
+                .filter(|&end| text.get(start..end) == Some(raw))
+                .map(|end| start..end)
+                .or_else(|| {
+                    // Earlier answers already rewrote neighbors — the span
+                    // still applies when the raw text survives exactly once.
+                    let mut hits = text.match_indices(raw);
+                    match (hits.next(), hits.next()) {
+                        (Some((at, _)), None) => Some(at..at + raw.len()),
+                        _ => None,
+                    }
+                })
+        };
         let Some(span) = span else {
             return false;
         };
@@ -1854,7 +2119,7 @@ impl ScratchpadTranscript {
                     || paragraph
                         .bullets
                         .iter()
-                        .any(|bullet| !bullet.trim().is_empty())
+                        .any(|bullet| !bullet.text.trim().is_empty())
             })
     }
 
@@ -2043,21 +2308,82 @@ fn word_spans(text: &str) -> Vec<(usize, usize)> {
 /// comma-separated spellings all count. Returns the text before and after
 /// the command's consumed span; surrounding punctuation and whitespace go
 /// with the command rather than into either side.
+#[cfg(test)]
 fn split_next_command(text: &str) -> Option<(&str, &str)> {
+    let (start, end) = next_command_span(text)?;
+    Some((
+        text[..start].trim_end(),
+        text[end..].trim_start_matches(|c: char| !c.is_alphanumeric()),
+    ))
+}
+
+/// The byte span of `text`'s first "okay next" command.
+fn next_command_span(text: &str) -> Option<(usize, usize)> {
     let words = word_spans(text);
     for pair in words.windows(2) {
-        let (a_start, a_end) = pair[0];
-        let (b_start, b_end) = pair[1];
-        let a = &text[a_start..a_end];
+        let (a_start, _) = pair[0];
+        let (_, b_end) = pair[1];
+        let a = &text[a_start..pair[0].1];
         if (a.eq_ignore_ascii_case("ok") || a.eq_ignore_ascii_case("okay"))
-            && text[b_start..b_end].eq_ignore_ascii_case("next")
+            && text[pair[1].0..b_end].eq_ignore_ascii_case("next")
         {
-            let before = text[..a_start].trim_end();
-            let after = text[b_end..].trim_start_matches(|c: char| !c.is_alphanumeric());
-            return Some((before, after));
+            return Some((a_start, b_end));
         }
     }
     None
+}
+
+/// The byte span of `text`'s first "okay, let's make an edit" — the
+/// annotation box's edit arming phrase, matched on the same alphanumeric
+/// tokens "okay next" scans, so casing, punctuation, and chunking all
+/// read the same.
+fn edit_command_span(text: &str) -> Option<(usize, usize)> {
+    let spans = word_spans(text);
+    let words: Vec<&str> = spans.iter().map(|&(start, end)| &text[start..end]).collect();
+    for start in 0..words.len() {
+        if let Some(len) = edit_command_len(&words[start..]) {
+            return Some((spans[start].0, spans[start + len - 1].1));
+        }
+    }
+    None
+}
+
+/// Split `text` around the first edit command — the same split shape
+/// `split_next_command` returns.
+#[cfg(test)]
+fn split_edit_command(text: &str) -> Option<(&str, &str)> {
+    let (start, end) = edit_command_span(text)?;
+    Some((
+        text[..start].trim_end(),
+        text[end..].trim_start_matches(|c: char| !c.is_alphanumeric()),
+    ))
+}
+
+/// Whether `words` opens with the edit phrase — "ok"/"okay" then
+/// "let's make an edit". The recognizer delivers "let's" as one word
+/// ("lets") or two ("let" "'s"), so the phrase runs five or six tokens.
+/// Returns how many words it consumed.
+fn edit_command_len(words: &[&str]) -> Option<usize> {
+    let is = |index: usize, expect: &str| {
+        words
+            .get(index)
+            .is_some_and(|word| word.eq_ignore_ascii_case(expect))
+    };
+    if !is(0, "ok") && !is(0, "okay") {
+        return None;
+    }
+    let start = if is(1, "lets") {
+        2
+    } else if is(1, "let") && is(2, "s") {
+        3
+    } else {
+        return None;
+    };
+    if is(start, "make") && is(start + 1, "an") && is(start + 2, "edit") {
+        Some(start + 3)
+    } else {
+        None
+    }
 }
 
 /// The trailing alphanumeric run of `text`, punctuation aside — the word a
@@ -2094,6 +2420,37 @@ fn seam_command<'a>(tail: &str, rest: &'a str) -> Option<&'a str> {
         return None;
     }
     Some(rest[end..].trim_start_matches(|c: char| !c.is_alphanumeric()))
+}
+
+/// Whether the edit phrase straddles the seam between the append point's
+/// committed `tail` and the incoming chunk `rest` — `seam_command`'s
+/// multi-word twin. Returns how many committed words the phrase took
+/// plus `rest` past the command's consumed span.
+fn seam_edit_command<'a>(tail: &str, rest: &'a str) -> Option<(usize, &'a str)> {
+    let tail_spans = word_spans(tail);
+    let rest_spans = word_spans(rest);
+    // The phrase needs at least one word off each side to be a seam —
+    // wholly committed or wholly incoming runs are the other scans'.
+    let take = tail_spans.len().min(EDIT_COMMAND_MAX_WORDS - 1);
+    for taken in (1..=take).rev() {
+        let mut words: Vec<&str> = tail_spans[tail_spans.len() - taken..]
+            .iter()
+            .map(|&(start, end)| &tail[start..end])
+            .collect();
+        words.extend(rest_spans.iter().map(|&(start, end)| &rest[start..end]));
+        let Some(len) = edit_command_len(&words) else {
+            continue;
+        };
+        if len <= taken || len - taken > rest_spans.len() {
+            continue;
+        }
+        let end = rest_spans[len - taken - 1].1;
+        return Some((
+            taken,
+            rest[end..].trim_start_matches(|c: char| !c.is_alphanumeric()),
+        ));
+    }
+    None
 }
 
 /// Streaming resampler: f32 mono at the device rate → s16le mono bytes at
@@ -3303,11 +3660,24 @@ impl Waku {
                     .filter(|key| !key.trim().is_empty());
                 let cleaned = match key {
                     Some(key) => {
+                        // A spoken edit applies its instruction to the
+                        // target's whole text; a plain request just
+                        // scrubs dictation artifacts.
+                        let (instructions, content) = match &request.edit {
+                            Some(instruction) => (
+                                EDIT_INSTRUCTIONS,
+                                format!(
+                                    "Text:\n{}\n\nEdit instruction: {}",
+                                    request.raw, instruction
+                                ),
+                            ),
+                            None => (CLEANUP_INSTRUCTIONS, request.raw.clone()),
+                        };
                         let body = serde_json::json!({
                             "model": CLEANUP_MODEL_ID,
                             "messages": [
-                                {"role": "system", "content": CLEANUP_INSTRUCTIONS},
-                                {"role": "user", "content": request.raw},
+                                {"role": "system", "content": instructions},
+                                {"role": "user", "content": content},
                             ],
                         });
                         match super::voice_briefing::post_json(
@@ -3343,6 +3713,7 @@ impl Waku {
                         start: request.start,
                         raw: request.raw,
                         cleaned,
+                        edit: request.edit.is_some(),
                     },
                 ));
                 signal_event_pump(&wake);
@@ -3379,6 +3750,7 @@ impl Waku {
                 start,
                 raw,
                 cleaned,
+                edit,
             } = event
             {
                 if let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) {
@@ -3398,7 +3770,7 @@ impl Waku {
                             scratchpad.transcript.clean_target_text(target).to_owned();
                         if scratchpad
                             .transcript
-                            .apply_cleanup(target, start, &raw, &cleaned)
+                            .apply_cleanup(target, start, &raw, &cleaned, edit)
                         {
                             changed = true;
                             scratchpad.morph_landed(target, before);
@@ -3922,7 +4294,7 @@ impl Waku {
                 note_text_fade(
                     &mut scratchpad.text_fades,
                     format!("b{index}-{bullet_index}"),
-                    bullet.len(),
+                    bullet.text.len(),
                     // `edited` is paragraph-scoped — it covers the bullets
                     // a caret or selection edit touched.
                     animate && !paragraph.edited,
@@ -4189,25 +4561,26 @@ impl Waku {
                 push_fade_runs(
                     &mut runs,
                     0,
-                    bullet.len(),
+                    bullet.text.len(),
                     &fades,
                     morph_t.map(ease_in_out).unwrap_or(1.0),
                     &font(ui_family.clone()),
                     theme.text_secondary,
                 );
+                let indent = 18.0 + bullet.depth as f32 * BULLET_INDENT;
                 let ghost = morph.zip(morph_t).map(|(morph, t)| {
                     scratchpad_morph_ghost(
                         &morph.old,
                         t,
                         2.0,
-                        32.0,
+                        indent + BULLET_INDENT,
                         0.0,
                         theme.text_secondary,
                         &ui_family,
                     )
                 });
                 let flat = md::render::FlatText {
-                    text: bullet.clone().into(),
+                    text: bullet.text.clone().into(),
                     runs,
                     links: Vec::new(),
                     code_ranges: Vec::new(),
@@ -4223,7 +4596,7 @@ impl Waku {
                     .w_full()
                     .relative()
                     .rounded(px(4.0))
-                    .pl(px(18.0))
+                    .pl(px(indent))
                     .py(px(2.0))
                     .flex()
                     .gap(px(8.0))
@@ -5398,9 +5771,9 @@ mod tests {
 
     #[test]
     fn bullet_annotation_commits_at_the_slot_in_order() {
-        // A bullet-targeted box inserts right after its bullet and the
-        // slot advances per commit — consecutive "okay next" bullets keep
-        // speech order under it.
+        // A bullet-targeted box nests its commits under the bullet and
+        // the slot advances per commit — consecutive "okay next" bullets
+        // keep speech order as children.
         let mut transcript = ScratchpadTranscript::default();
         transcript.append_finalized("the plan");
         transcript.annotate(0);
@@ -5409,16 +5782,21 @@ mod tests {
         transcript.annotate_bullet(0, 0);
         transcript.append_finalized("inserted one okay next");
         transcript.append_finalized("inserted two okay next");
+        let bullets = &transcript.paragraphs[0].bullets;
         assert_eq!(
-            transcript.paragraphs[0].bullets,
+            *bullets,
             vec!["first", "inserted one", "inserted two", "second"]
+        );
+        assert_eq!(
+            bullets.iter().map(|bullet| bullet.depth).collect::<Vec<_>>(),
+            vec![0, 1, 1, 0]
         );
     }
 
     #[test]
     fn open_bullet_box_sends_pending_text_at_the_slot() {
         // Enter sends what the user sees — an open box's uncommitted text
-        // commits at its insert slot, not at the list's end.
+        // commits at its insert slot, nested under its bullet.
         let mut transcript = ScratchpadTranscript::default();
         transcript.append_finalized("the plan");
         transcript.annotate(0);
@@ -5428,7 +5806,7 @@ mod tests {
         transcript.append_finalized("still talking");
         assert_eq!(
             transcript.to_message(),
-            "the plan\n- first\n- still talking\n- second"
+            "the plan\n- first\n  - still talking\n- second"
         );
     }
 
@@ -5453,6 +5831,252 @@ mod tests {
         // second copy, and fresh speech lands on the live row again.
         transcript.append_finalized("for a moment more");
         assert_eq!(transcript.paragraphs[1].text, "moment more");
+    }
+
+    #[test]
+    fn edit_command_splits_on_word_runs() {
+        // "Let's" arrives as "lets" or "let" + "'s" — both read as the
+        // phrase, and casing and punctuation ride with the command.
+        assert_eq!(split_edit_command("okay let's make an edit"), Some(("", "")));
+        assert_eq!(split_edit_command("ok lets make an edit"), Some(("", "")));
+        assert_eq!(
+            split_edit_command("note. Okay, let's make an edit — shorten it"),
+            Some(("note.", "shorten it"))
+        );
+        // Plain speech isn't a command.
+        assert_eq!(split_edit_command("let's make an edit"), None);
+        assert_eq!(split_edit_command("okay make an edit"), None);
+        assert_eq!(split_edit_command("okay let's make edits"), None);
+        assert_eq!(split_edit_command("okay let's make an"), None);
+    }
+
+    #[test]
+    fn edit_phrase_commits_a_rewrite_and_keeps_the_prior_note() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan is ready");
+        transcript.annotate(0);
+        transcript.append_finalized("a note okay let's make an edit shorten it okay next");
+        // The "okay next" ended the instruction — the rewrite dispatched
+        // and the box closed; only the pre-phrase words became a bullet.
+        assert!(transcript.annotation_target.is_none());
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["a note"]);
+        let (target, start, raw, instruction) = transcript
+            .cleanup_requests
+            .iter()
+            .find(|request| request.edit.is_some())
+            .map(|request| {
+                (
+                    request.target,
+                    request.start,
+                    request.raw.clone(),
+                    request.edit.clone(),
+                )
+            })
+            .expect("the commit queued the paragraph rewrite");
+        assert_eq!(target, CleanTarget::Node(ScratchpadNode::Paragraph(0)));
+        assert_eq!(start, 0);
+        assert_eq!(raw, "the plan is ready");
+        assert_eq!(instruction.as_deref(), Some("shorten it"));
+        // Its answer lands through the same verified swap a cleanup takes.
+        assert!(transcript.apply_cleanup(target, start, &raw, "Plan ready.", true));
+        assert_eq!(transcript.paragraphs[0].text, "Plan ready.");
+    }
+
+    #[test]
+    fn edit_phrase_straddles_the_committed_seam() {
+        // Chunked delivery splits the phrase anywhere — the committed
+        // tail pairs with the chunk's head like "okay next" does.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("note okay lets make");
+        transcript.append_finalized("an edit tighten the prose");
+        assert!(transcript.annotation_edit.is_some());
+        assert_eq!(transcript.annotation_text, "note tighten the prose");
+        // The provisional tail joins the instruction at commit.
+        transcript.set_interim("please".to_owned());
+        transcript.commit_annotation();
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["note"]);
+        let instruction = transcript
+            .cleanup_requests
+            .iter()
+            .find_map(|request| request.edit.clone())
+            .expect("the rewrite queued");
+        assert_eq!(instruction, "tighten the prose please");
+    }
+
+    #[test]
+    fn interim_edit_phrase_arms_before_the_segment_lands() {
+        // The partial carrying the phrase arms the box ahead of the
+        // finalized delivery — which then strips the folded command
+        // instead of arming twice or appending its words.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.set_interim("okay lets make an edit tighten it".to_owned());
+        assert!(transcript.annotation_edit.is_some());
+        assert_eq!(transcript.annotation_interim, "tighten it");
+        transcript.apply_final_segment("okay lets make an edit tighten it");
+        assert_eq!(transcript.annotation_text, "tighten it");
+        assert!(transcript.annotation_interim.is_empty());
+    }
+
+    #[test]
+    fn edit_phrase_without_an_instruction_rewrites_nothing() {
+        // The phrase alone arms the box but dispatches nothing — no
+        // request, no bullet, the paragraph untouched.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("okay let's make an edit");
+        assert!(transcript.annotation_edit.is_some());
+        transcript.commit_annotation();
+        assert!(transcript.paragraphs[0].bullets.is_empty());
+        assert!(
+            transcript
+                .cleanup_requests
+                .iter()
+                .all(|request| request.edit.is_none())
+        );
+        assert_eq!(transcript.paragraphs[0].text, "the plan");
+    }
+
+    #[test]
+    fn edit_phrase_off_a_paragraph_box_is_plain_speech() {
+        // The phrase only commands while a paragraph's box is open — in
+        // main dictation and on a bullet's box it transcribes as words.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("note okay let's make an edit later");
+        assert!(transcript.annotation_edit.is_none());
+        assert_eq!(
+            transcript.paragraphs[0].text,
+            "note okay let's make an edit later"
+        );
+        transcript.annotate(0);
+        transcript.append_finalized("a bullet okay next");
+        transcript.annotate_bullet(0, 0);
+        transcript.append_finalized("okay let's make an edit okay next");
+        assert!(transcript.annotation_edit.is_none());
+        assert_eq!(
+            transcript.paragraphs[0].bullets,
+            vec!["a bullet", "okay let's make an edit"]
+        );
+    }
+
+    #[test]
+    fn bullet_annotation_nests_one_level_deeper() {
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("first okay next");
+        transcript.append_finalized("second okay next");
+        // A box on a bullet writes its children — consecutive "okay next"
+        // commits keep speech order at the next depth.
+        transcript.annotate_bullet(0, 0);
+        transcript.append_finalized("child one okay next");
+        transcript.append_finalized("child two okay next");
+        // And a child's own box nests again, past existing siblings.
+        transcript.annotate_bullet(0, 2);
+        transcript.append_finalized("grandchild okay next");
+        transcript.exit_annotation();
+        let rows: Vec<(&str, usize)> = transcript.paragraphs[0]
+            .bullets
+            .iter()
+            .map(|bullet| (bullet.text.as_str(), bullet.depth))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("first", 0),
+                ("child one", 1),
+                ("child two", 1),
+                ("grandchild", 2),
+                ("second", 0),
+            ]
+        );
+        assert_eq!(
+            transcript.to_message(),
+            "the plan\n- first\n  - child one\n  - child two\n    - grandchild\n- second"
+        );
+    }
+
+    #[test]
+    fn bullet_depth_caps_at_nine_levels() {
+        // Nine rows in the commits stop nesting — they keep landing in
+        // order as siblings at the cap rather than marching further right.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.paragraphs[0].bullets.push(ScratchpadBullet {
+            text: "deep".to_owned(),
+            depth: MAX_BULLET_DEPTH,
+        });
+        transcript.annotate_bullet(0, 0);
+        transcript.append_finalized("still talking okay next");
+        transcript.append_finalized("one more okay next");
+        let bullets = &transcript.paragraphs[0].bullets;
+        assert_eq!(*bullets, vec!["deep", "still talking", "one more"]);
+        assert!(
+            bullets
+                .iter()
+                .all(|bullet| bullet.depth == MAX_BULLET_DEPTH)
+        );
+    }
+
+    #[test]
+    fn voice_edit_verifies_the_whole_paragraph_before_landing() {
+        // The rewrite only lands while the paragraph still reads exactly
+        // as it did at dispatch — a typed change in between keeps it
+        // untouched.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("okay let's make an edit tighten it");
+        transcript.commit_annotation();
+        let (target, raw) = transcript
+            .cleanup_requests
+            .iter()
+            .find(|request| request.edit.is_some())
+            .map(|request| (request.target, request.raw.clone()))
+            .expect("the rewrite queued");
+        let spans = vec![md::selection::Span {
+            key: md::selection::TextKey::new("vs-p-0", 0),
+            range: "the plan".len().."the plan".len(),
+            text: "the plan".into(),
+            block_break: false,
+            copy: Rc::default(),
+        }];
+        transcript.apply_selection_edit(&spans, " changed");
+        assert!(!transcript.apply_cleanup(target, 0, &raw, "Plan.", true));
+        assert_eq!(transcript.paragraphs[0].text, "the plan changed");
+    }
+
+    #[test]
+    fn voice_edit_applies_over_a_typed_paragraph() {
+        // Typing arms a paragraph's no-rewrite guard against the cleanup
+        // pass — a spoken edit is the user's own instruction, so it
+        // still lands while its raw text verifies whole.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        let spans = vec![md::selection::Span {
+            key: md::selection::TextKey::new("vs-p-0", 0),
+            range: "the plan".len().."the plan".len(),
+            text: "the plan".into(),
+            block_break: false,
+            copy: Rc::default(),
+        }];
+        transcript.apply_selection_edit(&spans, " here");
+        transcript.annotate(0);
+        transcript.append_finalized("okay let's make an edit tighten it");
+        transcript.commit_annotation();
+        let (target, raw) = transcript
+            .cleanup_requests
+            .iter()
+            .find(|request| request.edit.is_some())
+            .map(|request| (request.target, request.raw.clone()))
+            .expect("the rewrite queued");
+        assert_eq!(raw, "the plan here");
+        assert!(transcript.apply_cleanup(target, 0, &raw, "The plan.", true));
+        assert_eq!(transcript.paragraphs[0].text, "The plan.");
     }
 
     #[test]
@@ -5823,14 +6447,15 @@ mod tests {
         transcript.append_finalized("Um first uh thought. And second.");
         let request = &transcript.cleanup_requests[0];
         let (target, start, raw) = (request.target, request.start, request.raw.clone());
-        assert!(transcript.apply_cleanup(target, start, &raw, "First thought."));
+        assert!(transcript.apply_cleanup(target, start, &raw, "First thought.", false));
         assert_eq!(transcript.paragraphs[0].text, "First thought. And second.");
         // A missing match leaves the raw text alone.
         assert!(!transcript.apply_cleanup(
             CleanTarget::Node(ScratchpadNode::Paragraph(0)),
             0,
             "not in the transcript",
-            "whatever"
+            "whatever",
+            false
         ));
     }
 
@@ -5844,12 +6469,13 @@ mod tests {
         let second = transcript.cleanup_requests.remove(0);
         // The first answer rewrites shorter, shifting the second span's
         // recorded offset — the unique match still finds it.
-        assert!(transcript.apply_cleanup(first.target, first.start, &first.raw, "Filler."));
+        assert!(transcript.apply_cleanup(first.target, first.start, &first.raw, "Filler.", false));
         assert!(transcript.apply_cleanup(
             second.target,
             second.start,
             &second.raw,
-            "Everything else continues."
+            "Everything else continues.",
+            false
         ));
         assert_eq!(
             transcript.paragraphs[0].text,
@@ -5863,7 +6489,8 @@ mod tests {
             CleanTarget::Node(ScratchpadNode::Paragraph(0)),
             usize::MAX,
             "same.",
-            "Different."
+            "Different.",
+            false
         ));
         assert_eq!(transcript.paragraphs[0].text, "note same. and same. Tail");
     }
@@ -5882,7 +6509,7 @@ mod tests {
             copy: Rc::default(),
         }];
         transcript.apply_selection_edit(&spans, "typed ");
-        assert!(!transcript.apply_cleanup(target, start, &raw, "Dictated words."));
+        assert!(!transcript.apply_cleanup(target, start, &raw, "Dictated words.", false));
         assert_eq!(
             transcript.paragraphs[0].text,
             "typed Um dictated words. More"
