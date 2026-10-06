@@ -171,10 +171,11 @@ async fn fetch(
 
 /// espeak-rs locates `espeak-ng-data` under PIPER_ESPEAKNG_DATA_DIRECTORY,
 /// the working directory, or the executable's directory. The bundler ships
-/// the tables beside the executable and the build script drops them beside
-/// the target binary, but other launch shapes — a `cargo test` binary under
-/// `deps/`, a nested lane — still need the env var. Point it at the first
-/// ancestor of the executable that carries the data.
+/// the tables in `Contents/Resources` — `Contents/MacOS` may only carry
+/// executable code, so data there breaks codesigning — and the build script
+/// drops them beside the target binary, but other launch shapes — a `cargo
+/// test` binary under `deps/`, a nested lane — still need the env var.
+/// Point it at the first directory near the executable that carries the data.
 fn ensure_espeak_data() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -184,20 +185,32 @@ fn ensure_espeak_data() {
         let Ok(exe) = std::env::current_exe() else {
             return;
         };
-        let mut dir = exe.parent();
-        let found = std::iter::from_fn(|| {
-            let current = dir?;
-            dir = current.parent();
-            Some(current)
-        })
-        .take(4)
-        .find(|dir| dir.join("espeak-ng-data").is_dir());
-        if let Some(dir) = found {
+        if let Some(dir) = espeak_data_directory(&exe) {
             // SAFETY: runs once before the first espeak call, and nothing
             // else in the process mutates the environment.
             unsafe { std::env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", dir) };
         }
     });
+}
+
+/// The directory containing `espeak-ng-data` nearest the executable: a
+/// sibling for `cargo run`/`cargo test` layouts, `Contents/Resources` for a
+/// packaged macOS app.
+fn espeak_data_directory(executable: &std::path::Path) -> Option<PathBuf> {
+    let mut dir = executable.parent();
+    std::iter::from_fn(|| {
+        let current = dir?;
+        dir = current.parent();
+        Some(current)
+    })
+    .take(4)
+    .find_map(|dir| {
+        if dir.join("espeak-ng-data").is_dir() {
+            return Some(dir.to_path_buf());
+        }
+        let resources = dir.join("Resources");
+        resources.join("espeak-ng-data").is_dir().then_some(resources)
+    })
 }
 
 /// Synthesize `text` with `voice` into WAV bytes. Blocking CPU work — the
@@ -284,5 +297,40 @@ mod tests {
         assert_eq!(&wav[8..12], b"WAVE");
         assert_eq!(wav.len(), 44 + 5 * 2);
         assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
+    }
+
+    #[test]
+    fn espeak_data_directory_follows_each_launch_layout() {
+        let root = std::env::temp_dir().join(format!("goddard-espeak-{}", uuid::Uuid::new_v4()));
+        let bundled = root.join("Goddard.app/Contents");
+        let dev = root.join("target/debug");
+        for dir in [
+            bundled.join("MacOS"),
+            bundled.join("Resources/espeak-ng-data"),
+            dev.join("espeak-ng-data"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(bundled.join("MacOS/Goddard"), []).unwrap();
+        std::fs::write(dev.join("goddard"), []).unwrap();
+
+        assert_eq!(
+            espeak_data_directory(&bundled.join("MacOS/Goddard")),
+            Some(bundled.join("Resources"))
+        );
+        assert_eq!(
+            espeak_data_directory(&dev.join("goddard")),
+            Some(dev.clone())
+        );
+        // A test binary under deps/ still finds the profile dir's copy.
+        let deps = dev.join("deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        std::fs::write(deps.join("waku-abcdef"), []).unwrap();
+        assert_eq!(
+            espeak_data_directory(&deps.join("waku-abcdef")),
+            Some(dev.clone())
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
