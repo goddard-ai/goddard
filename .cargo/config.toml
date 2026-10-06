@@ -6,6 +6,13 @@ TOOLCHAINS = "Metal"
 # integer fields as JavaScript numbers.
 TS_RS_LARGE_INT = "number"
 
+# piper-rs builds espeak-ng from source; its phoneme compiler sizes every path
+# buffer off N_PATH_HOME, which is 160 on POSIX. Deep CARGO_TARGET_DIR layouts
+# (worktrees, the mbx lanes) overflow it and the data build dies opening
+# truncated file names — this only widens espeak's own buffers, other crates
+# ignore the define. An environment CFLAGS the user set themselves wins.
+CFLAGS = "-DN_PATH_HOME=520"
+
 # Link the C runtime statically on Windows, as Zed does for GPUI. The
 # alternative is shipping (or installing) the Visual C++ redistributable, and
 # neither works here: Goddard installs per-user with no elevation precisely so it

@@ -1,0 +1,288 @@
+//! The local voice engine: piper-rs voices text with a per-voice ONNX model
+//! from the rhasspy/piper-voices dataset, fully offline — a selected Piper
+//! voice downloads on first use into `piper_voices_directory()` and
+//! synthesis runs on the background executor. Output is 16-bit mono WAV at
+//! the model's sample rate, the same bytes `play_briefing_audio` already
+//! decodes, so clips ride the briefing/speech cache unchanged.
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+
+use anyhow::{Context as _, anyhow, bail};
+use futures::FutureExt;
+use futures::future::{Either, select};
+use futures::io::AsyncReadExt;
+
+/// Voice files resolve out of the pinned piper-voices dataset revision.
+const VOICES_BASE_URL: &str = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0";
+/// Voice models run 20–100 MB — far past the gateway request timeout.
+const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// One pickable Piper voice. `id` is the dataset's file stem; the label is
+/// a product name and stays untranslated.
+pub(super) struct PiperVoice {
+    pub id: &'static str,
+    pub label: &'static str,
+}
+
+/// A short curated set of the dataset's English voices. A hand-edited
+/// `voice_briefing_piper_voice` still resolves — the model URL derives from
+/// any well-formed voice id.
+pub(super) const PIPER_VOICES: &[PiperVoice] = &[
+    PiperVoice {
+        id: "en_US-lessac-medium",
+        label: "Lessac (US English)",
+    },
+    PiperVoice {
+        id: "en_US-amy-medium",
+        label: "Amy (US English)",
+    },
+    PiperVoice {
+        id: "en_US-arctic-medium",
+        label: "Arctic (US English)",
+    },
+    PiperVoice {
+        id: "en_US-hfc_female-medium",
+        label: "HFC Female (US English)",
+    },
+    PiperVoice {
+        id: "en_US-hfc_male-medium",
+        label: "HFC Male (US English)",
+    },
+    PiperVoice {
+        id: "en_US-joe-medium",
+        label: "Joe (US English)",
+    },
+    PiperVoice {
+        id: "en_US-libritts_r-medium",
+        label: "LibriTTS R (US English)",
+    },
+    PiperVoice {
+        id: "en_GB-alan-medium",
+        label: "Alan (British English)",
+    },
+    PiperVoice {
+        id: "en_GB-semaine-medium",
+        label: "Semaine (British English)",
+    },
+    PiperVoice {
+        id: "en_GB-northern_english_male-medium",
+        label: "Northern English Male (British English)",
+    },
+];
+
+/// What the voice picker shows for the stored id — the catalog label, or
+/// the raw id when it names a voice the catalog doesn't list.
+pub(super) fn piper_voice_label(voice: &str) -> String {
+    PIPER_VOICES
+        .iter()
+        .find(|entry| entry.id == voice)
+        .map(|entry| entry.label.to_owned())
+        .unwrap_or_else(|| voice.to_owned())
+}
+
+/// The loaded engine for the current voice, kept between calls so a speak
+/// chain doesn't pay the ONNX load per fragment.
+static PIPER_ENGINE: OnceLock<Mutex<Option<(String, piper_rs::Piper)>>> = OnceLock::new();
+
+/// The dataset's relative path for a voice id: `en_US-lessac-medium` lives
+/// at `en/en_US/lessac/medium/en_US-lessac-medium`. Voice ids are always
+/// `<locale>-<name>-<quality>` where the name itself may carry underscores.
+fn voice_dataset_path(voice: &str) -> anyhow::Result<String> {
+    let (locale, rest) = voice
+        .split_once('-')
+        .ok_or_else(|| anyhow!("piper voice id `{voice}` is not <locale>-<name>-<quality>"))?;
+    let (name, quality) = rest
+        .rsplit_once('-')
+        .ok_or_else(|| anyhow!("piper voice id `{voice}` is not <locale>-<name>-<quality>"))?;
+    let language = locale
+        .split('_')
+        .next()
+        .filter(|language| !language.is_empty())
+        .ok_or_else(|| anyhow!("piper voice id `{voice}` has no language"))?;
+    Ok(format!("{language}/{locale}/{name}/{quality}/{voice}"))
+}
+
+/// The model and config files for `voice`, downloading both from the
+/// dataset on first use. A half-download never leaves a live file — each
+/// side lands through a temp rename.
+async fn ensure_voice(
+    http: &Arc<dyn gpui::http_client::HttpClient>,
+    executor: &gpui::BackgroundExecutor,
+    voice: &str,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let dir = waku_client::persistence::piper_voices_directory();
+    let stem = voice_dataset_path(voice)?;
+    let model_path = dir.join(format!("{voice}.onnx"));
+    let config_path = dir.join(format!("{voice}.onnx.json"));
+    if model_path.is_file() && config_path.is_file() {
+        return Ok((model_path, config_path));
+    }
+    std::fs::create_dir_all(&dir).context("creating the voices directory")?;
+    for (suffix, target) in [
+        (".onnx", model_path.clone()),
+        (".onnx.json", config_path.clone()),
+    ] {
+        if target.is_file() {
+            continue;
+        }
+        let bytes = fetch(
+            http,
+            executor,
+            &format!("{VOICES_BASE_URL}/{stem}{suffix}"),
+        )
+        .await
+        .with_context(|| format!("downloading piper voice {voice}"))?;
+        let staged = target.with_extension("part");
+        std::fs::File::create(&staged)
+            .and_then(|mut file| file.write_all(&bytes))
+            .and_then(|_| std::fs::rename(&staged, &target))
+            .with_context(|| format!("writing {}", target.display()))?;
+    }
+    Ok((model_path, config_path))
+}
+
+/// GET a URL's bytes with a timeout — the sibling `post` helper is JSON-only.
+async fn fetch(
+    http: &Arc<dyn gpui::http_client::HttpClient>,
+    executor: &gpui::BackgroundExecutor,
+    url: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let request = gpui::http_client::Request::get(url)
+        .body(gpui::http_client::AsyncBody::empty())?;
+    let exchange = async {
+        let mut response = http.send(request).await?;
+        let status = response.status();
+        let mut bytes = Vec::new();
+        response.body_mut().read_to_end(&mut bytes).await?;
+        anyhow::Ok((status, bytes))
+    };
+    futures::pin_mut!(exchange);
+    let (status, bytes) = match select(exchange, executor.timer(DOWNLOAD_TIMEOUT).fuse()).await {
+        Either::Left((result, _)) => result?,
+        Either::Right(_) => bail!("the voice download timed out"),
+    };
+    if !status.is_success() {
+        bail!("the voice download answered HTTP {status} for {url}");
+    }
+    Ok(bytes)
+}
+
+/// espeak-rs locates `espeak-ng-data` under PIPER_ESPEAKNG_DATA_DIRECTORY,
+/// the working directory, or the executable's directory. The bundler ships
+/// the tables beside the executable and the build script drops them beside
+/// the target binary, but other launch shapes — a `cargo test` binary under
+/// `deps/`, a nested lane — still need the env var. Point it at the first
+/// ancestor of the executable that carries the data.
+fn ensure_espeak_data() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
+            return;
+        }
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        let mut dir = exe.parent();
+        let found = std::iter::from_fn(|| {
+            let current = dir?;
+            dir = current.parent();
+            Some(current)
+        })
+        .take(4)
+        .find(|dir| dir.join("espeak-ng-data").is_dir());
+        if let Some(dir) = found {
+            // SAFETY: runs once before the first espeak call, and nothing
+            // else in the process mutates the environment.
+            unsafe { std::env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", dir) };
+        }
+    });
+}
+
+/// Synthesize `text` with `voice` into WAV bytes. Blocking CPU work — the
+/// caller's pipeline already runs on the background executor.
+pub(super) async fn synthesize_piper(
+    http: &Arc<dyn gpui::http_client::HttpClient>,
+    executor: &gpui::BackgroundExecutor,
+    voice: &str,
+    text: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let voice = voice.trim();
+    if voice.is_empty() {
+        bail!("no Piper voice selected");
+    }
+    let (model_path, config_path) = ensure_voice(http, executor, voice).await?;
+    ensure_espeak_data();
+    let engine = PIPER_ENGINE.get_or_init(|| Mutex::new(None));
+    let mut guard = engine
+        .lock()
+        .map_err(|_| anyhow!("the piper engine lock is poisoned"))?;
+    if !matches!(guard.as_ref(), Some((loaded, _)) if loaded == voice) {
+        let piper = piper_rs::Piper::new(&model_path, &config_path)
+            .map_err(|error| anyhow!("loading piper voice {voice}: {error}"))?;
+        *guard = Some((voice.to_owned(), piper));
+    }
+    let piper = &mut guard.as_mut().expect("just loaded").1;
+    let (samples, sample_rate) = piper
+        .create(text, false, None, None, None, None)
+        .map_err(|error| anyhow!("piper synthesis failed: {error}"))?;
+    drop(guard);
+    if samples.is_empty() {
+        bail!("piper returned no audio");
+    }
+    Ok(wav_bytes(&samples, sample_rate))
+}
+
+/// 16-bit mono PCM WAV — the container AVAudioPlayer decodes on every
+/// platform the voice feature runs on.
+fn wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    let mut push = |bytes: &[u8]| out.extend_from_slice(bytes);
+    push(b"RIFF");
+    push(&(36 + data_len).to_le_bytes());
+    push(b"WAVE");
+    push(b"fmt ");
+    push(&16u32.to_le_bytes());
+    push(&1u16.to_le_bytes());
+    push(&1u16.to_le_bytes());
+    push(&sample_rate.to_le_bytes());
+    push(&(sample_rate * 2).to_le_bytes());
+    push(&2u16.to_le_bytes());
+    push(&16u16.to_le_bytes());
+    push(b"data");
+    push(&data_len.to_le_bytes());
+    for &sample in samples {
+        let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_dataset_path_derives_the_dataset_layout() {
+        assert_eq!(
+            voice_dataset_path("en_US-lessac-medium").unwrap(),
+            "en/en_US/lessac/medium/en_US-lessac-medium"
+        );
+        assert_eq!(
+            voice_dataset_path("en_GB-northern_english_male-medium").unwrap(),
+            "en/en_GB/northern_english_male/medium/en_GB-northern_english_male-medium"
+        );
+        assert!(voice_dataset_path("lessac").is_err());
+    }
+
+    #[test]
+    fn wav_bytes_writes_a_decodable_header() {
+        let wav = wav_bytes(&[0.0, 0.5, -0.5, 1.0, -1.0], 22050);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(wav.len(), 44 + 5 * 2);
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
+    }
+}

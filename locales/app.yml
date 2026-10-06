@@ -934,7 +934,7 @@ experiments.voice_briefing_title:
 experiments.voice_briefing_description:
   en: Landing on a task whose latest reply is long speaks a ~45-second summary aloud — what the agent did, then any decision or action it needs from you. Runs on your configured inference provider with the models below.
 experiments.voice_briefing_caption:
-  en: Both calls go through the selected inference provider — the summary model writes the transcript, the voice model speaks it. Credentials live under Inference providers on the Providers page.
+  en: The summary model writes the transcript and the voice model speaks it — both go through the selected inference provider unless the voice model is Piper, which runs offline. Credentials live under Inference providers on the Providers page.
 experiments.voice_briefing_provider:
   en: Provider
 experiments.voice_briefing_needs_key:
@@ -949,6 +949,10 @@ experiments.voice_briefing_custom_model_placeholder:
   en: provider/model — e.g. openai/tts-1
 experiments.voice_briefing_tts:
   en: Voice model
+experiments.voice_briefing_piper_voice:
+  en: Piper voice
+experiments.voice_briefing_piper_caption:
+  en: Piper runs offline — the voice model downloads once on first use, and Boss speech needs no credential at all.
 experiments.voice_briefing_instructions:
   en: Summary instructions
 experiments.voice_briefing_instructions_placeholder:

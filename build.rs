@@ -8,6 +8,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     export_sparkle_public_key();
     export_commit_sha();
+    stage_espeak_data();
 
     #[cfg(target_os = "windows")]
     {
@@ -94,6 +95,60 @@ fn export_commit_sha() {
         "cargo:rerun-if-changed={}",
         common.join(reference).display()
     );
+}
+
+/// espeak-ng's compiled phoneme tables — built by espeak-rs-sys (via
+/// piper-rs) into its own OUT_DIR — must sit beside the executable at
+/// runtime for libespeak-ng to find them (PIPER_ESPEAKNG_DATA_DIRECTORY
+/// resolves to a directory containing `espeak-ng-data`). Copy the installed
+/// copy up next to the profile's binaries so a bare `cargo run` works and
+/// `scripts/bundle.sh` has one stable source to ship inside the app.
+fn stage_espeak_data() {
+    // OUT_DIR is <target>/<profile>/build/waku-<hash>/out.
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let Some(build_dir) = out_dir.parent().and_then(|dir| dir.parent()) else {
+        return;
+    };
+    let Some(profile_dir) = build_dir.parent() else {
+        return;
+    };
+    let destination = profile_dir.join("espeak-ng-data");
+    if destination.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(build_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("espeak-rs-sys-") {
+            continue;
+        }
+        let source = entry.path().join("out/share/espeak-ng-data");
+        if !source.is_dir() {
+            continue;
+        }
+        // Recursive copy: the tree is ~9 MB of small files, once per build.
+        copy_dir(&source, &destination);
+        return;
+    }
+}
+
+fn copy_dir(source: &std::path::Path, destination: &std::path::Path) {
+    if std::fs::create_dir_all(destination).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(source) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let target = destination.join(entry.file_name());
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            copy_dir(&entry.path(), &target);
+        } else if !target.exists() {
+            let _ = std::fs::copy(entry.path(), &target);
+        }
+    }
 }
 
 /// `git <arguments>` trimmed to a single line, `None` when git is missing or

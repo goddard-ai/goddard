@@ -180,6 +180,12 @@ fi
 rm -rf "$bundle"
 mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/goddard-computer-use" "$contents/Helpers"
 cp "$cargo_target_dir/$profile/goddard" "$contents/MacOS/$app_name"
+# espeak-ng's phoneme tables ship beside the executable — piper-rs voices
+# text through libespeak-ng, which finds `espeak-ng-data` next to the binary.
+# The app's build script stages the compiled tables into the profile dir.
+if [ -d "$cargo_target_dir/$profile/espeak-ng-data" ]; then
+  cp -R "$cargo_target_dir/$profile/espeak-ng-data" "$contents/MacOS/espeak-ng-data"
+fi
 cp "$cargo_target_dir/$profile/goddard_js_repl" "$repl_executable"
 chmod 755 "$repl_executable"
 cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"

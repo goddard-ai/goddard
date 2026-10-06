@@ -371,11 +371,15 @@ pub enum VoiceBriefingTtsModel {
     FishAudioS1,
     FishAudioS2Pro,
     FishAudioS21ProFree,
+    /// piper-rs: a local ONNX voice model, synthesized offline — the gateway
+    /// still writes the transcript, but no speech call or voice leaves the
+    /// machine.
+    Piper,
     Custom,
 }
 
 impl VoiceBriefingTtsModel {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Flash,
         Self::FlashLite,
         Self::OpenAi,
@@ -385,6 +389,7 @@ impl VoiceBriefingTtsModel {
         Self::FishAudioS1,
         Self::FishAudioS2Pro,
         Self::FishAudioS21ProFree,
+        Self::Piper,
         Self::Custom,
     ];
 
@@ -401,7 +406,7 @@ impl VoiceBriefingTtsModel {
             Self::FishAudioS1 => Some("fish-audio/s1"),
             Self::FishAudioS2Pro => Some("fish-audio/s2-pro"),
             Self::FishAudioS21ProFree => Some("fish-audio/s2.1-pro-free"),
-            Self::Custom => None,
+            Self::Piper | Self::Custom => None,
         }
     }
 
@@ -427,13 +432,13 @@ impl VoiceBriefingTtsModel {
     }
 
     /// The selector rows for one provider — everything it serves, plus the
-    /// custom-model entry.
+    /// local and custom entries, which carry no provider slug.
     pub fn for_provider(
         provider: waku_protocol::inference::InferenceProvider,
     ) -> impl Iterator<Item = Self> {
-        Self::ALL
-            .into_iter()
-            .filter(move |model| model.is_custom() || model.model_id_for(provider).is_some())
+        Self::ALL.into_iter().filter(move |model| {
+            model.is_custom() || model.is_piper() || model.model_id_for(provider).is_some()
+        })
     }
 
     /// Model names are product names and stay untranslated.
@@ -448,12 +453,17 @@ impl VoiceBriefingTtsModel {
             Self::FishAudioS1 => "Fish Audio S1",
             Self::FishAudioS2Pro => "Fish Audio S2 Pro",
             Self::FishAudioS21ProFree => "Fish Audio S2.1 Pro Free",
+            Self::Piper => "Piper (local)",
             Self::Custom => "Custom model",
         }
     }
 
     pub fn is_custom(self) -> bool {
         matches!(self, Self::Custom)
+    }
+
+    pub fn is_piper(self) -> bool {
+        matches!(self, Self::Piper)
     }
 }
 
@@ -465,6 +475,12 @@ fn default_notification_enabled() -> bool {
 /// ~45-second summary; the settings field accepts any chat slug.
 pub fn default_voice_briefing_summary_model() -> String {
     "google/gemini-3-flash".to_owned()
+}
+
+/// The default Piper voice — an id from the rhasspy/piper-voices dataset,
+/// downloaded on demand. Lessac is Piper's reference voice.
+pub fn default_voice_briefing_piper_voice() -> String {
+    "en_US-lessac-medium".to_owned()
 }
 
 /// Briefings default to the Vercel AI Gateway — the provider the feature
@@ -1391,6 +1407,11 @@ pub struct AppSettings {
     /// Gateway model ID used when the TTS selector is set to Custom.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    /// Piper voice id used when the TTS selector is set to Piper — a
+    /// `rhasspy/piper-voices` model name like `en_US-lessac-medium`,
+    /// downloaded into the voices directory on first use.
+    #[serde(default = "default_voice_briefing_piper_voice")]
+    pub voice_briefing_piper_voice: String,
     /// Full system instructions used by the transcript writer.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_summary_instructions: String,
@@ -1493,6 +1514,7 @@ impl Default for AppSettings {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_piper_voice: default_voice_briefing_piper_voice(),
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
@@ -2050,6 +2072,9 @@ pub struct PersistedState {
     pub voice_briefing_tts_model: VoiceBriefingTtsModel,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    /// Piper voice id for the local engine — see the AppSettings twin.
+    #[serde(default = "default_voice_briefing_piper_voice")]
+    pub voice_briefing_piper_voice: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_summary_instructions: String,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -2453,6 +2478,7 @@ impl PersistedState {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_piper_voice: default_voice_briefing_piper_voice(),
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
@@ -2894,6 +2920,7 @@ impl PersistedState {
             voice_briefing_summary_custom: self.voice_briefing_summary_custom,
             voice_briefing_tts_model: self.voice_briefing_tts_model,
             voice_briefing_tts_custom_model: self.voice_briefing_tts_custom_model.clone(),
+            voice_briefing_piper_voice: self.voice_briefing_piper_voice.clone(),
             voice_briefing_summary_instructions: self.voice_briefing_summary_instructions.clone(),
             voice_briefing_summary_instructions_full_prompt: self
                 .voice_briefing_summary_instructions_full_prompt,
@@ -3050,6 +3077,7 @@ impl PersistedState {
         self.voice_briefing_summary_custom = settings.voice_briefing_summary_custom;
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
         self.voice_briefing_tts_custom_model = settings.voice_briefing_tts_custom_model;
+        self.voice_briefing_piper_voice = settings.voice_briefing_piper_voice;
         self.voice_briefing_summary_instructions = settings.voice_briefing_summary_instructions;
         self.voice_briefing_summary_instructions_full_prompt =
             settings.voice_briefing_summary_instructions_full_prompt;
@@ -3313,6 +3341,17 @@ pub fn speech_clips_directory() -> PathBuf {
         StateStore::default_path().with_file_name("speech")
     } else {
         configuration_directory().join("speech")
+    }
+}
+
+/// Downloaded Piper voice models: `<id>.onnx` plus its `<id>.onnx.json`
+/// config, fetched on demand from the rhasspy/piper-voices dataset when the
+/// local voice engine is selected.
+pub fn piper_voices_directory() -> PathBuf {
+    if uses_development_data_dir() {
+        StateStore::default_path().with_file_name("voices")
+    } else {
+        configuration_directory().join("voices")
     }
 }
 

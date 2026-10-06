@@ -21,6 +21,7 @@ use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::inference::InferenceProvider;
 
+use super::piper::synthesize_piper;
 use super::voice_briefing::{speech_parameters, synthesize};
 use super::*;
 
@@ -230,6 +231,20 @@ fn picked_clip<'a>(
     candidates.iter().find(|clip| &clip.text == choice)
 }
 
+/// Where a fragment's audio comes from: the briefing provider's speech
+/// endpoint with its stored credential, or a local Piper voice model that
+/// needs neither.
+enum SpeechEngine {
+    Gateway {
+        provider: InferenceProvider,
+        credential: String,
+        model_id: String,
+    },
+    Piper {
+        voice: String,
+    },
+}
+
 /// Resolve each fragment to audio bytes in order: exact clip hit, Jev-picked
 /// clip, or a fresh synthesis appended to the library. A failed synthesis
 /// fails the utterance — a sentence missing its middle is worse than none.
@@ -238,9 +253,7 @@ async fn resolve_speech_clips(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
     eval_ready: bool,
-    provider: InferenceProvider,
-    credential: &str,
-    model_id: &str,
+    engine: &SpeechEngine,
     parts: &[String],
 ) -> anyhow::Result<Vec<Vec<u8>>> {
     let dir = waku_client::persistence::speech_clips_directory();
@@ -324,15 +337,28 @@ async fn resolve_speech_clips(
     }
 
     // Whatever stayed unresolved is generated once and banked for reuse.
-    let extension = match provider {
-        InferenceProvider::OpenRouter => "mp3",
-        _ => speech_parameters(model_id).1,
+    let extension = match engine {
+        SpeechEngine::Gateway {
+            provider: InferenceProvider::OpenRouter,
+            ..
+        } => "mp3",
+        SpeechEngine::Gateway { model_id, .. } => speech_parameters(model_id).1,
+        SpeechEngine::Piper { .. } => "wav",
     };
     for (index, part) in parts.iter().enumerate() {
         if resolved[index].is_some() {
             continue;
         }
-        let bytes = synthesize(http, executor, provider, credential, model_id, part).await?;
+        let bytes = match engine {
+            SpeechEngine::Gateway {
+                provider,
+                credential,
+                model_id,
+            } => synthesize(http, executor, *provider, credential, model_id, part).await?,
+            SpeechEngine::Piper { voice } => {
+                synthesize_piper(http, executor, voice, part).await?
+            }
+        };
         let id = Uuid::new_v4();
         let clip = SpeechClip {
             id,
@@ -461,12 +487,14 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let provider = self.state.voice_briefing_provider;
+        let tts_model = self.state.voice_briefing_tts_model;
         let Some(daemon) = self.daemons.supervisor(key) else {
             return;
         };
         // Credentials live on the daemon the speak came from — a remote
         // boss's request resolves against its host's store, not this app's
-        // mirror of the local document.
+        // mirror of the local document. Piper voices entirely offline, so
+        // only the gateway engine needs a credential at all.
         let (credential_configured, eval_ready) = {
             let settings = daemon.settings();
             (
@@ -480,7 +508,7 @@ impl Waku {
                     .is_some_and(|eval| eval.ready(&settings.inference)),
             )
         };
-        if !credential_configured {
+        if !tts_model.is_piper() && !credential_configured {
             return;
         }
         // Ambient detection runs only once macOS has granted the mic; the
@@ -498,7 +526,6 @@ impl Waku {
         self.last_speech_request = Some(request_id);
         self.last_speech_clips.clear();
         cx.notify();
-        let tts_model = self.state.voice_briefing_tts_model;
         let model_id = match tts_model {
             VoiceBriefingTtsModel::Custom => {
                 self.state.voice_briefing_tts_custom_model.trim().to_owned()
@@ -508,40 +535,43 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
         let http = cx.http_client();
         let client = daemon.client();
         let executor = cx.background_executor().clone();
         let work = executor.spawn({
             let executor = executor.clone();
             async move {
-                let credential = client
-                    .request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::GetInferenceCredential { provider },
-                    )
-                    .ok()
-                    .and_then(|payload| match payload {
-                        waku_client::ResponsePayload::InferenceCredential { credential } => {
-                            credential
-                        }
-                        _ => None,
-                    })
-                    .filter(|key| !key.trim().is_empty())
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("{} has no configured credential", provider.display_name())
-                    })?;
-                resolve_speech_clips(
-                    &client,
-                    &http,
-                    &executor,
-                    eval_ready,
-                    provider,
-                    &credential,
-                    &model_id,
-                    &parts,
-                )
-                .await
+                let engine = if tts_model.is_piper() {
+                    SpeechEngine::Piper { voice: piper_voice }
+                } else {
+                    let credential = client
+                        .request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::GetInferenceCredential { provider },
+                        )
+                        .ok()
+                        .and_then(|payload| match payload {
+                            waku_client::ResponsePayload::InferenceCredential {
+                                credential,
+                            } => credential,
+                            _ => None,
+                        })
+                        .filter(|key| !key.trim().is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "{} has no configured credential",
+                                provider.display_name()
+                            )
+                        })?;
+                    SpeechEngine::Gateway {
+                        provider,
+                        credential,
+                        model_id,
+                    }
+                };
+                resolve_speech_clips(&client, &http, &executor, eval_ready, &engine, &parts).await
             }
         });
         cx.spawn(async move |this, cx| {

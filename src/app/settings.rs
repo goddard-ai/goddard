@@ -7573,6 +7573,35 @@ impl Waku {
             },
         );
 
+        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
+        let piper_handle = self.menu_handle("voice-briefing-piper-voice".to_owned(), cx);
+        let piper_weak = cx.entity().downgrade();
+        let piper_selector = dropdown_menu(
+            MenuChip::new("voice-briefing-piper-voice")
+                .label(super::piper::piper_voice_label(&piper_voice))
+                .outlined()
+                .selected(piper_handle.is_open())
+                .w(px(280.0))
+                .justify_between(),
+            "voice-briefing-piper-voice-menu",
+            &piper_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                super::piper::PIPER_VOICES
+                    .iter()
+                    .map(|option| {
+                        let weak = piper_weak.clone();
+                        MenuItem::new(option.label, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_briefing_piper_voice(option.id, cx)
+                            });
+                        })
+                        .selected(option.id == piper_voice)
+                    })
+                    .collect()
+            },
+        );
+
         let default_instructions =
             super::voice_briefing::default_voice_briefing_summary_instructions();
         let instructions_customized = self
@@ -7708,6 +7737,19 @@ impl Waku {
                     .into_any_element(),
                 ))
             })
+            .when(tts.is_piper(), |card| {
+                card.child(row(
+                    tr!("experiments.voice_briefing_piper_voice"),
+                    piper_selector.into_any_element(),
+                ))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("experiments.voice_briefing_piper_caption")),
+                )
+            })
             .child(text_area_row(
                 tr!("experiments.voice_briefing_instructions"),
                 instructions_control.into_any_element(),
@@ -7801,11 +7843,12 @@ impl Waku {
         }
         self.state.voice_briefing_provider = provider;
         // A TTS pick the new provider cannot serve falls back to its first
-        // served model — the picker's own list does the same filtering.
+        // served model — the picker's own list does the same filtering, and
+        // the local and custom entries ride every provider.
         let tts = self.state.voice_briefing_tts_model;
-        if !tts.is_custom() && tts.model_id_for(provider).is_none() {
+        if !tts.is_custom() && !tts.is_piper() && tts.model_id_for(provider).is_none() {
             self.state.voice_briefing_tts_model = VoiceBriefingTtsModel::for_provider(provider)
-                .find(|model| !model.is_custom())
+                .find(|model| !model.is_custom() && !model.is_piper())
                 .unwrap_or_default();
         }
         self.save();
@@ -7847,6 +7890,15 @@ impl Waku {
             return;
         }
         self.state.voice_briefing_tts_model = model;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_piper_voice(&mut self, voice: &str, cx: &mut Context<Self>) {
+        if self.state.voice_briefing_piper_voice.trim() == voice {
+            return;
+        }
+        self.state.voice_briefing_piper_voice = voice.to_owned();
         self.save();
         cx.notify();
     }

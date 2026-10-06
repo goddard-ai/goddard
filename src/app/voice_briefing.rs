@@ -24,6 +24,7 @@ use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion};
 use waku_protocol::inference::InferenceProvider;
 
+use super::piper::synthesize_piper;
 use super::status_markers::tail_chars;
 use super::*;
 use crate::ui::ActivationExt;
@@ -630,6 +631,7 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let piper_voice = self.state.voice_briefing_piper_voice.trim().to_owned();
         let http = cx.http_client();
         let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
@@ -666,9 +668,17 @@ impl Waku {
                 )
                 .await
                 .context("summary generation")?;
-                synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
-                    .await
-                    .context("speech generation")
+                // The gateway still wrote the transcript; only the voicing
+                // switches to the local engine when Piper is selected.
+                if tts_model.is_piper() {
+                    synthesize_piper(&http, &executor, &piper_voice, &transcript)
+                        .await
+                        .context("speech generation")
+                } else {
+                    synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
+                        .await
+                        .context("speech generation")
+                }
             }
         });
         cx.spawn(async move |this, cx| {
