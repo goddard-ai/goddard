@@ -1,1 +1,1 @@
-- Summoned employees no longer collide on the same few human names — the name pool is much larger and draws rotate through it in order, so suffixes like "Selma A." are rare and released names return to the rotation after retirement.
+- Summoned employees draw randomly from the curated name pool instead of following alphabetical order, while keeping names unique on the live roster and reusing retired names.

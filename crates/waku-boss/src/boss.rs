@@ -3121,9 +3121,7 @@ pub fn normalize_plan_file(raw: &str) -> anyhow::Result<String> {
     Ok(format!("plans/{rest}"))
 }
 
-/// First names employees draw from, in rotation order. The durable cursor
-/// `BossState::name_cursor` walks this pool, so the daemon exhausts it before
-/// a name repeats and a restart cannot reset the draw.
+/// Curated first names employees draw randomly from, excluding held names.
 const EMPLOYEE_NAMES: &[&str] = &[
     "Alden",
     "Ansel",
@@ -3536,30 +3534,33 @@ fn surname_suffix(mut value: usize) -> String {
     suffix
 }
 
-/// Draw the next employee name in rotation. `existing_names` is the live
-/// roster — retirement keeps no claim, so a retired employee's name rejoins
-/// the pool on its own. The draw scans forward from the durable `cursor`
-/// for the first pool name nobody holds and leaves the cursor past it, so
-/// names skipped while held re-enter rotation when they free up. Only with
-/// the whole pool held does the drawn name take a surname-initial suffix;
-/// the starting initial rotates per name instead of always landing on "A.".
+/// Draw from a shuffled pool, skipping names held by the live roster. Retired
+/// names become available again; only a fully held pool requires a suffix.
+/// The durable cursor also separates draws prepared before roster insertion.
 fn employee_human_name<'a>(
     existing_names: impl IntoIterator<Item = &'a str>,
     cursor: &mut u64,
 ) -> String {
+    static SHUFFLED_NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    let names = SHUFFLED_NAMES.get_or_init(|| {
+        let mut names = EMPLOYEE_NAMES.to_vec();
+        // UUID v4 supplies random sort keys without another RNG dependency.
+        names.sort_by_cached_key(|_| Uuid::new_v4());
+        names
+    });
     let existing_names = existing_names
         .into_iter()
         .collect::<std::collections::HashSet<_>>();
-    let len = EMPLOYEE_NAMES.len() as u64;
+    let len = names.len() as u64;
     for step in 0..len {
         let index = ((*cursor % len) + step) % len;
-        if !existing_names.contains(EMPLOYEE_NAMES[index as usize]) {
+        if !existing_names.contains(names[index as usize]) {
             *cursor = (*cursor).saturating_add(step + 1);
-            return EMPLOYEE_NAMES[index as usize].into();
+            return names[index as usize].into();
         }
     }
 
-    let base = EMPLOYEE_NAMES[(*cursor % len) as usize];
+    let base = names[(*cursor % len) as usize];
     *cursor = (*cursor).saturating_add(1);
     let start = base
         .bytes()
@@ -3818,9 +3819,7 @@ fn fresh_state() -> BossState {
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
         next_event_id: 0,
-        // A random start keeps the first summon from being the same name on
-        // every fresh install; the rotation order itself is fixed.
-        name_cursor: (id.as_u128() % EMPLOYEE_NAMES.len() as u128) as u64,
+        name_cursor: 0,
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
@@ -3884,80 +3883,41 @@ mod tests {
     }
 
     #[test]
-    fn employee_names_draw_in_rotation_and_wrap_the_pool() {
+    fn employee_names_are_distinct_until_the_pool_is_held() {
         let mut cursor = 0;
-        let drawn: Vec<String> = (0..EMPLOYEE_NAMES.len())
-            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
-            .collect();
-        assert_eq!(
-            drawn,
-            EMPLOYEE_NAMES
-                .iter()
-                .map(|name| name.to_string())
-                .collect::<Vec<_>>(),
-            "the pool empties in order before a name repeats"
-        );
-        assert_eq!(
-            employee_human_name(std::iter::empty(), &mut cursor),
-            EMPLOYEE_NAMES[0]
-        );
+        let mut held = Vec::new();
+        for _ in EMPLOYEE_NAMES {
+            let name = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+            assert!(EMPLOYEE_NAMES.contains(&name.as_str()));
+            assert!(!held.contains(&name));
+            held.push(name);
+        }
+        let suffixed = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+        assert!(!held.contains(&suffixed));
+        assert!(suffixed.ends_with('.'));
     }
 
     #[test]
-    fn employee_name_rotation_skips_held_names_and_revisits_them() {
+    fn employee_names_reuse_the_only_free_name_and_skip_held_suffixes() {
         let mut cursor = 0;
+        let free = EMPLOYEE_NAMES[0];
         assert_eq!(
-            employee_human_name([EMPLOYEE_NAMES[0]], &mut cursor),
-            EMPLOYEE_NAMES[1],
-            "a held name yields the next free name, not a suffix"
+            employee_human_name(EMPLOYEE_NAMES.iter().copied().skip(1), &mut cursor),
+            free
         );
-        let drawn: Vec<String> = (0..EMPLOYEE_NAMES.len() - 1)
-            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
-            .collect();
-        assert_eq!(drawn.last().unwrap(), EMPLOYEE_NAMES[0]);
+        let mut held: Vec<String> = EMPLOYEE_NAMES.iter().map(|name| name.to_string()).collect();
+        for base in EMPLOYEE_NAMES {
+            for initial in 'A'..='Z' {
+                held.push(format!("{base} {initial}."));
+            }
+        }
+        let name = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+        assert!(!held.contains(&name));
+        assert!(name.ends_with(" AA."));
     }
 
     #[test]
-    fn employee_name_suffixes_vary_and_advance_their_initial() {
-        // Only a fully held pool forces a suffix.
-        let held: Vec<String> = EMPLOYEE_NAMES.iter().map(|name| name.to_string()).collect();
-        let mut cursor = 0;
-        let first = employee_human_name(held.iter().map(String::as_str), &mut cursor);
-        let base = EMPLOYEE_NAMES[0];
-        let initial = first
-            .strip_prefix(&format!("{base} "))
-            .and_then(|rest| rest.strip_suffix('.'))
-            .expect("a held pool yields a surname-initial suffix");
-        assert_eq!(initial.chars().count(), 1);
-
-        // The next collision on the same name advances the alphabet.
-        let mut held: Vec<String> = held;
-        held.push(first.clone());
-        let mut cursor = 0;
-        let second = employee_human_name(held.iter().map(String::as_str), &mut cursor);
-        let next = (b'A' + (initial.chars().next().unwrap() as u8 - b'A' + 1) % 26) as char;
-        assert_eq!(second, format!("{base} {next}."));
-
-        // Starting initials vary across names rather than all landing on "A.".
-        let initials: std::collections::HashSet<char> = (0..26)
-            .map(|index| {
-                let held: Vec<String> =
-                    EMPLOYEE_NAMES.iter().map(|name| name.to_string()).collect();
-                let mut cursor = index as u64;
-                employee_human_name(held.iter().map(String::as_str), &mut cursor)
-                    .chars()
-                    .nth_back(1)
-                    .unwrap()
-            })
-            .collect();
-        assert!(
-            initials.len() > 1,
-            "suffixes should not all start at the same initial"
-        );
-    }
-
-    #[test]
-    fn employee_name_rotation_survives_a_restart() {
+    fn employee_summon_batch_names_are_distinct_across_a_restart() {
         let root = std::env::temp_dir().join(format!("boss-name-rotation-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
@@ -3978,6 +3938,7 @@ mod tests {
                 None,
             )
             .unwrap();
+        service.add_employee(first.clone()).unwrap();
         drop(service);
 
         let reopened = BossService::open(root.clone()).unwrap();
@@ -3991,15 +3952,33 @@ mod tests {
                 None,
             )
             .unwrap();
-        let first_index = EMPLOYEE_NAMES
+        assert_ne!(first.identity.name, second.identity.name);
+        reopened.add_employee(second).unwrap();
+        let mut batch = Vec::new();
+        for index in 0..32 {
+            let employee = reopened
+                .prepare_employee(
+                    boss,
+                    persona,
+                    format!("Job {index}"),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .unwrap();
+            batch.push(employee);
+        }
+        for employee in batch {
+            reopened.add_employee(employee).unwrap();
+        }
+        let state = reopened.document();
+        let names: std::collections::HashSet<_> = state
+            .employees
             .iter()
-            .position(|name| *name == first.identity.name)
-            .expect("a plain draw comes from the pool");
-        assert_eq!(
-            second.identity.name,
-            EMPLOYEE_NAMES[(first_index + 1) % EMPLOYEE_NAMES.len()],
-            "the draw resumes where the rotation left off"
-        );
+            .map(|employee| employee.identity.name.as_str())
+            .collect();
+        assert_eq!(names.len(), state.employees.len());
+        assert!(names.iter().all(|name| EMPLOYEE_NAMES.contains(name)));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -4048,11 +4027,15 @@ mod tests {
         assert_eq!(retired[0].identity.name, name);
         assert!(!service.is_employee(session_id));
         let mut cursor = service.document().name_cursor;
-        let rotation: Vec<String> = (0..EMPLOYEE_NAMES.len())
-            .map(|_| employee_human_name(std::iter::empty(), &mut cursor))
-            .collect();
-        assert!(
-            rotation.contains(&name),
+        assert_eq!(
+            employee_human_name(
+                EMPLOYEE_NAMES
+                    .iter()
+                    .copied()
+                    .filter(|candidate| *candidate != name),
+                &mut cursor,
+            ),
+            name,
             "the released name can be assigned again"
         );
 

@@ -46,9 +46,8 @@ nextSequence: number,
  */
 nextEventId: number,
 /**
- * Round-robin position in the employee name pool — the draw advances
- * it past every assignment so the pool empties before a name repeats
- * and a restart cannot reset the rotation.
+ * Position in the shuffled employee-name pool, retained across restarts.
+ * The pool is reshuffled when the daemon starts.
  */
 nameCursor: number,
 /**
