@@ -276,6 +276,13 @@ pub(super) struct VoiceScratchpad {
     /// `row_focuses` plus `"interim"` and `"annotation"` for the tails
     /// and the open box.
     text_fades: HashMap<String, TextFade>,
+    /// What the append point's row painted last frame — settled text
+    /// plus the interim tail. A delivery committing painted gray text
+    /// records an [`InterimCrossfade`] against it.
+    painted_row: Option<PaintedRow>,
+    /// A partial→final landing mid-crossfade — the displaced tail
+    /// dissolves in place while the divergent residual resolves.
+    interim_crossfade: Option<InterimCrossfade>,
     // The pill handles stay live for the floating controls row — the top
     // bar that hosted it is gone.
     #[allow(dead_code)]
@@ -311,6 +318,8 @@ impl VoiceScratchpad {
             row_focuses: HashMap::new(),
             cleanup_morphs: Vec::new(),
             text_fades: HashMap::new(),
+            painted_row: None,
+            interim_crossfade: None,
             mute_focus: cx.focus_handle(),
             hide_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -398,10 +407,103 @@ impl VoiceScratchpad {
         });
     }
 
-    /// Whether any morph or word-fade still needs repaint ticks.
+    /// Whether any morph, crossfade, or word-fade still needs repaint
+    /// ticks.
     fn motion_live(&self) -> bool {
         !self.cleanup_morphs.is_empty()
+            || self.interim_crossfade.is_some()
             || self.text_fades.values().any(|fade| !fade.fresh.is_empty())
+    }
+
+    /// What the append point paints this frame — the open box's composed
+    /// text, else the current paragraph's text plus its interim tail
+    /// joined the way `scratchpad_paragraph_text` joins it (the live
+    /// row while no paragraph exists yet).
+    fn painted_append_row(&self) -> PaintedRow {
+        let transcript = &self.transcript;
+        if transcript.annotation_target.is_some() {
+            let mut painted = transcript.annotation_text.clone();
+            let tail = strip_interim_terminators(&transcript.annotation_interim);
+            append_word_text(&mut painted, &tail);
+            return PaintedRow {
+                key: "annotation".to_owned(),
+                settled: transcript.annotation_text.len(),
+                tail_start: painted.len() - tail.len(),
+                painted,
+                edited: false,
+            };
+        }
+        let index = transcript.paragraphs.len().saturating_sub(1);
+        let paragraph = transcript.paragraphs.last();
+        let text = paragraph.map(|paragraph| paragraph.text.as_str()).unwrap_or("");
+        let mut painted = text.to_owned();
+        let tail = strip_interim_terminators(&transcript.interim);
+        append_word_text(&mut painted, &tail);
+        PaintedRow {
+            key: format!("p{index}"),
+            settled: text.len(),
+            tail_start: painted.len() - tail.len(),
+            painted,
+            edited: paragraph.is_some_and(|paragraph| paragraph.edited),
+        }
+    }
+
+    /// The row `key` paints now — its settled text plus the interim tail
+    /// when the append point still lives there. `None` when the row is
+    /// gone: a closed box or a discarded paragraph.
+    fn painted_row_for(&self, key: &str) -> Option<PaintedRow> {
+        let painted = self.painted_append_row();
+        if painted.key == key {
+            return Some(painted);
+        }
+        let index = key.strip_prefix('p')?.parse::<usize>().ok()?;
+        let paragraph = self.transcript.paragraphs.get(index)?;
+        Some(PaintedRow {
+            key: key.to_owned(),
+            settled: paragraph.text.len(),
+            tail_start: paragraph.text.len(),
+            painted: paragraph.text.clone(),
+            edited: paragraph.edited,
+        })
+    }
+
+    /// Diff the append point's painted row against last frame's record —
+    /// a delivery that grew settled text over painted gray is a landing
+    /// and gets its crossfade. The landing can close the interim's row
+    /// behind it ("okay next" commits the paragraph while the tail moves
+    /// on), so the diff follows the record's own key rather than the
+    /// live append point. The record refreshes every frame either way,
+    /// motion or not, so a stale row can't mint a landing later.
+    fn note_painted_row(&mut self, animate: bool, now: Instant) {
+        let painted = self.painted_append_row();
+        let same_row = self
+            .painted_row
+            .as_ref()
+            .is_some_and(|prev| prev.key == painted.key);
+        let prev = self.painted_row.replace(painted);
+        if !animate {
+            return;
+        }
+        let Some(prev) = prev else {
+            return;
+        };
+        let current_row;
+        let current = if same_row {
+            self.painted_row.as_ref().expect("stored this pass")
+        } else {
+            current_row = self.painted_row_for(&prev.key);
+            match current_row.as_ref() {
+                Some(row) => row,
+                None => return,
+            }
+        };
+        landing_crossfade(
+            &mut self.text_fades,
+            &mut self.interim_crossfade,
+            prev,
+            current,
+            now,
+        );
     }
 
     /// Pause the capture side: the worker exits and closes its socket,
@@ -462,6 +564,107 @@ fn note_text_fade(
         entry.fresh.push((entry.settled, now));
     }
     entry.settled = len;
+}
+
+/// A painted append-point row's composition: settled text plus the
+/// stripped interim tail appended the way the row joins it — the shape
+/// a landing's crossfade diffs.
+struct PaintedRow {
+    /// The fade key of the row described — "p{n}" or "annotation".
+    key: String,
+    /// The settled text's byte length inside `painted`; the interim
+    /// tail (join space included) follows it.
+    settled: usize,
+    /// Where the tail's visible bytes start inside `painted`.
+    tail_start: usize,
+    /// The whole painted string.
+    painted: String,
+    /// A user edit touched this buffer — its landings stay instant.
+    edited: bool,
+}
+
+/// A partial→final landing mid-crossfade: `ghost` (the row's painted
+/// text before the delivery) dissolves in place while the divergent
+/// residual resolves beneath it — matched bytes never left the screen,
+/// so nothing blinks out and back in.
+struct InterimCrossfade {
+    /// The fade key of the row it belongs to.
+    key: String,
+    /// What the row painted before the landing — dissolves as an
+    /// overlay pinned to the row's text block.
+    ghost: String,
+    /// Byte offset in `ghost` where its gray tail began — the settled
+    /// head dissolves in ink, the tail in the interim's gray.
+    tail_start: usize,
+    started: Instant,
+}
+
+/// `current` is the row `prev` recorded, painted now. Settled growth
+/// that kept the settled prefix and had a gray tail to displace is a
+/// landing: the displaced paint dissolves while the divergent residual
+/// resolves. The residual's first byte rewrites the landing's own fresh
+/// spans — appended at `prev.settled` — so matched text resolves
+/// already visible instead of fading in from nothing. Free function so
+/// the prep pass can call it on fields while the transcript stays
+/// borrowed.
+fn landing_crossfade(
+    fades: &mut HashMap<String, TextFade>,
+    crossfade: &mut Option<InterimCrossfade>,
+    prev: PaintedRow,
+    current: &PaintedRow,
+    now: Instant,
+) {
+    if current.settled <= prev.settled
+        || current.edited
+        || prev.tail_start >= prev.painted.len()
+        || current.painted.as_bytes()[..prev.settled]
+            != prev.painted.as_bytes()[..prev.settled]
+    {
+        return;
+    }
+    // The byte the landing's paint first diverges at — everything
+    // before it was already on screen.
+    let mut residual = prev.settled
+        + prev.painted.as_bytes()[prev.settled..]
+            .iter()
+            .zip(&current.painted.as_bytes()[prev.settled..])
+            .take_while(|(a, b)| a == b)
+            .count();
+    while !current.painted.is_char_boundary(residual) {
+        residual -= 1;
+    }
+    // Spans the growth pushed are the landing's, not appends — drop
+    // them wherever the slot recorded them so the matched prefix never
+    // starts a fade.
+    if let Some(entry) = fades.get_mut(&prev.key) {
+        entry.fresh.retain(|&(start, _)| start < prev.settled);
+    }
+    // The residual resumes the resolve at its divergent byte: inside
+    // the settled text on its own slot, inside the tail on the interim
+    // slot (the box diffs its composed string, so its offsets are the
+    // painted ones throughout).
+    let (slot, local, region) = if prev.key == "annotation" {
+        ("annotation", residual, current.painted.len())
+    } else if residual < current.settled {
+        (prev.key.as_str(), residual, current.settled)
+    } else {
+        (
+            "interim",
+            residual.saturating_sub(current.tail_start),
+            current.painted.len().saturating_sub(current.tail_start),
+        )
+    };
+    if local < region
+        && let Some(entry) = fades.get_mut(slot)
+    {
+        entry.fresh.push((local, now));
+    }
+    *crossfade = Some(InterimCrossfade {
+        key: prev.key,
+        ghost: prev.painted,
+        tail_start: prev.tail_start,
+        started: now,
+    });
 }
 
 /// The fade slot a cleanup target maps to — the same key the prep pass
@@ -3647,9 +3850,9 @@ impl Waku {
                 } else {
                     tr!("voice_scratchpad.mute")
                 },
-                // "Unmute" is the wider label — the pill holds its width
-                // across the toggle.
-                Some(tr!("voice_scratchpad.unmute")),
+                // "Mute" sets the width — the narrower label keeps the
+                // pill constant across the toggle without over-widening.
+                Some(tr!("voice_scratchpad.mute")),
                 24.0,
                 true,
                 theme,
@@ -3792,6 +3995,13 @@ impl Waku {
         // settle instantly and no repaint ticks get leased.
         let animate = !cx.reduce_motion();
         scratchpad.prune_cleanup_morphs(now);
+        if scratchpad
+            .interim_crossfade
+            .as_ref()
+            .is_some_and(|crossfade| now.duration_since(crossfade.started) >= WORD_FADE)
+        {
+            scratchpad.interim_crossfade = None;
+        }
         // Every row's focus handle exists before the paint loop — it then
         // works off a shared borrow so the status row and an open
         // annotation box can render through `self` beside it. The same
@@ -3849,6 +4059,11 @@ impl Waku {
             animate,
             now,
         );
+        // A delivery that committed painted gray text: diff the append
+        // point's painted row against last frame's record — a landing
+        // crossfades its displaced tail while the matched prefix skips
+        // the word-fade.
+        scratchpad.note_painted_row(animate, now);
         let motion_live = animate && scratchpad.motion_live();
         let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div().into_any_element();
@@ -3964,6 +4179,35 @@ impl Waku {
                     &ui_family,
                 )
             });
+            // A landing's displaced tail dissolves over the row that
+            // painted it while the residual resolves beneath — the same
+            // overlay the cleanup morph rides, held in place.
+            let landing_ghost = if animate {
+                scratchpad
+                    .interim_crossfade
+                    .as_ref()
+                    .filter(|crossfade| crossfade.key == format!("p{index}"))
+                    .map(|crossfade| {
+                        let t = (now
+                            .duration_since(crossfade.started)
+                            .as_secs_f32()
+                            / WORD_FADE.as_secs_f32())
+                        .min(1.0);
+                        scratchpad_landing_ghost(
+                            &crossfade.ghost,
+                            crossfade.tail_start,
+                            1.0 - t,
+                            2.0,
+                            0.0,
+                            if show_dot { 19.0 } else { 0.0 },
+                            theme.text,
+                            theme.text_tertiary,
+                            &ui_family,
+                        )
+                    })
+            } else {
+                None
+            };
             let paragraph_focus = row_focuses[index].0.clone();
             let paragraph_div = div()
                 .id(SharedString::from(format!("vs-paragraph-{index}")))
@@ -4000,6 +4244,7 @@ impl Waku {
                         }),
                 )
                 .when_some(ghost, |row, ghost| row.child(ghost))
+                .when_some(landing_ghost, |row, ghost| row.child(ghost))
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                         && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -4427,6 +4672,32 @@ impl Waku {
                 &crate::fonts::current(cx).ui,
             )
         });
+        let landing_ghost = if !cx.reduce_motion() {
+            scratchpad
+                .interim_crossfade
+                .as_ref()
+                .filter(|crossfade| crossfade.key == "annotation")
+                .map(|crossfade| {
+                    let t = (Instant::now()
+                        .duration_since(crossfade.started)
+                        .as_secs_f32()
+                        / WORD_FADE.as_secs_f32())
+                    .min(1.0);
+                    scratchpad_landing_ghost(
+                        &crossfade.ghost,
+                        crossfade.tail_start,
+                        1.0 - t,
+                        0.0,
+                        0.0,
+                        0.0,
+                        theme.text_secondary,
+                        theme.text_secondary,
+                        &crate::fonts::current(cx).ui,
+                    )
+                })
+        } else {
+            None
+        };
         let box_content = div()
             .min_w(px(240.0))
             .max_w(px(360.0))
@@ -4463,7 +4734,8 @@ impl Waku {
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
                     )
-                    .when_some(ghost, |row, ghost| row.child(ghost)),
+                    .when_some(ghost, |row, ghost| row.child(ghost))
+                    .when_some(landing_ghost, |row, ghost| row.child(ghost)),
             );
         deferred(FloatingSurface::anchored_to_parent(
             box_content.into_any_element(),
@@ -4833,6 +5105,48 @@ fn scratchpad_morph_ghost(
                 strikethrough: None,
             }]),
         )
+}
+
+/// The dissolving half of an interim landing: the row's painted text
+/// before the delivery — the settled head in `ink`, the gray tail from
+/// `tail_start` in `tail` — at `alpha` while the residual resolves
+/// beneath it. Unlike the cleanup morph the overlay holds its place:
+/// the tail dissolves where it sat. `top`/`left`/`right` pin its wrap
+/// column to the row's text block.
+fn scratchpad_landing_ghost(
+    ghost: &str,
+    tail_start: usize,
+    alpha: f32,
+    top: f32,
+    left: f32,
+    right: f32,
+    ink: Hsla,
+    tail: Hsla,
+    ui_family: &SharedString,
+) -> Div {
+    let tail_start = tail_start.min(ghost.len());
+    let mut runs = Vec::with_capacity(2);
+    for (start, end, color) in [
+        (0, tail_start, ink),
+        (tail_start, ghost.len(), tail),
+    ] {
+        if end > start {
+            runs.push(TextRun {
+                len: end - start,
+                font: font(ui_family.clone()),
+                color: color.opacity(alpha),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+        }
+    }
+    div()
+        .absolute()
+        .top(px(top))
+        .left(px(left))
+        .right(px(right))
+        .child(gpui::StyledText::new(ghost.to_owned()).with_runs(runs))
 }
 
 /// The dot's offset centers it on the first text line — GPUI's default phi
@@ -5714,5 +6028,114 @@ mod tests {
         let mut runs = Vec::new();
         push_fade_runs(&mut runs, 0, 10, &[(5, 0.5)], 0.5, &ui_font, color);
         assert!((runs[1].color.a - 0.25).abs() < 0.01);
+    }
+
+    fn painted(key: &str, settled: usize, tail_start: usize, text: &str) -> PaintedRow {
+        PaintedRow {
+            key: key.to_owned(),
+            settled,
+            tail_start,
+            painted: text.to_owned(),
+            edited: false,
+        }
+    }
+
+    #[test]
+    fn landing_crossfades_the_displaced_tail() {
+        let t0 = Instant::now();
+        let mut fades = HashMap::new();
+        // Last frame painted "hello" settled plus a gray " wurld"; the
+        // final lands "hello world." and keeps "again" provisional.
+        let prev = painted("p0", 5, 6, "hello wurld");
+        let current = painted("p0", 12, 13, "hello world. again");
+        note_text_fade(&mut fades, "p0".to_owned(), 5, true, t0);
+        note_text_fade(&mut fades, "p0".to_owned(), 12, true, t0);
+        assert_eq!(fades["p0"].fresh, vec![(5, t0)]);
+        let mut crossfade = None;
+        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
+        let crossfade = crossfade.expect("the landing records");
+        assert_eq!(crossfade.key, "p0");
+        assert_eq!(crossfade.ghost, "hello wurld");
+        assert_eq!(crossfade.tail_start, 6);
+        // "hello w" was already on screen — the resolve resumes where
+        // the paint first diverges rather than covering the whole span.
+        assert_eq!(fades["p0"].fresh, vec![(7, t0)]);
+    }
+
+    #[test]
+    fn landing_into_the_kept_tail_resolves_the_interim_slot() {
+        let t0 = Instant::now();
+        let mut fades = HashMap::new();
+        // The final is the whole displaced tail — "again" commits — and
+        // the next partial's " more" keeps painting provisional.
+        let prev = painted("p0", 5, 6, "hello again");
+        let current = painted("p0", 11, 12, "hello again more");
+        note_text_fade(&mut fades, "p0".to_owned(), 5, true, t0);
+        note_text_fade(&mut fades, "p0".to_owned(), 11, true, t0);
+        note_text_fade(&mut fades, "interim".to_owned(), 5, true, t0);
+        note_text_fade(&mut fades, "interim".to_owned(), 4, true, t0);
+        let mut crossfade = None;
+        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
+        assert!(crossfade.is_some());
+        // The committed span matched the displaced tail whole — nothing
+        // in it fades — and the kept tail's divergence resolves through
+        // the interim slot.
+        assert!(fades["p0"].fresh.is_empty());
+        assert_eq!(fades["interim"].fresh, vec![(0, t0)]);
+    }
+
+    #[test]
+    fn landing_diffs_the_boxs_composed_row() {
+        let t0 = Instant::now();
+        let mut fades = HashMap::new();
+        // The annotation slot diffs its composed string, so the
+        // residual's boundary lands in painted coordinates.
+        let prev = painted("annotation", 5, 6, "hello wurld");
+        let current = painted("annotation", 12, 13, "hello world. again");
+        note_text_fade(&mut fades, "annotation".to_owned(), 11, true, t0);
+        note_text_fade(&mut fades, "annotation".to_owned(), 18, true, t0);
+        assert_eq!(fades["annotation"].fresh, vec![(11, t0)]);
+        let mut crossfade = None;
+        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
+        assert!(crossfade.is_some());
+        assert_eq!(fades["annotation"].fresh, vec![(7, t0)]);
+    }
+
+    #[test]
+    fn landing_needs_a_displaced_tail() {
+        let t0 = Instant::now();
+        let mut fades = HashMap::new();
+        let mut crossfade = None;
+        // Growth with no gray showing is a plain append.
+        landing_crossfade(
+            &mut fades,
+            &mut crossfade,
+            painted("p0", 5, 5, "hello"),
+            &painted("p0", 12, 12, "hello world."),
+            t0,
+        );
+        assert!(crossfade.is_none());
+        // A rewrite that changed settled bytes isn't an append — the
+        // cleanup morph owns that repaint.
+        landing_crossfade(
+            &mut fades,
+            &mut crossfade,
+            painted("p0", 5, 6, "h3llo wurld"),
+            &painted("p0", 12, 13, "hello world. again"),
+            t0,
+        );
+        assert!(crossfade.is_none());
+        // A user-edited buffer lands instantly.
+        landing_crossfade(
+            &mut fades,
+            &mut crossfade,
+            painted("p0", 5, 6, "hello wurld"),
+            &PaintedRow {
+                edited: true,
+                ..painted("p0", 12, 13, "hello world. again")
+            },
+            t0,
+        );
+        assert!(crossfade.is_none());
     }
 }
