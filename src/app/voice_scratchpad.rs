@@ -69,6 +69,16 @@ const FOOTER_STRIP: f32 = 40.0;
 /// The hint line floats this far above the composer's top edge.
 const HINT_CLEARANCE: f32 = 34.0;
 const TOP_BAR_HEIGHT: f32 = 69.0;
+/// The separator under the top bar is inset to the frame's inner content
+/// group — 15px from the card's left edge, 12px from the right.
+const TOP_BAR_HAIRLINE_INSET: (f32, f32) = (15.0, 12.0);
+/// A radius below half the 32px pill height keeps the corner unsaturated so
+/// the renderer's smoothed-corner shoulder engages — the frame's squircles.
+/// `rounded_full` saturates and stays a plain circular capsule.
+const PILL_RADIUS: f32 = 12.0;
+/// The annotation bullet marker — a drawn disc reads heavier than the "•"
+/// text glyph, which renders as a ~4px speck at body size.
+const BULLET_SIZE: f32 = 6.0;
 const RECORDING_RED: u32 = 0xF0344E;
 const RECORDING_GLOW: u32 = 0xFF85B6;
 
@@ -2212,8 +2222,6 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .rounded(px(CARD_RADIUS))
-                    .border(hairline())
-                    .border_color(theme.border_subtle)
                     .bg(theme.composer)
                     .overflow_hidden()
                     .child(self.render_scratchpad_top_bar(&theme, cx))
@@ -2244,9 +2252,23 @@ impl Waku {
                             .child(self.render_scratchpad_rows(&theme, window, cx)),
                     )
                     .child(
+                        // The card's outline is a child rather than the
+                        // element's border: GPUI paints an element's border
+                        // after its children, so an element border would sit
+                        // over the gradient cover instead of dissolving into
+                        // it the way the frame's bottom edge does.
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .rounded(px(CARD_RADIUS))
+                            .border(hairline())
+                            .border_color(theme.border_subtle),
+                    )
+                    .child(
                         // The gradient cover's solid half hides behind the
-                        // composer. Painted after the scroll element so it
-                        // obscures whatever scrolls beneath it — the frame
+                        // composer. Painted after the scroll element and the
+                        // border overlay so it obscures whatever scrolls
+                        // beneath it and the card's own outline — the frame
                         // fades the transcript into the window surface, not
                         // the card.
                         div()
@@ -2360,20 +2382,20 @@ impl Waku {
         div()
             .h(px(TOP_BAR_HEIGHT))
             .flex_none()
+            .relative()
             .px(px(24.0))
             // The frame pins the label row 24px from the card's top — the
             // same inset as the sides — not centered in the bar.
             .pt(px(24.0))
             .flex()
             .items_start()
-            .border_b(hairline())
-            .border_color(theme.separator)
             .child(
                 div()
                     .text_size(sp(14.0))
-                    // The frame's two stacked label lines fit 16px apiece.
+                    // The frame's two stacked label lines fit 16px apiece at
+                    // 14pt semibold.
                     .line_height(sp(16.0))
-                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.text_tertiary)
                     .child(tr!("voice_scratchpad.title")),
             )
@@ -2428,6 +2450,17 @@ impl Waku {
                         cx,
                     )),
             )
+            .child(
+                // The frame's separator under the bar is a full pixel inset
+                // to the content group's edges — not a full-bleed hairline.
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left(px(TOP_BAR_HAIRLINE_INSET.0))
+                    .right(px(TOP_BAR_HAIRLINE_INSET.1))
+                    .h(px(1.0))
+                    .bg(theme.separator),
+            )
     }
 
     /// One top-bar pill: Mute wears the solid dark treatment, Hide and
@@ -2451,7 +2484,7 @@ impl Waku {
             .h(px(32.0))
             .px(px(18.0))
             .flex_none()
-            .rounded_full()
+            .rounded(px(PILL_RADIUS))
             .flex()
             .items_center()
             .justify_center()
@@ -2685,7 +2718,17 @@ impl Waku {
                         row.bg(MarkdownPalette::from_theme(theme).annotation)
                     })
                     .focus_visible(|row| row.bg(theme.focus_highlight()))
-                    .child(div().flex_none().text_color(theme.text_tertiary).child("•"))
+                    .child(
+                        // The disc centers on the first text line — GPUI's
+                        // default phi line height leaves `(size × φ −
+                        // BULLET_SIZE) / 2` of leading over it.
+                        div()
+                            .flex_none()
+                            .mt(px((14.0 * 1.618_034 - BULLET_SIZE).max(0.0) / 2.0))
+                            .size(px(BULLET_SIZE))
+                            .rounded_full()
+                            .bg(theme.text_tertiary),
+                    )
                     .child(md::render::selectable_flat_text(
                         &flat,
                         md::selection::TextKey::new(format!("vs-b-{index}"), bullet_index),
