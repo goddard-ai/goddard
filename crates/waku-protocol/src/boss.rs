@@ -881,6 +881,16 @@ pub struct PlanItem {
     pub history: Vec<PlanItemTransition>,
 }
 
+/// An item's panel-facing state — the stored state plus `InProgress`,
+/// derived from linked live employees and never persisted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanItemProgress {
+    ToDo,
+    InProgress,
+    Done,
+    Dropped,
+}
+
 /// One entry of an `updatePlanItems` payload — an entry naming an
 /// existing item `id` renames and repositions it; an entry without one
 /// creates a fresh `toDo` item.
@@ -982,6 +992,46 @@ impl BossPlan {
     pub fn terminal(&self) -> bool {
         self.finalized_at.is_some() && self.outcome().terminal()
     }
+
+    /// The "all work finished" hint the panel shows beside its check-off
+    /// action: the plan has something to finish — at least one item or
+    /// linked employee — and every item is done or dropped and every
+    /// linked employee expired. Never a state change.
+    pub fn all_work_finished(&self, employees: &[BossEmployee]) -> bool {
+        let mut linked = employees
+            .iter()
+            .filter(|entry| entry.plan_id == Some(self.id));
+        let any_work = !self.items.is_empty() || linked.clone().next().is_some();
+        any_work
+            && self
+                .items
+                .iter()
+                .all(|item| item.state != PlanItemState::ToDo)
+            && linked.all(|entry| entry.expired)
+    }
+}
+
+impl PlanItem {
+    /// The item's render state — stored state, or `InProgress` while at
+    /// least one employee linked to it is still live.
+    pub fn progress(&self, plan: &BossPlan, employees: &[BossEmployee]) -> PlanItemProgress {
+        match self.state {
+            PlanItemState::Done => PlanItemProgress::Done,
+            PlanItemState::Dropped => PlanItemProgress::Dropped,
+            PlanItemState::ToDo => {
+                let live = employees.iter().any(|entry| {
+                    entry.plan_id == Some(plan.id)
+                        && entry.item_id == Some(self.id)
+                        && !entry.expired
+                });
+                if live {
+                    PlanItemProgress::InProgress
+                } else {
+                    PlanItemProgress::ToDo
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -1037,6 +1087,103 @@ pub struct BossState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wave_outbox: Vec<WaveNotification>,
     pub revision: u64,
+}
+
+/// One work item inside a [`PlanGroup`] — its derived progress plus the
+/// employees linked to it, in roster order.
+pub struct PlanGroupItem<'a> {
+    pub item: &'a PlanItem,
+    pub progress: PlanItemProgress,
+    pub employees: Vec<&'a BossEmployee>,
+}
+
+/// The Goals panel's ongoing-area group for one plan — the work
+/// breakdown in declared order with each item's linked employees nested
+/// beneath it, then the employees tagged to the plan but no live item.
+/// Borrowed from the [`BossState`] snapshot the panel already holds.
+pub struct PlanGroup<'a> {
+    pub plan: &'a BossPlan,
+    pub items: Vec<PlanGroupItem<'a>>,
+    /// Employees tagged to the plan without a resolvable item — no tag,
+    /// or a tag pointing at an item the breakdown no longer carries.
+    pub unallocated: Vec<&'a BossEmployee>,
+    /// The newest activity the group owns — a linked employee's summon
+    /// or finish, the plan's freeze, or its latest audited transition.
+    /// Groups order by it, most recent first.
+    pub last_activity_at: u64,
+}
+
+impl BossState {
+    /// Plan groups for the Goals ongoing area: every open plan that is
+    /// approved or carries at least one tagged employee — a draft plan
+    /// earns its row through work alone — ordered by most recent child
+    /// activity. Completed and abandoned plans list in the Finished
+    /// section instead. Employees within a bucket keep roster order;
+    /// the panel owns any finer sorting.
+    pub fn plan_groups(&self) -> Vec<PlanGroup<'_>> {
+        let mut groups = self
+            .planning
+            .iter()
+            .filter(|plan| !plan.terminal())
+            .filter_map(|plan| {
+                let linked = |item: Option<Uuid>| {
+                    self.employees
+                        .iter()
+                        .filter(|entry| {
+                            entry.plan_id == Some(plan.id) && entry.item_id == item
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let tagged = self
+                    .employees
+                    .iter()
+                    .filter(|entry| entry.plan_id == Some(plan.id))
+                    .count();
+                if plan.lifecycle() == PlanLifecycle::Planning && tagged == 0 {
+                    return None;
+                }
+                let items = plan
+                    .items
+                    .iter()
+                    .map(|item| PlanGroupItem {
+                        item,
+                        progress: item.progress(plan, &self.employees),
+                        employees: linked(Some(item.id)),
+                    })
+                    .collect::<Vec<_>>();
+                let unallocated = self
+                    .employees
+                    .iter()
+                    .filter(|entry| {
+                        entry.plan_id == Some(plan.id)
+                            && entry
+                                .item_id
+                                .is_none_or(|item| {
+                                    plan.items.iter().all(|known| known.id != item)
+                                })
+                    })
+                    .collect::<Vec<_>>();
+                let employee_activity = self
+                    .employees
+                    .iter()
+                    .filter(|entry| entry.plan_id == Some(plan.id))
+                    .filter_map(|entry| entry.expired_at.or(entry.created_at))
+                    .max()
+                    .unwrap_or(0);
+                let last_activity_at = employee_activity
+                    .max(plan.finalized_at.unwrap_or(0))
+                    .max(plan.history.last().map(|entry| entry.at).unwrap_or(0));
+                Some(PlanGroup {
+                    plan,
+                    items,
+                    unallocated,
+                    last_activity_at,
+                })
+            })
+            .collect::<Vec<_>>();
+        groups.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+        groups
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

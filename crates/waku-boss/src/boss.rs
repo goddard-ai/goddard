@@ -7596,4 +7596,89 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn plan_groups_list_open_plans_by_child_activity() {
+        let root = std::env::temp_dir().join(format!("boss-plan-groups-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let draft = add_plan(&service, test_plan("plans/draft.md"));
+        let approved = test_plan("plans/approved.md");
+        let approved_id = add_plan(&service, approved);
+        service.finalize_plan("plans/approved.md", None, 10).unwrap();
+        let abandoned = test_plan("plans/dead.md");
+        let abandoned_id = add_plan(&service, abandoned);
+        service
+            .finalize_plan("plans/dead.md", None, 5)
+            .unwrap();
+        service
+            .set_plan_outcome(Some(boss), "plans/dead.md", PlanOutcome::Abandoned)
+            .unwrap();
+        // No employees yet: the approved plan earns a row, the untagged
+        // draft does not, and the abandoned plan has left for Finished.
+        let groups = service.document();
+        let groups = groups.plan_groups();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].plan.id, approved_id);
+        // One employee tagged to the draft — work earns it a row.
+        let employee = {
+            let mut employee = service
+                .prepare_employee(
+                    boss,
+                    service.document().personas[0].id,
+                    "Job".into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .unwrap();
+            employee.plan_id = Some(draft);
+            employee.created_at = Some(50);
+            employee
+        };
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let groups = service.document();
+        let groups = groups.plan_groups();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].plan.id, draft, "fresher child activity leads");
+        assert_eq!(groups[0].unallocated.len(), 1);
+        assert_eq!(groups[1].plan.id, approved_id);
+        // A second employee on the older plan out-ranks it once active.
+        let employee = {
+            let mut employee = service
+                .prepare_employee(
+                    boss,
+                    service.document().personas[0].id,
+                    "Other".into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .unwrap();
+            employee.plan_id = Some(approved_id);
+            employee.created_at = Some(60);
+            employee
+        };
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let groups = service.document();
+        let groups = groups.plan_groups();
+        assert_eq!(groups[0].plan.id, approved_id);
+        let _ = abandoned_id;
+        fs::remove_dir_all(root).unwrap();
+    }
 }

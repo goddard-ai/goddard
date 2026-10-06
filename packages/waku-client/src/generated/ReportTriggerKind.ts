@@ -3,4 +3,4 @@
 /**
  * The outcome an employee's report carried to its supervisor.
  */
-export type ReportTriggerKind = "finished" | "failed" | "blocker" | "finishedWithBlocker";
+export type ReportTriggerKind = "finished" | "failed" | "blocker" | "finishedWithBlocker" | "interrupted";
