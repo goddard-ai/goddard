@@ -800,12 +800,6 @@ impl Waku {
             .or_else(|| self.toast_selection.selection.borrow().selected_text())
             .or_else(|| self.skills_selection.selection.borrow().selected_text())
             .or_else(|| {
-                self.settings_memory_selection
-                    .selection
-                    .borrow()
-                    .clipboard_text()
-            })
-            .or_else(|| {
                 self.transcript_selection
                     .selection
                     .borrow()
@@ -3682,10 +3676,8 @@ impl Waku {
         // A `boss_summon` marker lands in the supervisor's transcript when
         // the daemon completes a summon — it renders as the live employee
         // card and is lifted out of the activity fold entirely.
-        let summons: Vec<waku_protocol::model::BossSummonCard> = activities
-            .iter()
-            .filter_map(boss_summon_card)
-            .collect();
+        let summons: Vec<waku_protocol::model::BossSummonCard> =
+            activities.iter().filter_map(boss_summon_card).collect();
         if !summons.is_empty()
             && activities
                 .iter()
@@ -3697,9 +3689,11 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .children(summons.iter().map(|card| {
-                    self.render_summon_card(session_id, card, theme, cx)
-                }))
+                .children(
+                    summons
+                        .iter()
+                        .map(|card| self.render_summon_card(session_id, card, theme, cx)),
+                )
                 .into_any_element();
         }
         let plain: Vec<ActivityItem>;
@@ -3813,9 +3807,11 @@ impl Waku {
             );
         if !expanded {
             return cluster
-                .children(summons.iter().map(|card| {
-                    self.render_summon_card(session_id, card, theme, cx)
-                }))
+                .children(
+                    summons
+                        .iter()
+                        .map(|card| self.render_summon_card(session_id, card, theme, cx)),
+                )
                 .into_any_element();
         }
         // `Theme::overlay` is 5% alpha and GPUI's `opacity` multiplies it.
@@ -4376,9 +4372,11 @@ impl Waku {
         }
         cluster
             .child(items)
-            .children(summons.iter().map(|card| {
-                self.render_summon_card(session_id, card, theme, cx)
-            }))
+            .children(
+                summons
+                    .iter()
+                    .map(|card| self.render_summon_card(session_id, card, theme, cx)),
+            )
             .into_any_element()
     }
 
@@ -4467,16 +4465,10 @@ impl Waku {
         };
         let status_indicator = self
             .boss_queued_indicator(employee_id, &format!("summon-card-{owner_session}"), theme)
-            .or_else(|| {
-                employee.and_then(|session| self.session_status_indicator(session, theme))
-            })
+            .or_else(|| employee.and_then(|session| self.session_status_indicator(session, theme)))
             .or_else(|| {
                 self.boss_ui.dispatching.contains(&employee_id).then(|| {
-                    motion::spin_slow(icon(
-                        "icons/loader-circle.svg",
-                        12.0,
-                        theme.text_secondary,
-                    ))
+                    motion::spin_slow(icon("icons/loader-circle.svg", 12.0, theme.text_secondary))
                 })
             });
         let card_id = format!("summon-card-{owner_session}-{employee_id}");
@@ -4548,9 +4540,7 @@ impl Waku {
                                             .copied()
                                             .unwrap_or(card.icon)
                                             .map(crate::custom_commands::icon_path)
-                                            .unwrap_or_else(|| {
-                                                boss::job_title_icon(&job_title)
-                                            }),
+                                            .unwrap_or_else(|| boss::job_title_icon(&job_title)),
                                         11.0,
                                         theme.text_tertiary,
                                     )

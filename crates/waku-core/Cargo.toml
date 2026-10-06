@@ -38,7 +38,6 @@ url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-localization = { path = "../waku-localization" }
 waku-boss = { path = "../waku-boss" }
-waku-memory-engine = { path = "../waku-memory-engine" }
 waku-protocol = { path = "../waku-protocol" }
 waku-repo-map = { path = "../waku-repo-map" }
 waku-share = { path = "../waku-share" }

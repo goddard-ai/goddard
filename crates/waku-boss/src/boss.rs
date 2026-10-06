@@ -6,21 +6,213 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
+#[cfg(test)]
+use waku_protocol::boss::BossPersonaUpsert;
 use waku_protocol::boss::{
     AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
     BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
-    DispatchNotification, EmployeeGoal, EmployeeLifecycle, ModelLimit, PermissionOverrides,
-    PersonaPermissions, SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification,
+    DispatchNotification, EmployeeGoal, EmployeeLifecycle, MemoryMigrationCandidate,
+    MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, SummonTicket,
+    WaveMember, WaveMemberOutcome, WaveNotification,
 };
 use waku_protocol::model::ProviderKind;
-#[cfg(test)]
-use waku_protocol::boss::BossPersonaUpsert;
 
 pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
     let parsed = url::Url::parse(url).context("invalid browser URL")?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
         bail!("browser URLs must use http or https");
+    }
+    Ok(())
+}
+
+fn project_bucket_id(path: &Path) -> String {
+    // Git's common directory is stable across linked worktrees. Fall back to
+    // the canonical project path for non-Git projects.
+    let common_dir = std::process::Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(path)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| path.join(value.trim()))
+        .and_then(|value| fs::canonicalize(value).ok());
+    let stable_path = common_dir
+        .or_else(|| fs::canonicalize(path).ok())
+        .unwrap_or_else(|| path.to_path_buf());
+    let digest = Sha256::digest(stable_path.to_string_lossy().as_bytes());
+    let key: String = digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("project-{key}")
+}
+
+const LEGACY_MEMORY_FILE_BYTES: u64 = 256 * 1024;
+const LEGACY_MEMORY_NOTE_LIMIT: usize = 256;
+const LEGACY_MEMORY_TOTAL_BYTES: usize = 2 * 1024 * 1024;
+const LEGACY_MEMORY_PART_BYTES: usize = 56 * 1024;
+
+fn legacy_memory_candidates(
+    boss_root: &Path,
+    source: &str,
+) -> anyhow::Result<Vec<MemoryMigrationCandidate>> {
+    let roots = if source == "boss" {
+        vec![
+            (boss_root.join("files/memory"), "boss/memory".to_owned()),
+            (
+                boss_root.join("files/memory-engine"),
+                "boss/memory-engine".to_owned(),
+            ),
+        ]
+    } else {
+        let project = PathBuf::from(source);
+        anyhow::ensure!(
+            project.is_absolute(),
+            "project memory source must be an absolute project root or 'boss'"
+        );
+        let project = fs::canonicalize(&project).context("project memory source does not exist")?;
+        anyhow::ensure!(
+            project.is_dir(),
+            "project memory source must be a directory"
+        );
+        vec![
+            (
+                project.join(".goddard/memory"),
+                format!("project/{}/.goddard/memory", project_bucket_id(&project)),
+            ),
+            (
+                project.join(".goddard/memory-engine"),
+                format!(
+                    "project/{}/.goddard/memory-engine",
+                    project_bucket_id(&project)
+                ),
+            ),
+        ]
+    };
+
+    fn visit(
+        path: &Path,
+        relative: &Path,
+        source_prefix: &str,
+        out: &mut Vec<MemoryMigrationCandidate>,
+    ) -> anyhow::Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let mut entries = fs::read_dir(path)
+            .with_context(|| format!("could not list {}", path.display()))?
+            .collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let child = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let child_relative = relative.join(name.as_ref());
+            if file_type.is_dir() {
+                // Plan documents remain documents and are excluded even if
+                // an old installation still has the former memory/plans path.
+                if child_relative
+                    .components()
+                    .any(|part| part.as_os_str() == "plans")
+                {
+                    continue;
+                }
+                visit(&child, &child_relative, source_prefix, out)?;
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let is_log = child.file_name().is_some_and(|name| name == "LOG.txt");
+            let is_markdown = child.extension().is_some_and(|ext| ext == "md");
+            if !is_log && !is_markdown {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            anyhow::ensure!(
+                metadata.len() <= LEGACY_MEMORY_FILE_BYTES,
+                "legacy memory file exceeds 256 KiB: {}",
+                child.display()
+            );
+            let content = fs::read_to_string(&child)
+                .with_context(|| format!("legacy memory file is not UTF-8: {}", child.display()))?;
+            let source = format!("{source_prefix}/{}", child_relative.to_string_lossy());
+            if is_log {
+                for (index, line) in content.lines().enumerate() {
+                    let text =
+                        serde_json::from_str::<String>(line).unwrap_or_else(|_| line.to_owned());
+                    if !text.trim().is_empty() {
+                        push_legacy_candidate(out, format!("{source}#{}", index + 1), &text)?;
+                    }
+                }
+            } else {
+                let text = markdown_body(&content).trim().to_owned();
+                if !text.is_empty() {
+                    push_legacy_candidate(out, source, &text)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn markdown_body(content: &str) -> &str {
+        if let Some(rest) = content.strip_prefix("---\n")
+            && let Some(end) = rest.find("\n---\n")
+        {
+            return &rest[end + 5..];
+        }
+        content
+    }
+
+    let mut candidates = Vec::new();
+    for (path, prefix) in roots {
+        visit(&path, Path::new(""), &prefix, &mut candidates)?;
+    }
+    Ok(candidates)
+}
+
+fn push_legacy_candidate(
+    out: &mut Vec<MemoryMigrationCandidate>,
+    source: String,
+    text: &str,
+) -> anyhow::Result<()> {
+    let mut start = 0;
+    let mut part = 1;
+    while start < text.len() {
+        let mut end = (start + LEGACY_MEMORY_PART_BYTES).min(text.len());
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let source = if text.len() > LEGACY_MEMORY_PART_BYTES {
+            format!("{source}#part-{part}")
+        } else {
+            source.clone()
+        };
+        out.push(MemoryMigrationCandidate {
+            source,
+            text: text[start..end].to_owned(),
+        });
+        start = end;
+        part += 1;
+        let total_bytes = out
+            .iter()
+            .map(|candidate| candidate.text.len())
+            .sum::<usize>();
+        anyhow::ensure!(
+            out.len() <= LEGACY_MEMORY_NOTE_LIMIT,
+            "legacy memory source exceeds {LEGACY_MEMORY_NOTE_LIMIT} notes"
+        );
+        anyhow::ensure!(
+            total_bytes <= LEGACY_MEMORY_TOTAL_BYTES,
+            "legacy memory source exceeds 2 MiB; import a narrower source"
+        );
     }
     Ok(())
 }
@@ -146,7 +338,6 @@ impl BossService {
             .filter(|entry| restart_interrupted(entry))
             .map(|entry| entry.session_id)
             .collect();
-        self.migrate_legacy_pins();
         self.migrate_plan_documents();
         self.save(&self.state.lock())?;
         self.active.store(true, Ordering::Release);
@@ -232,7 +423,6 @@ impl BossService {
             router: Mutex::new(BossRouter::default()),
             evals: Mutex::new(BossEval::default()),
         };
-        service.migrate_legacy_pins();
         service.migrate_plan_documents();
         service.save(&service.state.lock())?;
         Ok(service)
@@ -362,23 +552,6 @@ impl BossService {
         })
     }
 
-    /// Legacy documents pinned knowledge files by their path beneath the
-    /// files root; pins are now relative to `memory/` — the one store.
-    /// Rewrite `memory/x` as `x`, move a file pinned from elsewhere
-    /// beneath `memory/`, and drop pins that cannot resolve: managed
-    /// persona documents, missing files, and unsafe paths. Upserts
-    /// reject `memory/`-prefixed pins, so a stored prefix can only come
-    /// from a legacy document.
-    fn migrate_legacy_pins(&self) {
-        let mut state = self.state.lock();
-        for persona in &mut state.personas {
-            self.migrate_pin_list(&mut persona.pinned_files);
-        }
-        for employee in &mut state.employees {
-            self.migrate_pin_list(&mut employee.pinned_files);
-        }
-    }
-
     /// Plan documents moved out of `memory/` to `plans/` at the files
     /// root — they are work product, not memory. Move a legacy
     /// `memory/plans/` wholesale when `plans/` is absent, else merge the
@@ -399,31 +572,6 @@ impl BossService {
         }
         move_missing_entries(&legacy, &plans);
         let _ = fs::remove_dir(&legacy);
-    }
-
-    fn migrate_pin_list(&self, pins: &mut Vec<String>) {
-        pins.retain_mut(|entry| {
-            if let Some(rest) = entry.strip_prefix("memory/") {
-                *entry = rest.to_owned();
-                return validate_relative(entry, false).is_ok();
-            }
-            if entry.starts_with("personas/") || validate_relative(entry, false).is_err() {
-                return false;
-            }
-            let (Ok(from), Ok(to)) = (
-                self.file_path(entry, false),
-                self.file_path(&format!("memory/{entry}"), false),
-            ) else {
-                return false;
-            };
-            if fs::symlink_metadata(&from).is_ok_and(|meta| meta.is_file()) && !to.exists() {
-                if let Some(parent) = to.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let _ = fs::rename(&from, &to);
-            }
-            to.is_file()
-        });
     }
 
     pub fn set_task_notifier(&self, notifier: crate::TaskNotifier) {
@@ -673,6 +821,7 @@ impl BossService {
             .iter()
             .find(|persona| persona.id == persona_id)
             .ok_or_else(|| anyhow!("unknown persona"))?;
+        self.validate_bucket_ids(&persona.permissions.bucket_ids)?;
         // Summon overrides the persona default; either explicit choice is
         // copied onto the record — a snapshot the client renders directly,
         // untouched by later persona edits. `None` leaves the title
@@ -684,7 +833,7 @@ impl BossService {
         let mut permissions = persona.permissions.clone();
         let mut pinned_files = persona.pinned_files.clone();
         if let Some(overrides) = &overrides {
-            self.validate_memory_folders(overrides.memory_folders.as_deref().unwrap_or(&[]))?;
+            self.validate_bucket_ids(overrides.bucket_ids.as_deref().unwrap_or(&[]))?;
             overrides.apply_to(&mut permissions);
         }
         if self.is_planning(caller)
@@ -714,10 +863,7 @@ impl BossService {
                 bail!("employees inherit their supervisor's boss-assigned persona");
             }
             permissions.clamp_within(&parent.permissions);
-            pinned_files.retain(|path| {
-                self.authorize_file(Some(caller), &format!("memory/{path}"), false)
-                    .is_ok()
-            });
+            pinned_files.retain(|path| self.authorize_file(Some(caller), path, false).is_ok());
         }
         let id = Uuid::new_v4();
         let mut name = String::new();
@@ -769,7 +915,7 @@ impl BossService {
         session_id: Uuid,
         overrides: PermissionOverrides,
     ) -> anyhow::Result<()> {
-        self.validate_memory_folders(overrides.memory_folders.as_deref().unwrap_or(&[]))?;
+        self.validate_bucket_ids(overrides.bucket_ids.as_deref().unwrap_or(&[]))?;
         let ceiling = match caller {
             Some(caller) if !self.is_boss_principal(caller) => Some(
                 self.employee(caller)
@@ -797,11 +943,7 @@ impl BossService {
     /// queues no prompt, wakes nothing, and writes no transcript entry.
     /// Retired records update too so a resurrecting steer still relabels
     /// the job it revives.
-    pub fn set_employee_job_title(
-        &self,
-        session_id: Uuid,
-        job_title: &str,
-    ) -> anyhow::Result<()> {
+    pub fn set_employee_job_title(&self, session_id: Uuid, job_title: &str) -> anyhow::Result<()> {
         validate_name(job_title)?;
         self.update(|state| {
             let employee = state
@@ -815,10 +957,15 @@ impl BossService {
         })
     }
 
-    fn validate_memory_folders(&self, folders: &[String]) -> anyhow::Result<()> {
-        for folder in folders {
-            validate_relative(folder, false)?;
-            self.file_path(&format!("memory/{folder}"), false)?;
+    fn validate_bucket_ids(&self, buckets: &[String]) -> anyhow::Result<()> {
+        let known =
+            waku_memory_engine::buckets::BucketStore::open(self.root.join("files/memory-engine"))?
+                .list_buckets()?
+                .into_iter()
+                .map(|bucket| bucket.id)
+                .collect::<std::collections::HashSet<_>>();
+        for bucket in buckets {
+            anyhow::ensure!(known.contains(bucket), "unknown memory bucket {bucket}");
         }
         Ok(())
     }
@@ -930,7 +1077,7 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. You have no owned memory and must not write memory. Use `goddard-agent boss` to read granted files and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned memory files: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; you can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -941,7 +1088,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nGrant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every memory folder, and memory upkeep is a standing duty rather than a side task: write durable facts, decisions, and outcomes under memory/ as they surface — do not wait for a lull or for the human to ask — keep them in folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every named memory bucket, but their contents are never loaded automatically. Choose the relevant bucket and use its explicit overview, zoom, scan, record, and summary operations. Record concise, useful notes directly in the appropriate bucket; notes survive sessions, employees, and model changes. Project-assigned employees have automatic read and insert access to that project's shared bucket. Personal buckets remain private unless you grant them deliberately. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish useful employee outputs with deliverables so the human can find them later, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -963,7 +1110,7 @@ impl BossService {
             })
             .unwrap_or_default();
         format!(
-            "<boss-persona>\n{}\n\n{}{}\nPinned memory files: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
+            "<boss-persona>\n{}\n\n{}{}\nPinned documents: {}. Read them selectively through the Boss readFile operation.\n{project_context}\n</boss-persona>\n\n{prompt}",
             persona.markdown,
             role,
             planning,
@@ -1505,8 +1652,7 @@ impl BossService {
             // lifecycle fold reports as working — its update rides the
             // synthesized ticket `base` supplies.
             let working = entry.lifecycle() == EmployeeLifecycle::Working
-                || (entry.lifecycle() == EmployeeLifecycle::Queued
-                    && entry.ticket.is_none());
+                || (entry.lifecycle() == EmployeeLifecycle::Queued && entry.ticket.is_none());
             if !working {
                 bail!("employee is not running — its ticket cannot hold a resource update");
             }
@@ -1685,9 +1831,7 @@ impl BossService {
                     .ticket
                     .as_ref()
                     .is_some_and(|ticket| ticket.pending_resources.is_some());
-            if waits
-                && let Some(ticket) = &mut entry.ticket
-            {
+            if waits && let Some(ticket) = &mut entry.ticket {
                 ticket.blocked_by = blockers;
             }
             Ok(())
@@ -2087,7 +2231,6 @@ impl BossService {
                 })
             }
             BossOperation::Memory { operation } => {
-                use waku_memory_engine::{Acl, Grant, Scope, Store};
                 use waku_protocol::boss::MemoryOperation;
 
                 let state = self.document();
@@ -2097,112 +2240,242 @@ impl BossService {
                 } else {
                     caller.context("missing Boss caller")?.to_string()
                 };
-                let mut grants = Vec::new();
-                if let Some(caller) = caller.filter(|_| !boss_principal) {
-                    if let Some(employee) = state.employees.iter().find(|e| e.session_id == caller)
-                    {
-                        for folder in &employee.permissions.memory_folders {
-                            grants.push(Grant {
-                                principal_id: principal.clone(),
-                                scope_id: "boss".into(),
-                                collections: vec![folder.clone()],
-                                read: true,
-                                write: false,
-                                grantor: "boss".into(),
-                                revision: state.revision,
-                                expires_at: employee.expired.then_some(0),
-                            });
-                        }
-                    }
+                let buckets = waku_memory_engine::buckets::BucketStore::open(
+                    self.root.join("files/memory-engine"),
+                )?;
+                let mut known_buckets = buckets.list_buckets()?;
+                let active_employee = caller.filter(|caller| {
+                    state
+                        .employees
+                        .iter()
+                        .any(|employee| employee.session_id == *caller && !employee.expired)
+                });
+                let project_bucket_id = active_employee
+                    .and_then(|session| self.projects.lock().get(&session).cloned())
+                    .map(|path| project_bucket_id(&path));
+                if let Some(bucket_id) = &project_bucket_id
+                    && !known_buckets.iter().any(|bucket| bucket.id == *bucket_id)
+                {
+                    let context_path = caller
+                        .and_then(|session| self.projects.lock().get(&session).cloned())
+                        .unwrap_or_default();
+                    let name = context_path
+                        .file_name()
+                        .and_then(|part| part.to_str())
+                        .unwrap_or("Project")
+                        .to_owned();
+                    let bucket = waku_memory_engine::buckets::Bucket {
+                        id: bucket_id.clone(),
+                        name,
+                        purpose: "Shared project memory".into(),
+                        project_id: Some(bucket_id.clone()),
+                    };
+                    buckets.create_bucket(&bucket)?;
+                    known_buckets.push(bucket);
                 }
-                let scope = Scope {
-                    version: 1,
-                    scope_id: "boss".into(),
-                    daemon_id: state.identity.id.to_string(),
-                    kind: "boss".into(),
-                    owner_id: "boss".into(),
-                    acl_revision: state.revision,
+                let granted_bucket_ids = if boss_principal {
+                    Vec::new()
+                } else {
+                    state
+                        .employees
+                        .iter()
+                        .find(|employee| Some(employee.session_id) == caller && !employee.expired)
+                        .map(|employee| employee.permissions.bucket_ids.clone())
+                        .unwrap_or_default()
                 };
-                let acl = Acl {
-                    scopes: vec![scope.clone()],
-                    grants,
-                    now: waku_protocol::model::unix_time(),
+                let visible_buckets = known_buckets
+                    .iter()
+                    .filter(|bucket| {
+                    boss_principal
+                        || Some(bucket.id.as_str()) == project_bucket_id.as_deref()
+                        || granted_bucket_ids.contains(&bucket.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let bucket_access = waku_memory_engine::buckets::BucketAccess {
+                    buckets: known_buckets.clone(),
+                    grants: visible_buckets
+                        .iter()
+                        .map(|bucket| waku_memory_engine::buckets::BucketGrant {
+                            bucket_id: bucket.id.clone(),
+                            principal_id: principal.clone(),
+                            read: true,
+                            insert: true,
+                        })
+                        .collect(),
+                    boss: boss_principal,
                 };
-                let store = Store::open(self.root.join("files/memory-engine"))?;
-                store.create_scope(&scope)?;
-                let mut index = None;
-                let mut chunks = Vec::new();
-                let mut inserted = None;
-                let mut imported = None;
+                let mut bucket_list = Vec::new();
+                let mut overview = None;
+                let mut notes = Vec::new();
+                let mut compression = None;
+                let mut bucket = None;
+                let mut recorded = None;
+                let mut migration = None;
                 match operation {
-                    MemoryOperation::Insert {
-                        collection,
-                        title,
-                        cue,
-                        body,
-                        source_id,
+                    MemoryOperation::ListBuckets => {
+                        bucket_list = visible_buckets
+                            .iter()
+                            .map(serde_json::to_value)
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
+                    }
+                    MemoryOperation::CreateBucket { name, purpose } => {
+                        anyhow::ensure!(boss_principal, "only the Boss can create memory buckets");
+                        let name = name.trim();
+                        anyhow::ensure!(!name.is_empty(), "bucket name cannot be empty");
+                        let slug = name
+                            .to_ascii_lowercase()
+                            .chars()
+                            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+                            .collect::<String>();
+                        let id = format!("{}-{}", slug.trim_matches('-'), Uuid::new_v4());
+                        let created = waku_memory_engine::buckets::Bucket {
+                            id: id.clone(),
+                            name: name.to_owned(),
+                            purpose,
+                            project_id: None,
+                        };
+                        buckets.create_bucket(&created)?;
+                        bucket_list.push(serde_json::to_value(created)?);
+                    }
+                    MemoryOperation::Overview { bucket: bucket_id } => {
+                        bucket = Some(bucket_id.clone());
+                        let result = buckets.overview(&bucket_access, &principal, &bucket_id)?;
+                        compression = result
+                            .compression
+                            .as_ref()
+                            .map(serde_json::to_value)
+                            .transpose()?;
+                        overview = Some(serde_json::to_value(result)?);
+                    }
+                    MemoryOperation::Record {
+                        bucket: bucket_id,
+                        kind,
+                        text,
+                        retry_key,
                     } => {
-                        inserted = Some(store.insert(
-                            &acl,
+                        bucket = Some(bucket_id.clone());
+                        let kind = match kind {
+                            waku_protocol::boss::MemoryNoteKind::Fact => {
+                                waku_memory_engine::buckets::NoteKind::Fact
+                            }
+                            waku_protocol::boss::MemoryNoteKind::Observation => {
+                                waku_memory_engine::buckets::NoteKind::Observation
+                            }
+                            waku_protocol::boss::MemoryNoteKind::Question => {
+                                waku_memory_engine::buckets::NoteKind::Question
+                            }
+                        };
+                        let result = buckets.insert(
+                            &bucket_access,
                             &principal,
-                            "boss",
-                            &collection,
-                            &title,
-                            &cue,
-                            &body,
-                            &source_id,
-                            "detail",
-                        )?);
+                            &bucket_id,
+                            kind,
+                            &text,
+                            &retry_key,
+                        )?;
+                        recorded = Some(serde_json::to_value(result.note)?);
+                        compression = result.compression.map(serde_json::to_value).transpose()?;
                     }
-                    MemoryOperation::ImportFolder { folder, collection } => {
-                        let source = Path::new(&folder);
-                        if folder.is_empty()
-                            || source
-                                .components()
-                                .any(|part| !matches!(part, std::path::Component::Normal(_)))
-                        {
-                            bail!("invalid Boss memory folder");
-                        }
-                        let source = self.root.join("files/memory").join(source);
-                        imported = Some(store.import_folder(
-                            &acl,
-                            &principal,
-                            "boss",
-                            source.to_str().context("invalid Boss memory path")?,
-                            &collection,
-                        )?);
-                    }
-                    MemoryOperation::Surface { collection, limit } => {
-                        chunks =
-                            store.surface_fallback(&acl, &principal, "boss", &collection, limit)?;
-                    }
-                    MemoryOperation::ListIndex => {
-                        index = Some(store.list_index(&acl, &principal, "boss")?)
-                    }
-                    MemoryOperation::Search { collection, query } => {
-                        chunks = store.search(&acl, &principal, "boss", &collection, &query)?;
-                    }
-                    MemoryOperation::ReadChunk {
-                        collection,
-                        chunk_id,
+                    MemoryOperation::SubmitSummary {
+                        bucket: bucket_id,
+                        start,
+                        end,
+                        text,
                     } => {
-                        chunks.push(store.read_chunk(
-                            &acl,
-                            &principal,
-                            "boss",
-                            &collection,
-                            &chunk_id,
-                        )?);
+                        bucket = Some(bucket_id.clone());
+                        compression = buckets
+                            .submit_summary(
+                                &bucket_access,
+                                &principal,
+                                &bucket_id,
+                                start,
+                                end,
+                                &text,
+                            )?
+                            .map(serde_json::to_value)
+                            .transpose()?;
                     }
-                    MemoryOperation::Zoom { collection, target } => {
-                        chunks = store.zoom(&acl, &principal, "boss", &collection, &target)?;
+                    MemoryOperation::Scan {
+                        bucket: bucket_id,
+                        query,
+                    } => {
+                        bucket = Some(bucket_id.clone());
+                        notes = buckets
+                            .search(&bucket_access, &principal, &bucket_id, &query)?
+                            .into_iter()
+                            .map(serde_json::to_value)
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
+                    }
+                    MemoryOperation::ZoomBucket {
+                        bucket: bucket_id,
+                        start,
+                        end,
+                    } => {
+                        bucket = Some(bucket_id.clone());
+                        notes = buckets
+                            .zoom(&bucket_access, &principal, &bucket_id, start, end)?
+                            .into_iter()
+                            .map(serde_json::to_value)
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
+                    }
+                    MemoryOperation::MigrateLegacy {
+                        bucket: bucket_id,
+                        source,
+                        dry_run,
+                    } => {
+                        anyhow::ensure!(boss_principal, "legacy memory migration is Boss-only");
+                        anyhow::ensure!(
+                            known_buckets.iter().any(|known| known.id == bucket_id),
+                            "unknown memory bucket {bucket_id}"
+                        );
+                        let candidates = legacy_memory_candidates(&self.root, &source)?;
+                        if !dry_run {
+                            for candidate in &candidates {
+                                let text = format!(
+                                    "Imported from {}\n\n{}",
+                                    candidate.source, candidate.text
+                                );
+                                let retry_key = format!(
+                                    "legacy-{}",
+                                    Sha256::digest(
+                                        format!("{}\0{}", candidate.source, candidate.text)
+                                            .as_bytes()
+                                    )
+                                    .iter()
+                                    .map(|byte| format!("{byte:02x}"))
+                                    .collect::<String>()
+                                );
+                                let result = buckets.insert(
+                                    &bucket_access,
+                            &principal,
+                                    &bucket_id,
+                                    waku_memory_engine::buckets::NoteKind::Observation,
+                                    &text,
+                                    &retry_key,
+                                )?;
+                                compression =
+                                    result.compression.map(serde_json::to_value).transpose()?;
+                    }
+                    }
+                        bucket = Some(bucket_id.clone());
+                        migration = Some(MemoryMigrationReport {
+                            bucket: bucket_id,
+                            source,
+                            dry_run,
+                            imported: if dry_run { 0 } else { candidates.len() },
+                            candidates,
+                        });
                     }
                 }
                 Ok(BossResult::Memory {
-                    index,
-                    chunks,
-                    inserted,
-                    imported,
+                    buckets: bucket_list,
+                    overview,
+                    notes,
+                    compression,
+                    recorded,
+                    bucket,
+                    migration,
                 })
             }
             BossOperation::RenameEmployee { session_id, name } => {
@@ -2256,12 +2529,12 @@ impl BossService {
                 }
                 for path in &persona.pinned_files {
                     if path == "memory" || path.starts_with("memory/") {
-                        bail!("pinned files are paths beneath memory/");
+                        bail!("pinned files cannot point into legacy memory storage");
                     }
                     validate_relative(path, false)?;
-                    self.file_path(&format!("memory/{path}"), false)?;
+                    self.file_path(path, false)?;
                 }
-                self.validate_memory_folders(&persona.permissions.memory_folders)?;
+                self.validate_bucket_ids(&persona.permissions.bucket_ids)?;
                 self.update(|state| {
                     let id = if persona.id.is_nil() {
                         Uuid::new_v4()
@@ -2577,31 +2850,22 @@ impl BossService {
             .iter()
             .find(|entry| entry.id == employee.persona_id)
             .ok_or_else(|| anyhow!("employee persona is unavailable"))?;
-        let permitted = employee
-            .permissions
-            .memory_folders
+        let permitted = !path.starts_with("memory/")
+            && employee
+            .pinned_files
             .iter()
-            .map(|folder| format!("memory/{folder}"))
-            .any(|folder| path == folder || path.starts_with(&format!("{folder}/")))
-            || path
-                .strip_prefix("memory/")
-                .is_some_and(|rest| employee.pinned_files.iter().any(|file| file == rest))
+            .any(|file| path == file || path.starts_with(&format!("{file}/")))
             || path == format!("personas/{}/PERSONA.md", persona.id);
         // Directory discovery reveals only ancestors of a granted file/folder.
         let ancestor = directory
             && (path.is_empty()
                 || employee
-                    .permissions
-                    .memory_folders
-                    .iter()
-                    .map(|folder| format!("memory/{folder}"))
-                    .chain(
-                        employee
                             .pinned_files
                             .iter()
-                            .map(|file| format!("memory/{file}")),
-                    )
-                    .any(|file| file.starts_with(&format!("{path}/"))));
+                    .cloned()
+                    .any(|file| {
+                        !file.starts_with("memory/") && file.starts_with(&format!("{path}/"))
+                    }));
         if !permitted && !ancestor {
             bail!("persona does not grant access to this Boss file");
         }
@@ -2626,10 +2890,9 @@ impl BossService {
     }
 }
 
-/// Render memory-relative pins as the files-root paths agents pass to
-/// `readFile`.
+/// Return pinned document paths for the files-root `readFile` operation.
 fn pinned_paths(pinned: &[String]) -> impl Iterator<Item = String> + '_ {
-    pinned.iter().map(|path| format!("memory/{path}"))
+    pinned.iter().cloned()
 }
 
 fn validate_relative(path: &str, allow_empty: bool) -> anyhow::Result<()> {
@@ -3405,7 +3668,7 @@ fn fresh_state() -> BossState {
         session_id: None,
         personas: vec![
             BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in durable memory, and reconcile the notes as work changes. Publish useful employee outputs as deliverables. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions as they surface, file them under memory/ folders per topic or project, and prune or reconcile stale entries instead of accumulating duplicates. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nGrant each employee only the memory folders required by their role and task. Personal memory is boss-only by default; grant it only when the task genuinely requires personal context. When a persona repeatedly needs shared memory, create a per-role memory folder and grant that folder instead. Persona permissions are the memory grant mechanism for summon; pinnedFiles lists memory files an agent always sees in its context and can read without a folder grant; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in the appropriate memory bucket, and reconcile the notes as work changes. Publish useful employee outputs as deliverables. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions in explicit named buckets, keep notes concise and scoped, and append corrections rather than rewriting history. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
         ],
         employees: Vec::new(),
         retired_employees: Vec::new(),
@@ -3517,10 +3780,7 @@ mod tests {
     #[test]
     fn employee_name_suffixes_vary_and_advance_their_initial() {
         // Only a fully held pool forces a suffix.
-        let held: Vec<String> = EMPLOYEE_NAMES
-            .iter()
-            .map(|name| name.to_string())
-            .collect();
+        let held: Vec<String> = EMPLOYEE_NAMES.iter().map(|name| name.to_string()).collect();
         let mut cursor = 0;
         let first = employee_human_name(held.iter().map(String::as_str), &mut cursor);
         let base = EMPLOYEE_NAMES[0];
@@ -3541,10 +3801,8 @@ mod tests {
         // Starting initials vary across names rather than all landing on "A.".
         let initials: std::collections::HashSet<char> = (0..26)
             .map(|index| {
-                let held: Vec<String> = EMPLOYEE_NAMES
-                    .iter()
-                    .map(|name| name.to_string())
-                    .collect();
+                let held: Vec<String> =
+                    EMPLOYEE_NAMES.iter().map(|name| name.to_string()).collect();
                 let mut cursor = index as u64;
                 employee_human_name(held.iter().map(String::as_str), &mut cursor)
                     .chars()
@@ -3571,13 +3829,27 @@ mod tests {
             .unwrap();
         let persona = service.document().personas[0].id;
         let first = service
-            .prepare_employee(boss, persona, "One".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(
+                boss,
+                persona,
+                "One".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
             .unwrap();
         drop(service);
 
         let reopened = BossService::open(root.clone()).unwrap();
         let second = reopened
-            .prepare_employee(boss, persona, "Two".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(
+                boss,
+                persona,
+                "Two".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
             .unwrap();
         let first_index = EMPLOYEE_NAMES
             .iter()
@@ -3782,11 +4054,6 @@ mod tests {
     #[test]
     fn default_boss_persona_prioritizes_delegation_and_commit_verification() {
         let state = fresh_state();
-        let employee = state
-            .personas
-            .iter()
-            .find(|persona| persona.name == "Employee")
-            .unwrap();
         let boss = state
             .personas
             .iter()
@@ -3803,16 +4070,8 @@ mod tests {
                 .contains("Verify completion from the worktree")
         );
         assert!(boss.markdown.contains("employee caps"));
-        assert!(employee.permissions.memory_folders.is_empty());
-        assert!(
-            boss.markdown
-                .contains("Personal memory is boss-only by default")
-        );
-        assert!(
-            boss.markdown
-                .contains("only the memory folders required by their role and task")
-        );
-        assert!(boss.markdown.contains("per-role memory folder"));
+        assert!(boss.markdown.contains("Personal buckets remain Boss-only"));
+        assert!(boss.markdown.contains("automatically receive read and insert access"));
     }
 
     #[test]
@@ -4157,7 +4416,7 @@ mod tests {
     }
 
     #[test]
-    fn employees_cannot_read_ungranted_memory_or_mutate_state() {
+    fn employees_can_read_only_pinned_documents_and_cannot_mutate_personas() {
         let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let state = service.document();
@@ -4178,10 +4437,12 @@ mod tests {
                     created_at: None,
                     icon: None,
                     permissions: PersonaPermissions {
-                        memory_folders: vec!["work".into()],
                         ..Default::default()
                     },
-                    pinned_files: Vec::new(),
+                    pinned_files: vec![
+                        "docs/release.md".into(),
+                        "memory/work/old.md".into(),
+                    ],
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -4196,8 +4457,9 @@ mod tests {
             })
             .unwrap();
         for (path, content) in [
-            ("memory/work/note.md", "public"),
-            ("memory/private/note.md", "private"),
+            ("docs/release.md", "public"),
+            ("docs/private.md", "private"),
+            ("memory/work/old.md", "legacy memory"),
         ] {
             service
                 .handle(
@@ -4214,14 +4476,15 @@ mod tests {
                 .handle(
                     Some(session_id),
                     BossOperation::ReadFile {
-                        path: "memory/work/note.md".into()
+                        path: "docs/release.md".into()
                     }
                 )
                 .is_ok()
         );
         for path in [
-            "memory/private/note.md",
-            "memory/work/../private/note.md",
+            "docs/private.md",
+            "memory/work/old.md",
+            "docs/../private.md",
             "../boss.json",
             "/etc/passwd",
         ] {
@@ -4249,7 +4512,7 @@ mod tests {
                 .handle(
                     Some(session_id),
                     BossOperation::WriteFile {
-                        path: "memory/work/note.md".into(),
+                        path: "docs/release.md".into(),
                         content: "changed".into()
                     }
                 )
@@ -4291,13 +4554,19 @@ mod tests {
                     .iter_mut()
                     .find(|entry| entry.id == persona)
                     .unwrap();
-                persona.permissions.memory_folders = vec!["work".into()];
                 persona.permissions.summon_employees = true;
                 Ok(())
             })
             .unwrap();
         let parent = service
-            .prepare_employee(boss, persona, "Release".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(
+                boss,
+                persona,
+                "Release".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
             .unwrap();
         let parent_id = parent.session_id;
         service
@@ -4313,7 +4582,6 @@ mod tests {
                     .iter_mut()
                     .find(|entry| entry.id == persona)
                     .unwrap();
-                persona.permissions.memory_folders.push("private".into());
                 persona.permissions.computer_use = true;
                 persona.permissions.integration_ids.push("linear".into());
                 Ok(())
@@ -4329,7 +4597,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(child.permissions.memory_folders, vec!["work"]);
         assert!(!child.permissions.computer_use);
         assert!(child.permissions.integration_ids.is_empty());
         let child_id = child.session_id;
@@ -4387,7 +4654,6 @@ mod tests {
                     .iter_mut()
                     .find(|entry| entry.id == persona)
                     .unwrap();
-                persona.permissions.memory_folders = vec!["shared".into()];
                 persona.permissions.summon_employees = true;
                 persona.permissions.integration_ids = vec!["linear".into()];
                 Ok(())
@@ -4400,7 +4666,6 @@ mod tests {
                 persona,
                 "Release".into(),
                 Some(PermissionOverrides {
-                    memory_folders: Some(vec!["work".into()]),
                     computer_use: Some(true),
                     ..Default::default()
                 }),
@@ -4408,7 +4673,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(employee.permissions.memory_folders, vec!["work"]);
         assert!(employee.permissions.computer_use);
         assert!(employee.permissions.summon_employees);
         assert_eq!(employee.permissions.integration_ids, vec!["linear"]);
@@ -4419,22 +4683,6 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        // Traversal or absolute memory folders are rejected outright.
-        assert!(
-            service
-                .prepare_employee(
-                    boss,
-                    persona,
-                    "Escape".into(),
-                    Some(PermissionOverrides {
-                        memory_folders: Some(vec!["../self".into()]),
-                        ..Default::default()
-                    }),
-                    EmployeeGoal::Errand,
-                    None,
-                )
-                .is_err()
-        );
         // An employee summoner's overrides cannot widen past its own grants.
         let child = service
             .prepare_employee(
@@ -4442,7 +4690,6 @@ mod tests {
                 persona,
                 "Child".into(),
                 Some(PermissionOverrides {
-                    memory_folders: Some(vec!["shared".into(), "private".into()]),
                     computer_use: Some(true),
                     summon_employees: Some(false),
                     ..Default::default()
@@ -4451,7 +4698,6 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(child.permissions.memory_folders, Vec::<String>::new());
         assert!(child.permissions.computer_use);
         assert!(!child.permissions.summon_employees);
         // The boss rewrites a live employee's grants field by field.
@@ -4460,14 +4706,12 @@ mod tests {
                 Some(boss),
                 parent_id,
                 PermissionOverrides {
-                    memory_folders: Some(vec!["work/release".into()]),
                     computer_use: Some(false),
                     ..Default::default()
                 },
             )
             .unwrap();
         let updated = service.employee(parent_id).unwrap();
-        assert_eq!(updated.permissions.memory_folders, vec!["work/release"]);
         assert!(!updated.permissions.computer_use);
         assert!(updated.permissions.summon_employees);
         // The same edit from an employee supervisor clamps to its grants.
@@ -4925,10 +5169,7 @@ mod tests {
     #[test]
     fn summon_icon_field_parses_and_rejects_unknown_identifiers() {
         // Omitted and null both mean "no override" on the wire.
-        for extra in [
-            serde_json::json!({}),
-            serde_json::json!({ "icon": null }),
-        ] {
+        for extra in [serde_json::json!({}), serde_json::json!({ "icon": null })] {
             let mut payload = serde_json::json!({
                 "type": "summon", "personaId": Uuid::nil(), "jobTitle": "Review",
                 "prompt": "Check the diff", "project": "/project"
@@ -4938,7 +5179,10 @@ mod tests {
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
             let operation: BossOperation = serde_json::from_value(payload).unwrap();
-            assert!(matches!(operation, BossOperation::Summon { icon: None, .. }));
+            assert!(matches!(
+                operation,
+                BossOperation::Summon { icon: None, .. }
+            ));
         }
         let operation: BossOperation = serde_json::from_value(serde_json::json!({
             "type": "summon", "personaId": Uuid::nil(), "jobTitle": "Review",
@@ -4980,12 +5224,10 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
-            let BossOperation::UpsertPersona { persona } =
-                serde_json::from_value::<BossOperation>(
+            let BossOperation::UpsertPersona { persona } = serde_json::from_value::<BossOperation>(
                     serde_json::json!({ "type": "upsertPersona", "persona": persona }),
                 )
-                .unwrap()
-            else {
+            .unwrap() else {
                 panic!("expected upsertPersona");
             };
             persona.icon
@@ -5107,140 +5349,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn pinned_memory_files_grant_read_and_survive_legacy_migration() {
-        let root = std::env::temp_dir().join(format!("boss-pins-{}", Uuid::new_v4()));
-        let service = BossService::open(root.clone()).unwrap();
-        let session_id = Uuid::new_v4();
-        let persona = service.document().personas[1].id;
-        service
-            .update(|state| {
-                state.employees.push(BossEmployee {
-                    session_id,
-                    supervisor_id: Uuid::new_v4(),
-                    identity: BossIdentity {
-                        id: session_id,
-                        name: "Maren".into(),
-                        avatar_seed: session_id.to_string(),
-                    },
-                    job_title: "Review".into(),
-                    persona_id: persona,
-                    work_goal: EmployeeGoal::Errand,
-                    created_at: None,
-                    icon: None,
-                    permissions: PersonaPermissions::default(),
-                    pinned_files: vec!["work/note.md".into()],
-                    expired: false,
-                    expired_at: None,
-                    blocker: None,
-                    cancelled: false,
-                    state: EmployeeLifecycle::Working,
-                    ticket: None,
-                    queued_at: None,
-                    request_id: None,
-                    request_fingerprint: None,
-                });
-                Ok(())
-            })
-            .unwrap();
-        for (path, content) in [
-            ("memory/work/note.md", "pinned"),
-            ("memory/work/other.md", "unpinned"),
-        ] {
-            service
-                .handle(
-                    None,
-                    BossOperation::WriteFile {
-                        path: path.into(),
-                        content: content.into(),
-                    },
-                )
-                .unwrap();
-        }
-        // A pin grants file-level read without a folder grant; neighbors
-        // in the same folder stay closed.
-        assert!(
-            service
-                .handle(
-                    Some(session_id),
-                    BossOperation::ReadFile {
-                        path: "memory/work/note.md".into()
-                    }
-                )
-                .is_ok()
-        );
-        assert!(
-            service
-                .handle(
-                    Some(session_id),
-                    BossOperation::ReadFile {
-                        path: "memory/work/other.md".into()
-                    }
-                )
-                .is_err()
-        );
-        // Pins inject the files-root path into the persona context.
-        let prompt = service.prompt_with_context(session_id, "job".into());
-        assert!(prompt.contains("Pinned memory files: memory/work/note.md"));
-        // Pins are memory-relative — writing them with the store prefix is refused.
-        let mut persona_doc = service.document().personas[1].clone();
-        persona_doc.pinned_files = vec!["memory/work/note.md".into()];
-        assert!(
-            service
-                .handle(
-                    None,
-                    BossOperation::UpsertPersona {
-                        persona: persona_doc.into()
-                    },
-                )
-                .is_err()
-        );
 
-        drop(service);
-        // Legacy documents pinned knowledge files beneath the files root:
-        // `memory/` paths rewrite relative to the store, pins of files
-        // elsewhere move the file beneath `memory/`, and unresolvable
-        // pins drop.
-        let path = root.join("boss.json");
-        let mut legacy: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        fs::write(root.join("files/stray.md"), "moved").unwrap();
-        legacy["personas"][1]
-            .as_object_mut()
-            .unwrap()
-            .remove("pinnedFiles");
-        legacy["personas"][1]["knowledgeFiles"] = serde_json::json!([
-            "memory/self/core.md",
-            "stray.md",
-            "gone.md",
-            "personas/managed/PERSONA.md"
-        ]);
-        legacy["employees"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("pinnedFiles");
-        legacy["employees"][0]["knowledgeFiles"] = serde_json::json!(["memory/work/note.md"]);
-        fs::create_dir_all(root.join("files/memory/self")).unwrap();
-        fs::write(root.join("files/memory/self/core.md"), "core").unwrap();
-        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        let migrated = BossService::open(root.clone()).unwrap();
-        let state = migrated.document();
-        assert_eq!(
-            state.personas[1].pinned_files,
-            vec!["self/core.md".to_owned(), "stray.md".to_owned()]
-        );
-        assert_eq!(
-            state.employees[0].pinned_files,
-            vec!["work/note.md".to_owned()]
-        );
-        assert!(!root.join("files/stray.md").exists());
-        assert_eq!(
-            fs::read_to_string(root.join("files/memory/stray.md")).unwrap(),
-            "moved"
-        );
-        drop(migrated);
-        fs::remove_dir_all(root).unwrap();
-    }
 }
 
 #[cfg(test)]
@@ -5249,8 +5358,8 @@ mod memory_op_tests {
     use waku_protocol::boss::MemoryOperation;
 
     #[test]
-    fn memory_ops_follow_collection_grants() {
-        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+    fn project_bucket_is_automatic_and_other_buckets_require_an_explicit_grant() {
+        let root = std::env::temp_dir().join(format!("boss-buckets-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
         service
@@ -5259,70 +5368,40 @@ mod memory_op_tests {
                 Ok(())
             })
             .unwrap();
-        let boss_memory =
-            |operation| service.handle(Some(boss), BossOperation::Memory { operation });
-        let insert = |collection: &str, title: &str, cue: &str, body: &str, source: &str| {
-            MemoryOperation::Insert {
-                collection: collection.into(),
-                title: title.into(),
-                cue: cue.into(),
-                body: body.into(),
-                source_id: source.into(),
-            }
-        };
-        let BossResult::Memory {
-            inserted: Some(work),
-            ..
-        } = boss_memory(insert(
-            "work",
-            "Launch owner",
-            "launch owner",
-            "Alec owns the launch.",
-            "t:1",
-        ))
+        let create = |name: &str| {
+            let BossResult::Memory { buckets, .. } = service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::CreateBucket {
+                            name: name.into(),
+                            purpose: String::new(),
+                        },
+                    },
+                )
         .unwrap()
         else {
-            panic!("boss insert returns the chunk");
+                panic!("create bucket returns metadata")
         };
-        boss_memory(insert(
-            "private",
-            "Private note",
-            "boss-only cue",
-            "boss-only body",
-            "t:2",
-        ))
-        .unwrap();
-        // The same scope/collection/source/body is an idempotent retry.
-        let BossResult::Memory {
-            inserted: Some(again),
-            ..
-        } = boss_memory(insert(
-            "work",
-            "Launch owner",
-            "launch owner",
-            "Alec owns the launch.",
-            "t:1",
-        ))
+            buckets.into_iter().next().unwrap()["id"]
+                .as_str()
         .unwrap()
-        else {
-            panic!("repeat insert returns the existing chunk");
+                .to_owned()
         };
-        assert_eq!(again.chunk_id, work.chunk_id);
-
-        let persona = service.document().personas[0].id;
-        let employee = service
+        let shared = create("Shared");
+        let private = create("Private");
+        let persona = service.document().personas[1].id;
+        let mut employee = service
             .prepare_employee(
                 boss,
                 persona,
                 "Review".into(),
-                Some(PermissionOverrides {
-                    memory_folders: Some(vec!["work".into()]),
-                    ..Default::default()
-                }),
+                None,
                 EmployeeGoal::Errand,
                 None,
             )
             .unwrap();
+        employee.permissions.bucket_ids.push(shared.clone());
         let employee_id = employee.session_id;
         service
             .update(|state| {
@@ -5330,71 +5409,227 @@ mod memory_op_tests {
                 Ok(())
             })
             .unwrap();
-        let employee_memory =
-            |operation| service.handle(Some(employee_id), BossOperation::Memory { operation });
+        let project = root.join("repo");
+        fs::create_dir_all(&project).unwrap();
+        service.set_project_context(employee_id, project);
+
+        let BossResult::Memory { buckets, .. } = service
+            .handle(
+                Some(employee_id),
+                BossOperation::Memory {
+                    operation: MemoryOperation::ListBuckets,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("list buckets returns visible metadata")
+        };
+        assert!(buckets.iter().any(|bucket| bucket["id"] == shared));
+        assert!(!buckets.iter().any(|bucket| bucket["id"] == private));
+        let project_bucket = buckets
+            .iter()
+            .find(|bucket| bucket["projectId"].as_str().is_some())
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let BossResult::Memory {
+            recorded: Some(note),
+            ..
+        } = service
+            .handle(
+                Some(employee_id),
+                BossOperation::Memory {
+                    operation: MemoryOperation::Record {
+                        bucket: project_bucket,
+                        kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                        text: "Project access needs no special grant".into(),
+                        retry_key: "project-note".into(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("employee can write to its project bucket")
+        };
+        assert_eq!(note["text"], "Project access needs no special grant");
+        assert!(
+            service
+                .handle(
+                    Some(employee_id),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Overview { bucket: private }
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("access denied")
+        );
+        assert!(
+            service
+                .handle(
+                    Some(employee_id),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::CreateBucket {
+                            name: "Forbidden".into(),
+                            purpose: String::new()
+                        }
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("only the Boss")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_memory_migration_is_inspectable_additive_and_idempotent() {
+        let root = std::env::temp_dir().join(format!("boss-memory-import-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let BossResult::Memory { buckets, .. } = service
+            .handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::CreateBucket {
+                        name: "Imported notes".into(),
+                        purpose: String::new(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("bucket creation returns metadata")
+        };
+        let bucket = buckets[0]["id"].as_str().unwrap().to_owned();
+        let memory_dir = root.join("files/memory/work");
+        let engine_dir = root.join("files/memory-engine/scopes/old/collections/work/topics/topic");
+        fs::create_dir_all(&memory_dir).unwrap();
+        fs::create_dir_all(&engine_dir).unwrap();
+        fs::write(
+            memory_dir.join("MEMORY.md"),
+            "# Old memory\n\nRelease branch is dev.",
+        )
+        .unwrap();
+        fs::write(
+            engine_dir.join("note.md"),
+            "---\ntitle: Branch\n---\nThe default QA branch is dev.",
+        )
+        .unwrap();
+
+        let migrate = |dry_run| {
+            service.handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::MigrateLegacy {
+                        bucket: bucket.clone(),
+                        source: "boss".into(),
+                        dry_run,
+                    },
+                },
+            )
+        };
+        let BossResult::Memory {
+            migration: Some(preview),
+            ..
+        } = migrate(true).unwrap()
+        else {
+            panic!("dry run returns an inspectable migration report")
+        };
+        assert!(preview.dry_run);
+        assert_eq!(preview.imported, 0);
+        assert_eq!(preview.candidates.len(), 2);
+        assert!(
+            preview
+                .candidates
+                .iter()
+                .any(|candidate| candidate.text.contains("Release branch is dev"))
+        );
+        assert!(
+            fs::read_to_string(memory_dir.join("MEMORY.md"))
+                .unwrap()
+                .contains("Release branch is dev")
+        );
 
         let BossResult::Memory {
-            index: Some(index), ..
-        } = employee_memory(MemoryOperation::ListIndex).unwrap()
+            migration: Some(imported),
+            ..
+        } = migrate(false).unwrap()
         else {
-            panic!("employee index read succeeds");
+            panic!("import returns an inspectable report")
         };
-        assert!(index.contains("Launch owner"));
-        assert!(!index.contains("Private note") && !index.contains("boss-only"));
-        let BossResult::Memory { chunks, .. } = employee_memory(MemoryOperation::Search {
-            collection: "work".into(),
-            query: "launch".into(),
-        })
-        .unwrap() else {
-            panic!("employee search inside a granted collection succeeds");
+        assert_eq!(imported.imported, 2);
+        assert!(engine_dir.join("note.md").is_file());
+        let BossResult::Memory { notes, .. } = service
+            .handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::Scan {
+                        bucket: bucket.clone(),
+                        query: "dev".into(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("scan returns original bucket notes")
         };
-        assert_eq!(chunks.len(), 1);
-        assert!(
-            employee_memory(MemoryOperation::ReadChunk {
-                collection: "private".into(),
-                chunk_id: work.chunk_id.clone(),
-            })
-            .is_err()
+        assert_eq!(notes.len(), 2);
+        migrate(false).unwrap();
+        let BossResult::Memory { notes, .. } = service
+            .handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::Scan {
+                        bucket: bucket.clone(),
+                        query: "dev".into(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("scan returns original bucket notes")
+        };
+        assert_eq!(
+            notes.len(),
+            2,
+            "retrying migration does not duplicate records"
         );
-        assert!(
-            employee_memory(MemoryOperation::Search {
-                collection: "private".into(),
-                query: "boss-only".into(),
-            })
-            .is_err()
-        );
-        assert!(
-            employee_memory(MemoryOperation::Surface {
-                collection: "private".into(),
-                limit: 10,
-            })
-            .is_err()
-        );
-        assert!(
-            employee_memory(MemoryOperation::Zoom {
-                collection: "private".into(),
-                target: "topic:inbox".into(),
-            })
-            .is_err()
-        );
-        assert!(employee_memory(insert("work", "sneaky", "sneaky", "sneaky", "t:3")).is_err());
-
-        // Expiry revokes even the granted collection.
-        service.expire(employee_id).unwrap();
-        assert!(
-            employee_memory(MemoryOperation::Search {
-                collection: "work".into(),
-                query: "launch".into(),
-            })
-            .is_err()
-        );
+        let project = root.join("repo");
+        let project_memory = project.join(".goddard/memory");
+        fs::create_dir_all(&project_memory).unwrap();
+        fs::write(
+            project_memory.join("MEMORY.md"),
+            "Project memory survives worktree cleanup.",
+        )
+        .unwrap();
         let BossResult::Memory {
-            index: Some(index), ..
-        } = employee_memory(MemoryOperation::ListIndex).unwrap()
+            migration: Some(project_preview),
+            ..
+        } = service
+            .handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::MigrateLegacy {
+                        bucket: bucket.clone(),
+                        source: project.to_string_lossy().into_owned(),
+                        dry_run: true,
+                    },
+                },
+            )
+            .unwrap()
         else {
-            panic!("an expired employee's index still renders, minus every cue");
+            panic!("project dry run returns an inspectable report")
         };
-        assert!(!index.contains("Launch owner"));
+        assert_eq!(project_preview.candidates.len(), 1);
+        assert!(project_memory.join("MEMORY.md").is_file());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -5530,7 +5765,9 @@ mod memory_op_tests {
             panic!("the frozen document still reads")
         };
         // The legacy `memory/` spelling reads the same document.
-        let BossResult::File { content: legacy, .. } = service
+        let BossResult::File {
+            content: legacy, ..
+        } = service
             .handle(
                 None,
                 BossOperation::ReadFile {
@@ -5680,7 +5917,14 @@ mod memory_op_tests {
         };
         let member = |title: &str| {
             service
-                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
+                .prepare_employee(
+                    boss,
+                    persona,
+                    title.into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
                 .unwrap()
         };
         let first = member("A");
@@ -5692,13 +5936,17 @@ mod memory_op_tests {
         assert_eq!(wave.members.len(), 2);
         assert!(wave.resolved_at.is_none());
 
-        service.begin_finishing(first.session_id, false, false).unwrap();
+        service
+            .begin_finishing(first.session_id, false, false)
+            .unwrap();
         service.complete_expiry(first.session_id).unwrap();
         assert!(
             service.document().wave_outbox.is_empty(),
             "one member still in flight — no notice yet"
         );
-        service.begin_finishing(second.session_id, false, false).unwrap();
+        service
+            .begin_finishing(second.session_id, false, false)
+            .unwrap();
         service.complete_expiry(second.session_id).unwrap();
         let document = service.document();
         let wave = &document.waves[0];
@@ -5723,7 +5971,9 @@ mod memory_op_tests {
                 .outcome
                 .is_none()
         );
-        service.begin_finishing(first.session_id, false, false).unwrap();
+        service
+            .begin_finishing(first.session_id, false, false)
+            .unwrap();
         let document = service.document();
         assert!(document.waves[0].resolved_at.is_some());
         assert_eq!(
@@ -5779,7 +6029,14 @@ mod memory_op_tests {
             ..Default::default()
         };
         let employee = service
-            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(
+                boss,
+                persona,
+                "Job".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
             .unwrap();
         let session = employee.session_id;
         service.enqueue_ticket(employee, ticket()).unwrap();
@@ -5828,9 +6085,7 @@ mod memory_op_tests {
         service
             .request_resource_update(session, ticket(), builds(2), next)
             .unwrap();
-        let (_employee, stale) = service
-            .requeue_employee(session, ticket(), |_| {})
-            .unwrap();
+        let (_employee, stale) = service.requeue_employee(session, ticket(), |_| {}).unwrap();
         let requeued = service.employee(session).unwrap().ticket.unwrap();
         assert_eq!(requeued.resources.native_builds, 2);
         assert!(requeued.pending_reservation.is_none());
@@ -5841,7 +6096,9 @@ mod memory_op_tests {
         // Expiry hands back both a held reservation and a parked update
         // id so nothing leaks mid-flight.
         let held_two = Uuid::new_v4();
-        service.mark_dispatching(session, 2, Some(held_two)).unwrap();
+        service
+            .mark_dispatching(session, 2, Some(held_two))
+            .unwrap();
         service.mark_working(session, 2).unwrap();
         let parked = Uuid::new_v4();
         service
@@ -5870,7 +6127,14 @@ mod memory_op_tests {
             .unwrap();
         let persona = service.document().personas[0].id;
         let employee = service
-            .prepare_employee(boss, persona, "Job".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(
+                boss,
+                persona,
+                "Job".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
             .unwrap();
         let session_id = employee.session_id;
         // The wave record with the member still in flight, and an expired
@@ -5922,7 +6186,14 @@ mod memory_op_tests {
         let persona = service.document().personas[0].id;
         let hire = |title: &str| {
             let mut employee = service
-                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
+                .prepare_employee(
+                    boss,
+                    persona,
+                    title.into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
                 .unwrap();
             employee.set_lifecycle(EmployeeLifecycle::Working, 1);
             let session_id = employee.session_id;

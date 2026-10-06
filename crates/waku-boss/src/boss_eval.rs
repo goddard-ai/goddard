@@ -42,7 +42,7 @@ const MAX_EVAL_OUTPUT_CHARS: usize = 64 * 1024;
 const HELP: &str = "\
 Boss script bindings — every call runs one BossOperation and returns its
 payload (state maps, strings, ids); Saved operations return (). Variables
-exist only during this script invocation; use Boss files or memory for durable state.
+exist only during this script invocation; use named memory buckets for durable state.
 
   view()                                    boss state map
   roster()                                  compact employee status digest
@@ -91,9 +91,9 @@ exist only during this script invocation; use Boss files or memory for durable s
   rename(name)                              the boss's name
   renameEmployee(sessionId, name)
   regenerateAvatar([sessionId])             omit for the boss's own face
-  memory(#{type,...})                       memory store op: insert/importFolder/
-                                            surface/listIndex/search/readChunk/
-                                            zoom — returns its filled fields
+  memory(#{type,...})                       bucket op: listBuckets/createBucket/overview/
+                                            record/submitSummary/scan/zoomBucket; every
+                                            content op names its bucket explicitly
   op(#{type,...})                           advanced escape hatch for supported
                                             Boss operations, result returned whole
   help()                                    this text";

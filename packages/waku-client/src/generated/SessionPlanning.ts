@@ -9,8 +9,8 @@ import type { WireTranslation } from "./WireTranslation";
  */
 export type SessionPlanning = {
 /**
- * The plan document, relative to `memory/` in the Boss files root —
- * always `plans/<name>.md`.
+ * The plan document, relative to the Boss files root — always
+ * `plans/<name>.md`.
  */
 planFile: string,
 /**

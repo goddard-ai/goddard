@@ -79,11 +79,6 @@ pub struct DaemonSettings {
     /// means the user removed them, so the field always serializes.
     #[serde(default = "crate::auto_prompts::default_rules")]
     pub auto_prompts: Vec<AutoPromptRule>,
-    /// Experimental opt-in for project memory: the daemon maintains a
-    /// `.goddard/memory/` store per project, distills finished turns into it
-    /// in the background, and injects it into each session's first prompt.
-    /// Defaults on in development builds, opt-in in release builds.
-    pub memory_experiment_enabled: bool,
     /// Experimental opt-in for the Boss assistant, employee management,
     /// personas, and plans surfaces. Defaults on in development builds and
     /// opt-in in release builds.
@@ -99,11 +94,6 @@ pub struct DaemonSettings {
     /// development builds and off in release builds.
     #[serde(default = "default_experiment_enabled")]
     pub composer_drafts_experiment_enabled: bool,
-    /// Per-provider model override for memory distillation runs. A provider
-    /// absent here distills on its advertised default model; the value is a
-    /// catalog model id handed to that provider's headless driver.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub memory_models: BTreeMap<ProviderKind, String>,
     /// Preferred inexpensive model for background session title rewrites.
     /// Claude and Codex have inexpensive defaults; other supported providers
     /// need a selected model before background title rewrites can run.
@@ -184,12 +174,10 @@ impl Default for DaemonSettings {
             route_classes: RouteClassMap::new(),
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
-            memory_experiment_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             boss_rotation_cache_ttl_secs: HashMap::new(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
-            memory_models: BTreeMap::new(),
             title_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),

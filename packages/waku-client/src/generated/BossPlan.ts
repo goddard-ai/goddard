@@ -3,7 +3,7 @@
 /**
  * A planning session the boss opened with `createPlan`: the managed task
  * it drafts in and the plan document that task owns. `plan_file` is
- * relative to `memory/` in the Boss files root — always `plans/<name>.md`.
+ * relative to the Boss files root — always `plans/<name>.md`.
  * `finalized_at` freezes the document once the user approves
  * `finalizePlan`; the daemon archives the session after a grace period.
  */

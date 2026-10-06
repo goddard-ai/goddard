@@ -19,9 +19,11 @@ pub struct BossIdentity {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PersonaPermissions {
-    pub memory_folders: Vec<String>,
+    /// Explicit grants to Boss-created memory buckets.
+    #[serde(default)]
+    pub bucket_ids: Vec<String>,
     pub integration_ids: Vec<String>,
     pub summon_employees: bool,
     pub computer_use: bool,
@@ -31,12 +33,8 @@ impl PersonaPermissions {
     /// Restrict these grants to what `ceiling` holds — delegation can
     /// narrow, never widen, a supervisor employee's own permissions.
     pub fn clamp_within(&mut self, ceiling: &PersonaPermissions) {
-        self.memory_folders.retain(|folder| {
-            ceiling
-                .memory_folders
-                .iter()
-                .any(|grant| std::path::Path::new(folder).starts_with(grant))
-        });
+        self.bucket_ids
+            .retain(|bucket| ceiling.bucket_ids.contains(bucket));
         self.integration_ids
             .retain(|id| ceiling.integration_ids.contains(id));
         self.summon_employees &= ceiling.summon_employees;
@@ -53,7 +51,8 @@ impl PersonaPermissions {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct PermissionOverrides {
-    pub memory_folders: Option<Vec<String>>,
+    #[serde(default)]
+    pub bucket_ids: Option<Vec<String>>,
     pub integration_ids: Option<Vec<String>>,
     pub summon_employees: Option<bool>,
     pub computer_use: Option<bool>,
@@ -61,8 +60,8 @@ pub struct PermissionOverrides {
 
 impl PermissionOverrides {
     pub fn apply_to(&self, permissions: &mut PersonaPermissions) {
-        if let Some(folders) = &self.memory_folders {
-            permissions.memory_folders = folders.clone();
+        if let Some(buckets) = &self.bucket_ids {
+            permissions.bucket_ids = buckets.clone();
         }
         if let Some(ids) = &self.integration_ids {
             permissions.integration_ids = ids.clone();
@@ -82,9 +81,8 @@ pub struct BossPersona {
     pub id: Uuid,
     pub name: String,
     pub markdown: String,
-    /// Memory files pinned into the persona's context — paths relative to
-    /// `memory/` in the Boss files root, matching `memory_folders`.
-    /// Pinning also grants employees read access to the file.
+    /// Documents pinned into the persona's context — relative to the Boss
+    /// files root. Memory knowledge is granted through named buckets.
     #[serde(default, alias = "knowledgeFiles")]
     pub pinned_files: Vec<String>,
     pub permissions: PersonaPermissions,
@@ -105,9 +103,8 @@ pub struct BossPersonaUpsert {
     pub id: Uuid,
     pub name: String,
     pub markdown: String,
-    /// Memory files pinned into the persona's context — paths relative to
-    /// `memory/` in the Boss files root, matching `memory_folders`.
-    /// Pinning also grants employees read access to the file.
+    /// Documents pinned into the persona's context — relative to the Boss
+    /// files root. Memory knowledge is granted through named buckets.
     #[serde(default, alias = "knowledgeFiles")]
     pub pinned_files: Vec<String>,
     pub permissions: PersonaPermissions,
@@ -953,63 +950,74 @@ pub enum AutomationOperation {
     deny_unknown_fields
 )]
 pub enum MemoryOperation {
-    Insert {
-        collection: String,
-        title: String,
-        cue: String,
-        body: String,
-        source_id: String,
+    ListBuckets,
+    CreateBucket {
+        name: String,
+        #[serde(default)]
+        purpose: String,
     },
-    ImportFolder {
-        folder: String,
-        collection: String,
+    Overview {
+        bucket: String,
     },
-    Surface {
-        collection: String,
-        limit: usize,
+    Record {
+        bucket: String,
+        kind: MemoryNoteKind,
+        text: String,
+        retry_key: String,
     },
-    ListIndex,
-    Search {
-        collection: String,
+    SubmitSummary {
+        bucket: String,
+        start: u64,
+        end: u64,
+        text: String,
+    },
+    Scan {
+        bucket: String,
         query: String,
     },
-    ReadChunk {
-        collection: String,
-        chunk_id: String,
+    ZoomBucket {
+        bucket: String,
+        start: u64,
+        end: u64,
     },
-    Zoom {
-        collection: String,
-        target: String,
+    /// Inspect or append old memory files into an explicit named bucket.
+    /// `source` is `boss` or an absolute project root. This operation is
+    /// Boss-only; dry runs return every candidate without changing storage.
+    MigrateLegacy {
+        bucket: String,
+        source: String,
+        #[serde(default = "default_true")]
+        dry_run: bool,
     },
 }
 
-/// One immutable memory record. The daemon's file store persists it as a
-/// Markdown file: snake_case frontmatter (the field aliases) plus `body` as
-/// the file's text, while the wire form is camelCase like every other
-/// protocol type.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MemoryNoteKind {
+    Fact,
+    Observation,
+    Question,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct MemoryChunk {
-    pub version: u32,
-    #[serde(alias = "chunk_id")]
-    pub chunk_id: String,
-    #[serde(alias = "scope_id")]
-    pub scope_id: String,
-    #[serde(alias = "collection_id")]
-    pub collection_id: String,
-    pub layer: String,
-    pub revision: u64,
-    pub title: String,
-    pub cue: String,
-    pub status: String,
-    #[serde(alias = "source_id")]
-    pub source_id: String,
-    #[serde(alias = "source_digest")]
-    pub source_digest: String,
-    #[serde(alias = "created_at")]
-    pub created_at: u64,
-    #[serde(default)]
-    pub body: String,
+pub struct MemoryMigrationCandidate {
+    pub source: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryMigrationReport {
+    pub bucket: String,
+    pub source: String,
+    pub dry_run: bool,
+    pub candidates: Vec<MemoryMigrationCandidate>,
+    pub imported: usize,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -1095,10 +1103,20 @@ pub enum BossResult {
         output: String,
     },
     Memory {
-        index: Option<String>,
-        chunks: Vec<MemoryChunk>,
-        inserted: Option<MemoryChunk>,
-        imported: Option<usize>,
+        #[serde(default)]
+        buckets: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        overview: Option<serde_json::Value>,
+        #[serde(default)]
+        notes: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compression: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recorded: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        migration: Option<MemoryMigrationReport>,
     },
 }
 
@@ -1269,13 +1287,13 @@ mod tests {
             "prompt": "Check the build",
             "project": "/project",
             "reasoningEffort": "high",
-            "permissions": {"memoryFolders": ["work"], "computerUse": true}
+            "permissions": {"bucketIds": ["work"], "computerUse": true}
         }))
         .unwrap();
         assert!(matches!(
             summon,
             super::BossOperation::Summon { permissions: Some(overrides), reasoning_effort, work_goal, .. }
-                if overrides.memory_folders.as_deref() == Some(&["work".to_string()][..])
+                if overrides.bucket_ids.as_deref() == Some(&["work".to_string()][..])
                     && overrides.computer_use == Some(true)
                     && overrides.integration_ids.is_none()
                     && reasoning_effort.as_deref() == Some("high")

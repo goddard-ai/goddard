@@ -1,1 +1,0 @@
-- [Experimental] Employee transcripts, side-chat handoffs, provider-switch carry-over, and project memory now share the memory engine's store and reads — each session and project keeps its own scope and grants, so readers see the same context as before.

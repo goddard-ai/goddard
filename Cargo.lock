@@ -11405,6 +11405,7 @@ dependencies = [
  "rhai",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "url",
  "uuid",
  "waku-memory-engine",
@@ -11480,7 +11481,6 @@ dependencies = [
  "waku-boss",
  "waku-client",
  "waku-localization",
- "waku-memory-engine",
  "waku-protocol",
  "waku-repo-map",
  "waku-share",
@@ -11516,7 +11516,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "uuid",
- "waku-protocol",
 ]
 
 [[package]]

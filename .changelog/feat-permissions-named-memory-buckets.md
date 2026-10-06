@@ -1,0 +1,1 @@
+- Employees can use their project's shared memory bucket through explicit bucket operations, with agent-written summaries and durable original notes; Boss can inspect and add legacy memory files to a named bucket with a dry-run migration command that preserves every source file.

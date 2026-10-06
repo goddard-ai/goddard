@@ -81,13 +81,6 @@ provider_route_classes?: { [key in ProviderKind]?: { [key in TaskClass]?: RouteC
  */
 auto_prompts: Array<AutoPromptRule>,
 /**
- * Experimental opt-in for project memory: the daemon maintains a
- * `.goddard/memory/` store per project, distills finished turns into it
- * in the background, and injects it into each session's first prompt.
- * Defaults on in development builds, opt-in in release builds.
- */
-memory_experiment_enabled: boolean,
-/**
  * Experimental opt-in for the Boss assistant, employee management,
  * personas, and plans surfaces. Defaults on in development builds and
  * opt-in in release builds.
@@ -107,12 +100,6 @@ boss_rotation_cache_ttl_secs?: { [key in ProviderKind]?: number },
  * development builds and off in release builds.
  */
 composer_drafts_experiment_enabled: boolean,
-/**
- * Per-provider model override for memory distillation runs. A provider
- * absent here distills on its advertised default model; the value is a
- * catalog model id handed to that provider's headless driver.
- */
-memory_models?: { [key in ProviderKind]?: string },
 /**
  * Preferred inexpensive model for background session title rewrites.
  * Claude and Codex have inexpensive defaults; other supported providers

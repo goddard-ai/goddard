@@ -87,7 +87,7 @@ pub(super) struct DaemonQrCode {
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 18] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 17] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -135,12 +135,6 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 18] = [
         "settings.git",
         "icons/git-branch.svg",
         "settings.git_keywords",
-    ),
-    (
-        SettingsPage::Memory,
-        "settings.memory",
-        "icons/book-open.svg",
-        "settings.memory_keywords",
     ),
     (
         SettingsPage::Usage,
@@ -1272,14 +1266,6 @@ impl Waku {
         self.settings_search_sections.clear();
         self.settings_search_target = None;
         let page = self.settings_page.unwrap_or(SettingsPage::General);
-        // The Memory page's selection dies with it — a stale range would
-        // otherwise keep winning the ⌘C chain while its text is off screen.
-        if page != SettingsPage::Memory {
-            self.settings_memory_selection
-                .selection
-                .borrow_mut()
-                .clear();
-        }
         let search = SettingSearch::inactive().for_page(
             page,
             &self.settings_scroll,
@@ -1391,7 +1377,6 @@ impl Waku {
                         SettingsPage::Terminal => tr!("settings.terminal"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                         SettingsPage::Git => tr!("settings.git"),
-                        SettingsPage::Memory => tr!("settings.memory"),
                         SettingsPage::Jev => tr!("settings.jev"),
                         SettingsPage::Experiments => tr!("settings.experiments"),
                         SettingsPage::Integrations => tr!("settings.integrations"),
@@ -1412,7 +1397,6 @@ impl Waku {
                 SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                 SettingsPage::Git => self.render_git_settings(window, cx),
-                SettingsPage::Memory => self.render_memory_settings(cx),
                 SettingsPage::Jev => self.render_jev_settings(&search, cx),
                 SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
                 SettingsPage::Integrations => self.render_integrations_settings(cx),
@@ -1472,30 +1456,7 @@ impl Waku {
                             &self.settings_scrollbar,
                         ))
                     })
-                    .children(git_scrollbar)
-                    // The Memory page's text-selection input covers the
-                    // viewport — outside the scroll container, whose bounds
-                    // mark the scrolled content instead; the contract
-                    // [`md::render::install_selection_input`] documents.
-                    .when(page == SettingsPage::Memory, |element| {
-                        let selection = self.settings_memory_selection.clone();
-                        element.child(
-                            canvas(
-                                |bounds, window, _| {
-                                    window.insert_hitbox(bounds, HitboxBehavior::Normal).id
-                                },
-                                move |_, region, window, _| {
-                                    md::render::install_selection_input(
-                                        region, window, &selection, None,
-                                    )
-                                },
-                            )
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full(),
-                        )
-                    }),
+                    .children(git_scrollbar),
             )
     }
 
@@ -5337,17 +5298,6 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
-                id: "memory-experiment-toggle",
-                icon: "icons/brain.svg",
-                title_key: "experiments.memory_title",
-                description_key: "experiments.memory_description",
-                enabled: self.state.memory_experiment_enabled,
-                set: Self::set_memory_experiment_enabled,
-                eval_backed: false,
-                tuning: Some(Self::memory_tuning),
-            },
-            ExperimentDef {
-                group: ExperimentGroup::Sessions,
                 id: "boss-experiment-toggle",
                 icon: "icons/brain.svg",
                 title_key: "experiments.boss_title",
@@ -7461,34 +7411,8 @@ impl Waku {
         cx.notify();
     }
 
-    fn set_memory_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.memory_experiment_enabled = enabled;
-        self.save();
-        cx.notify();
-    }
-
     fn set_composer_drafts_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.composer_drafts_experiment_enabled = enabled;
-        self.save();
-        cx.notify();
-    }
-
-    /// The per-provider memory-distillation override: `None` restores the
-    /// provider's advertised default model.
-    fn set_memory_model(
-        &mut self,
-        provider: ProviderKind,
-        model: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        match model {
-            Some(model) => {
-                self.state.memory_models.insert(provider, model);
-            }
-            None => {
-                self.state.memory_models.remove(&provider);
-            }
-        }
         self.save();
         cx.notify();
     }
@@ -8039,324 +7963,6 @@ impl Waku {
             .update(cx, |input, cx| input.set_content(instructions, cx));
         self.save_voice_briefing_fields(cx);
         cx.notify();
-    }
-
-    /// The project-memory card's tuning block: one model picker per enabled
-    /// provider, governing only the daemon's background distillation runs.
-    fn memory_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let rows = Self::probes_on(&self.probes, waku_client::DaemonKey::Local)
-            .iter()
-            .filter(|probe| {
-                probe.installed && !self.state.disabled_providers.contains(&probe.provider)
-            })
-            .map(|probe| self.memory_model_row(probe, theme, cx))
-            .collect::<Vec<_>>();
-        if rows.is_empty() {
-            return div().into_any_element();
-        }
-        div()
-            .mt(px(10.0))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .text_size(sp(11.5))
-                    .line_height(sp(15.0))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("experiments.memory_models_caption")),
-            )
-            .children(rows)
-            .into_any_element()
-    }
-
-    /// One provider's distillation-model picker. It uses the shared searchable
-    /// model panel; the provider default row clears the memory override.
-    fn memory_model_row(&self, probe: &ProviderProbe, theme: Theme, cx: &mut Context<Self>) -> Div {
-        let provider = probe.provider;
-        let current = self.state.memory_models.get(&provider).cloned();
-        let label = current
-            .as_deref()
-            .map(|id| {
-                probe
-                    .model(id)
-                    .map(|model| model.name.clone())
-                    .unwrap_or_else(|| id.to_owned())
-            })
-            .unwrap_or_else(|| tr!("experiments.memory_model_default"));
-        let menu_id = format!("memory-model-{}", provider.id());
-        let search = self.route_class_picker.search.clone();
-        let search_focus = search.read(cx).focus_handle(cx);
-        let weak = cx.entity().downgrade();
-        let current_for_open = current.clone();
-        let handle = {
-            let open_weak = weak.clone();
-            let reset_search = search.clone();
-            let picker_focus = search_focus.clone();
-            self.menu_handle_with(menu_id.clone(), cx, move |open, window, cx| {
-                if open {
-                    reset_search.update(cx, |search, cx| search.clear(cx));
-                    let _ = open_weak.update(cx, |this, cx| {
-                        this.refresh_provider_model_discovery(provider);
-                        let rows = this.memory_model_picker_rows(provider, "");
-                        let selected = rows.iter().position(|row| match row {
-                            PickerRow::ProviderDefault(kind) => {
-                                *kind == provider && current_for_open.is_none()
-                            }
-                            PickerRow::Combo(row) => {
-                                row.provider == provider
-                                    && current_for_open.as_deref() == Some(row.model.id.as_str())
-                            }
-                            PickerRow::Policy(_) => false,
-                        });
-                        this.route_class_picker.highlight = None;
-                        if let Some(index) = selected {
-                            this.route_class_picker.reveal(index, rows.len());
-                        }
-                        cx.notify();
-                    });
-                    let focus = picker_focus.clone();
-                    window.on_next_frame(move |window, _| {
-                        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                    });
-                } else {
-                    let _ = open_weak.update(cx, |this, cx| {
-                        this.route_class_picker.highlight = None;
-                        let focus = this.settings_focus.clone();
-                        window.focus(&focus, cx);
-                    });
-                }
-            })
-        };
-        let normalized_query = search.read(cx).content().trim().to_ascii_lowercase();
-        let searching = !normalized_query.is_empty();
-        let available_rows = Rc::new(if handle.is_open() {
-            self.memory_model_picker_rows(provider, &normalized_query)
-        } else {
-            Vec::new()
-        });
-        let section_rows = if searching && handle.is_open() {
-            Rc::new(self.memory_model_picker_rows(provider, ""))
-        } else {
-            available_rows.clone()
-        };
-        let rail_favorites = section_rows
-            .iter()
-            .any(|row| picker_row_section(row) == PickerSection::Favorites);
-        let rail_recents = section_rows
-            .iter()
-            .any(|row| picker_row_section(row) == PickerSection::Recents);
-        let highlight = self
-            .route_class_picker
-            .highlight
-            .filter(|index| *index < available_rows.len());
-        let list_state = self.route_class_picker.list.clone();
-        let scrollbar_state = self.route_class_picker.scrollbar.clone();
-        let current_for_render = current.clone();
-        let rows_for_render = available_rows.clone();
-        let weak_for_render = weak.clone();
-        let popover_chip = MenuChip::new(format!("memory-model-selector-{}", provider.id()))
-            .label(label)
-            .outlined()
-            .selected(handle.is_open())
-            .w(px(240.0))
-            .justify_between();
-        div()
-            .flex()
-            .items_center()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(provider_mark(provider, 15.0, theme.text_secondary))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(provider.display_name()),
-                    ),
-            )
-            .child(popover(
-                popover_chip,
-                &handle,
-                MenuAlign::BelowRight,
-                move |popover, _window, _cx| {
-                    let theme = Theme::current(_cx);
-                    let mut rail_sections = Vec::new();
-                    if rail_favorites {
-                        rail_sections.push(picker_section_rail_item(
-                            format!("memory-model-rail-favorites-{}", provider.id()),
-                            icon("icons/star.svg", 17.0, theme.text_tertiary).into_any_element(),
-                            PickerSection::Favorites,
-                            move |this| this.memory_model_picker_rows(provider, ""),
-                            route_class_picker_state,
-                        ));
-                    }
-                    if rail_recents {
-                        rail_sections.push(picker_section_rail_item(
-                            format!("memory-model-rail-recents-{}", provider.id()),
-                            icon("icons/hourglass.svg", 17.0, theme.text_tertiary)
-                                .into_any_element(),
-                            PickerSection::Recents,
-                            move |this| this.memory_model_picker_rows(provider, ""),
-                            route_class_picker_state,
-                        ));
-                    }
-                    let render_weak = weak_for_render.clone();
-                    let render_current = current_for_render.clone();
-                    let move_current = current.clone();
-                    let render_row = Rc::new(
-                        move |row_index: usize,
-                              row: &PickerRow,
-                              is_highlighted: bool,
-                              popover: &ContextMenuHandle,
-                              _window: &mut Window,
-                              cx: &mut App|
-                              -> AnyElement {
-                            let theme = Theme::current(cx);
-                            let (title, subtitle) = match row {
-                                PickerRow::ProviderDefault(_) => (
-                                    provider.short_name().to_owned(),
-                                    tr!("experiments.memory_model_default"),
-                                ),
-                                PickerRow::Combo(row) => (
-                                    row.model
-                                        .name_i18n
-                                        .as_ref()
-                                        .map(waku_client::WireTranslation::render)
-                                        .unwrap_or_else(|| row.model.name.clone()),
-                                    model_picker_subtitle(
-                                        row.provider,
-                                        row.model.sub_provider.as_deref(),
-                                    ),
-                                ),
-                                PickerRow::Policy(_) => return div().into_any_element(),
-                            };
-                            let mark = provider_mark(provider, 12.0, theme.text_tertiary)
-                                .into_any_element();
-                            let selected = match row {
-                                PickerRow::ProviderDefault(kind) => {
-                                    *kind == provider && render_current.is_none()
-                                }
-                                PickerRow::Combo(row) => {
-                                    row.provider == provider
-                                        && render_current.as_deref() == Some(row.model.id.as_str())
-                                }
-                                PickerRow::Policy(_) => false,
-                            };
-                            let picked = row.clone();
-                            let picked_weak = render_weak.clone();
-                            let picked_popover = popover.clone();
-                            model_picker_row_shell(
-                                SharedString::from(format!("memory-model-row-{row_index}")),
-                                selected,
-                                is_highlighted,
-                                &theme,
-                            )
-                            .child(model_picker_row_body(title, None, mark, subtitle, &theme))
-                            .when(selected, |element| {
-                                element.child(icon("icons/check.svg", 13.0, theme.accent))
-                            })
-                            .on_click(move |_, window, cx| {
-                                let _ = picked_weak.update(cx, |this, cx| {
-                                    this.apply_memory_model_row(provider, &picked, cx);
-                                });
-                                picked_popover.close(window, cx);
-                            })
-                            .into_any_element()
-                        },
-                    );
-                    model_picker_panel(
-                        ModelPickerPanel {
-                            rows: rows_for_render.clone(),
-                            search: search.clone(),
-                            list_state: list_state.clone(),
-                            scrollbar_state: scrollbar_state.clone(),
-                            highlight,
-                            empty_label: tr!("models.none_found").into(),
-                            rail_sections,
-                            // This picker is already scoped to its row's provider.
-                            rail_providers: Vec::new(),
-                            render_row,
-                            on_move: Rc::new(move |this, key, rows, cx| {
-                                let seed = rows.iter().position(|row| match row {
-                                    PickerRow::ProviderDefault(kind) => {
-                                        *kind == provider && move_current.is_none()
-                                    }
-                                    PickerRow::Combo(row) => {
-                                        row.provider == provider
-                                            && move_current.as_deref()
-                                                == Some(row.model.id.as_str())
-                                    }
-                                    PickerRow::Policy(_) => false,
-                                });
-                                if this
-                                    .route_class_picker
-                                    .move_highlight(seed, rows.len(), key)
-                                    .is_some()
-                                {
-                                    cx.notify();
-                                }
-                            }),
-                            on_confirm: Rc::new(move |this, rows, cx| {
-                                if let Some(row) =
-                                    rows.get(this.route_class_picker.highlight.unwrap_or(0))
-                                {
-                                    this.apply_memory_model_row(provider, row, cx);
-                                }
-                            }),
-                            on_cycle_section: None,
-                        },
-                        &popover,
-                        &theme,
-                        &weak,
-                    )
-                },
-            ))
-    }
-
-    fn memory_model_picker_rows(
-        &self,
-        provider: ProviderKind,
-        normalized_query: &str,
-    ) -> Vec<PickerRow> {
-        picker_rows(
-            Self::probes_on(&self.probes, waku_client::DaemonKey::Local),
-            &PickerRowSpec {
-                leading: &[],
-                provider_defaults: true,
-                granularity: PickerGranularity::Models,
-                favorites: &self.state.favorite_models,
-                pinned: &self.pinned_unfavorites,
-                recents: &self.state.recent_model_uses,
-                disabled_providers: &[],
-                locked_provider: Some(provider),
-                normalized_query,
-            },
-        )
-    }
-
-    fn apply_memory_model_row(
-        &mut self,
-        provider: ProviderKind,
-        row: &PickerRow,
-        cx: &mut Context<Self>,
-    ) {
-        match row {
-            PickerRow::ProviderDefault(kind) if *kind == provider => {
-                self.set_memory_model(provider, None, cx);
-            }
-            PickerRow::Combo(row) if row.provider == provider => {
-                self.set_memory_model(provider, Some(row.model.id.clone()), cx);
-            }
-            PickerRow::Policy(_) | PickerRow::ProviderDefault(_) | PickerRow::Combo(_) => {}
-        }
     }
 
     /// The sandbox experiment opt-in is daemon-owned like subagents. Turning

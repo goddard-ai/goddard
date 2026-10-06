@@ -318,9 +318,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss employee model EMPLOYEE_ID --provider codex --model gpt-5".to_owned(),
         ),
         "boss employee permissions" => (
-            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"memoryFolders":{"type":"string[]","optional":true},"integrationIds":{"type":"string[]","optional":true},"summonEmployees":{"type":"boolean","optional":true},"computerUse":{"type":"boolean","optional":true}}}}),
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucketIds":{"type":"string[]","optional":true,"notes":"Boss-created bucket IDs; project bucket access is automatic"},"integrationIds":{"type":"string[]","optional":true},"summonEmployees":{"type":"boolean","optional":true},"computerUse":{"type":"boolean","optional":true}}}}),
             json!({"json":{"type":"saved"}}),
-            "goddard-agent boss employee permissions EMPLOYEE_ID --json '{\"memoryFolders\":[\"work\"]}'".to_owned(),
+            "goddard-agent boss employee permissions EMPLOYEE_ID --json '{\"bucketIds\":[\"operating-rules\"]}'".to_owned(),
         ),
         "boss employee workspace" => (
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"workspace":{"required":true,"enum":["local","worktree"]},"baseBranch":{"requiredWhen":"workspace=worktree"}}}}),
@@ -350,62 +350,67 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         "boss file write" => (
             json!({"PATH":{"positional":true,"required":true,"type":"Boss-files relative path"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 content; an empty file clears content"}}),
             json!({"json":{"type":"saved"}}),
-            "goddard-agent boss file write memory/work/notes.md --file notes.md".to_owned(),
+            "goddard-agent boss file write plans/auth.md --file auth.md".to_owned(),
         ),
         "boss file list" => (
             json!({"PATH":{"positional":true,"optional":true,"default":"Boss files root","type":"Boss-files relative directory path"}}),
             json!({"json":{"type":"files","files":"array of {path: string, directory: boolean}"}}),
-            "goddard-agent boss file list memory".to_owned(),
+            "goddard-agent boss file list plans".to_owned(),
         ),
         "boss file read" => (
             json!({"PATH":{"positional":true,"required":true,"type":"Boss-files relative path"}}),
             json!({"json":{"type":"file","path":"resolved relative path","content":"UTF-8 file contents"}}),
-            "goddard-agent boss file read memory/work/notes.md".to_owned(),
+            "goddard-agent boss file read plans/auth.md".to_owned(),
         ),
         "boss file mkdir" => (
             json!({"PATH":{"positional":true,"required":true,"type":"Boss-files relative directory path"}}),
             json!({"json":{"type":"saved"}}),
-            "goddard-agent boss file mkdir memory/work".to_owned(),
+            "goddard-agent boss file mkdir plans/archive".to_owned(),
         ),
         "boss persona upsert" => (
-            json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"memoryFolders":"string[]","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
+            json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"bucketIds":"string[] of existing Boss-created buckets","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
             json!({"json":{"type":"state","state":"updated BossState including the persona record"}}),
             "goddard-agent boss persona upsert --new --name Reviewer --file persona.md".to_owned(),
         ),
-        "boss memory insert" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"collection":{"required":true},"title":{"required":true},"cue":{"required":true},"body":{"required":true},"sourceId":{"required":true}}}}),
-            json!({"json":{"type":"memory","inserted":"created MemoryChunk"}}),
-            "goddard-agent boss memory insert --json-file memory-entry.json".to_owned(),
-        ),
-        "boss memory import" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"folder":{"required":true,"type":"relative path under memory/"},"collection":{"required":true,"type":"collection ID"}}}}),
-            json!({"json":{"type":"memory","imported":"number of indexed chunks"}}),
-            "goddard-agent boss memory import --json '{\"folder\":\"work\",\"collection\":\"project-x\"}'".to_owned(),
-        ),
-        "boss memory index" => (
+        "boss memory buckets" => (
             json!({}),
-            json!({"json":{"type":"memory","index":"memory collection/index listing"}}),
-            "goddard-agent boss memory index".to_owned(),
+            json!({"json":{"type":"memory","buckets":"bucket names and purposes visible to this caller; contents are not loaded"}}),
+            "goddard-agent boss memory buckets".to_owned(),
         ),
-        "boss memory search" => (
-            json!({"COLLECTION":{"positional":true,"required":true,"type":"collection ID"},"QUERY":{"positional":true,"required":true,"type":"search query"}}),
-            json!({"json":{"type":"memory","chunks":"matching MemoryChunk records"}}),
-            "goddard-agent boss memory search project-x authentication".to_owned(),
+        "boss memory create" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"name":{"required":true},"purpose":{"optional":true}}}}),
+            json!({"json":{"type":"memory","buckets":"created bucket metadata"}}),
+            "goddard-agent boss memory create --json '{\"name\":\"Operating rules\",\"purpose\":\"Boss-owned guidance\"}'".to_owned(),
         ),
-        "boss memory read" => (
-            json!({"COLLECTION":{"positional":true,"required":true,"type":"collection ID"},"CHUNK_ID":{"positional":true,"required":true,"type":"memory chunk ID"}}),
-            json!({"json":{"type":"memory","chunks":"one MemoryChunk record"}}),
-            "goddard-agent boss memory read project-x chunk-id".to_owned(),
+        "boss memory overview" => (
+            json!({"BUCKET":{"positional":true,"required":true,"type":"named bucket ID"}}),
+            json!({"json":{"type":"memory","overview":"bounded summaries and recent original notes","compression":"optional agent-written summary request"}}),
+            "goddard-agent boss memory overview project-abc".to_owned(),
+        ),
+        "boss memory record" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"required":true},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true},"retryKey":{"required":true}}}}),
+            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent boss memory record --json-file note.json".to_owned(),
+        ),
+        "boss memory summary" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"required":true},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}}}),
+            json!({"json":{"type":"memory","compression":"next summary request, if one is ready"}}),
+            "goddard-agent boss memory summary --json-file summary.json".to_owned(),
+        ),
+        "boss memory scan" => (
+            json!({"BUCKET":{"positional":true,"required":true,"type":"named bucket ID"},"QUERY":{"positional":true,"required":true,"type":"literal search in original notes"}}),
+            json!({"json":{"type":"memory","notes":"matching original notes"}}),
+            "goddard-agent boss memory scan project-abc authentication".to_owned(),
         ),
         "boss memory zoom" => (
-            json!({"COLLECTION":{"positional":true,"required":true,"type":"collection ID"},"TARGET":{"positional":true,"required":true,"type":"memory chunk or topic target"}}),
-            json!({"json":{"type":"memory","chunks":"expanded related MemoryChunk records"}}),
-            "goddard-agent boss memory zoom project-x auth-token".to_owned(),
+            json!({"BUCKET":{"positional":true,"required":true,"type":"named bucket ID"},"START":{"positional":true,"required":true,"type":"first note index"},"END":{"positional":true,"required":true,"type":"last note index"}}),
+            json!({"json":{"type":"memory","notes":"two child summaries or the original note"}}),
+            "goddard-agent boss memory zoom project-abc 1 8".to_owned(),
         ),
-        "boss memory surface" => (
-            json!({"COLLECTION":{"positional":true,"required":true,"type":"collection ID"},"--limit":{"type":"positive integer","default":20}}),
-            json!({"json":{"type":"memory","chunks":"surfaced MemoryChunk records"}}),
-            "goddard-agent boss memory surface project-x --limit 8".to_owned(),
+        "boss memory migrate" => (
+            json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false appends candidates; source files are never modified"}}),
+            json!({"json":{"type":"memory","migration":{"dryRun":"candidate list when true; imported count when false","candidates":"inspectable source paths and original note text"}}}),
+            "goddard-agent boss memory migrate project-abc boss".to_owned(),
         ),
         "boss plan create" => (
             json!({"--title":{"required":true,"type":"plan display title"},"--plan-file":{"required":true,"type":"relative path under plans/"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 planning brief"},"--provider":{"enum":providers,"optional":true},"--model":{"type":"provider model ID","optional":true}}),
@@ -578,7 +583,7 @@ fn legacy_schema() -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect();
     json!({
-        "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "summon", "control", "reportBlocker", "transcript", "context", "rename", "renameEmployee", "regenerateAvatar", "upsertPersona", "setEmployeeIcon", "listFiles", "readFile", "writeFile", "createFolder", "publishDeliverable", "dismissDeliverable", "speak", "eval", "memory", "createPlan", "finalizePlan"], "createPlan": {"title": "the idea the design doc covers — becomes the planning session's title", "planFile": "design doc file name under plans/ in the boss's files root (e.g. \"auth.md\"; accepts plans/<name>.md or workspace/plans/<name>.md spellings)", "prompt": "the user request that prompted planning — seeds the new session's transcript", "provider": "optional inherited provider", "model": "optional inherited model", "notes": "boss-only; opens a dedicated boss-attached planning session — a product-design session that drafts a design doc (user experience, flows, edge cases, decisions with rationale; implementation specifics stay out) for the user's approval — once approved, the boss implements the design via employees. Several plans may run at once — reuse an open plan's session instead of starting a second plan on the same idea"}, "finalizePlan": {"planFile": "optional; a planning session omits it to finalize its own plan, the boss chat names the file", "notes": "shows the user an approval card; approval freezes the plan document and reports the approved design to the boss chat — the boss then coordinates implementation via employees, and the planning session archives after a grace period"}, "summon": {"personaId": "UUID assigned by boss", "jobTitle": "purpose-specific job title; Goddard assigns the human name", "prompt": "bounded job", "project": "absolute project path", "workspace": "optional; \"worktree\" runs the employee in a fresh daemon-managed Git worktree, \"adopt\" hands it a finished employee's existing worktree instead of the primary checkout", "baseBranch": "required when workspace is \"worktree\"; ignored for \"adopt\"", "adoptWorktree": "required when workspace is \"adopt\" — absolute path of a daemon-managed worktree whose owning ticket is finished; the employee lands in it with uncommitted state intact", "provider": "optional inherited provider", "model": "optional inherited model", "reasoningEffort": "optional effort id supported by the resolved model — an unsupported id fails the summon", "permissions": "optional per-employee grant overrides — each supplied field (memoryFolders, integrationIds, summonEmployees, computerUse) replaces the persona default for this employee, an empty list clears it, omitted fields inherit", "workGoal": "optional; \"errand\" (default) reports the finish to you — use it when the completion feeds your next step; \"goal\" expires silently and lists on the user's Goals page", "icon": format!("optional employee icon enum: {}; overrides the persona icon for this employee only — omit to inherit, and when neither names one the client derives the icon from the job title", employee_icons.join(", ")), "resources": "optional host-resource set reserved for the assignment's lifetime — snake_case keys like resource acquire: {\"exclusive\": [\"ios:<UDID>\"], \"resident_devices\": 1, \"native_builds\": 1, \"desktop_input\": 0}. The employee's own `resource run` calls borrow subsets of it; a contested set queues instead of erroring, and the broker never steals devices the user claimed. Example for a device build: {\"native_builds\": 1}", "allowBurst": "optional boolean; lets the ticket spend burst slots above the model rule's liveLimit — it still cannot pass hardCap. Without it the ticket waits at liveLimit", "groupId": "optional wave id — summons sharing one form a wave: a single notice lands when every member finishes, fails, or is cancelled", "priority": "optional scheduling hint stored on the admission — the FIFO scheduler does not reorder on it yet", "goalId": "optional UUID of a daemon-owned goal the assignment projects onto", "requestId": "optional UUID idempotency key — a retry that lost its response returns the original employee; reusing the id with different fields errors"}, "control": {"sessionId": "employee UUID", "action": {"type": "prompt | steer | stop | setModel | setPermissions | setWorkspace | setResources", "prompt": "required for prompt and steer", "jobTitle": "optional for steer — retitles the job when the steer redirects the assignment; bookkeeping only, it queues no prompt and writes no transcript entry", "provider": "required for setModel", "model": "catalog model id required for setModel", "reasoningEffort": "optional effort id supported by the selected model", "permissions": "required for setPermissions — same per-field override shape as summon; each supplied field replaces the employee's current grant; MCP and Computer Use changes apply to its next launch", "workspace": "required for setWorkspace — \"local\" returns the employee to the project's primary checkout, \"worktree\" forks a fresh daemon-managed worktree", "baseBranch": "required for setWorkspace when workspace is \"worktree\" — the ref the new worktree detaches at; ignored for \"local\"", "resources": "required for setResources — a host-resource set like summon's; a queued ticket re-enters admission on it, a running employee swaps to it once capacity grants without interrupting its turn", "notes": "setWorkspace is one atomic move: it interrupts the employee's current turn, rebinds the session, and resumes the same transcript in the new workspace — a failure leaves it running in its old workspace"}}, "reportBlocker": {"message": "what needs supervisor attention (<=1000 chars)", "notes": "employee-only; interrupts the supervisor's running turn when it can and makes the finish deliver a full report — flag blockers, needed decisions, and failures, never routine completions"}, "transcript": {"sessionId": "employee UUID", "turn": "optional turn number; omit for index", "notes": "pull-only; a flagged, errand, or always-report employee's index arrives at finish — never poll it"}, "context": {"type": "context", "result": "snapshot of the human's projects, tasks, and automations"}, "files": "paths are relative to the boss's persistent files root; writeFile/createFolder are boss-only while employees may read granted folders — keep durable memory in memory/<topic-or-project>/, record facts and decisions as they surface, and reconcile stale notes instead of duplicating them", "speak": {"parts": ["ordered utterance fragments, 1-8; each becomes or reuses a canned voice clip", "several parts chain into a sentence — isolate proper nouns and reusable phrases as their own parts so generated audio is reused", "boss-only; returns {\"type\":\"speak\",\"delivered\":<client connections reached>} — 0 means nobody could hear it"], "example": {"type": "speak", "parts": ["Your build on ", "Goddard", " finished"]}},  "publishDeliverable": {"path": "absolute path of an employee-produced file or folder; shows it in the user's sidebar", "name": "optional display name; defaults to the file name"}, "dismissDeliverable": {"id": "deliverable UUID from view"},  "memory": {"operation": {"type": "insert | importFolder | surface | listIndex | search | readChunk | zoom"}, "insert": {"collection": "collection name", "title": "string", "cue": "one-line lookup hint", "body": "Markdown fact text", "sourceId": "stable source ref for idempotent retries"}, "importFolder": {"folder": "relative folder under the boss's files/memory", "collection": "destination collection"}, "surface": {"collection": "collection name", "limit": "max chunks, newest first (cap 100)"}, "listIndex": "no fields — returns the cue index filtered to the caller's grants", "search": {"collection": "collection name", "query": "literal substring over chunk titles, cues, and bodies"}, "readChunk": {"collection": "collection name", "chunkId": "id from an index, surface, or search result"}, "zoom": {"collection": "collection name", "target": "\"index\" for inbox chunks, \"topic:<name>\" for a topic, \"chunk:<id>\" for one record"}, "notes": "the boss's deterministic memory store — insert/import are boss-only; employees read only collections matching their granted memory folders; returns {\"type\":\"memory\",\"index\",\"chunks\",\"inserted\",\"imported\"} with only the fields the operation fills"}, "setEmployeeIcon": {"sessionId": "employee UUID", "icon": format!("optional custom icon enum: {} (null clears override)", employee_icons.join(", "))},  "eval": {"script": "Rhai source run inside the daemon with the boss operations bound as functions — one call batches operations and chains their results; variables persist between evals for this boss session. Bindings: view() → state map, context() → digest string, summon(#{personaId,jobTitle,prompt,project,...}) → sessionId, control(sessionId, action-map | \"stop\"), transcript(sessionId[, turn]), readFile(path) → #{path,content}, writeFile(path, content), listFiles([path]), createFolder(path), publishDeliverable(path[, name]), dismissDeliverable(id), speak(parts|string) → delivered, upsertPersona(#{name,markdown,...}) — id/pinnedFiles/permissions optional, setEmployeeIcon(sessionId, icon|null), rename(name), renameEmployee(sessionId, name), regenerateAvatar([sessionId]), memory(#{type,...}) → memory store fields, op(#{type,...}) → whole result for any other operation, help() → binding list. Returns {\"type\":\"eval\",\"value\":<script's last expression as JSON>,\"output\":<captured print/debug text>}. Boss-only, bounded by a wall-clock and operations budget.", "example": "let s = view(); s.employees.len()"},  "examples": [{"type": "view"}, {"type": "readFile", "path": "memory/work/notes.md"}, {"type": "writeFile", "path": "memory/work/notes.md", "content": "A durable fact"}, {"type": "publishDeliverable", "path": "/abs/path/to/output", "name": "Q3 report"}], "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "pinnedFiles": "file paths beneath memory/ pinned into the agent's context and readable without a folder grant", "permissions": {"memoryFolders": "relative folder names under memory/", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean", "alwaysReport": "boolean; finishes report to the supervisor instead of expiring silently"}}},
+        "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "summon", "control", "reportBlocker", "transcript", "context", "rename", "renameEmployee", "regenerateAvatar", "upsertPersona", "setEmployeeIcon", "listFiles", "readFile", "writeFile", "createFolder", "publishDeliverable", "dismissDeliverable", "speak", "eval", "memory", "createPlan", "finalizePlan"], "createPlan": {"title": "the idea the design doc covers — becomes the planning session's title", "planFile": "design doc file name under plans/ in the boss's files root (e.g. \"auth.md\"; accepts plans/<name>.md or workspace/plans/<name>.md spellings)", "prompt": "the user request that prompted planning — seeds the new session's transcript", "provider": "optional inherited provider", "model": "optional inherited model", "notes": "boss-only; opens a dedicated boss-attached planning session — a product-design session that drafts a design doc (user experience, flows, edge cases, decisions with rationale; implementation specifics stay out) for the user's approval — once approved, the boss implements the design via employees. Several plans may run at once — reuse an open plan's session instead of starting a second plan on the same idea"}, "finalizePlan": {"planFile": "optional; a planning session omits it to finalize its own plan, the boss chat names the file", "notes": "shows the user an approval card; approval freezes the plan document and reports the approved design to the boss chat — the boss then coordinates implementation via employees, and the planning session archives after a grace period"}, "summon": {"personaId": "UUID assigned by boss", "jobTitle": "purpose-specific job title; Goddard assigns the human name", "prompt": "bounded job", "project": "absolute project path", "workspace": "optional; \"worktree\" runs the employee in a fresh daemon-managed Git worktree, \"adopt\" hands it a finished employee's existing worktree instead of the primary checkout", "baseBranch": "required when workspace is \"worktree\"; ignored for \"adopt\"", "adoptWorktree": "required when workspace is \"adopt\" — absolute path of a daemon-managed worktree whose owning ticket is finished; the employee lands in it with uncommitted state intact", "provider": "optional inherited provider", "model": "optional inherited model", "reasoningEffort": "optional effort id supported by the resolved model — an unsupported id fails the summon", "permissions": "optional per-employee grant overrides — each supplied field (bucketIds, integrationIds, summonEmployees, computerUse) replaces the persona default for this employee, an empty list clears it, omitted fields inherit", "workGoal": "optional; \"errand\" (default) reports the finish to you — use it when the completion feeds your next step; \"goal\" expires silently and lists on the user's Goals page", "icon": format!("optional employee icon enum: {}; overrides the persona icon for this employee only — omit to inherit, and when neither names one the client derives the icon from the job title", employee_icons.join(", ")), "resources": "optional host-resource set reserved for the assignment's lifetime — snake_case keys like resource acquire: {\"exclusive\": [\"ios:<UDID>\"], \"resident_devices\": 1, \"native_builds\": 1, \"desktop_input\": 0}. The employee's own `resource run` calls borrow subsets of it; a contested set queues instead of erroring, and the broker never steals devices the user claimed. Example for a device build: {\"native_builds\": 1}", "allowBurst": "optional boolean; lets the ticket spend burst slots above the model rule's liveLimit — it still cannot pass hardCap. Without it the ticket waits at liveLimit", "groupId": "optional wave id — summons sharing one form a wave: a single notice lands when every member finishes, fails, or is cancelled", "priority": "optional scheduling hint stored on the admission — the FIFO scheduler does not reorder on it yet", "goalId": "optional UUID of a daemon-owned goal the assignment projects onto", "requestId": "optional UUID idempotency key — a retry that lost its response returns the original employee; reusing the id with different fields errors"}, "control": {"sessionId": "employee UUID", "action": {"type": "prompt | steer | stop | setModel | setPermissions | setWorkspace | setResources", "prompt": "required for prompt and steer", "jobTitle": "optional for steer — retitles the job when the steer redirects the assignment; bookkeeping only, it queues no prompt and writes no transcript entry", "provider": "required for setModel", "model": "catalog model id required for setModel", "reasoningEffort": "optional effort id supported by the selected model", "permissions": "required for setPermissions — same per-field override shape as summon; each supplied field replaces the employee's current grant; MCP and Computer Use changes apply to its next launch", "workspace": "required for setWorkspace — \"local\" returns the employee to the project's primary checkout, \"worktree\" forks a fresh daemon-managed worktree", "baseBranch": "required for setWorkspace when workspace is \"worktree\" — the ref the new worktree detaches at; ignored for \"local\"", "resources": "required for setResources — a host-resource set like summon's; a queued ticket re-enters admission on it, a running employee swaps to it once capacity grants without interrupting its turn", "notes": "setWorkspace is one atomic move: it interrupts the employee's current turn, rebinds the session, and resumes the same transcript in the new workspace — a failure leaves it running in its old workspace"}}, "reportBlocker": {"message": "what needs supervisor attention (<=1000 chars)", "notes": "employee-only; interrupts the supervisor's running turn when it can and makes the finish deliver a full report — flag blockers, needed decisions, and failures, never routine completions"}, "transcript": {"sessionId": "employee UUID", "turn": "optional turn number; omit for index", "notes": "pull-only; a flagged, errand, or always-report employee's index arrives at finish — never poll it"}, "context": {"type": "context", "result": "snapshot of the human's projects, tasks, and automations"}, "files": "document paths are relative to the boss's persistent files root; writeFile/createFolder are boss-only while employees may read pinned documents — memory is managed through named bucket operations, not files or folders", "speak": {"parts": ["ordered utterance fragments, 1-8; each becomes or reuses a canned voice clip", "several parts chain into a sentence — isolate proper nouns and reusable phrases as their own parts so generated audio is reused", "boss-only; returns {\"type\":\"speak\",\"delivered\":<client connections reached>} — 0 means nobody could hear it"], "example": {"type": "speak", "parts": ["Your build on ", "Goddard", " finished"]}},  "publishDeliverable": {"path": "absolute path of an employee-produced file or folder; shows it in the user's sidebar", "name": "optional display name; defaults to the file name"}, "dismissDeliverable": {"id": "deliverable UUID from view"},  "memory": {"operation": {"type": "listBuckets | createBucket | overview | record | submitSummary | scan | zoomBucket", "notes": "every operation names a bucket for content access; bucket metadata can be listed without loading contents; employees receive their project bucket automatically and Boss-created bucket IDs are explicit grants"}}, "setEmployeeIcon": {"sessionId": "employee UUID", "icon": format!("optional custom icon enum: {} (null clears override)", employee_icons.join(", "))},  "eval": {"script": "Rhai source run inside the daemon with the boss operations bound as functions — one call batches operations and chains their results; variables persist between evals for this boss session. Bindings: view() → state map, context() → digest string, summon(#{personaId,jobTitle,prompt,project,...}) → sessionId, control(sessionId, action-map | \"stop\"), transcript(sessionId[, turn]), readFile(path) → #{path,content}, writeFile(path, content), listFiles([path]), createFolder(path), publishDeliverable(path[, name]), dismissDeliverable(id), speak(parts|string) → delivered, upsertPersona(#{name,markdown,...}) — id/pinnedFiles/permissions optional, setEmployeeIcon(sessionId, icon|null), rename(name), renameEmployee(sessionId, name), regenerateAvatar([sessionId]), memory(#{type,...}) → memory store fields, op(#{type,...}) → whole result for any other operation, help() → binding list. Returns {\"type\":\"eval\",\"value\":<script's last expression as JSON>,\"output\":<captured print/debug text>}. Boss-only, bounded by a wall-clock and operations budget.", "example": "let s = view(); s.employees.len()"},  "examples": [{"type": "view"}, {"type": "readFile", "path": "plans/auth.md"}, {"type": "publishDeliverable", "path": "/abs/path/to/output", "name": "Q3 report"}], "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "pinnedFiles": "document paths beneath the Boss files root pinned into the agent's context; memory bucket access is controlled by bucketIds", "permissions": {"bucketIds": "Boss-created memory bucket IDs", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean", "alwaysReport": "boolean; finishes report to the supervisor instead of expiring silently"}}},
         "merge": {"submit": "no payload; submits this employee's daemon-managed worktree to the configured QA branch after serialized rebase and verification"},
         "computer": {"js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"}, "reset": "no payload; resets only this task", "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"},
         "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
@@ -747,13 +752,14 @@ fn schema() -> serde_json::Value {
         "boss file read",
         "boss file write",
         "boss file mkdir",
-        "boss memory insert",
-        "boss memory import",
-        "boss memory index",
-        "boss memory search",
-        "boss memory read",
+        "boss memory buckets",
+        "boss memory create",
+        "boss memory overview",
+        "boss memory record",
+        "boss memory summary",
+        "boss memory scan",
         "boss memory zoom",
-        "boss memory surface",
+        "boss memory migrate",
         "boss plan create",
         "boss plan finalize",
         "boss deliverable publish",
@@ -1440,14 +1446,17 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 id: pos[0].parse().context("invalid deliverable ID")?,
             })?)
         }
-        ("memory", "insert" | "import" | "index" | "search" | "read" | "zoom" | "surface") => {
+        ("memory", "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom") => {
             let kind = match operation.as_str() {
-                "import" => "importFolder",
-                "index" => "listIndex",
-                "read" => "readChunk",
+                "buckets" => "listBuckets",
+                "create" => "createBucket",
+                "record" => "record",
+                "summary" => "submitSummary",
+                "scan" => "scan",
+                "zoom" => "zoomBucket",
                 other => other,
             };
-            let memory = if operation == "insert" || operation == "import" {
+            let memory = if matches!(operation.as_str(), "create" | "record" | "summary") {
                 let (_, opts) = flags(args, &["json", "json-file"], false)?;
                 let mut value: serde_json::Value =
                     serde_json::from_str(&json_input(&opts)?).context("invalid memory input")?;
@@ -1457,26 +1466,34 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                     .insert("type".into(), json!(kind));
                 serde_json::from_value(value)?
             } else {
-                let (pos, opts) = flags(args, &["limit"], true)?;
+                let (pos, _) = flags(args, &[], true)?;
                 let value = match operation.as_str() {
-                    "index" => json!({"type":kind}),
-                    "search" if pos.len() == 2 => {
-                        json!({"type":kind,"collection":pos[0],"query":pos[1]})
-                    }
-                    "read" if pos.len() == 2 => {
-                        json!({"type":kind,"collection":pos[0],"chunkId":pos[1]})
-                    }
-                    "zoom" if pos.len() == 2 => {
-                        json!({"type":kind,"collection":pos[0],"target":pos[1]})
-                    }
-                    "surface" if pos.len() == 1 => {
-                        json!({"type":kind,"collection":pos[0],"limit":opts.get("limit").and_then(|v|v.parse::<usize>().ok()).unwrap_or(20)})
-                    }
-                    _ => bail!("usage: boss memory {operation} [COLLECTION QUERY|CHUNK_ID|TARGET]"),
+                    "buckets" if pos.is_empty() => json!({"type":kind}),
+                    "overview" if pos.len() == 1 => json!({"type":kind,"bucket":pos[0]}),
+                    "scan" if pos.len() == 2 => json!({"type":kind,"bucket":pos[0],"query":pos[1]}),
+                    "zoom" if pos.len() == 3 => json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?}),
+                    _ => bail!("usage: boss memory {operation} [BUCKET [QUERY|START END]]"),
                 };
                 serde_json::from_value(value)?
             };
             print_boss(boss_request(Op::Memory { operation: memory })?)
+        }
+        ("memory", "migrate") => {
+            let (pos, options) = flags(args, &["dry-run"], true)?;
+            if pos.len() != 2 {
+                bail!("usage: boss memory migrate BUCKET boss|PROJECT_PATH [--dry-run true|false]");
+            }
+            let dry_run = options
+                .get("dry-run")
+                .map(|value| value.parse::<bool>().context("--dry-run must be true or false"))
+                .transpose()?
+                .unwrap_or(true);
+            let operation = waku_protocol::boss::MemoryOperation::MigrateLegacy {
+                bucket: pos[0].clone(),
+                source: pos[1].clone(),
+                dry_run,
+            };
+            print_boss(boss_request(Op::Memory { operation })?)
         }
         ("plan", "finalize") => {
             let (pos, _) = flags(args, &[], true)?;

@@ -25,25 +25,24 @@ use super::streaming::session_accepts_steer_result;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     CONTINUE_PROMPT, ComposerSubmission, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation,
-    EscapeStopPress,
-    EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, NavigationLocation,
-    PendingUserInput, SessionNavigation, SettingsHistoryEntry, SettingsNavigation, StreamDeltaKind,
-    TranscriptLanding, TranscriptRowKind::*, TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT,
-    WorkingIndicatorFade, active_navigation_turn_index, activity_group_is_live,
-    activity_header_title, append_text_delta_to_session, assistant_response_footer,
-    assistant_response_footer_index, assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_group,
-    compact_driver_error,
-    disclosure_leading_space, fenced_code, fitted_file_tree_width, fitted_panel_widths,
-    folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
-    maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
-    navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
-    navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
-    previous_navigation_turn_index, prompt_answer_index, push_reasoning_delta,
-    push_transcript_activity, response_footer_message_index, response_row_turn_id,
-    retain_fading_working_indicator, row_starts_followup_turn, session_accepts_turn_output,
-    session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
-    should_show_navigation_rail, should_show_scroll_to_bottom, sidebar_slide_right_panel_widths,
-    still_archived_sessions,
+    EscapeStopPress, EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT,
+    NavigationLocation, PendingUserInput, SessionNavigation, SettingsHistoryEntry,
+    SettingsNavigation, StreamDeltaKind, TranscriptLanding, TranscriptRowKind::*,
+    TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
+    active_navigation_turn_index, activity_group_is_live, activity_header_title,
+    append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
+    assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_group,
+    compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
+    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
+    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
+    navigation_rail_height, navigation_rail_scale, next_navigation_turn_index,
+    paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, prompt_answer_index,
+    push_reasoning_delta, push_transcript_activity, response_footer_message_index,
+    response_row_turn_id, retain_fading_working_indicator, row_starts_followup_turn,
+    session_accepts_turn_output, session_is_reapable, settle_stream_segment,
+    should_refresh_branch_after_activity, should_show_navigation_rail,
+    should_show_scroll_to_bottom, sidebar_slide_right_panel_widths, still_archived_sessions,
     tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
     transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
@@ -1632,7 +1631,8 @@ fn next_unread_completion_deliverable_candidates_follow_the_viewed_marker() {
     dormant.dormant_at = Some(1);
     let mut archived = boss_deliverable(deliverable_id, 200, None);
     archived.archived_at = Some(1);
-    let states = |deliverable| HashMap::from([(key, boss_state(Some(boss_chat), vec![deliverable]))]);
+    let states =
+        |deliverable| HashMap::from([(key, boss_state(Some(boss_chat), vec![deliverable]))]);
 
     // Viewed at publish: not a candidate.
     assert_eq!(
@@ -2627,7 +2627,17 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
     let unseen = HashMap::from([(shelved, 300)]);
 
     assert_eq!(
-        next_unread_completion(&sessions, &unseen, &HashMap::new(), &rows, None, None, &dormant, None, None),
+        next_unread_completion(
+            &sessions,
+            &unseen,
+            &HashMap::new(),
+            &rows,
+            None,
+            None,
+            &dormant,
+            None,
+            None
+        ),
         None
     );
     assert_eq!(
@@ -2896,7 +2906,10 @@ fn sidebar_slide_holds_the_right_panel_until_the_chat_minimum() {
     assert_eq!(rendered, 800.0);
     let (rendered, content) = sidebar_slide_right_panel_widths(1400.0, 260.0, true, 800.0);
     assert_eq!(rendered, 780.0);
-    assert_eq!(rendered, fitted_panel_widths(1400.0, true, true, 260.0, 800.0).1);
+    assert_eq!(
+        rendered,
+        fitted_panel_widths(1400.0, true, true, 260.0, 800.0).1
+    );
     // The surface stays laid out at the uncrowded fit: the container clips
     // it rather than reflowing every frame.
     assert_eq!(content, 800.0);
@@ -5359,7 +5372,6 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Commands,
         SettingsPage::Terminal,
         SettingsPage::Git,
-        SettingsPage::Memory,
         SettingsPage::Usage,
         SettingsPage::Archived,
         SettingsPage::Daemon,
@@ -5561,13 +5573,12 @@ fn plan_doc_settles_per_state_and_retries_failures_on_events_not_frames() {
     // settled for that state. A landed failure stays settled for render
     // callers — re-arming on every frame was the plan preview's flicker —
     // while event callers get one bounded retry per received state.
-    let doc = |revision: u64, requested: bool, content: Option<Result<String, String>>| {
-        super::PlanDoc {
+    let doc =
+        |revision: u64, requested: bool, content: Option<Result<String, String>>| super::PlanDoc {
             key: waku_client::DaemonKey::Local,
             revision,
             requested,
             content,
-        }
     };
     let local = waku_client::DaemonKey::Local;
     assert!(doc(3, true, None).settled(local, 3, true));
@@ -5577,10 +5588,11 @@ fn plan_doc_settles_per_state_and_retries_failures_on_events_not_frames() {
     assert!(!doc(3, false, Some(Err("gone".into()))).settled(local, 3, true));
     // A newer Boss state — or a different host's — re-arms the read.
     assert!(!doc(3, false, Some(Ok("# Plan".into()))).settled(local, 4, false));
-    assert!(
-        !doc(3, false, Some(Ok("# Plan".into())))
-            .settled(waku_client::DaemonKey::Remote(Uuid::new_v4()), 3, false)
-    );
+    assert!(!doc(3, false, Some(Ok("# Plan".into()))).settled(
+        waku_client::DaemonKey::Remote(Uuid::new_v4()),
+        3,
+        false
+    ));
 }
 
 #[test]
@@ -6744,50 +6756,6 @@ fn busy_close_counts_skip_idle_and_watched_sessions() {
         busy_owned_session_counts(&sessions[..1], |_| false, |_| false),
         (0, 0)
     );
-}
-
-/// Memory log lines split into the parts their rows render: the date they
-/// group under, a `tag:` chip prefix, the body, cited commits, status
-/// words, and whether a fresh session could see the note.
-#[test]
-fn memory_log_entries_parse_structure() {
-    use super::projects::{MemoryNoteStatus, parse_memory_log_entry};
-
-    let entry = parse_memory_log_entry(
-        "2026-09-25 git-check: 87af0eb1 \"fix(transcript): hold markers\" was rebased to ebad430e",
-        0,
-        20,
-    );
-    assert_eq!(entry.date, chrono::NaiveDate::from_ymd_opt(2026, 9, 25));
-    assert_eq!(entry.tag.as_deref(), Some("git-check"));
-    assert_eq!(
-        entry.body,
-        "87af0eb1 \"fix(transcript): hold markers\" was rebased to ebad430e"
-    );
-    assert_eq!(entry.shas, ["87af0eb1", "ebad430e"]);
-    assert!(entry.injection_candidate);
-
-    // A doubled stamp — the distiller's own date ahead of the appender's —
-    // folds into the first date's group, and status words get ranges.
-    let doubled = parse_memory_log_entry("2026-09-25 2026-09-24 landed on dev", 20, 20);
-    assert_eq!(doubled.date, chrono::NaiveDate::from_ymd_opt(2026, 9, 25));
-    assert_eq!(doubled.body, "landed on dev");
-    assert!(matches!(
-        doubled.status_ranges.first(),
-        Some((_, MemoryNoteStatus::Landed))
-    ));
-    assert!(!doubled.injection_candidate);
-
-    // Prose colons are not tags and ordinary words are not SHAs.
-    let prose = parse_memory_log_entry("2026-09-25 ships at 12:30 UTC", 0, 20);
-    assert_eq!(prose.tag, None);
-    assert_eq!(prose.body, "ships at 12:30 UTC");
-    assert!(prose.shas.is_empty());
-
-    // An undated line keeps its whole text and lands in the undated group.
-    let undated = parse_memory_log_entry("no stamp on this one", 0, 20);
-    assert_eq!(undated.date, None);
-    assert_eq!(undated.body, "no stamp on this one");
 }
 
 fn report_trigger(

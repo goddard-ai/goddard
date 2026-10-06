@@ -15,9 +15,8 @@ export type BossPersonaUpsert = {
  */
 id: string, name: string, markdown: string,
 /**
- * Memory files pinned into the persona's context — paths relative to
- * `memory/` in the Boss files root, matching `memory_folders`.
- * Pinning also grants employees read access to the file.
+ * Documents pinned into the persona's context — relative to the Boss
+ * files root. Memory knowledge is granted through named buckets.
  */
 pinnedFiles: Array<string>, permissions: PersonaPermissions,
 /**

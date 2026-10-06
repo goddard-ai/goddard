@@ -321,7 +321,6 @@ enum SettingsPage {
     Terminal,
     Appearance,
     Git,
-    Memory,
     Jev,
     Experiments,
     Integrations,
@@ -380,7 +379,6 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
-    BossMemoryTree,
     /// The horizontal divider between the Git panel's top region and its
     /// commit log — the one drag that moves on the y axis.
     GitPanelTop,
@@ -2064,7 +2062,6 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
         SettingsPage::Terminal => PersistedSettingsPage::Terminal,
         SettingsPage::Appearance => PersistedSettingsPage::Appearance,
         SettingsPage::Git => PersistedSettingsPage::Git,
-        SettingsPage::Memory => PersistedSettingsPage::Memory,
         SettingsPage::Jev => PersistedSettingsPage::Jev,
         SettingsPage::Experiments => PersistedSettingsPage::Experiments,
         SettingsPage::Integrations => PersistedSettingsPage::Integrations,
@@ -2087,7 +2084,7 @@ fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
         PersistedSettingsPage::Terminal => SettingsPage::Terminal,
         PersistedSettingsPage::Appearance => SettingsPage::Appearance,
         PersistedSettingsPage::Git => SettingsPage::Git,
-        PersistedSettingsPage::Memory => SettingsPage::Memory,
+        PersistedSettingsPage::Memory => SettingsPage::General,
         PersistedSettingsPage::Jev => SettingsPage::Jev,
         PersistedSettingsPage::Experiments => SettingsPage::Experiments,
         PersistedSettingsPage::Integrations => SettingsPage::Integrations,
@@ -3916,22 +3913,6 @@ pub struct Waku {
     /// The Settings → Git page's project selection — which repo's worktrees
     /// and branches the page lists.
     settings_git_project: Option<Uuid>,
-    /// The project and last loaded contents shown by Settings → Memory.
-    settings_memory_project: Option<Uuid>,
-    settings_memory_requested_project: Option<Uuid>,
-    settings_memory_content: Option<projects::ProjectMemoryContent>,
-    settings_memory_generation: u64,
-    /// How many log entries the page reveals before its "show older" step.
-    settings_memory_shown: usize,
-    /// Filter query over the Memory page's notes.
-    memory_search: Entity<TextInput>,
-    /// Filename query for the Boss's read-only Memory tree.
-    boss_memory_search: Entity<TextInput>,
-    /// The rendered MEMORY.md document — cached per project so a refresh
-    /// reuses the incremental parse until the text actually changes — and
-    /// the page's text selection.
-    settings_memory_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
-    settings_memory_selection: TranscriptSelection,
     /// Set when the Git page's data should be (re)fetched on its next
     /// render — opening the page or switching its project. Cleared once
     /// `projects_refresh` runs with state in place.
@@ -5492,20 +5473,6 @@ impl Waku {
                 .accessibility_label(tr!("drafts.search"))
                 .placeholder(tr!("drafts.search"))
         });
-        let memory_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .tab_index(0)
-                .clear_on_escape()
-                .accessibility_label(tr!("settings.memory_filter"))
-                .placeholder(tr!("settings.memory_filter"))
-        });
-        let boss_memory_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .tab_index(0)
-                .clear_on_escape()
-                .accessibility_label(tr!("boss.search_file_names"))
-                .placeholder(tr!("boss.search_file_names"))
-        });
         let drafts_edit_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -6526,25 +6493,6 @@ impl Waku {
             })
             .detach();
             cx.subscribe(
-                &boss_memory_search,
-                |this: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                        // Searching is asynchronous. The Brain list is a bounded
-                        // UI surface, but all directory discovery stays in the
-                        // Boss request worker.
-                        this.ensure_boss_memory_search(cx);
-                    }
-                },
-            )
-            .detach();
-            cx.subscribe(&memory_search, |_: &mut Self, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Edited) {
-                    cx.notify();
-                }
-            })
-            .detach();
-            cx.subscribe(
                 &session_rename_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => {
@@ -7456,15 +7404,6 @@ impl Waku {
                 automations_row_focus: cx.focus_handle(),
                 automations_new_focus: cx.focus_handle(),
                 settings_git_project: None,
-                settings_memory_project: None,
-                settings_memory_requested_project: None,
-                settings_memory_content: None,
-                settings_memory_generation: 0,
-                settings_memory_shown: projects::MEMORY_LOG_CHUNK,
-                memory_search,
-                boss_memory_search,
-                settings_memory_markdown: RefCell::new(None),
-                settings_memory_selection: TranscriptSelection::default(),
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),

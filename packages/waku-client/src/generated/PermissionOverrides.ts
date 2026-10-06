@@ -8,4 +8,4 @@
  * action applies them to the employee's live record. Either way an
  * employee summoner stays clamped to its own grants.
  */
-export type PermissionOverrides = { memoryFolders: Array<string> | null, integrationIds: Array<string> | null, summonEmployees: boolean | null, computerUse: boolean | null, };
+export type PermissionOverrides = { bucketIds: Array<string> | null, integrationIds: Array<string> | null, summonEmployees: boolean | null, computerUse: boolean | null, };
