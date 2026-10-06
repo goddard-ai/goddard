@@ -1,0 +1,1 @@
+- Opening a transcript search result — a message match in the command palette, or a `goddard://task/<id>?message=<id>` link — now scrolls the task's transcript to the matched message and flashes it, instead of landing on the latest turn and leaving the hit to find by hand.

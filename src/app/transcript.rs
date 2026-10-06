@@ -324,6 +324,18 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
+        // A deep-linked search hit owns the landing: reveal the matched
+        // message rather than wherever the reader left the transcript. A
+        // parked link for a different session is stale — drop it.
+        if let Some(pending) = self.pending_transcript_match.take() {
+            if pending.session_id == session_id
+                && self.reveal_transcript_match(&pending, cx)
+            {
+                self.transcript_landing =
+                    Some((session_id, TranscriptLanding::MatchReveal(pending)));
+                return;
+            }
+        }
         let saved = self.saved_transcript_landing(session_id);
         let landing = if attention {
             // Open on the last turn so the new work — or the pending
@@ -334,7 +346,7 @@ impl Waku {
         } else {
             saved
         };
-        self.transcript_landing = landing.map(|landing| (session_id, landing));
+        self.transcript_landing = landing.clone().map(|landing| (session_id, landing));
         if let Some(landing) = landing {
             self.scroll_to_transcript_landing(landing, cx);
         }
@@ -369,6 +381,14 @@ impl Waku {
                 if let Some(message_id) = self.navigation_turns().last().map(|turn| turn.message_id)
                 {
                     self.scroll_to_navigation_turn(message_id, cx);
+                }
+            }
+            TranscriptLanding::MatchReveal(pending) => {
+                // The message may have left the record — a rewind between
+                // link and landing — in which case the tail is the honest
+                // landing.
+                if !self.reveal_transcript_match(&pending, cx) {
+                    self.pin_transcript_to_tail();
                 }
             }
         }
@@ -1477,7 +1497,7 @@ pub(super) fn transcript_position_landing(
     }
 }
 
-fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
+pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
     match row {
         TranscriptRowKind::Message(index) => session.messages.get(index)?.turn_id,
         TranscriptRowKind::TurnBlock(index) => session.transcript_blocks.get(index)?.turn_id,

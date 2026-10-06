@@ -5699,6 +5699,7 @@ fn archived_filter_matches_transcript_hits() {
         beta.id,
         SessionMessageMatch {
             session_id: beta.id,
+            message_id: Uuid::new_v4(),
             source: MessageRole::User,
             snippet: "a needle in the transcript".into(),
         },

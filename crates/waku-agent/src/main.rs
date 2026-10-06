@@ -658,7 +658,7 @@ fn legacy_schema() -> serde_json::Value {
                 "last_turns": {"type": "number", "notes": "search only each task's last N turns; omit to scan whole transcripts"}
             },
             "example": "{\"query\":\"status:idle retry logic\"}",
-            "returns": {"results": [{"task_id": "uuid", "title": "string", "project": "project name", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
+            "returns": {"results": [{"task_id": "uuid", "title": "string", "project": "project name", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "message_id": "uuid of the matched message", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
         },
         "map": {
             "description": "Ask Jev to rank source evidence from this session's indexed workspace, then return relevant declarations and locations. Use for code discovery and query again as you learn more. Requires the Project Map experiment to be enabled.",
@@ -2247,10 +2247,12 @@ fn parse_boss_operation(payload: &str) -> anyhow::Result<waku_protocol::boss::Bo
 
 /// One line appended to `search` output so the agent knows how to turn a
 /// hit into a transcript link — the app renders `[title](goddard://task/<id>)`
-/// as a link that opens that task.
+/// as a link that opens that task, and `?message=<message_id>` scrolls it to
+/// the matched message.
 fn session_link_hint() -> String {
     format!(
-        "Reference a task in your reply as [title]({}<task_id>) and Goddard renders it as a link that opens the task.",
+        "Reference a task in your reply as [title]({}<task_id>) and Goddard renders it as a link that opens the task. With a search hit's messageId, [title]({}<task_id>?message=<message_id>) lands on the matched message.",
+        waku_protocol::TASK_LINK_PREFIX,
         waku_protocol::TASK_LINK_PREFIX
     )
 }
@@ -2605,6 +2607,8 @@ mod tests {
     fn the_link_hint_names_the_task_link_format() {
         let hint = session_link_hint();
         assert!(hint.contains(waku_protocol::TASK_LINK_PREFIX));
+        assert!(hint.contains("messageId"));
+        assert!(hint.contains("?message="));
     }
 
     #[test]

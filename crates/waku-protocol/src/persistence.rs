@@ -282,6 +282,9 @@ impl ComposerDrafts {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct SessionMessageMatch {
     pub session_id: Uuid,
+    /// The matched message's id — lets a client deep-link the hit to its
+    /// transcript position instead of landing on the task's tail.
+    pub message_id: Uuid,
     pub source: MessageRole,
     pub snippet: String,
 }

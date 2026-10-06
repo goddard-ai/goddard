@@ -1050,6 +1050,7 @@ fn search_session_messages(
         .prepare(&format!(
             "WITH {turn_cte}ranked AS (
                  SELECT messages.session_id,
+                        messages.id,
                         messages.role,
                         messages.content,
                         messages.created_at,
@@ -1072,7 +1073,7 @@ fn search_session_messages(
                     AND messages.notice IS NULL
                     AND instr(lower(messages.content), lower(?1)) > 0
              )
-             SELECT session_id, role, content
+             SELECT session_id, id, role, content
                FROM ranked
               WHERE session_match_rank = 1
               ORDER BY source_rank, session_updated_at DESC, session_id
@@ -1085,6 +1086,7 @@ fn search_session_messages(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
         ))
     };
     let rows = match last_turns {
@@ -1098,8 +1100,10 @@ fn search_session_messages(
 
     let mut matches = Vec::new();
     for row in rows {
-        let (session_id, role, content) = row.map_err(to_io_error)?;
-        let Ok(session_id) = Uuid::parse_str(&session_id) else {
+        let (session_id, message_id, role, content) = row.map_err(to_io_error)?;
+        let (Ok(session_id), Ok(message_id)) =
+            (Uuid::parse_str(&session_id), Uuid::parse_str(&message_id))
+        else {
             continue;
         };
         let source = match role.as_str() {
@@ -1109,6 +1113,7 @@ fn search_session_messages(
         };
         matches.push(SessionMessageMatch {
             session_id,
+            message_id,
             source,
             snippet: build_session_search_snippet(&content, query),
         });
@@ -4724,6 +4729,10 @@ mod tests {
                 (user_match_id, MessageRole::User),
                 (assistant_match_id, MessageRole::Assistant),
             ]
+        );
+        assert_eq!(
+            matches[0].message_id, state.sessions[0].messages[0].id,
+            "the hit names the matched user message"
         );
         assert!(matches[0].snippet.contains("user needle"));
         assert!(matches[1].snippet.contains("Final assistant needle"));

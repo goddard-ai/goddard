@@ -3990,6 +3990,9 @@ pub struct AgentSessionSearchHit {
     pub updated_at: u64,
     /// Which side of the conversation `snippet` came from.
     pub source: MessageRole,
+    /// The matched message's id — pairs with `task_id` in a
+    /// `goddard://task/<id>?message=<message_id>` link to land on the hit.
+    pub message_id: Uuid,
     /// The matched message text excerpted around the query, like the
     /// command palette shows.
     pub snippet: String,

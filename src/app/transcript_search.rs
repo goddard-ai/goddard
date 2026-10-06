@@ -14,6 +14,39 @@ use crate::ui::ActivationExt;
 
 const MAX_TRANSCRIPT_SEARCH_MATCHES: usize = 20_000;
 
+/// The row flash's fade-out once a deep-linked match lands.
+pub(super) const MATCH_FLASH_FADE: Duration = Duration::from_millis(1400);
+/// How long a landed match keeps its glyph washes before the state clears —
+/// the flash reads as transient without a per-frame fade of painted text.
+const MATCH_FLASH_TTL: Duration = Duration::from_secs(5);
+
+/// A landed deep link's highlight state: the matched message's glyph washes
+/// — computed once at reveal time, never per frame — plus the row flash and
+/// the pending reveal the next frames refine into position.
+pub(super) struct TranscriptMatchFlash {
+    pub session_id: Uuid,
+    pub message_id: Uuid,
+    /// Snapshots from reveal time. `transcript_row` re-verifies the id
+    /// against the session before trusting `message_index` — a rewind could
+    /// have parked another message there.
+    pub message_index: usize,
+    pub row_index: usize,
+    pub highlights: Rc<Vec<TextSearchMatch>>,
+    pub active: Option<TextSearchMatch>,
+    pub armed_at: Instant,
+    /// Set until the first render pass consumes the reveal — like
+    /// `TranscriptSearch::pending_reveal`.
+    pub pending_reveal: bool,
+}
+
+#[derive(Clone)]
+struct TranscriptMatchTarget {
+    armed_at: Instant,
+    message_id: Uuid,
+    row_index: usize,
+    text: Option<TextSearchMatch>,
+}
+
 pub(super) struct TranscriptSearch {
     open: bool,
     query: Entity<TextInput>,
@@ -282,17 +315,290 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> Option<SearchHighlights> {
-        let search = self
+        if let Some(search) = self
             .transcript_search
             .as_ref()
-            .filter(|search| search.open)?;
-        let matches = search.matches_by_message.get(&message_index)?.clone();
-        let active = search
-            .current
-            .and_then(|current| search.matches.get(current))
-            .filter(|found| found.message_index == message_index)
-            .map(|found| found.text.clone());
-        Some(SearchHighlights { matches, active })
+            .filter(|search| search.open)
+        {
+            let matches = search.matches_by_message.get(&message_index)?.clone();
+            let active = search
+                .current
+                .and_then(|current| search.matches.get(current))
+                .filter(|found| found.message_index == message_index)
+                .map(|found| found.text.clone());
+            return Some(SearchHighlights { matches, active });
+        }
+        // A landed deep link paints the matched message's washes without the
+        // find bar — while the flash lives, on the message it names.
+        let flash = self.transcript_match_flash.as_ref()?;
+        if flash.message_index != message_index
+            || self.state.selected_session != Some(flash.session_id)
+        {
+            return None;
+        }
+        let still_the_same_message = self
+            .selected_session()
+            .and_then(|session| session.messages.get(message_index))
+            .is_some_and(|message| message.id == flash.message_id);
+        still_the_same_message.then(|| SearchHighlights {
+            matches: flash.highlights.clone(),
+            active: flash.active.clone(),
+        })
+    }
+
+    /// Land the transcript on a deep-linked match: open the fold hiding it,
+    /// put its row on screen, and arm the flash the next frames refine into
+    /// a centered, glyph-highlighted position. Reports whether the target
+    /// resolved — a rewound-away message is not a reveal.
+    pub(super) fn reveal_transcript_match(
+        &mut self,
+        pending: &PendingTranscriptMatch,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        if session.id != pending.session_id {
+            return false;
+        }
+        let Some(message_index) = session
+            .messages
+            .iter()
+            .position(|message| message.id == pending.message_id)
+        else {
+            return false;
+        };
+        let message = &session.messages[message_index];
+        let turn_id = message.turn_id;
+        let role = message.role;
+        let hidden = message.hidden;
+        let content = message.visible_content().to_owned();
+
+        self.sync_transcript_rows();
+        // A hit folded behind "Worked for …" stays invisible until the
+        // disclosure opens — open it so the reveal lands on the text.
+        if let Some(turn_id) = turn_id {
+            let folded_away = {
+                let kinds = self.transcript_row_kinds.borrow();
+                !kinds.contains(&TranscriptRowKind::Message(message_index))
+                    && kinds.contains(&TranscriptRowKind::TurnFold(turn_id))
+            };
+            if folded_away {
+                self.expanded_turns.insert(turn_id);
+                self.sync_transcript_rows();
+            }
+        }
+        let row_index = {
+            let kinds = self.transcript_row_kinds.borrow();
+            let session = self.selected_session();
+            kinds
+                .iter()
+                .position(|kind| *kind == TranscriptRowKind::Message(message_index))
+                // A hidden report prompt's row is the wake marker standing
+                // in for it.
+                .or_else(|| {
+                    kinds.iter().position(|kind| {
+                        *kind == TranscriptRowKind::BossTrigger(pending.message_id)
+                    })
+                })
+                .or_else(|| {
+                    turn_id.and_then(|turn_id| {
+                        kinds
+                            .iter()
+                            .position(|kind| *kind == TranscriptRowKind::TurnFold(turn_id))
+                    })
+                })
+                .or_else(|| {
+                    session.and_then(|session| {
+                        turn_id.and_then(|turn_id| {
+                            kinds
+                                .iter()
+                                .position(|kind| row_turn_id(session, *kind) == Some(turn_id))
+                        })
+                    })
+                })
+        };
+        let Some(row_index) = row_index else {
+            return false;
+        };
+
+        // `scroll_to` is bounds-independent — the row mounts at the viewport
+        // top this frame, and `pending_reveal` centers the match once the
+        // row has measured bounds.
+        self.transcript_anchor_following.set(false);
+        self.transcript_tail_recheck.set(false);
+        self.active_transcript_rows().scroll_to(ListOffset {
+            item_ix: row_index,
+            offset_in_item: Pixels::ZERO,
+        });
+        self.transcript_is_scrolled.set(true);
+
+        // The same glyph washes ⌘F paints — computed once here so a frame
+        // never scans the message again.
+        let query = pending.query.trim();
+        let (highlights, active) = if query.is_empty() || hidden {
+            (Rc::new(Vec::new()), None)
+        } else {
+            let regex = literal_find_regex(query);
+            let (matches, _) = if matches!(role, MessageRole::User | MessageRole::Assistant) {
+                md::render::markdown_search_matches(
+                    &content,
+                    &regex,
+                    MAX_TRANSCRIPT_SEARCH_MATCHES,
+                )
+            } else {
+                md::render::plain_search_matches(
+                    &content,
+                    0,
+                    &regex,
+                    MAX_TRANSCRIPT_SEARCH_MATCHES,
+                )
+            };
+            let active = matches.first().cloned();
+            (Rc::new(matches), active)
+        };
+
+        let armed_at = Instant::now();
+        self.transcript_match_flash = Some(TranscriptMatchFlash {
+            session_id: pending.session_id,
+            message_id: pending.message_id,
+            message_index,
+            row_index,
+            highlights,
+            active,
+            armed_at,
+            pending_reveal: true,
+        });
+        // The washes expire on a timer — a stale link cannot leave a
+        // permanent highlight behind.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(MATCH_FLASH_TTL).await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .transcript_match_flash
+                    .as_ref()
+                    .is_some_and(|flash| flash.armed_at == armed_at)
+                {
+                    this.transcript_match_flash = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        true
+    }
+
+    /// The first frame a deep-linked match is on screen: refine the arm-time
+    /// top-of-viewport scroll into the real reveal — matched glyphs on the
+    /// reveal line, or the row centered when it carries no glyph target.
+    pub(super) fn apply_pending_transcript_match_reveal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self.transcript_match_flash.as_mut().and_then(|flash| {
+            if !flash.pending_reveal || self.state.selected_session != Some(flash.session_id) {
+                return None;
+            }
+            flash.pending_reveal = false;
+            Some(TranscriptMatchTarget {
+                armed_at: flash.armed_at,
+                message_id: flash.message_id,
+                row_index: flash.row_index,
+                text: flash.active.clone(),
+            })
+        });
+        let Some(target) = target else {
+            return;
+        };
+
+        if self.transcript_match_target_bounds(&target).is_some() {
+            self.reveal_transcript_match_geometry(target, 1, window, cx);
+            return;
+        }
+        self.detach_transcript_search_from_tail();
+        self.active_transcript_rows()
+            .scroll_to_reveal_item(target.row_index);
+        cx.on_next_frame(window, move |this, window, cx| {
+            this.reveal_transcript_match_geometry(target, 0, window, cx)
+        });
+    }
+
+    fn transcript_match_target_bounds(
+        &self,
+        target: &TranscriptMatchTarget,
+    ) -> Option<Bounds<Pixels>> {
+        let text = target.text.as_ref()?;
+        self.transcript_text_bounds(
+            &TextKey::new(format!("message-{}", target.message_id), text.ordinal),
+            &text.range,
+        )
+    }
+
+    fn reveal_transcript_match_geometry(
+        &mut self,
+        target: TranscriptMatchTarget,
+        attempt: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let still_current = self.transcript_match_flash.as_ref().is_some_and(|flash| {
+            flash.message_id == target.message_id && flash.armed_at == target.armed_at
+        });
+        if !still_current {
+            return;
+        }
+        let match_bounds = self.transcript_match_target_bounds(&target);
+        let Some(match_bounds) = match_bounds else {
+            if target.text.is_some() && attempt < 1 {
+                cx.on_next_frame(window, move |this, window, cx| {
+                    this.reveal_transcript_match_geometry(target, attempt + 1, window, cx)
+                });
+            } else {
+                // No registered glyph geometry — a bare `?message=` link or
+                // text that no painted element claims. Center the row.
+                self.center_transcript_match_row(target, 0, window, cx);
+            }
+            return;
+        };
+        self.position_transcript_match_bounds(target.message_id, match_bounds, cx);
+    }
+
+    fn center_transcript_match_row(
+        &mut self,
+        target: TranscriptMatchTarget,
+        attempt: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = self.active_transcript_rows();
+        let Some(bounds) = rows.bounds_for_item(target.row_index) else {
+            if attempt < 3 {
+                cx.on_next_frame(window, move |this, window, cx| {
+                    this.center_transcript_match_row(target, attempt + 1, window, cx)
+                });
+            }
+            return;
+        };
+        let viewport = rows.viewport_bounds();
+        if viewport.size.height <= Pixels::ZERO {
+            return;
+        }
+        // A row taller than the viewport cannot center — pin its top on the
+        // reveal line a glyph reveal would use.
+        let target_top = if bounds.size.height >= viewport.size.height {
+            viewport.top() + viewport.size.height * 0.35
+        } else {
+            viewport.top() + (viewport.size.height - bounds.size.height) / 2.0
+        };
+        let current = rows.scroll_px_offset_for_scrollbar().y;
+        let max_offset = rows.max_offset_for_scrollbar().y;
+        let next = (current + (target_top - bounds.top())).clamp(-max_offset, Pixels::ZERO);
+        if next != current {
+            self.detach_transcript_search_from_tail();
+            rows.set_offset_from_scrollbar(point(Pixels::ZERO, next));
+            cx.notify();
+        }
     }
 
     /// Reveal a pending result without disturbing an already-mounted row.
@@ -332,20 +638,30 @@ impl Waku {
         });
     }
 
-    fn transcript_search_match_bounds(
+    /// The registered glyph bounds one text key paints for `range` — shared
+    /// by find-in-page navigation and a deep link's match reveal.
+    fn transcript_text_bounds(
         &self,
-        target: &TranscriptSearchTarget,
+        key: &TextKey,
+        range: &Range<usize>,
     ) -> Option<Bounds<Pixels>> {
         let registry = self.transcript_selection.registry.borrow();
         registry
             .entries()
             .iter()
-            .find(|entry| entry.key == target.key)
+            .find(|entry| entry.key == *key)
             .and_then(|entry| {
-                md::render::text_range_bounds(&entry.geometry, &target.range)
+                md::render::text_range_bounds(&entry.geometry, range)
                     .into_iter()
                     .next()
             })
+    }
+
+    fn transcript_search_match_bounds(
+        &self,
+        target: &TranscriptSearchTarget,
+    ) -> Option<Bounds<Pixels>> {
+        self.transcript_text_bounds(&target.key, &target.range)
     }
 
     fn detach_transcript_search_from_tail(&self) {
@@ -354,34 +670,18 @@ impl Waku {
         self.transcript_is_scrolled.set(true);
     }
 
-    fn reveal_transcript_search_geometry(
+    /// Slide a capped user bubble then the transcript so `match_bounds` lands
+    /// inside the viewport on the reveal line — the shared tail of find
+    /// navigation and deep-link match reveals.
+    fn position_transcript_match_bounds(
         &mut self,
-        target: TranscriptSearchTarget,
-        attempt: u8,
-        window: &mut Window,
+        message_id: Uuid,
+        mut match_bounds: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let still_current = self.transcript_search.as_ref().is_some_and(|search| {
-            search.open
-                && search.generation == target.generation
-                && search.current == Some(target.current)
-        });
-        if !still_current {
-            return;
-        }
-        let match_bounds = self.transcript_search_match_bounds(&target);
-        let Some(mut match_bounds) = match_bounds else {
-            if attempt < 1 {
-                cx.on_next_frame(window, move |this, window, cx| {
-                    this.reveal_transcript_search_geometry(target, attempt + 1, window, cx)
-                });
-            }
-            return;
-        };
-
         // Reveal inside a capped user bubble before positioning the transcript.
         // Search keeps full text geometry even when those glyphs are clipped.
-        if let Some(viewport) = self.user_message_viewports.borrow().get(&target.message_id) {
+        if let Some(viewport) = self.user_message_viewports.borrow().get(&message_id) {
             let scroll = &viewport.scroll_handle;
             let bounds = scroll.bounds();
             let margin = px(18.0);
@@ -422,6 +722,33 @@ impl Waku {
             rows.set_offset_from_scrollbar(point(Pixels::ZERO, next));
             cx.notify();
         }
+    }
+
+    fn reveal_transcript_search_geometry(
+        &mut self,
+        target: TranscriptSearchTarget,
+        attempt: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let still_current = self.transcript_search.as_ref().is_some_and(|search| {
+            search.open
+                && search.generation == target.generation
+                && search.current == Some(target.current)
+        });
+        if !still_current {
+            return;
+        }
+        let match_bounds = self.transcript_search_match_bounds(&target);
+        let Some(match_bounds) = match_bounds else {
+            if attempt < 1 {
+                cx.on_next_frame(window, move |this, window, cx| {
+                    this.reveal_transcript_search_geometry(target, attempt + 1, window, cx)
+                });
+            }
+            return;
+        };
+        self.position_transcript_match_bounds(target.message_id, match_bounds, cx);
     }
 
     pub(super) fn render_transcript_search_bar(

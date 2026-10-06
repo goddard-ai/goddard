@@ -9491,6 +9491,7 @@ impl WakuBackend {
                         status: session.status,
                         updated_at: session.updated_at,
                         source: matched.source,
+                        message_id: matched.message_id,
                         snippet: matched.snippet,
                     })
             })

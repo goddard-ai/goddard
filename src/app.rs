@@ -2235,8 +2235,20 @@ struct NewContentDot {
     fade_started: Option<Instant>,
 }
 
+/// A transcript position a search result or `goddard://task/<id>?message=`
+/// link asked the next activation to reveal. The landing consumes it when
+/// the session comes on screen, so it survives session hydration.
+#[derive(Clone, Debug)]
+struct PendingTranscriptMatch {
+    session_id: Uuid,
+    message_id: Uuid,
+    /// The search's free-text needle — paints the matched glyphs during the
+    /// landing flash. Empty for a bare message link.
+    query: String,
+}
+
 /// Where a session activation parks the transcript.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum TranscriptLanding {
     /// The reading position the session held when the reader left it;
     /// back/forward history restores it.
@@ -2247,6 +2259,9 @@ enum TranscriptLanding {
     /// The top of the final turn — the same spot the navigation rail's last
     /// button jumps to.
     LastTurn,
+    /// The deep-linked match — scrolled on screen with a transient
+    /// highlight. Re-applied when a late runtime attach resets the rows.
+    MatchReveal(PendingTranscriptMatch),
 }
 
 /// A session's parked transcript position. `tail_while_busy` marks a reader
@@ -4137,6 +4152,12 @@ pub struct Waku {
     /// Find-in-page state for the selected transcript, created lazily on the
     /// first primary-modifier F press.
     transcript_search: Option<transcript_search::TranscriptSearch>,
+    /// A search-result or task-link deep link waiting for its session's
+    /// landing — `apply_transcript_landing` consumes it.
+    pending_transcript_match: Option<PendingTranscriptMatch>,
+    /// The landed deep link's transient highlight: the matched message's
+    /// glyph washes plus the row flash, cleared by timer.
+    transcript_match_flash: Option<transcript_search::TranscriptMatchFlash>,
     /// Independent selection for the transient toast message. Keeping it out
     /// of the transcript registry prevents an overlay from joining a drag to
     /// whatever happens to be painted beneath it.
@@ -7494,6 +7515,8 @@ impl Waku {
                 window_handle: window.window_handle(),
                 transcript_focus: cx.focus_handle(),
                 transcript_search: None,
+                pending_transcript_match: None,
+                transcript_match_flash: None,
                 toast_selection: TranscriptSelection::default(),
                 transcript_scrollbar: ScrollbarState::new(),
                 composer_lane_height: Rc::new(Cell::new(0.0)),

@@ -229,6 +229,7 @@ impl Waku {
         self.retire_fading_working_indicator(cx);
         self.sync_transcript_layout_width(window);
         self.apply_pending_transcript_search_reveal(window, cx);
+        self.apply_pending_transcript_match_reveal(window, cx);
         self.prune_transcript_annotations(cx);
         let search_bar = self.render_transcript_search_bar(chat_viewport_width, cx);
         let annotation_offer = self.render_annotation_offer(window, cx);
@@ -2159,6 +2160,40 @@ impl Waku {
                     element.into_any_element()
                 })
             });
+        // A landed search hit flashes its row once — the wash and ring fade
+        // out under the flash's fade window. The overlay registers no
+        // hitbox, so it never blocks the message's text selection or menu.
+        let match_flash_overlay = self
+            .transcript_match_flash
+            .as_ref()
+            .filter(|flash| {
+                flash.armed_at.elapsed() < transcript_search::MATCH_FLASH_FADE
+                    && self.state.selected_session == Some(flash.session_id)
+                    && !cx.reduce_motion()
+                    && matches!(kind, TranscriptRowKind::Message(row_message) if row_message == flash.message_index)
+                    && self
+                        .selected_session()
+                        .and_then(|session| session.messages.get(flash.message_index))
+                        .is_some_and(|message| message.id == flash.message_id)
+            })
+            .map(|flash| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(px(10.0))
+                    .border(px(1.0))
+                    .border_color(theme.info)
+                    .bg(theme.info.opacity(0.12))
+                    .with_animation(
+                        SharedString::from(format!(
+                            "transcript-match-flash-{}",
+                            flash.message_id
+                        )),
+                        Animation::new(transcript_search::MATCH_FLASH_FADE).with_easing(ease_out_quint()),
+                        |element, delta| element.opacity(1.0 - delta),
+                    )
+                    .into_any_element()
+            });
         let mut row = div()
             .id(("transcript-row", index))
             .w_full()
@@ -2185,7 +2220,10 @@ impl Waku {
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .min_w_0()
                     .when_some(new_content_dot, |column, dot| column.relative().child(dot))
-                    .child(inner),
+                    .child(inner)
+                    .when_some(match_flash_overlay, |column, overlay| {
+                        column.relative().child(overlay)
+                    }),
             );
         if let Some(turn_id) = response_turn_id {
             let hover_target = (turn_id, kind);

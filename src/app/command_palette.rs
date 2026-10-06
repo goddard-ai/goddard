@@ -4821,11 +4821,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let index = index.unwrap_or(self.command_palette.selected);
-        let Some(action) = self
+        let Some((action, content_match)) = self
             .command_palette
             .results
             .get(index)
-            .map(|item| item.action.clone())
+            .map(|item| (item.action.clone(), item.content_match.clone()))
         else {
             return;
         };
@@ -5037,6 +5037,23 @@ impl Waku {
             }
             PaletteAction::SelectTask(session_id) => {
                 self.settings_page = None;
+                // A content match rides the activation: the landing scrolls
+                // the transcript to the hit and flashes it.
+                if let Some(matched) =
+                    content_match.filter(|matched| matched.session_id == session_id)
+                {
+                    self.pending_transcript_match = Some(PendingTranscriptMatch {
+                        session_id,
+                        message_id: matched.message_id,
+                        query: self
+                            .command_palette
+                            .message_matches_query
+                            .as_deref()
+                            .map(crate::persistence::parse_session_message_search)
+                            .map(|parsed| parsed.text)
+                            .unwrap_or_default(),
+                    });
+                }
                 self.select_session(session_id, cx);
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);

@@ -1310,7 +1310,7 @@ impl Waku {
             if let Some(landing) = self.saved_transcript_landing(session_id) {
                 // The runtime attach that lands after this resets the rows
                 // again — `transcript_landing` re-applies the position there.
-                self.transcript_landing = Some((session_id, landing));
+                self.transcript_landing = Some((session_id, landing.clone()));
                 self.scroll_to_transcript_landing(landing, cx);
             }
         }
@@ -2163,7 +2163,8 @@ impl Waku {
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
-            .is_some_and(|(landing_session, _)| landing_session == session_id)
+            .as_ref()
+            .is_some_and(|(landing_session, _)| *landing_session == session_id)
         {
             self.transcript_landing = None;
         }
@@ -2518,7 +2519,8 @@ impl Waku {
         self.transcript_scroll_positions.remove(&session_id);
         if self
             .transcript_landing
-            .is_some_and(|(landing_session, _)| landing_session == session_id)
+            .as_ref()
+            .is_some_and(|(landing_session, _)| *landing_session == session_id)
         {
             self.transcript_landing = None;
         }

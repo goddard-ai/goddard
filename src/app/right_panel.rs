@@ -41,7 +41,8 @@ enum TranscriptLinkRoute {
     ProjectFile(String, Option<String>),
     Finder(PathBuf),
     /// A `goddard://task/<id>` reference — `None` when the id is malformed.
-    Task(Option<Uuid>),
+    /// A `?message=<id>` query deep-links to that message's transcript row.
+    Task(Option<Uuid>, Option<Uuid>),
     External,
 }
 
@@ -298,7 +299,15 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     // A task reference never reaches the file or browser paths — a malformed
     // id is reported as a bad task link rather than opened externally.
     if let Some(rest) = target.strip_prefix(waku_protocol::TASK_LINK_PREFIX) {
-        return TranscriptLinkRoute::Task(Uuid::parse_str(rest.trim_end_matches('/')).ok());
+        let (id, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let message = query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("message="))
+            .and_then(|value| Uuid::parse_str(value).ok());
+        return TranscriptLinkRoute::Task(
+            Uuid::parse_str(id.trim_end_matches('/')).ok(),
+            message,
+        );
     }
     let Some(path) = markdown_file_link_path(target) else {
         return TranscriptLinkRoute::External;
@@ -1967,6 +1976,32 @@ mod tests {
     }
 
     #[test]
+    fn task_links_route_an_optional_message_deep_link() {
+        let task = Uuid::new_v4();
+        let message = Uuid::new_v4();
+        let prefix = waku_protocol::TASK_LINK_PREFIX;
+
+        assert_eq!(
+            transcript_link_route(&format!("{prefix}{task}"), None),
+            TranscriptLinkRoute::Task(Some(task), None)
+        );
+        assert_eq!(
+            transcript_link_route(&format!("{prefix}{task}?message={message}"), None),
+            TranscriptLinkRoute::Task(Some(task), Some(message))
+        );
+        // A malformed message id degrades to a plain task link, and a
+        // malformed task id still reports a bad task link.
+        assert_eq!(
+            transcript_link_route(&format!("{prefix}{task}?message=nope"), None),
+            TranscriptLinkRoute::Task(Some(task), None)
+        );
+        assert_eq!(
+            transcript_link_route(&format!("{prefix}nope?message={message}"), None),
+            TranscriptLinkRoute::Task(None, Some(message))
+        );
+    }
+
+    #[test]
     fn link_copy_names_what_it_copies() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
         let file = workspace.join("My File.rs");
@@ -2692,7 +2727,7 @@ impl Waku {
                 files_root.as_ref().map(|root| root.join(relative_path))
             }
             TranscriptLinkRoute::Finder(path) => Some(path.clone()),
-            TranscriptLinkRoute::Task(_) | TranscriptLinkRoute::External => None,
+            TranscriptLinkRoute::Task(..) | TranscriptLinkRoute::External => None,
         };
         if linked_path
             .as_deref()
@@ -2728,11 +2763,24 @@ impl Waku {
                     crate::platform::reveal_in_file_manager(&path, cx);
                 }
             }
-            TranscriptLinkRoute::Task(task_id) => {
+            TranscriptLinkRoute::Task(task_id, message_id) => {
                 let known = task_id
                     .is_some_and(|id| self.state.sessions.iter().any(|session| session.id == id));
                 match (task_id, known) {
-                    (Some(id), true) => self.select_session(id, cx),
+                    (Some(id), true) => {
+                        // A `?message=` link reveals its row on landing —
+                        // the needle is unknown here, so the flash carries
+                        // no glyph washes, just the row.
+                        if let Some(message_id) = message_id {
+                            self.pending_transcript_match =
+                                Some(PendingTranscriptMatch {
+                                    session_id: id,
+                                    message_id,
+                                    query: String::new(),
+                                });
+                        }
+                        self.select_session(id, cx)
+                    }
                     _ => {
                         self.show_toast(tr!("errors.task_link_unknown"));
                         cx.notify();

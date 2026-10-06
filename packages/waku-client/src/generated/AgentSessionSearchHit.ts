@@ -20,6 +20,11 @@ project: string, provider: ProviderKind, status: SessionStatus, updatedAt: numbe
  */
 source: MessageRole,
 /**
+ * The matched message's id — pairs with `task_id` in a
+ * `goddard://task/<id>?message=<message_id>` link to land on the hit.
+ */
+messageId: string,
+/**
  * The matched message text excerpted around the query, like the
  * command palette shows.
  */
