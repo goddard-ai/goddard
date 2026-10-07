@@ -182,10 +182,38 @@ impl Waku {
                     return;
                 }
                 *waku.sidebar_terminal_repo_roots.borrow_mut() = roots;
+                waku.sync_standalone_terminal_git_panel(cx);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Re-target an open standalone terminal's Git panel after a cwd change
+    /// or repository scan. The window creates the input only once the root
+    /// is ready, without taking keyboard focus from the terminal.
+    fn sync_standalone_terminal_git_panel(&mut self, cx: &mut Context<Self>) {
+        if !self.git_panel_visible || self.standalone_git_panel_terminal().is_none() {
+            return;
+        }
+        self.sync_git_panel_workspace(cx);
+        if self.git_panel.is_some() {
+            return;
+        }
+        let waku = cx.entity();
+        let window_handle = self.window_handle;
+        cx.defer(move |cx| {
+            let _ = window_handle.update(cx, move |_, window, cx| {
+                let _ = waku.update(cx, |this, cx| {
+                    if this.git_panel_visible
+                        && this.git_panel.is_none()
+                        && this.standalone_git_panel_terminal().is_some()
+                    {
+                        this.open_git_panel(window, cx, false);
+                    }
+                });
+            });
+        });
     }
 
     /// The next "…ago" boundary any terminal row crosses, in seconds from
@@ -559,6 +587,8 @@ impl Waku {
                         this.refresh_right_panel_working_tree(cx);
                     }
                     if cwd_changed {
+                        this.ensure_sidebar_terminal_repo_roots(cx);
+                        this.sync_standalone_terminal_git_panel(cx);
                         this.save();
                     }
                     cx.notify()
@@ -1084,6 +1114,7 @@ impl Waku {
         if self.sync_right_panel_files_root(cx) {
             self.refresh_right_panel_working_tree(cx);
         }
+        self.sync_standalone_terminal_git_panel(cx);
         let focus = self
             .right_panel_terminals
             .get(&terminal_id)
@@ -1950,6 +1981,26 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nearest_repo_root_handles_nested_repos_worktrees_and_non_repo_cwds() {
+        let root = std::env::temp_dir().join(format!("goddard-terminal-repo-{}", Uuid::new_v4()));
+        let repo = root.join("repo");
+        let nested = repo.join("nested");
+        let cwd = nested.join("src");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        assert_eq!(nearest_repo_root(&repo), Some(repo.clone()));
+        assert_eq!(nearest_repo_root(&cwd), Some(repo.clone()));
+        // A linked worktree has a .git file, and the nearest marker wins.
+        std::fs::write(nested.join(".git"), "gitdir: /unused/worktree\n").unwrap();
+        assert_eq!(nearest_repo_root(&cwd), Some(nested));
+        assert_eq!(nearest_repo_root(&outside), None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn sidebar_terminal_order_leads_with_pinned() {

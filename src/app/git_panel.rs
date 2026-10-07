@@ -585,6 +585,10 @@ impl Waku {
             return;
         }
         self.git_panel_visible = false;
+        self.clear_git_panel_contents();
+    }
+
+    fn clear_git_panel_contents(&mut self) {
         self.git_panel = None;
         self.git_panel_file_diffs.clear();
         self.git_panel_hover = None;
@@ -621,7 +625,7 @@ impl Waku {
         }
     }
 
-    /// Build the panel state for the selected session's workspace and start
+    /// Build the panel state for the selected workspace and start
     /// the first snapshot and commit page. `take_focus` is false for restores
     /// that happen under a session switch — the panel reopens without
     /// claiming the keyboard.
@@ -631,10 +635,10 @@ impl Waku {
         cx: &mut Context<Self>,
         take_focus: bool,
     ) {
-        let Some(workspace) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        if self.standalone_git_panel_terminal().is_some() {
+            self.ensure_sidebar_terminal_repo_roots(cx);
+        }
+        let Some(workspace) = self.resolve_git_panel_workspace(cx) else {
             return;
         };
         let base = self.selected_session_land_base();
@@ -724,13 +728,38 @@ impl Waku {
         })
     }
 
-    /// The selected session changed checkouts or its selected base: point the
+    pub(super) fn standalone_git_panel_terminal(&self) -> Option<Uuid> {
+        let RightPanelOwner::Terminal(terminal_id) = self.active_right_panel_owner() else {
+            return None;
+        };
+        self.terminal_records
+            .get(&terminal_id)
+            .filter(|record| record.session.is_none())
+            .map(|_| terminal_id)
+    }
+
+    /// Standalone terminals use the background-resolved repository root.
+    /// A confirmed non-repository uses its cwd for the existing empty state;
+    /// an unresolved cwd waits for the scan before any Git operations run.
+    fn resolve_git_panel_workspace(&self, cx: &App) -> Option<PathBuf> {
+        if let Some(terminal_id) = self.standalone_git_panel_terminal() {
+            let cwd = self.terminal_cwd(terminal_id, cx)?;
+            return self
+                .sidebar_terminal_repo_roots
+                .borrow()
+                .get(&cwd)
+                .map(|root| root.clone().unwrap_or(cwd));
+        }
+        self.selected_workspace_path().map(Path::to_path_buf)
+    }
+
+    /// The selected workspace changed checkouts or its selected base: point the
     /// open panel at the new target and discard results from the old one.
     pub(super) fn sync_git_panel_workspace(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        let Some(workspace) = self.resolve_git_panel_workspace(cx) else {
+            if self.standalone_git_panel_terminal().is_some() {
+                self.clear_git_panel_contents();
+            }
             return;
         };
         let base = self.selected_session_land_base();
