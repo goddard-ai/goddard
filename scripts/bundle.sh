@@ -230,7 +230,10 @@ cp -R "$cached_helper_bundle" "$helper_bundle"
 xattr -cr "$bundle"
 # Sparkle's nested executables sign first, then the framework, then the app.
 # The app's hardened runtime enforces library validation, so the framework must
-# carry the same identity as the app or dlopen rejects it at launch.
+# carry the same identity as the app or dlopen rejects it at launch. The audio
+# input entitlement must ride the signature too: without it the hardened
+# runtime refuses the microphone TCC prompt outright and the app never
+# registers in System Settings > Privacy & Security > Microphone.
 if [ "$codesign_identity" = "-" ]; then
   codesign --force --sign - "$sparkle_framework/Versions/B/Autoupdate"
   codesign --force --sign - "$sparkle_framework/Versions/B/Updater.app"
@@ -260,14 +263,14 @@ elif [ "$profile" = "release" ]; then
   if [ -f "$shuru_executable" ]; then
     codesign --force --options runtime --timestamp --entitlements scripts/shuru.entitlements --identifier "$bundle_identifier.shuru" --sign "$codesign_identity" "$shuru_executable"
   fi
-  codesign --force --options runtime --timestamp --sign "$codesign_identity" "$bundle"
+  codesign --force --options runtime --timestamp --entitlements scripts/goddard.entitlements --sign "$codesign_identity" "$bundle"
 else
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
   codesign --force --options runtime --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
-  codesign --force --options runtime --sign "$codesign_identity" "$bundle"
+  codesign --force --options runtime --entitlements scripts/goddard.entitlements --sign "$codesign_identity" "$bundle"
 fi
 if [ "$profile" = "release" ]; then
   codesign --verify --strict --verbose=2 "$repl_executable"

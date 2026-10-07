@@ -181,7 +181,7 @@ function serveFile(updatesDir: string, request: Request): Response | Promise<Res
 /** Re-sign the bundle after stamping its version — plutil invalidates the
  *  signature bundle.sh wrote. The identity is read back from the signature
  *  itself so whatever bundle.sh picked is preserved. */
-async function resignBundle(appBundle: string): Promise<void> {
+async function resignBundle(appBundle: string, root: string): Promise<void> {
   const describe = await $`codesign -dv --verbose=2 ${appBundle}`.quiet().nothrow();
   const details = `${describe.stderr}\n${describe.stdout}`;
   const authority = details.match(/^Authority=(.+)$/m)?.[1];
@@ -191,7 +191,9 @@ async function resignBundle(appBundle: string): Promise<void> {
     await $`codesign --force --sign - ${appBundle}`;
     return;
   }
-  await $`codesign --force --options runtime --timestamp --sign ${authority} ${appBundle}`;
+  // --force replaces the signature wholesale: re-pass the entitlements
+  // bundle.sh embedded or the hardened runtime loses its audio-input grant.
+  await $`codesign --force --options runtime --timestamp --entitlements ${join(root, "scripts", "goddard.entitlements")} --sign ${authority} ${appBundle}`;
 }
 
 export async function startDevServe(options: {
@@ -240,7 +242,7 @@ export async function startDevServe(options: {
       const plist = join(appBundle, "Contents", "Info.plist");
       await $`plutil -replace CFBundleShortVersionString -string ${shortVersion} ${plist}`;
       await $`plutil -replace CFBundleVersion -string ${buildNumber} ${plist}`;
-      await resignBundle(appBundle);
+      await resignBundle(appBundle, root);
 
       // Build each publication off to the side. The live directory contains
       // immutable archives plus one atomically replaced appcast, so readers

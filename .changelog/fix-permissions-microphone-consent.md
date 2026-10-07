@@ -1,0 +1,1 @@
+- Goddard can now ask for microphone access: signed builds were missing the audio-input entitlement macOS requires before showing the consent prompt, so the app never appeared under System Settings → Privacy & Security → Microphone and dictation could not be granted.

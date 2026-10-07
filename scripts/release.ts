@@ -373,7 +373,9 @@ try {
     // updater could never be exercised from an ad-hoc build.
     await $`codesign --force --sign - ${appBundle}`;
   } else {
-    await $`codesign --force --options runtime --timestamp --sign ${identity} ${appBundle}`;
+    // --force replaces the signature wholesale: re-pass the entitlements
+    // bundle.sh embedded or the hardened runtime loses its audio-input grant.
+    await $`codesign --force --options runtime --timestamp --entitlements ${join(projectRoot, "scripts", "goddard.entitlements")} --sign ${identity} ${appBundle}`;
   }
   await $`codesign --verify --deep --strict --verbose=2 ${appBundle}`;
 
