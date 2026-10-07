@@ -888,21 +888,26 @@ impl WakuBackend {
         // An archived task keeps no live runtime — the same outcome as the
         // client's archive evicting it — and a removed side chat's dies too.
         let gone: Vec<Uuid> = archived_ids.iter().chain(&removed_ids).copied().collect();
-        let removed_runtimes = gone
-            .iter()
-            .filter_map(|id| self.sessions.lock().remove(id))
-            .collect::<Vec<_>>();
-        for runtime in &removed_runtimes {
-            runtime.driver.begin_shutdown();
-        }
-        drop_detached(removed_runtimes);
-        for id in &archived_ids {
-            self.agent.revoke_session(*id);
-        }
+        self.retire_archived_runtimes(&gone);
         for id in removed_ids {
             self.agent.clear_session(id);
         }
         Ok(())
+    }
+
+    /// Stop archived provider processes and revoke their scoped credentials.
+    pub(super) fn retire_archived_runtimes(&self, session_ids: &[Uuid]) {
+        let removed = session_ids
+            .iter()
+            .filter_map(|id| self.sessions.lock().remove(id))
+            .collect::<Vec<_>>();
+        for runtime in &removed {
+            runtime.driver.begin_shutdown();
+        }
+        drop_detached(removed);
+        for id in session_ids {
+            self.agent.revoke_session(*id);
+        }
     }
 
     /// Return the reason and path when archiving would discard employee work.

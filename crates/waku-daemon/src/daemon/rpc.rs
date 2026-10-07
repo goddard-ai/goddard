@@ -206,6 +206,29 @@ impl Backend for WakuBackend {
     ) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
+        let boss_chat_command = matches!(
+            &request.command,
+            Command::Start { .. } | Command::Prompt { .. }
+        ) && {
+            let identity = self.boss.identity_and_session().0.id;
+            self.task_state.lock().sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.boss_managed
+                    && session.project_id == identity
+                    && session.planning.is_none()
+            })
+        };
+        let _boss_chat_guard = boss_chat_command.then(|| self.boss.operation_guard());
+        if boss_chat_command {
+            anyhow::ensure!(
+                self.task_state
+                    .lock()
+                    .sessions
+                    .iter()
+                    .any(|session| { session.id == session_id && session.archived_at.is_none() }),
+                "Boss chat is archived; reopen the active Boss chat"
+            );
+        }
         match request.command {
             Command::Boss { operation } => Ok(ResponsePayload::Boss {
                 result: self.handle_boss_operation(agent, operation, &events)?,

@@ -393,6 +393,10 @@ impl WakuBackend {
                 .hydrate(&mut state.sessions[index])
                 .context("could not load the task's stored state")?;
             let session = &state.sessions[index];
+            anyhow::ensure!(
+                session.archived_at.is_none(),
+                "task {session_id} is archived"
+            );
             let cwd = session
                 .workspace
                 .path()

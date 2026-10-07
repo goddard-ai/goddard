@@ -530,6 +530,18 @@ impl BossService {
         })
     }
 
+    /// Publish a staged chat only if the session it replaces is still active.
+    pub fn replace_session_id(&self, old: Uuid, next: Uuid) -> anyhow::Result<()> {
+        self.update(|state| {
+            anyhow::ensure!(
+                state.session_id == Some(old),
+                "Boss session changed during rotation"
+            );
+            state.session_id = Some(next);
+            Ok(())
+        })
+    }
+
     pub fn add_employee(&self, employee: BossEmployee) -> anyhow::Result<()> {
         self.update(|state| {
             state.employees.push(employee);
@@ -720,8 +732,12 @@ impl BossService {
         *self.project_catalog.lock() = Some(catalog);
     }
 
-    /// Serialize a host-side operation with Boss mutations without exposing
-    /// the service's lock or its state.
+    /// Serialize Boss chat prompts and cold starts with session publication.
+    pub fn operation_guard(&self) -> parking_lot::MutexGuard<'_, ()> {
+        self.operation_lock.lock()
+    }
+
+    /// Serialize a host-side operation with Boss mutations.
     pub fn with_operation_lock<R>(&self, operation: impl FnOnce() -> R) -> R {
         let _guard = self.operation_lock.lock();
         operation()

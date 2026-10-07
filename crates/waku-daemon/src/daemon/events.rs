@@ -25,6 +25,15 @@ pub(super) fn record_boss_event(
         return Ok(());
     };
     task_store.hydrate(session)?;
+    if matches!(
+        event,
+        DriverEvent::PromptSubmitted { .. } | DriverEvent::TurnStarted
+    ) {
+        anyhow::ensure!(
+            session.archived_at.is_none(),
+            "Boss chat is archived; reopen the active Boss chat"
+        );
+    }
     let mut activity = None;
     match event {
         DriverEvent::PromptSubmitted {
@@ -117,6 +126,18 @@ pub(super) fn record_boss_event(
             ));
         }
         DriverEvent::RichActivity(item) => activity = Some(item.clone()),
+        DriverEvent::UsageUpdated {
+            context_tokens,
+            context_window,
+        } => {
+            let usage = session.context_usage.get_or_insert(Default::default());
+            if let Some(tokens) = context_tokens {
+                usage.tokens = *tokens;
+            }
+            if let Some(window) = context_window {
+                usage.window = Some(*window);
+            }
+        }
         DriverEvent::Permission { .. } | DriverEvent::UserInputRequested { .. } => {
             session.status = SessionStatus::Waiting
         }

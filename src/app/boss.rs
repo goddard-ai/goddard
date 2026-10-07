@@ -736,6 +736,7 @@ impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         let mut finalized_plan_host = None;
+        let mut rotated_chat_host = None;
         while let Ok((key, state)) = self.boss_events.try_recv() {
             if self.boss_ui.states.get(&key).is_some_and(|previous| {
                 previous.identity.id == state.identity.id && previous.revision > state.revision
@@ -755,6 +756,17 @@ impl Waku {
                 .is_some_and(|id| self.boss_ui.plan_finalizing.contains(&id))
             {
                 finalized_plan_host = Some(key);
+            }
+            if self.boss_ui.page.is_none()
+                && self.boss_ui.states.get(&key).is_some_and(|previous| {
+                    previous.identity.id == state.identity.id
+                        && previous.session_id.is_some()
+                        && previous.session_id == self.state.selected_session
+                        && state.session_id.is_some()
+                        && previous.session_id != state.session_id
+                })
+            {
+                rotated_chat_host = Some(key);
             }
             let queue_rank = boss_queue_ranks(&state);
             let rows = Arc::new(
@@ -932,7 +944,7 @@ impl Waku {
                 }
             }
         }
-        if let Some(key) = finalized_plan_host {
+        if let Some(key) = rotated_chat_host.or(finalized_plan_host) {
             self.chat_with_boss(key, cx);
         }
         self.pump_boss_avatars(cx);

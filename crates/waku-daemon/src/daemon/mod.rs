@@ -607,6 +607,7 @@ enum ReviewMove {
 
 mod agent_tasks;
 mod boss_ops;
+mod boss_rotation;
 mod catalog_ops;
 mod driver_commands;
 mod events;

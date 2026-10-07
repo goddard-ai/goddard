@@ -1,6 +1,6 @@
 //! Store-independent policy and durable intent records for Boss rotation.
 //!
-//! Rotation is always on: a settled Boss session rotates once its context
+//! Rotation defaults on: a settled Boss session rotates once its context
 //! crosses the configured threshold and the provider's prompt cache has gone
 //! cold. The daemon owns provider session creation; this module makes the
 //! trigger and the journal decision deterministic and restart-readable.
@@ -91,6 +91,8 @@ pub struct RotationIntent {
     pub new_session_id: Uuid,
     pub created_at: u64,
     pub committed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -99,6 +101,8 @@ pub struct RotationJournal {
     pub generation: u64,
     pub active_session_id: Option<Uuid>,
     pub intent: Option<RotationIntent>,
+    /// Completed swaps retained for diagnostics and transcript provenance.
+    pub rotations: Vec<RotationIntent>,
 }
 
 impl RotationJournal {
@@ -123,6 +127,7 @@ impl RotationJournal {
             new_session_id,
             created_at: now,
             committed_at: None,
+            reason: None,
         });
         Ok(())
     }
@@ -142,6 +147,7 @@ impl RotationJournal {
         let next = intent.new_session_id;
         self.active_session_id = Some(next);
         self.generation = self.generation.saturating_add(1);
+        self.rotations.push(intent.clone());
         self.intent = None;
         Ok(next)
     }

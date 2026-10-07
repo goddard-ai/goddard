@@ -37,6 +37,26 @@ impl WakuBackend {
     /// full digest when the context router asked for one a steer-less or
     /// already-settled turn could not take.
     pub(super) fn boss_outbound_prompt(&self, session_id: Uuid, prompt: String) -> String {
+        // A rotated chat's first human prompt carries the same durable
+        // handoff as the daemon's queued-prompt path.
+        let handoff = if self.boss.is_boss(session_id) {
+            let mut state = self.task_state.lock();
+            let handoff = state
+                .session_mut(session_id)
+                .and_then(|session| session.pending_provider_context.take());
+            if handoff.is_some() {
+                if let Err(error) = self.task_store.save(&mut state) {
+                    eprintln!("could not persist Boss context delivery: {error:#}");
+                }
+            }
+            handoff
+        } else {
+            None
+        };
+        let prompt = match handoff {
+            Some(context) if !prompt.contains(&context) => format!("{context}\n\n{prompt}"),
+            _ => prompt,
+        };
         wrap_boss_outbound_prompt(
             &self.task_state,
             &self.automations.document(),
@@ -199,7 +219,11 @@ impl WakuBackend {
             self.settings.get().boss_experiment_enabled,
             "Boss is disabled by the experiment setting"
         );
+        let was_active = self.boss.is_active();
         self.boss.activate()?;
+        if !was_active {
+            self.wake_summon_queue();
+        }
         match operation {
             BossOperation::Automation { action } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
@@ -1057,6 +1081,7 @@ impl WakuBackend {
             self.task_store.save(&mut state)?;
         }
         self.boss.set_session_id(id)?;
+        self.wake_summon_queue();
         Ok(BossResult::Session {
             session: Box::new(session),
             project: Box::new(project),

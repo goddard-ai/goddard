@@ -239,6 +239,7 @@ pub(super) fn persist_agent_prompt(
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
+    anyhow::ensure!(session.archived_at.is_none(), "task is archived");
     let dequeued = queued_id.is_some_and(|queued_id| {
         let before = session.queued_messages.len();
         session
@@ -290,6 +291,7 @@ pub(super) fn mirror_agent_queued_prompt(
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
+    anyhow::ensure!(session.archived_at.is_none(), "task is archived");
     if session
         .queued_messages
         .iter()

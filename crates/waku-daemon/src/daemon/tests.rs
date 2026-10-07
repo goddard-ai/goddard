@@ -9463,3 +9463,383 @@ fn boss_control_set_plan_retags_an_admitted_employee() {
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
+
+fn rotation_boss(backend: &WakuBackend) -> Uuid {
+    use waku_protocol::boss::{BossOperation, BossResult};
+    let BossResult::Session { session, .. } = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Open {
+                provider: ProviderKind::Codex,
+                model: Some("gpt-6.1-sol".into()),
+                mode: Default::default(),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected boss chat")
+    };
+    session.id
+}
+
+#[test]
+fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
+    use crate::boss_rotation::RotationJournal;
+    let root = std::env::temp_dir().join(format!("boss-rotation-runtime-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    let capture = Arc::new(CaptureDriver::default());
+    let driver = DriverHandle::from_control(capture.clone());
+    let old_runtime = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        old,
+        RuntimeEntry {
+            runtime_id: old_runtime,
+            driver: driver.clone(),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.reasoning_effort = Some("high".into());
+        session.begin_turn("Keep supervising the release");
+        session.push_message(
+            MessageRole::Assistant,
+            "The release work is still in flight",
+        );
+        backend.task_store.save(&mut state).unwrap();
+    }
+    // Exercise the daemon's actual recorder, including partial provider
+    // usage reports, rather than seeding a client-owned usage snapshot.
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::UsageUpdated {
+            context_tokens: Some(81),
+            context_window: None,
+        },
+    )
+    .unwrap();
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::UsageUpdated {
+            context_tokens: None,
+            context_window: Some(100),
+        },
+    )
+    .unwrap();
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time() + 301)
+        .unwrap();
+    assert_eq!(
+        backend.boss.identity_and_session().1,
+        Some(old),
+        "open turns never rotate"
+    );
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    let refreshed = backend
+        .task_state
+        .lock()
+        .session_mut(old)
+        .unwrap()
+        .last_reply_at
+        .unwrap();
+    backend.reconcile_boss_rotation(refreshed + 299).unwrap();
+    assert_eq!(
+        backend.boss.identity_and_session().1,
+        Some(old),
+        "warm caches never rotate"
+    );
+    backend.reconcile_boss_rotation(refreshed + 300).unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    assert_eq!(*capture.shutdowns.lock(), 1);
+    assert!(!backend.sessions.lock().contains_key(&old));
+    assert!(
+        backend
+            .ensure_agent_runtime(old, &EventSink::detached())
+            .err()
+            .expect("archived chat must not restart")
+            .to_string()
+            .contains("archived")
+    );
+    assert_eq!(backend.boss.report_target_for(old), Some(next));
+    let journal_path = root.join("boss/rotation.json");
+    let journal = RotationJournal::load(&journal_path).unwrap();
+    assert_eq!(journal.active_session_id, Some(next));
+    assert_eq!(journal.generation, 1);
+    assert!(journal.intent.is_none());
+    assert_eq!(journal.rotations.len(), 1);
+    assert_eq!(journal.rotations[0].old_session_id, old);
+    assert_eq!(journal.rotations[0].new_session_id, next);
+    assert!(journal.rotations[0].committed_at.is_some());
+    // Read both transcripts back from the real database, proving archive
+    // preserves the source and staging survives restart.
+    let mut stored = backend.task_store.load().unwrap();
+    for id in [old, next] {
+        let session = stored.session_mut(id).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        let marker = session
+            .messages
+            .iter()
+            .find(|message| message.content.starts_with("Boss session rotated:"))
+            .unwrap();
+        assert_eq!(marker.role, MessageRole::System);
+        assert!(
+            marker
+                .content
+                .contains("boss_rotation_context_threshold=0.8")
+        );
+        assert!(marker.content.contains("context_tokens=81"));
+        assert!(marker.content.contains(&old.to_string()));
+        assert!(marker.content.contains(&next.to_string()));
+    }
+    let transcript = backend
+        .handle_boss_operation(
+            Some(next),
+            waku_protocol::boss::BossOperation::Transcript {
+                session_id: old,
+                turn: None,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(
+        serde_json::to_string(&transcript)
+            .unwrap()
+            .contains("Keep supervising the release"),
+        "the new Boss can retrieve the archived conversation through its transcript API"
+    );
+    let previous = stored.session_mut(old).unwrap();
+    assert!(previous.archived_at.is_some());
+    assert!(
+        previous
+            .messages
+            .iter()
+            .any(|message| message.content == "Keep supervising the release")
+    );
+    let fresh = stored.session_mut(next).unwrap();
+    assert!(fresh.archived_at.is_none());
+    assert!(fresh.boss_managed);
+    assert_eq!(fresh.model.as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(fresh.reasoning_effort.as_deref(), Some("high"));
+    assert!(fresh.provider_cursor.is_none());
+    assert!(fresh.context_usage.is_none());
+    let next_runtime = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        next,
+        RuntimeEntry {
+            runtime_id: next_runtime,
+            driver,
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    let prompt = |id, runtime_id| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: id,
+                runtime_id,
+                command: Command::Prompt {
+                    prompt: "Continue the release".into(),
+                    turn_id: None,
+                    message_id: None,
+                    hidden: false,
+                    attachments: Vec::new(),
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+    };
+    assert!(
+        prompt(old, old_runtime)
+            .unwrap_err()
+            .to_string()
+            .contains("archived")
+    );
+    prompt(next, next_runtime).unwrap();
+    let prompts = capture.prompts.lock();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("Continue the release"));
+    assert!(prompts[0].contains("Keep supervising the release"));
+    assert!(prompts[0].contains(&format!("boss transcript {old}")));
+    drop(prompts);
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(next)
+            .unwrap()
+            .pending_provider_context
+            .is_none()
+    );
+    let recovered_boss = crate::boss::BossService::open(root.join("boss")).unwrap();
+    assert_eq!(recovered_boss.identity_and_session().1, Some(next));
+    backend.reconcile_boss_rotation(refreshed + 600).unwrap();
+    assert_eq!(
+        RotationJournal::load(&journal_path).unwrap().generation,
+        1,
+        "new chat does not inherit context pressure"
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
+    let root = std::env::temp_dir().join(format!("boss-rotation-opt-out-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    let mut settings = backend.settings.get();
+    assert!(!settings.boss_rotation_disabled);
+    assert!(
+        !serde_json::from_value::<crate::DaemonSettings>(json!({}))
+            .unwrap()
+            .boss_rotation_disabled
+    );
+    settings
+        .boss_rotation_cache_ttl_secs
+        .insert(ProviderKind::Codex, 0);
+    backend.settings.replace(settings.clone()).unwrap();
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 80,
+            window: Some(100),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    settings.boss_rotation_disabled = true;
+    backend.settings.replace(settings.clone()).unwrap();
+    backend
+        .task_state
+        .lock()
+        .session_mut(old)
+        .unwrap()
+        .context_usage
+        .as_mut()
+        .unwrap()
+        .tokens = 81;
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    settings.boss_rotation_disabled = false;
+    backend.settings.replace(settings).unwrap();
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    assert_ne!(backend.boss.identity_and_session().1, Some(old));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
+    use crate::boss_rotation::RotationJournal;
+    for boundary in 0..3 {
+        let root = std::env::temp_dir().join(format!("boss-rotation-recovery-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let old = rotation_boss(&backend);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(old).unwrap();
+            session.begin_turn("Keep supervising the existing work");
+            session.finish_active_turn(TurnStatus::Completed);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let next = Uuid::new_v4();
+        let identity = backend.boss.identity_and_session().0;
+        let mut journal = RotationJournal {
+            active_session_id: Some(old),
+            ..Default::default()
+        };
+        let now = crate::model::unix_time();
+        journal.begin(identity.id, old, next, now).unwrap();
+        journal.intent.as_mut().unwrap().reason = Some("boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100); provider prompt cache cold".into());
+        journal.persist(&root.join("boss/rotation.json")).unwrap();
+        if boundary >= 1 {
+            let mut state = backend.task_state.lock();
+            let mut staged = AgentSession::new(identity.id, ProviderKind::Codex);
+            staged.id = next;
+            staged.boss_managed = true;
+            staged.title = identity.name;
+            // Staging initializes a durable transcript and handoff; bare
+            // drafts are deliberately excluded by StateStore::save.
+            staged.push_message(MessageRole::System, "Boss rotation handoff staged");
+            staged.pending_provider_context = Some(format!("Continue supervising work from {old}"));
+            state.push_session(staged);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        if boundary == 2 {
+            backend.boss.replace_session_id(old, next).unwrap();
+        }
+        // An opt-out must not strand a partially published rotation.
+        let mut settings = backend.settings.get();
+        settings.boss_rotation_disabled = true;
+        backend.settings.replace(settings).unwrap();
+        drop(backend);
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        backend.reconcile_boss_rotation(now + 1).unwrap();
+        backend.reconcile_boss_rotation(now + 2).unwrap();
+        assert_eq!(backend.boss.identity_and_session().1, Some(next));
+        let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
+        assert_eq!(journal.generation, 1);
+        assert_eq!(journal.rotations.len(), 1);
+        let mut state = backend.task_store.load().unwrap();
+        let old_session = state.session_mut(old).unwrap();
+        backend.task_store.hydrate(old_session).unwrap();
+        assert!(old_session.archived_at.is_some());
+        assert_eq!(
+            old_session
+                .messages
+                .iter()
+                .filter(|message| message.content.starts_with("Boss session rotated:"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            state
+                .sessions
+                .iter()
+                .filter(|session| session.id == next)
+                .count(),
+            1
+        );
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

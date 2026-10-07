@@ -87,6 +87,10 @@ auto_prompts: Array<AutoPromptRule>,
  */
 boss_experiment_enabled: boolean,
 /**
+ * Disable automatic rotation of settled Boss chats. Off by default, including release builds.
+ */
+boss_rotation_disabled: boolean,
+/**
  * Context fraction that makes a settled Boss session eligible to rotate.
  */
 boss_rotation_context_threshold: number,

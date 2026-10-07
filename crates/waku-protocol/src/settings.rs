@@ -83,6 +83,9 @@ pub struct DaemonSettings {
     /// personas, and plans surfaces. Defaults on in development builds and
     /// opt-in in release builds.
     pub boss_experiment_enabled: bool,
+    /// Disable automatic rotation of settled Boss chats. Off by default, including release builds.
+    #[serde(default)]
+    pub boss_rotation_disabled: bool,
     /// Context fraction that makes a settled Boss session eligible to rotate.
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
@@ -181,6 +184,7 @@ impl Default for DaemonSettings {
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             boss_experiment_enabled: default_experiment_enabled(),
+            boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             boss_rotation_cache_ttl_secs: HashMap::new(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
@@ -225,8 +229,8 @@ impl DaemonSettings {
             "sidebar_transparency",
             "sidebar_transparency_amount",
             "project_map_enabled",
-            // Dropped when rotation went always-on; the field is inert in
-            // documents written while it was an opt-in.
+            // The former opt-in is inert; only the explicit opt-out above
+            // disables the default-on runtime path.
             "boss_rotation_enabled",
         ] {
             self.extra.remove(key);

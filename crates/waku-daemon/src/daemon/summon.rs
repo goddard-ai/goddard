@@ -9,7 +9,7 @@ impl WakuBackend {
     /// `BossService::update` and the broker's authority lock.
     pub(super) fn start_summon_scheduler(self: &Arc<Self>) {
         use std::sync::atomic::Ordering;
-        if !self.boss.is_active() || self.summon_scheduler_started.swap(true, Ordering::AcqRel) {
+        if self.summon_scheduler_started.swap(true, Ordering::AcqRel) {
             return;
         }
         let backend = Arc::downgrade(self);
@@ -21,8 +21,16 @@ impl WakuBackend {
                     let Some(backend) = backend.upgrade() else {
                         return;
                     };
-                    backend.run_summon_scheduler();
-                    let queued = !backend.boss.queued_heads().is_empty()
+                    if backend.boss.is_active() {
+                        if let Err(error) =
+                            backend.reconcile_boss_rotation(crate::model::unix_time())
+                        {
+                            eprintln!("could not rotate Boss chat: {error:#}");
+                        }
+                        backend.run_summon_scheduler();
+                    }
+                    let queued = backend.boss.identity_and_session().1.is_some()
+                        || !backend.boss.queued_heads().is_empty()
                         || !backend.boss.pending_resource_updates().is_empty()
                         || !backend.employee_update_targets().is_empty();
                     let (lock, condvar) = &*wake;
