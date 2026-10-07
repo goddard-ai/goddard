@@ -4285,6 +4285,115 @@ fn a_blocker_steer_marks_its_accepted_boundary() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Employee reports wait for the entire source turn, even if the boss
+/// queue drains or the source parks between chunks. Rapid updates keep
+/// their individual snapshots and order through the durable queue.
+#[test]
+fn employee_updates_wait_for_the_complete_source_turn() {
+    for busy_supervisor in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-stream-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee_id, parent, _child) = employee_finish_fixture(&root);
+        let events = EventSink::detached();
+        if busy_supervisor {
+            backend
+                .agent
+                .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+        }
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            employee_id,
+            &DriverEvent::TurnStarted,
+        )
+        .unwrap();
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            employee_id,
+            &DriverEvent::TextDelta("long report beginning".into()),
+        )
+        .unwrap();
+        for message in ["first update", "second update"] {
+            backend
+                .handle_boss_operation(
+                    Some(employee_id),
+                    waku_protocol::boss::BossOperation::ReportBlocker {
+                        message: message.into(),
+                    },
+                    &events,
+                )
+                .unwrap();
+        }
+        backend
+            .agent
+            .note_driver_event(employee_id, &DriverEvent::TurnParked);
+        backend.run_summon_scheduler();
+        assert!(parent.prompts.lock().is_empty());
+        assert!(parent.steers.lock().is_empty());
+        let session = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap()
+            .clone();
+        assert_eq!(session.queued_messages.len(), 2);
+        assert!(session.queued_messages[0].content.contains("first update"));
+        assert!(session.queued_messages[1].content.contains("second update"));
+        let finished = DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        };
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            employee_id,
+            &DriverEvent::TextDelta(" and final report text".into()),
+        )
+        .unwrap();
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            employee_id,
+            &finished,
+        )
+        .unwrap();
+        backend.agent.note_driver_event(employee_id, &finished);
+        backend.run_summon_scheduler();
+        backend.run_summon_scheduler();
+        let prompts = if busy_supervisor {
+            parent.steers.lock()
+        } else {
+            parent.prompts.lock()
+        };
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[0].contains("first update"));
+        assert!(prompts[1].contains("second update"));
+        assert!(!backend.agent.has_queued(supervisor));
+        let state = backend.task_state.lock();
+        let source = state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        assert!(
+            source
+                .messages
+                .last()
+                .unwrap()
+                .content
+                .ends_with("and final report text")
+        );
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A report parked behind a busy supervisor keeps its trigger through
 /// the durable mirror — a restart rehydrates the queue with the wake
 /// record intact.

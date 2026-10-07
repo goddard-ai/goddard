@@ -43,6 +43,32 @@ pub(super) fn agent_prompt_envelope(
     ))
 }
 
+/// Employee updates may wake their supervisor only after the employee's
+/// open turn settles, so transcript reads include the complete report.
+pub(super) fn employee_update_streaming(
+    target: Uuid,
+    sender: Option<Uuid>,
+    agent: &crate::agent::AgentState,
+    boss: &crate::boss::BossService,
+) -> bool {
+    sender.is_some_and(|sender| {
+        agent.has_open_turn(sender)
+            && boss
+                .employee(sender)
+                .is_some_and(|employee| boss.report_target(&employee) == Some(target))
+    })
+}
+
+/// Urgent reports keep their interrupt delivery after waiting for the sender.
+pub(super) fn employee_report_interrupts(entry: &crate::agent::AgentPrompt) -> bool {
+    entry.report_trigger.as_ref().is_some_and(|trigger| {
+        matches!(
+            trigger.kind,
+            crate::model::ReportTriggerKind::Blocker | crate::model::ReportTriggerKind::Interrupted
+        )
+    })
+}
+
 /// Deliver one queued agent prompt to a live session. A session with an
 /// open but parked turn is messaged through the provider's steer path so
 /// the prompt folds into the waiting turn; anything else begins a normal
@@ -61,7 +87,10 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
-    if agent.has_parked_turn(session_id) && driver.supports_steer() {
+    if driver.supports_steer()
+        && (agent.has_parked_turn(session_id)
+            || (employee_report_interrupts(&entry) && agent.has_open_turn(session_id)))
+    {
         let mut entry = entry;
         entry.transport =
             agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt);
@@ -334,6 +363,7 @@ pub(super) fn rehydrate_agent_queue(
         session
             .queued_messages
             .iter()
+            .filter(|queued| !agent.queued_steer_pending(session_id, queued.id))
             .filter_map(|queued| match queued.source {
                 crate::model::QueuedMessageSource::Agent { sent_by } => {
                     Some(crate::agent::AgentPrompt {

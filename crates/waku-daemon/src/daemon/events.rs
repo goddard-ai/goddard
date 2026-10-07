@@ -421,7 +421,9 @@ pub(super) fn forward_driver_events(
         {
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if agent.is_working(session_id) {
+                if agent.is_working(session_id)
+                    || employee_update_streaming(session_id, entry.sender, &agent, &boss)
+                {
                     // A fresh turn opened while the queue drained — the
                     // rest waits for its finish like any other queued
                     // prompt.
@@ -457,7 +459,9 @@ pub(super) fn forward_driver_events(
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if agent.is_working(session_id) {
+                if agent.is_working(session_id)
+                    || employee_update_streaming(session_id, entry.sender, &agent, &boss)
+                {
                     // A turn started while the queue drained — a human
                     // prompt, or a provider-side wake. Queue-mode messages
                     // wait for the finish rather than steer mid-turn.

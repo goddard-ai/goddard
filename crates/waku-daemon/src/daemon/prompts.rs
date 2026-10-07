@@ -116,6 +116,10 @@ impl WakuBackend {
         if self.session_quarantined(target) {
             bail!("received files are quarantined until trusted");
         }
+        if employee_update_streaming(target, sender, &self.agent, &self.boss) {
+            self.queue_agent_prompt(target, prompt, sender, &events)?;
+            return Ok(ResponsePayload::Ack);
+        }
         match delivery {
             AgentPromptDelivery::Interrupt => {
                 match self.steerable_driver(target) {
@@ -233,7 +237,9 @@ impl WakuBackend {
         }) {
             return Ok(());
         }
-        if self.agent.is_working(target) {
+        if self.agent.is_working(target)
+            || employee_update_streaming(target, sender, &self.agent, &self.boss)
+        {
             // The runtime event forwarder delivers queued prompts in
             // order once the provider finishes the turn. Mirror the wait
             // into the session document so every client renders the parked
@@ -256,6 +262,10 @@ impl WakuBackend {
                     &events.for_session(target, runtime_id),
                     target,
                 );
+            }
+            // Wake even if the sender settled after the hold check.
+            if managed {
+                self.wake_summon_queue();
             }
             return Ok(());
         }
@@ -317,7 +327,10 @@ impl WakuBackend {
     ) -> anyhow::Result<()> {
         rehydrate_agent_queue(&self.agent, &self.task_state, &self.task_store, session_id);
         while let Some(entry) = self.agent.pop_queued(session_id) {
-            if self.agent.is_working(session_id) {
+            if (self.agent.is_working(session_id)
+                && !(employee_report_interrupts(&entry) && driver.supports_steer()))
+                || employee_update_streaming(session_id, entry.sender, &self.agent, &self.boss)
+            {
                 self.agent.requeue_front(session_id, entry);
                 break;
             }

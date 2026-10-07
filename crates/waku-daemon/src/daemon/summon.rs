@@ -23,7 +23,8 @@ impl WakuBackend {
                     };
                     backend.run_summon_scheduler();
                     let queued = !backend.boss.queued_heads().is_empty()
-                        || !backend.boss.pending_resource_updates().is_empty();
+                        || !backend.boss.pending_resource_updates().is_empty()
+                        || !backend.employee_update_targets().is_empty();
                     let (lock, condvar) = &*wake;
                     let mut signaled = lock.lock();
                     // Queued tickets get a bounded tick so broker-side changes
@@ -42,6 +43,72 @@ impl WakuBackend {
                     *signaled = false;
                 }
             });
+    }
+
+    /// Durable supervisor queues are also the record of reports waiting
+    /// for their sender. Reconciliation covers a finish with no boss wake.
+    fn employee_update_targets(&self) -> Vec<Uuid> {
+        let state = self.task_state.lock();
+        state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.queued_messages.iter().any(|message| {
+                    let crate::model::QueuedMessageSource::Agent { sent_by } = message.source
+                    else {
+                        return false;
+                    };
+                    sent_by.is_some_and(|sender| {
+                        self.boss.employee(sender).is_some_and(|employee| {
+                            self.boss.report_target(&employee) == Some(session.id)
+                        })
+                    })
+                })
+            })
+            .map(|session| session.id)
+            .collect()
+    }
+
+    fn deliver_settled_employee_updates(&self) {
+        let events = self.event_source.lock().clone();
+        for target in self.employee_update_targets() {
+            let waiting = self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == target)
+                .and_then(|session| {
+                    session.queued_messages.iter().find(|message| {
+                        matches!(
+                            message.source,
+                            crate::model::QueuedMessageSource::Agent { .. }
+                        )
+                    })
+                })
+                .is_some_and(|message| {
+                    let crate::model::QueuedMessageSource::Agent { sent_by } = message.source
+                    else {
+                        return false;
+                    };
+                    employee_update_streaming(target, sent_by, &self.agent, &self.boss)
+                });
+            if waiting {
+                continue;
+            }
+            let result =
+                self.ensure_agent_runtime(target, &events)
+                    .and_then(|(runtime, driver)| {
+                        self.drain_agent_queue(
+                            target,
+                            &driver,
+                            &events.for_session(target, runtime),
+                        )
+                    });
+            if let Err(error) = result {
+                eprintln!("could not deliver settled employee update for {target}: {error:#}");
+            }
+        }
     }
 
     /// The host resource broker — or the test-rooted ledger a backend was
@@ -86,6 +153,7 @@ impl WakuBackend {
         {
             eprintln!("could not reconcile host resource policy: {error:#}");
         }
+        self.deliver_settled_employee_updates();
         self.deliver_dispatch_notifications();
         self.deliver_wave_notifications();
         loop {
@@ -1465,6 +1533,17 @@ impl WakuBackend {
                 });
             trigger
         });
+        if employee_update_streaming(target, Some(sender), &self.agent, &self.boss) {
+            return self.queue_agent_prompt_with_id(
+                target,
+                prompt,
+                Some(sender),
+                true,
+                None,
+                report_trigger,
+                events,
+            );
+        }
         let driver = self
             .sessions
             .lock()

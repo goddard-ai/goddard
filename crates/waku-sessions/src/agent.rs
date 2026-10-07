@@ -459,6 +459,19 @@ impl AgentState {
         }
     }
 
+    /// A mirrored prompt already sent as a steer is awaiting its echo,
+    /// so queue reconciliation must not send it a second time.
+    pub fn queued_steer_pending(&self, session_id: Uuid, queued_id: Uuid) -> bool {
+        self.pending_steers
+            .lock()
+            .get(&session_id)
+            .is_some_and(|pending| {
+                pending
+                    .iter()
+                    .any(|steer| steer.queued_id == Some(queued_id))
+            })
+    }
+
     /// Whether a daemon context steer is still awaiting the provider's echo
     /// for this session — a second prompt must not compose another context
     /// injection while one is in flight.
