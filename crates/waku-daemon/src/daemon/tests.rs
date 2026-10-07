@@ -5623,6 +5623,23 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
     );
     backend.settings.replace(daemon_settings).unwrap();
 
+    // Effort validation resolves against the live catalog — a probed cache
+    // or the shipped fallback — so pick a listed reasoning model and one of
+    // its valid efforts instead of assuming gpt-5.5.
+    let catalog = crate::model_catalog::cached_models(ProviderKind::Codex)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(ProviderKind::Codex));
+    let catalog_model = catalog
+        .iter()
+        .find(|model| !model.reasoning_efforts.is_empty())
+        .expect("the codex catalog lists at least one reasoning model");
+    let model_id = catalog_model.id.clone();
+    let valid_effort = catalog_model
+        .reasoning_efforts
+        .iter()
+        .map(|option| option.id.clone())
+        .find(|id| id == "high")
+        .unwrap_or_else(|| catalog_model.reasoning_efforts[0].id.clone());
+
     let persona = backend.boss.document().personas[0].id;
     let summon = |effort: Option<&str>| {
         backend.handle_boss_operation(
@@ -5633,7 +5650,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
                 prompt: "Check the build".into(),
                 project: project.display().to_string(),
                 provider: Some(ProviderKind::Codex),
-                model: Some("gpt-5.5".into()),
+                model: Some(model_id.clone()),
                 reasoning_effort: effort.map(str::to_owned),
                 workspace: None,
                 base_branch: None,
@@ -5654,10 +5671,11 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         )
     };
 
-    // The fallback catalog's gpt-5.5 lists low/medium/high/xhigh.
     let error = summon(Some("bogus")).unwrap_err().to_string();
     assert!(
-        error.contains("reasoning effort \"bogus\" is not supported by model \"gpt-5.5\""),
+        error.contains(&format!(
+            "reasoning effort \"bogus\" is not supported by model \"{model_id}\""
+        )),
         "unexpected error: {error}"
     );
     assert_eq!(
@@ -5666,7 +5684,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         "a rejected summon persists no employee task"
     );
 
-    assert!(summon(Some("high")).is_err());
+    assert!(summon(Some(valid_effort.as_str())).is_err());
     let session = backend
         .task_state
         .lock()
@@ -5675,7 +5693,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         .find(|session| session.id != boss)
         .expect("the employee task persisted before the failed launch")
         .clone();
-    assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(session.reasoning_effort.as_deref(), Some(valid_effort.as_str()));
 
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -9274,7 +9292,8 @@ fn a_supervisor_prompt_steers_the_running_turn() {
 
 /// A prompt parked behind the employee's last turn outlives the expiry
 /// the finish applies: its mirrored queue entry is the revive path's
-/// backlog, so the next control prompt drains it first.
+/// backlog, so the next control prompt's wake drains it first — parked
+/// and reviving prompts join into one envelope, in order.
 #[test]
 fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     use waku_protocol::boss::{BossOperation, EmployeeControl};
@@ -9344,9 +9363,12 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
         )
         .unwrap();
     let prompts = child.prompts.lock().clone();
-    assert_eq!(prompts.len(), 2);
-    assert!(prompts[0].contains("queued while working"));
-    assert!(prompts[1].contains("revive prompt"));
+    assert_eq!(prompts.len(), 1);
+    let envelope = &prompts[0];
+    let parked_at = envelope.find("queued while working");
+    let revive_at = envelope.find("revive prompt");
+    assert!(parked_at.is_some() && revive_at.is_some());
+    assert!(parked_at.unwrap() < revive_at.unwrap());
     let _ = std::fs::remove_dir_all(root);
 }
 
