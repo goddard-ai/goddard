@@ -114,6 +114,8 @@ Changes specific to the mobile app are in
 - Bosses can build a reusable library of purpose-specific employee personas and refine existing roles as recurring work patterns emerge.
 - Opening a transcript search result — a message match in the command palette, or a `goddard://task/<id>?message=<id>` link — now scrolls the task's transcript to the matched message and flashes it, instead of landing on the latest turn and leaving the hit to find by hand.
 - Remote Boss rows now show the configured machine name beneath the Boss name, so you can tell which machine owns each Boss and its employees.
+- Employees and ordinary task agents can now use `goddard-agent memory` — `overview`, `scan`, `zoom`, `record`, `summary`, and `buckets` — against their session's shared project memory, and new sessions receive a bounded overview of it with their startup context. Boss-only `create` and `migrate` stay under `goddard-agent boss memory`.
+- Agents can run bounded browser tasks from a URL, goal, and supplied field values using Jev-selected scrolling, clicks, and text entry. Runs use a new isolated browser profile and report verified completion only when declared checks pass; missing inputs are handed back.
 
 ### Experiments
 
@@ -246,6 +248,9 @@ Changes specific to the mobile app are in
 - In the VoicePad scratchpad, the composer's VP button now hides while the pad is open and returns when it closes, hides, cancels, or sends; the annotation box wraps dictated text at its edge instead of running off-screen; and the paragraph dividers follow the Border intensity setting and read a bit more clearly by default.
 - Typing an edit into the VoicePad transcript no longer jumps to the composer mid-word — pressing Space at the edit caret kept ending the edit and diverting the rest of what you typed into the draft.
 - Unmuting the VoicePad scratchpad now reliably restarts the microphone and transcription — including after switching chats, after the pad paused itself, or after mic permission was granted in System Settings since a denial.
+- Employee instructions now reserve supervisor interruptions for blockers that require supervisor or human action, and direct recoverable failures and non-blocking findings to normal work and finish reports.
+- Boss chat transcripts now show a brief session rotation notice while rotation diagnostics stay in daemon logs.
+- Keep composer and transcript chips together when text wraps, so chip labels remain readable on narrow lines.
 
 ## [0.14.0]
 

@@ -1,1 +1,0 @@
-- Boss chat transcripts now show a brief session rotation notice while rotation diagnostics stay in daemon logs.
