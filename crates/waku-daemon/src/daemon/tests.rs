@@ -7445,6 +7445,115 @@ fn dispatch_notifications_dedupe_across_deliveries() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn employee_dispatch_notifies_once_and_batches_queued_resumption() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
+    let root = std::env::temp_dir().join(format!("summon-wake-{}", Uuid::new_v4()));
+    let (backend, supervisor) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "wake",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { workspace, .. } = &mut operation {
+        *workspace = Some(AgentWorkspace::Local);
+    }
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(Some(supervisor), operation, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let supervisor_capture = Arc::new(CaptureDriver::default());
+    let initial_capture = Arc::new(CaptureDriver::default());
+    for (id, capture) in [
+        (supervisor, supervisor_capture.clone()),
+        (session_id, initial_capture.clone()),
+    ] {
+        backend.sessions.lock().insert(
+            id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+    }
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    backend
+        .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
+        .unwrap();
+    assert_eq!(initial_capture.prompts.lock().len(), 1);
+    assert_eq!(supervisor_capture.prompts.lock().len(), 1);
+    assert!(supervisor_capture.prompts.lock()[0].contains("has started working"));
+    backend
+        .finish_boss_employee(
+            session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+
+    let notices_after_finish = supervisor_capture.prompts.lock().len();
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    for prompt in ["First queued check", "Second queued check"] {
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::Prompt {
+                        prompt: prompt.into(),
+                        delivery: Some(AgentPromptDelivery::Queue),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+    }
+    let resumed_capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(resumed_capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    backend
+        .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
+        .unwrap();
+    let prompts = resumed_capture.prompts.lock();
+    assert_eq!(
+        prompts.len(),
+        1,
+        "all parked prompts share one resumed turn"
+    );
+    assert!(prompts[0].contains("First queued check\n\nSecond queued check"));
+    assert!(!backend.agent.has_queued(session_id));
+    assert_eq!(backend.boss.document().outbox.len(), 1);
+    assert_eq!(
+        supervisor_capture.prompts.lock().len(),
+        notices_after_finish,
+        "resumption adds no notice; finish reports are still allowed"
+    );
+    drop(prompts);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Two summons under one `groupId` make a wave: membership is
 /// durable, every member's terminal state tallies once, and the
 /// supervisor gets a single resolution notice whose outbox entry

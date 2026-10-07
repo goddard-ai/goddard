@@ -1,0 +1,1 @@
+- Resuming a Boss employee no longer repeats its "started working" notice, and follow-ups queued while it waits to resume arrive together in order.

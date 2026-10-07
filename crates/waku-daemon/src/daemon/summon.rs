@@ -387,13 +387,17 @@ impl WakuBackend {
                 // The envelope has been adopted — the transcript owns it
                 // now, and a later requeue must not replay it.
                 let _ = self.boss.clear_employee_prompt_queue(session_id);
-                self.boss.outbox_push(
-                    session_id,
-                    ticket.generation,
-                    ticket.provider,
-                    ticket.model.clone(),
-                    ticket.goal_id,
-                )?;
+                // Re-admission wakes the existing assignment; only its
+                // first launch owes the supervisor a started notice.
+                if !resumed {
+                    self.boss.outbox_push(
+                        session_id,
+                        ticket.generation,
+                        ticket.provider,
+                        ticket.model.clone(),
+                        ticket.goal_id,
+                    )?;
+                }
                 self.deliver_dispatch_notifications();
                 Ok(true)
             }
@@ -423,7 +427,7 @@ impl WakuBackend {
     /// The persisted launch for a granted ticket. Fresh summons adopt the
     /// envelope — assignment plus every prompt parked while queued — onto
     /// the shell and start the provider; re-admitted employees (revival,
-    /// setModel) park their ticket prompts so the caller can drain them in
+    /// setModel) park one ordered envelope so the caller can drain it in
     /// order once `mark_working` lands. Deferred launch revalidates the
     /// mutable parts: the project path and the worktree fork happen now,
     /// not at admission. Returns `true` when the session resumed rather
@@ -446,10 +450,14 @@ impl WakuBackend {
             state.sessions[index].has_started()
         };
         if started {
-            for prompt in std::iter::once(ticket.prompt.clone())
+            // Like a fresh assignment, all prompts waiting for admission
+            // belong to one wake, rather than one provider turn per item.
+            let prompt = std::iter::once(ticket.prompt.clone())
                 .chain(ticket.pending_prompts.iter().cloned())
                 .filter(|prompt| !prompt.trim().is_empty())
-            {
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if !prompt.is_empty() {
                 self.queue_agent_prompt(session_id, prompt, Some(employee.supervisor_id), &events)?;
             }
             return Ok(true);
