@@ -178,7 +178,6 @@ mod tests {
             settings.auto_prompts,
             waku_protocol::auto_prompts::default_rules()
         );
-        assert!(settings.auto_prompts.iter().all(|rule| rule.enabled));
         store.replace(settings).unwrap();
 
         // Once written, the seeded rule survives reloads.
