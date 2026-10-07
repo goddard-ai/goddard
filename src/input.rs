@@ -3207,17 +3207,16 @@ pub(crate) fn atom_slot_font(weight: FontWeight) -> Font {
 }
 
 /// The painted bounds a chip's leading icon takes inside [`ATOM_ICON_SLOT`]'s
-/// reserved width: a step in from the chip's edge, vertically centered. The
-/// remainder of the slot is the gap between icon and label text.
+/// reserved width: vertically centered, with its trailing edge anchored where
+/// [`atom_avatar_bounds`]'s lands, so the slot's gap before the label is the
+/// same whichever glyph fills it.
 pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
     let icon = chip.size.height * ATOM_ICON_SCALE;
-    Bounds::new(
-        point(
-            chip.origin.x + ATOM_CHIP_PADDING_X + ATOM_ICON_INSET_X,
-            chip.center().y - icon / 2.0,
-        ),
-        size(icon, icon),
-    )
+    let trailing = chip.origin.x
+        + ATOM_CHIP_PADDING_X
+        + ATOM_ICON_INSET_X
+        + chip.size.height * ATOM_AVATAR_SCALE;
+    Bounds::new(point(trailing - icon, chip.center().y - icon / 2.0), size(icon, icon))
 }
 
 /// A mention chip's avatar fills more of the icon slot than a stroked glyph
@@ -3227,8 +3226,9 @@ pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
 pub(crate) const ATOM_AVATAR_SCALE: f32 = 0.9;
 
 /// The painted bounds a session mention's avatar takes inside
-/// [`ATOM_ICON_SLOT`]'s reserved width — [`atom_icon_bounds`]'s anchor with
-/// the larger [`ATOM_AVATAR_SCALE`] box.
+/// [`ATOM_ICON_SLOT`]'s reserved width — a step in from the chip's edge with
+/// the larger [`ATOM_AVATAR_SCALE`] box. Its trailing edge is the anchor
+/// [`atom_icon_bounds`] aligns to.
 pub(crate) fn atom_avatar_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
     let avatar = chip.size.height * ATOM_AVATAR_SCALE;
     Bounds::new(
@@ -6425,6 +6425,18 @@ mod tests {
         assert_eq!(runs[1].font.family.as_ref(), "Slot Face");
         assert_eq!(runs[1].color, accent);
         assert_eq!(runs[2].font.family.as_ref(), "Test Sans");
+    }
+
+    /// Icon and avatar chips share the slot's trailing edge, so the label
+    /// keeps one gap whichever glyph the chip paints.
+    #[test]
+    fn icon_and_avatar_chips_leave_the_same_gap_before_the_label() {
+        use gpui::{Bounds, size};
+        let chip = Bounds::new(point(px(10.0), px(20.0)), size(px(60.0), px(17.0)));
+        assert_eq!(
+            super::atom_icon_bounds(chip).right(),
+            super::atom_avatar_bounds(chip).right()
+        );
     }
 
     /// The single-line scroll follows the caret with an em of lookahead and

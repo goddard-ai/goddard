@@ -2515,12 +2515,16 @@ pub(crate) fn range_rects(
                 let start_x = x_for_index(selected_start);
                 let end_x = x_for_index(selected_end);
                 if end_x > start_x {
+                    // `pad_x` overhangs the range into its adjacent text; at
+                    // a row's edge there is none, only the element's bound —
+                    // which a clipping ancestor (a sent prompt's bubble)
+                    // enforces. Clamp the wash to the layout's own box so a
+                    // chip opening a row keeps its rounded cap.
+                    let left = (start_x - px(pad_x)).max(bounds.left());
+                    let right = (end_x + px(pad_x)).min(bounds.right());
                     rects.push(Bounds::new(
-                        point(start_x - px(pad_x), row_top + px(inset_y)),
-                        size(
-                            end_x - start_x + px(2.0 * pad_x),
-                            line_height - px(2.0 * inset_y),
-                        ),
+                        point(left, row_top + px(inset_y)),
+                        size(right - left, line_height - px(2.0 * inset_y)),
                     ));
                 }
             }
@@ -5081,6 +5085,45 @@ mod tests {
         assert!(
             rects.iter().all(|rect| rect.left() == left),
             "a full selection must include each wrapped row's first glyph: {rects:?}"
+        );
+    }
+
+    /// A padded wash — a chip's or inline code's — overhangs into adjacent
+    /// text. At a row's edge there is none, so the box must stay inside the
+    /// layout's own bounds or a clipping ancestor (a sent prompt's bubble)
+    /// shears off its rounded cap.
+    #[gpui::test]
+    fn padded_washes_clamp_to_the_text_bounds(cx: &mut TestAppContext) {
+        struct TestWindow;
+
+        impl gpui::Render for TestWindow {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        let text: SharedString =
+            "one two three four five six seven eight nine ten eleven twelve".into();
+        let styled = StyledText::new(text.clone());
+        let layout = styled.layout().clone();
+
+        cx.draw(Point::default(), size(px(96.0), px(400.0)), move |_, _| {
+            div()
+                .w(px(96.0))
+                .text_size(px(14.0))
+                .line_height(px(20.0))
+                .child(styled)
+        });
+
+        let rects = range_rects(&layout, &(0..text.len()), 2.0, 2.0);
+        assert!(rects.len() >= 3, "fixture must wrap across several rows");
+        let bounds = layout.bounds();
+        assert!(
+            rects
+                .iter()
+                .all(|rect| rect.left() >= bounds.left() && rect.right() <= bounds.right()),
+            "a padded wash must not paint past the text's own box: {rects:?}"
         );
     }
 
