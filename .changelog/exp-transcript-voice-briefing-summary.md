@@ -1,0 +1,1 @@
+- Voice briefings now default to a single sentence under 20 words stating the agent's current status; saved custom instructions stay unchanged.
