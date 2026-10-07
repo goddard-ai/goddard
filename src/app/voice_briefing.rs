@@ -256,7 +256,25 @@ impl Waku {
         } else {
             tts_model.model_id_for(provider).unwrap_or_default()
         };
-        format!("{}:{model_id}", provider.id())
+        gateway_voice_key(provider, model_id, self.voice_briefing_gateway_voice())
+    }
+
+    pub(super) fn voice_briefing_gateway_voice(&self) -> &str {
+        let model = self.state.voice_briefing_tts_model;
+        let model_id = if model.is_custom() {
+            self.state.voice_briefing_tts_custom_model.trim()
+        } else {
+            model
+                .model_id_for(self.state.voice_briefing_provider)
+                .unwrap_or_default()
+        };
+        let configured = self
+            .state
+            .voice_briefing_tts_voices
+            .get(model.model_id().unwrap_or("custom"))
+            .map(String::as_str)
+            .unwrap_or_default();
+        effective_speech_voice(model_id, configured)
     }
 
     /// Shared gate: experiment on, key and model set, the session settled
@@ -962,6 +980,7 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let gateway_voice = self.voice_briefing_gateway_voice().to_owned();
         let piper_speaker = self.state.voice_briefing_piper_speaker;
         let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
@@ -989,9 +1008,17 @@ impl Waku {
                         .await
                         .context("speech generation")?
                 } else {
-                    synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
-                        .await
-                        .context("speech generation")?
+                    synthesize(
+                        &http,
+                        &executor,
+                        provider,
+                        &key,
+                        &tts_model_id,
+                        &gateway_voice,
+                        &transcript,
+                    )
+                    .await
+                    .context("speech generation")?
                 };
                 anyhow::Ok((transcript, audio))
             }
@@ -1051,6 +1078,7 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let gateway_voice = self.voice_briefing_gateway_voice().to_owned();
         let piper_speaker = self.state.voice_briefing_piper_speaker;
         let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
@@ -1065,9 +1093,17 @@ impl Waku {
                         .context("speech generation")?
                 } else {
                     let key = inference_credential(&daemon, provider)?;
-                    synthesize(&http, &executor, provider, &key, &tts_model_id, &transcript)
-                        .await
-                        .context("speech generation")?
+                    synthesize(
+                        &http,
+                        &executor,
+                        provider,
+                        &key,
+                        &tts_model_id,
+                        &gateway_voice,
+                        &transcript,
+                    )
+                    .await
+                    .context("speech generation")?
                 };
                 anyhow::Ok((transcript, audio))
             }
@@ -1267,11 +1303,12 @@ pub(super) async fn synthesize(
     provider: InferenceProvider,
     key: &str,
     model_id: &str,
+    voice: &str,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
     match provider {
         InferenceProvider::VercelGateway => {
-            let (voice, output_format) = speech_parameters(model_id);
+            let output_format = speech_parameters(model_id).1;
             let body = json!({
                 "text": text,
                 "voice": voice,
@@ -1302,7 +1339,7 @@ pub(super) async fn synthesize(
             let body = json!({
                 "model": model_id,
                 "input": text,
-                "voice": speech_parameters(model_id).0,
+                "voice": voice,
                 "response_format": "mp3",
             });
             post(
@@ -1318,6 +1355,19 @@ pub(super) async fn synthesize(
             .with_context(|| format!("speech gateway request for model {model_id}"))
         }
         other => bail!("{} cannot voice a briefing", other.display_name()),
+    }
+}
+
+fn gateway_voice_key(provider: InferenceProvider, model_id: &str, voice: &str) -> String {
+    format!("{}:{model_id}:{voice}", provider.id())
+}
+
+fn effective_speech_voice<'a>(model_id: &str, configured: &'a str) -> &'a str {
+    let configured = configured.trim();
+    if configured.is_empty() {
+        speech_parameters(model_id).0
+    } else {
+        configured
     }
 }
 
@@ -1394,6 +1444,36 @@ pub(super) async fn post_json(
 ) -> anyhow::Result<Value> {
     let bytes = post(http, executor, url, key, provider, model_header, body).await?;
     serde_json::from_slice(&bytes).context("the gateway returned invalid JSON")
+}
+
+#[cfg(test)]
+mod voice_tests {
+    use super::*;
+
+    #[test]
+    fn selected_voice_changes_clip_identity_and_blank_restores_defaults() {
+        let provider = InferenceProvider::VercelGateway;
+        for model in [
+            "google/gemini-3.8-flash-tts",
+            "openai/tts-1",
+            "spacexai/grok-tts",
+            "fish-audio/s1",
+            "acme/custom-tts",
+        ] {
+            let default = effective_speech_voice(model, "  ");
+            assert_eq!(default, speech_parameters(model).0);
+            let selected = effective_speech_voice(model, " narrator ");
+            assert_eq!(selected, "narrator");
+            assert_ne!(
+                gateway_voice_key(provider, model, selected),
+                gateway_voice_key(provider, model, default)
+            );
+            assert_eq!(
+                gateway_voice_key(provider, model, default),
+                gateway_voice_key(provider, model, effective_speech_voice(model, ""))
+            );
+        }
+    }
 }
 
 #[cfg(test)]

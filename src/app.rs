@@ -2545,6 +2545,7 @@ pub struct Waku {
     /// section, not here.
     voice_briefing_model_input: Entity<TextInput>,
     voice_briefing_tts_model_input: Entity<TextInput>,
+    voice_briefing_tts_voice_input: Entity<TextInput>,
     voice_briefing_instructions_input: Entity<TextInput>,
     voice_briefing_gate_instructions_input: Entity<TextInput>,
     /// Replies already briefed this run, keyed by message id — landing on
@@ -5499,6 +5500,27 @@ impl Waku {
             input.set_content(state.voice_briefing_tts_custom_model.clone(), cx);
             input
         });
+        let voice_briefing_tts_voice_input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .select_all_on_focus_click()
+                .accessibility_label(tr!("experiments.voice_briefing_tts_voice"))
+                .placeholder(tr!("experiments.voice_briefing_tts_voice_placeholder"));
+            input.set_content(
+                state
+                    .voice_briefing_tts_voices
+                    .get(
+                        state
+                            .voice_briefing_tts_model
+                            .model_id()
+                            .unwrap_or("custom"),
+                    )
+                    .cloned()
+                    .unwrap_or_default(),
+                cx,
+            );
+            input
+        });
         let initial_voice_briefing_instructions =
             voice_briefing::effective_voice_briefing_summary_instructions(
                 &state.voice_briefing_summary_instructions,
@@ -6567,6 +6589,7 @@ impl Waku {
             for input in [
                 &voice_briefing_model_input,
                 &voice_briefing_tts_model_input,
+                &voice_briefing_tts_voice_input,
                 &voice_briefing_instructions_input,
                 &voice_briefing_gate_instructions_input,
             ] {
@@ -6916,6 +6939,7 @@ impl Waku {
                 inference_inputs_seeded: false,
                 voice_briefing_model_input,
                 voice_briefing_tts_model_input,
+                voice_briefing_tts_voice_input,
                 voice_briefing_instructions_input,
                 voice_briefing_gate_instructions_input,
                 briefed_messages: HashSet::new(),

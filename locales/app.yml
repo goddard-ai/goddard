@@ -6548,3 +6548,10 @@ voice_scratchpad.connection_lost:
   en: Transcription paused — connection lost
 voice_scratchpad.paused:
   en: Transcription paused by the service — still listening
+
+experiments.voice_briefing_tts_voice:
+  en: Voice
+experiments.voice_briefing_tts_voice_placeholder:
+  en: Default voice (or enter a voice name / ID)
+experiments.voice_briefing_tts_voice_caption:
+  en: "Using %{voice}. Enter a voice name or ID supported by this model; clear to restore its default."

@@ -239,6 +239,7 @@ enum SpeechEngine {
         provider: InferenceProvider,
         credential: String,
         model_id: String,
+        voice: String,
     },
     Piper {
         voice: String,
@@ -355,7 +356,8 @@ async fn resolve_speech_clips(
                 provider,
                 credential,
                 model_id,
-            } => synthesize(http, executor, *provider, credential, model_id, part).await?,
+                voice,
+            } => synthesize(http, executor, *provider, credential, model_id, voice, part).await?,
             SpeechEngine::Piper { voice, speaker } => {
                 synthesize_piper(http, executor, voice, *speaker, part).await?
             }
@@ -680,6 +682,7 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let gateway_voice = self.voice_briefing_gateway_voice().to_owned();
         let piper_speaker = self.state.voice_briefing_piper_speaker;
         let piper_voice =
             super::piper::piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
@@ -700,6 +703,7 @@ impl Waku {
                         provider,
                         credential,
                         model_id,
+                        voice: gateway_voice,
                     }
                 };
                 resolve_speech_clips(&client, &http, &executor, eval_ready, &engine, &parts).await

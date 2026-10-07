@@ -7890,6 +7890,26 @@ impl Waku {
                     .into_any_element(),
                 ))
             })
+            .when(!tts.is_piper(), |card| {
+                card.child(row(
+                    tr!("experiments.voice_briefing_tts_voice"),
+                    TextField::new(
+                        "voice-briefing-tts-voice",
+                        self.voice_briefing_tts_voice_input.clone(),
+                    )
+                    .w(px(280.0))
+                    .into_any_element(),
+                ))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!(
+                            "experiments.voice_briefing_tts_voice_caption",
+                            voice = self.voice_briefing_gateway_voice()
+                        )),
+                )
+            })
             .when(tts.is_piper(), |card| {
                 card.child(row(
                     tr!("experiments.voice_briefing_piper_voice"),
@@ -8150,6 +8170,7 @@ impl Waku {
                 .find(|model| !model.is_custom() && !model.is_piper())
                 .unwrap_or_default();
         }
+        self.refresh_voice_briefing_voice_input(cx);
         self.save();
         cx.notify();
     }
@@ -8189,8 +8210,25 @@ impl Waku {
             return;
         }
         self.state.voice_briefing_tts_model = model;
+        self.refresh_voice_briefing_voice_input(cx);
         self.save();
         cx.notify();
+    }
+
+    fn refresh_voice_briefing_voice_input(&mut self, cx: &mut Context<Self>) {
+        let voice = self
+            .state
+            .voice_briefing_tts_voices
+            .get(
+                self.state
+                    .voice_briefing_tts_model
+                    .model_id()
+                    .unwrap_or("custom"),
+            )
+            .cloned()
+            .unwrap_or_default();
+        self.voice_briefing_tts_voice_input
+            .update(cx, |input, cx| input.set_content(voice, cx));
     }
 
     /// LibriTTS has hundreds of speakers: render only the visible rows, using
@@ -8397,6 +8435,25 @@ impl Waku {
             .content()
             .trim()
             .to_owned();
+        if !self.state.voice_briefing_tts_model.is_piper() {
+            let key = self
+                .state
+                .voice_briefing_tts_model
+                .model_id()
+                .unwrap_or("custom")
+                .to_owned();
+            let voice = self
+                .voice_briefing_tts_voice_input
+                .read(cx)
+                .content()
+                .trim()
+                .to_owned();
+            if voice.is_empty() {
+                self.state.voice_briefing_tts_voices.remove(&key);
+            } else {
+                self.state.voice_briefing_tts_voices.insert(key, voice);
+            }
+        }
         self.state.voice_briefing_summary_instructions = self
             .voice_briefing_instructions_input
             .read(cx)

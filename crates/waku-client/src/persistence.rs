@@ -1480,6 +1480,10 @@ pub struct AppSettings {
     /// Gateway model ID used when the TTS selector is set to Custom.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    /// Voice overrides keyed by the built-in model slug, or `custom` for the custom model.
+    /// Missing entries retain the model's default voice.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub voice_briefing_tts_voices: BTreeMap<String, String>,
     /// Piper voice id used when the TTS selector is set to Piper — a
     /// `rhasspy/piper-voices` model name like `en_US-lessac-medium`,
     /// downloaded into the voices directory on first use.
@@ -1600,6 +1604,7 @@ impl Default for AppSettings {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_tts_voices: BTreeMap::new(),
             voice_briefing_piper_voice: default_voice_briefing_piper_voice(),
             voice_briefing_piper_speaker: 0,
             voice_briefing_summary_instructions: String::new(),
@@ -2181,6 +2186,10 @@ pub struct PersistedState {
     pub voice_briefing_tts_model: VoiceBriefingTtsModel,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_briefing_tts_custom_model: String,
+    /// Voice overrides keyed by the built-in model slug, or `custom` for the custom model.
+    /// Missing entries retain the model's default voice.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub voice_briefing_tts_voices: BTreeMap<String, String>,
     /// Piper voice id for the local engine — see the AppSettings twin.
     #[serde(default = "default_voice_briefing_piper_voice")]
     pub voice_briefing_piper_voice: String,
@@ -2599,6 +2608,7 @@ impl PersistedState {
             voice_briefing_summary_custom: false,
             voice_briefing_tts_model: VoiceBriefingTtsModel::default(),
             voice_briefing_tts_custom_model: String::new(),
+            voice_briefing_tts_voices: BTreeMap::new(),
             voice_briefing_piper_voice: default_voice_briefing_piper_voice(),
             voice_briefing_piper_speaker: 0,
             voice_briefing_summary_instructions: String::new(),
@@ -3049,6 +3059,7 @@ impl PersistedState {
             voice_briefing_summary_custom: self.voice_briefing_summary_custom,
             voice_briefing_tts_model: self.voice_briefing_tts_model,
             voice_briefing_tts_custom_model: self.voice_briefing_tts_custom_model.clone(),
+            voice_briefing_tts_voices: self.voice_briefing_tts_voices.clone(),
             voice_briefing_piper_voice: self.voice_briefing_piper_voice.clone(),
             voice_briefing_piper_speaker: self.voice_briefing_piper_speaker,
             voice_briefing_summary_instructions: self.voice_briefing_summary_instructions.clone(),
@@ -3214,6 +3225,7 @@ impl PersistedState {
         self.voice_briefing_summary_custom = settings.voice_briefing_summary_custom;
         self.voice_briefing_tts_model = settings.voice_briefing_tts_model;
         self.voice_briefing_tts_custom_model = settings.voice_briefing_tts_custom_model;
+        self.voice_briefing_tts_voices = settings.voice_briefing_tts_voices;
         self.voice_briefing_piper_voice = settings.voice_briefing_piper_voice;
         self.voice_briefing_piper_speaker = settings.voice_briefing_piper_speaker;
         self.voice_briefing_summary_instructions = settings.voice_briefing_summary_instructions;
@@ -5043,6 +5055,13 @@ mod tests {
         state.voice_briefing_summary_custom = true;
         state.voice_briefing_tts_model = VoiceBriefingTtsModel::Custom;
         state.voice_briefing_tts_custom_model = "acme/voice-model".to_owned();
+        state
+            .voice_briefing_tts_voices
+            .insert("custom".to_owned(), "narrator".to_owned());
+        state.voice_briefing_tts_voices.insert(
+            VoiceBriefingTtsModel::Flash.model_id().unwrap().to_owned(),
+            "Puck".to_owned(),
+        );
         state.voice_briefing_piper_voice = "en_US-libritts-high".to_owned();
         state.voice_briefing_piper_speaker = 42;
         let settings = serde_json::to_value(state.app_settings()).unwrap();
@@ -5056,6 +5075,10 @@ mod tests {
             VoiceBriefingTtsModel::Custom
         );
         assert_eq!(restored.voice_briefing_tts_custom_model, "acme/voice-model");
+        assert_eq!(
+            restored.voice_briefing_tts_voices,
+            state.voice_briefing_tts_voices
+        );
         assert_eq!(restored.voice_briefing_piper_voice, "en_US-libritts-high");
         assert_eq!(restored.voice_briefing_piper_speaker, 42);
 
@@ -5072,6 +5095,7 @@ mod tests {
             VoiceBriefingTtsModel::FlashLite
         );
         assert!(legacy.voice_briefing_tts_custom_model.is_empty());
+        assert!(legacy.voice_briefing_tts_voices.is_empty());
         assert_eq!(legacy.voice_briefing_piper_speaker, 0);
     }
 
