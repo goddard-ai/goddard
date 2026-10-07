@@ -587,12 +587,18 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let playback = self.voice_briefing_playback_status()?;
-        let seconds = playback.remaining.as_secs();
-        let button = |id, path, label| {
+        let playback = self.voice_briefing_playback_status();
+        let can_skip = playback.is_some()
+            || self.briefing_queue.waiting.is_some()
+            || !self.speech_clip_queue.is_empty();
+        if !self.state.voice_briefing_enabled && !can_skip {
+            return None;
+        }
+        let playing = playback.is_some_and(|playback| playback.playing);
+        let button = |id, path, label, enabled| {
             div()
                 .id(id)
-                .tab_index(0)
+                .when(enabled, |button| button.tab_index(0))
                 .size(px(24.0))
                 .rounded(px(8.0))
                 .flex()
@@ -600,8 +606,12 @@ impl Waku {
                 .justify_center()
                 .bg(theme.raised)
                 .cursor_default()
-                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .hover(|style| style.bg(theme.raised.blend(theme.overlay_strong)))
+                .when(enabled, |button| {
+                    button
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .hover(|style| style.bg(theme.raised.blend(theme.overlay_strong)))
+                })
+                .when(!enabled, |button| button.opacity(0.4))
                 .tooltip(Tooltip::text(label))
                 .child(icon(path, 12.0, theme.text_secondary))
         };
@@ -616,42 +626,56 @@ impl Waku {
                         "voice-briefing-restart",
                         "icons/rotate-ccw.svg",
                         "Restart briefing",
+                        playback.is_some(),
                     )
-                    .on_activation(cx, |this, _, cx| {
-                        if let Some(remaining) = crate::platform::restart_briefing_audio() {
-                            let message_id =
-                                this.voice_briefing_playback.and_then(|p| p.message_id);
-                            this.track_voice_briefing_playback(remaining, message_id, cx);
-                        }
+                    .when(playback.is_some(), |button| {
+                        button.on_activation(cx, |this, _, cx| {
+                            if let Some(remaining) = crate::platform::restart_briefing_audio() {
+                                let message_id =
+                                    this.voice_briefing_playback.and_then(|p| p.message_id);
+                                this.track_voice_briefing_playback(remaining, message_id, cx);
+                            }
+                        })
                     }),
                 )
                 .child(
                     button(
                         "voice-briefing-toggle",
-                        if playback.playing {
+                        if playing {
                             "icons/pause.svg"
                         } else {
                             "icons/play.svg"
                         },
-                        if playback.playing { "Pause" } else { "Resume" },
+                        if playing { "Pause" } else { "Resume" },
+                        playback.is_some(),
                     )
-                    .on_activation(cx, |this, _, cx| this.toggle_voice_briefing_playback(cx)),
+                    .when(playback.is_some(), |button| {
+                        button.on_activation(cx, |this, _, cx| {
+                            this.toggle_voice_briefing_playback(cx)
+                        })
+                    }),
                 )
                 .child(
                     button(
                         "voice-briefing-skip",
                         "icons/fast-forward.svg",
                         "Skip briefing",
+                        can_skip,
                     )
-                    .on_activation(cx, |this, _, cx| this.skip_voice_briefing(cx)),
+                    .when(can_skip, |button| {
+                        button.on_activation(cx, |this, _, cx| this.skip_voice_briefing(cx))
+                    }),
                 )
-                .child(
-                    div()
-                        .px(px(5.0))
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(format!("{:02}:{:02}", seconds / 60, seconds % 60)),
-                ),
+                .when_some(playback, |controls, playback| {
+                    let seconds = playback.remaining.as_secs();
+                    controls.child(
+                        div()
+                            .px(px(5.0))
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(format!("{:02}:{:02}", seconds / 60, seconds % 60)),
+                    )
+                }),
         )
     }
 
