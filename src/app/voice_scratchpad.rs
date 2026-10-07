@@ -2992,6 +2992,12 @@ impl Waku {
         if !self.state.voice_scratchpad_enabled {
             return None;
         }
+        // An open pad is its own chrome — the pill only renders when this
+        // chat's scratchpad is not on screen, and returns on close, cancel,
+        // send, and hide.
+        if self.voice_scratchpad_visible() && session_id == self.state.selected_session {
+            return None;
+        }
         let state = self.voice_scratchpad_button_state(session_id);
         let theme = Theme::current(cx);
         let enabled = session_id.is_some();
@@ -4619,7 +4625,7 @@ impl Waku {
                         .h(hairline())
                         .w_full()
                         .my(px(14.0))
-                        .bg(theme.separator.opacity(0.4)),
+                        .bg(theme.separator.opacity(0.44)),
                 );
             }
             first_drawn = false;
@@ -5221,7 +5227,12 @@ impl Waku {
                     .flex_wrap()
                     .items_start()
                     .gap(px(4.0))
-                    .child(text_element)
+                    // A bare text leaf measures at max-content and is never
+                    // re-shaped at the line width — inside a wrap container
+                    // it paints unwrapped, straight past the box. The
+                    // full-width div gives it a definite wrap column, the
+                    // same treatment `selectable_flat_text` gives the rows.
+                    .child(div().w_full().min_w_0().child(text_element))
                     .when(
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
@@ -7034,5 +7045,128 @@ mod tests {
             t0,
         );
         assert!(crossfade.is_none());
+    }
+
+    /// Mirrors `render_annotation_box`'s DOM — box card, dot, and the
+    /// wrap container holding the text layers — with a cloned
+    /// `TextLayout` per layer so the test can read each painted width.
+    /// Keep it in step with the real box: the wrapped-leaf invariant it
+    /// guards lives in this wiring, not in the elements.
+    struct AnnotationBoxHarness {
+        text_layout: Option<gpui::TextLayout>,
+        ghost_layout: Option<gpui::TextLayout>,
+        landing_layout: Option<gpui::TextLayout>,
+    }
+
+    impl Render for AnnotationBoxHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = Theme::current(cx);
+            let ui_family = crate::fonts::current(cx).ui;
+            let run = |text: &str, color: Hsla| {
+                vec![TextRun {
+                    len: text.len(),
+                    font: font(ui_family.clone()),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }]
+            };
+            let long = "dictated annotation text that runs well past three hundred \
+                 and sixty pixels of box width so every line must wrap inside the box \
+                 rather than slide off its right edge toward the window"
+                .to_owned();
+            let styled = gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
+            self.text_layout = Some(styled.layout().clone());
+            let ghost_styled =
+                gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
+            self.ghost_layout = Some(ghost_styled.layout().clone());
+            let landing_styled =
+                gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
+            self.landing_layout = Some(landing_styled.layout().clone());
+            let box_content = div()
+                .debug_selector(|| "ann-box".into())
+                .min_w(px(240.0))
+                .max_w(px(360.0))
+                .p(px(8.0))
+                .border(hairline())
+                .bg(theme.raised)
+                .text_size(sp(13.0))
+                .text_color(theme.text_secondary)
+                .flex()
+                .gap(px(8.0))
+                .items_start()
+                .child(div().flex_none().size(px(15.0)))
+                .child(
+                    div()
+                        .debug_selector(|| "ann-inner".into())
+                        .min_w_0()
+                        .flex_1()
+                        .relative()
+                        .flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap(px(4.0))
+                        .child(div().w_full().min_w_0().child(styled))
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .child(ghost_styled),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .child(landing_styled),
+                        ),
+                );
+            div().size_full().child(
+                div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
+                    FloatingSurface::anchored_to_parent(
+                        box_content.into_any_element(),
+                        MenuAlign::BelowLeft,
+                        px(4.0),
+                        px(8.0),
+                    ),
+                )),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn annotation_box_layers_wrap_inside_the_box(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| AnnotationBoxHarness {
+            text_layout: None,
+            ghost_layout: None,
+            landing_layout: None,
+        });
+        cx.run_until_parked();
+        let inner = cx
+            .debug_bounds("ann-inner")
+            .expect("the annotation text column should paint");
+        let layouts = cx.read(|app| {
+            let harness = view.read(app);
+            [
+                ("text", harness.text_layout.clone()),
+                ("ghost", harness.ghost_layout.clone()),
+                ("landing", harness.landing_layout.clone()),
+            ]
+        });
+        for (key, layout) in layouts {
+            let layout = layout.unwrap_or_else(|| panic!("{key} should have painted"));
+            for line in layout.line_layouts() {
+                assert!(
+                    line.width() <= inner.size.width + px(1.0),
+                    "{key} painted {:?} wide in a {:?} column",
+                    line.width(),
+                    inner.size.width
+                );
+            }
+        }
     }
 }
