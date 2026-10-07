@@ -530,7 +530,9 @@ impl Waku {
             .items
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
-        let viewport = self.file_preview_scroll_handle.bounds();
+        let viewport = self
+            .preview_list_state(relative_path)
+            .map_or_else(Bounds::default, |list| list.viewport_bounds());
         self.spans_anchor_in(&self.file_preview_selection, viewport, &annotation.spans)
     }
 
@@ -551,7 +553,9 @@ impl Waku {
             .items
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
-        let viewport = self.file_preview_scroll_handle.bounds();
+        let viewport = self
+            .preview_list_state(relative_path)
+            .map_or_else(Bounds::default, |list| list.viewport_bounds());
         self.spans_anchor_union_in(&self.file_preview_selection, viewport, &annotation.spans)
     }
 
@@ -1336,7 +1340,7 @@ impl Waku {
             .items
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
-        let viewport = self.plan_preview_scroll_handle.bounds();
+        let viewport = self.plan_preview_list_state.viewport_bounds();
         self.spans_anchor_in(&self.plan_preview_selection, viewport, &annotation.spans)
     }
 
@@ -1352,7 +1356,7 @@ impl Waku {
             .items
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
-        let viewport = self.plan_preview_scroll_handle.bounds();
+        let viewport = self.plan_preview_list_state.viewport_bounds();
         self.spans_anchor_union_in(&self.plan_preview_selection, viewport, &annotation.spans)
     }
 
@@ -1880,7 +1884,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let spans = self.annotatable_preview_selection(relative_path)?;
-        let viewport = self.file_preview_scroll_handle.bounds();
+        let viewport = self
+            .preview_list_state(relative_path)
+            .map_or_else(Bounds::default, |list| list.viewport_bounds());
         let anchor = self.spans_anchor_in(&self.file_preview_selection, viewport, &spans)?;
         // Resolve the chord as if the preview were focused — the same
         // FileEditorPane binding the editor's pill shows.
@@ -2303,7 +2309,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let spans = self.annotatable_plan_selection(session_id)?;
-        let viewport = self.plan_preview_scroll_handle.bounds();
+        let viewport = self.plan_preview_list_state.viewport_bounds();
         let anchor = self.spans_anchor_in(&self.plan_preview_selection, viewport, &spans)?;
         // Resolve the chord as if the document were focused — the same
         // FileEditorPane binding the file preview's pill shows.

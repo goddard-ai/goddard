@@ -7050,9 +7050,11 @@ impl Waku {
                         if image_mode {
                             None
                         } else if preview {
-                            Some(self.file_preview_scroll_handle.clone())
+                            self.preview_list_state(&relative_path)
+                                .map(|state| -> Box<dyn scrollbar::Scrollable> { Box::new(state) })
                         } else {
-                            Some(self.right_panel_editor_scroll_handle.clone())
+                            Some(Box::new(self.right_panel_editor_scroll_handle.clone())
+                                as Box<dyn scrollbar::Scrollable>)
                         }
                     })
                     .flatten(),
@@ -7366,6 +7368,7 @@ impl Waku {
                 read_epoch: 0,
                 pending_position: position_pending,
                 pending_heading: heading_pending,
+                preview_list: ListState::new(0, ListAlignment::Top, px(1024.0)),
                 annotations: Rc::new(RefCell::new(annotations)),
             },
         );
@@ -7456,34 +7459,56 @@ impl Waku {
             state.update(cx, |state, cx| state.select_range(offset..offset, cx));
             let weak = cx.entity().downgrade();
             let path = relative_path.to_owned();
-            window.on_next_frame(move |_, cx| {
+            window.on_next_frame(move |window, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     this.reveal_editor_offset(&state, offset, cx);
                     if let Some(offset) = preview_heading_offset {
-                        this.reveal_markdown_heading(&path, offset);
+                        this.reveal_markdown_heading(&path, offset, 0, window, cx);
                     }
                 });
             });
         }
     }
 
-    fn reveal_markdown_heading(&mut self, relative_path: &str, source_offset: usize) {
+    /// The virtualized scroll state backing `relative_path`'s markdown
+    /// preview. `None` while the file has no editor — the preview renders
+    /// only after [`ensure_right_panel_file_editor`] has run, so a missing
+    /// entry means the preview is gone too.
+    pub(super) fn preview_list_state(&self, relative_path: &str) -> Option<ListState> {
+        self.right_panel_file_editors
+            .get(relative_path)
+            .map(|editor| editor.preview_list.clone())
+    }
+
+    fn reveal_markdown_heading(
+        &mut self,
+        relative_path: &str,
+        source_offset: usize,
+        attempt: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.state.markdown_preview {
             return;
         }
-        let preview = self.file_preview_markdown.borrow();
-        let Some((_, view)) = preview.as_ref().filter(|(path, _)| path == relative_path) else {
+        let Some(list) = self.preview_list_state(relative_path) else {
             return;
         };
-        let mut block_index = 0;
-        let target_block = loop {
-            let Some(range) = view.block_source_range(block_index) else {
+        let target_block = {
+            let preview = self.file_preview_markdown.borrow();
+            let Some((_, view)) = preview.as_ref().filter(|(path, _)| path == relative_path) else {
                 return;
             };
-            if range.contains(&source_offset) {
-                break block_index;
+            let mut block_index = 0;
+            loop {
+                let Some(range) = view.block_source_range(block_index) else {
+                    return;
+                };
+                if range.contains(&source_offset) {
+                    break block_index;
+                }
+                block_index += 1;
             }
-            block_index += 1;
         };
         let target_bounds = self
             .file_preview_selection
@@ -7501,13 +7526,23 @@ impl Waku {
                     .next()
             });
         let Some(target_bounds) = target_bounds else {
+            // The preview mounts only the viewport's blocks, so the heading's
+            // glyphs register only after its list item scrolls into view.
+            if attempt < 4 {
+                list.scroll_to_reveal_item(target_block);
+                cx.notify();
+                let path = relative_path.to_owned();
+                cx.on_next_frame(window, move |this, window, cx| {
+                    this.reveal_markdown_heading(&path, source_offset, attempt + 1, window, cx)
+                });
+            }
             return;
         };
-        let viewport = self.file_preview_scroll_handle.bounds();
-        let current = self.file_preview_scroll_handle.offset();
+        let viewport = list.viewport_bounds();
+        let current = list.scroll_px_offset_for_scrollbar();
         let delta = target_bounds.top() - viewport.top();
-        self.file_preview_scroll_handle
-            .set_offset(point(current.x, current.y - delta));
+        list.set_offset_from_scrollbar(point(current.x, current.y - delta));
+        cx.notify();
     }
 
     /// Reads a file into its editor off the UI thread.
@@ -8328,13 +8363,27 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let centered = self.panel_fullscreen_active();
-        let mut cache = self.plan_markdown.borrow_mut();
-        if !matches!(cache.as_ref(), Some((cached, _)) if *cached == session_id) {
-            *cache = Some((session_id, MarkdownView::document()));
+        let (block_count, content_changed) = {
+            let mut cache = self.plan_markdown.borrow_mut();
+            if !matches!(cache.as_ref(), Some((cached, _)) if *cached == session_id) {
+                *cache = Some((session_id, MarkdownView::document()));
+                // The list's measured heights describe the previous
+                // session's blocks — this document starts from the top.
+                self.plan_preview_list_state.reset(0);
+            }
+            let (_, view) = cache.as_mut().expect("entry ensured above");
+            let changed = view.source() != text;
+            view.set_text(text, false);
+            (view.block_count(), changed)
+        };
+        // Same contract as the file preview: one top-level block per list
+        // item keeps per-frame work proportional to the viewport.
+        let list_state = self.plan_preview_list_state.clone();
+        if list_state.item_count() != block_count {
+            list_state.splice(0..list_state.item_count(), block_count);
+        } else if content_changed {
+            list_state.remeasure();
         }
-        let (_, view) = cache.as_mut().expect("entry ensured above");
-        view.set_text(text, false);
         let mut preview_selection = self.plan_preview_selection.clone();
         // The session's pins paint here exactly as a file's do on its
         // markdown preview — the same store the hover and editor read.
@@ -8374,7 +8423,22 @@ impl Waku {
         }))
         .with_link_items(self.markdown_link_menu_items.clone())
         .with_link_handler(self.markdown_link_handler.clone());
-        let document = md::render::markdown(view, &ctx);
+        let item_waku = cx.entity().downgrade();
+        let document = md::render::standalone_context_menu(
+            div()
+                .size_full()
+                .child(
+                    list(list_state.clone(), move |index, _window, cx| {
+                        item_waku
+                            .update(cx, |this, cx| {
+                                this.render_plan_preview_block(session_id, index, cx)
+                            })
+                            .unwrap_or_else(|_| div().into_any_element())
+                    })
+                    .size_full(),
+                ),
+            &ctx,
+        );
 
         let preview_focus = self.transcript_control_focus("plan-preview", cx);
         let preview_focus_click = preview_focus.clone();
@@ -8434,39 +8498,10 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("plan-preview-{session_id}")))
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.plan_preview_scroll_handle)
-                            // Painted before the document, so the frame's
-                            // selection registry holds exactly this frame's
-                            // text elements.
-                            .child(md::render::frame_reset(preview_selection.clone()))
-                            .child(
-                                div()
-                                    .when(centered, |element| {
-                                        element.w_full().flex().justify_center()
-                                    })
-                                    .child(
-                                        div()
-                                            .when(centered, |element| {
-                                                element
-                                                    .w_full()
-                                                    .max_w(px(CONTENT_MAX_WIDTH))
-                                                    .min_w_0()
-                                            })
-                                            .px(px(16.0))
-                                            .pt(px(14.0))
-                                            .pb(px(
-                                                24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES,
-                                            ))
-                                            .text_color(theme.text)
-                                            .children(document),
-                                    ),
-                            ),
-                    )
+                    // Painted before the document, so the frame's selection
+                    // registry holds exactly this frame's text elements.
+                    .child(md::render::frame_reset(preview_selection.clone()))
+                    .child(document)
                     .child(selection_input)
                     // After the selection canvas so its hit-tests see this
                     // frame's registry — the file preview's ordering.
@@ -8478,13 +8513,77 @@ impl Waku {
                         ))
                     })
                     .child(scrollbar::vertical(
-                        &self.plan_preview_scroll_handle,
+                        &self.plan_preview_list_state,
                         &self.plan_preview_scrollbar,
                     ))
                     .children(annotation_offer)
                     .children(annotation_editor)
                     .children(annotation_tooltip),
             )
+    }
+
+    /// One top-level block of the session's plan document — the `list` item
+    /// renderer. [`Self::plan_document_view`] feeds the parser and owns the
+    /// item count; this rebuilds the render context for the block the
+    /// viewport asks about.
+    fn render_plan_preview_block(
+        &mut self,
+        session_id: Uuid,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let palette = MarkdownPalette::from_theme(&theme);
+        let centered = self.panel_fullscreen_active();
+        let metrics =
+            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let mut preview_selection = self.plan_preview_selection.clone();
+        preview_selection.annotations =
+            self.plan_annotations.entry(session_id).or_default().clone();
+        let reader_selection = preview_selection.clone();
+        let reader_title = tr!("speed_reader.preview_title", path = "plan");
+        let reader_waku = cx.entity().downgrade();
+        let (block, count) = {
+            let cache = self.plan_markdown.borrow();
+            let Some((_, view)) = cache.as_ref().filter(|(id, _)| *id == session_id) else {
+                return div().into_any_element();
+            };
+            let reader_source = view.source().to_owned();
+            let ctx = MarkdownCtx::new(
+                format!("plan-preview-{session_id}"),
+                &palette,
+                metrics,
+                preview_selection,
+            )
+            .with_families(crate::fonts::current(cx))
+            .with_math_enabled(self.state.render_math)
+            .with_guided_reading(self.guided_reading())
+            .with_standalone_context_menu(self.menu_handle("plan-preview-math", cx))
+            .with_context_menu_items(Rc::new(move |_| {
+                let source = reader_selection
+                    .selection
+                    .borrow()
+                    .selected_text()
+                    .unwrap_or_else(|| reader_source.clone());
+                let waku = reader_waku.clone();
+                let title = reader_title.clone();
+                vec![MenuItem::new(
+                    tr!("speed_reader.go_fast"),
+                    move |window, cx| {
+                        let _ = waku.update(cx, |this, cx| {
+                            this.open_speed_reader(title.clone(), source.clone(), window, cx);
+                        });
+                    },
+                )]
+            }))
+            .with_link_items(self.markdown_link_menu_items.clone())
+            .with_link_handler(self.markdown_link_handler.clone());
+            match md::render::markdown_block(view, &ctx, index) {
+                Some(block) => (block, view.block_count()),
+                None => return div().into_any_element(),
+            }
+        };
+        self.markdown_document_item(block, index, count, centered, metrics, theme.text)
     }
 
     /// The Plan surface's body: the session's fetched document, a loading
@@ -8562,12 +8661,29 @@ impl Waku {
         // The maximized panel and a deliverable's page both own a full-width
         // column — the document centers at the content measure either way.
         let centered = self.panel_fullscreen_active() || deliverable_page;
-        let mut cache = self.file_preview_markdown.borrow_mut();
-        if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
-            *cache = Some((relative_path.to_owned(), MarkdownView::document()));
+        let (block_count, content_changed) = {
+            let mut cache = self.file_preview_markdown.borrow_mut();
+            if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
+                *cache = Some((relative_path.to_owned(), MarkdownView::document()));
+            }
+            let (_, view) = cache.as_mut().expect("entry ensured above");
+            let content = editor_state.read(cx).content();
+            let changed = view.source() != content;
+            view.set_text(content, false);
+            (view.block_count(), changed)
+        };
+        // The document mounts one top-level block per list item, so a large
+        // file's flatten and layout stay proportional to the viewport instead
+        // of the document. A block-count change splices; a same-count edit
+        // only invalidates measured heights.
+        let list_state = self
+            .preview_list_state(relative_path)
+            .unwrap_or_else(|| ListState::new(0, ListAlignment::Top, px(1024.0)));
+        if list_state.item_count() != block_count {
+            list_state.splice(0..list_state.item_count(), block_count);
+        } else if content_changed {
+            list_state.remeasure();
         }
-        let (_, view) = cache.as_mut().expect("entry ensured above");
-        view.set_text(editor_state.read(cx).content(), false);
         let mut preview_selection = self.file_preview_selection.clone();
         if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
             preview_selection.annotations = editor.annotations.clone();
@@ -8631,7 +8747,23 @@ impl Waku {
         if let Some(highlights) = search_highlights {
             ctx = ctx.with_search_highlights(highlights);
         }
-        let document = md::render::markdown(view, &ctx);
+        let item_waku = cx.entity().downgrade();
+        let item_path = relative_path.to_owned();
+        let document = md::render::standalone_context_menu(
+            div()
+                .size_full()
+                .child(
+                    list(list_state.clone(), move |index, _window, cx| {
+                        item_waku
+                            .update(cx, |this, cx| {
+                                this.render_file_preview_block(&item_path, index, centered, cx)
+                            })
+                            .unwrap_or_else(|_| div().into_any_element())
+                    })
+                    .size_full(),
+                ),
+            &ctx,
+        );
 
         let preview_focus = self.transcript_control_focus("file-preview", cx);
         let preview_focus_click = preview_focus.clone();
@@ -8699,39 +8831,10 @@ impl Waku {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("file-preview-{relative_path}")))
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.file_preview_scroll_handle)
-                            // Painted before the document, so the frame's
-                            // selection registry holds exactly this frame's
-                            // text elements.
-                            .child(md::render::frame_reset(preview_selection.clone()))
-                            .child(
-                                div()
-                                    .when(centered, |element| {
-                                        element.w_full().flex().justify_center()
-                                    })
-                                    .child(
-                                        div()
-                                            .when(centered, |element| {
-                                                element
-                                                    .w_full()
-                                                    .max_w(px(CONTENT_MAX_WIDTH))
-                                                    .min_w_0()
-                                            })
-                                            .px(px(16.0))
-                                            .pt(px(14.0))
-                                            .pb(px(
-                                                24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES
-                                            ))
-                                            .text_color(theme.text)
-                                            .children(document),
-                                    ),
-                            ),
-                    )
+                    // Painted before the document, so the frame's selection
+                    // registry holds exactly this frame's text elements.
+                    .child(md::render::frame_reset(preview_selection.clone()))
+                    .child(document)
                     .child(selection_input)
                     // After the selection canvas so its hit-tests see this
                     // frame's registry; bubble dispatch runs listeners in
@@ -8740,13 +8843,122 @@ impl Waku {
                     // begins.
                     .child(self.preview_annotation_input(&preview_selection, relative_path, cx))
                     .child(scrollbar::vertical(
-                        &self.file_preview_scroll_handle,
+                        &list_state,
                         &self.file_preview_scrollbar,
                     ))
                     .children(annotation_offer)
                     .children(annotation_editor)
                     .children(annotation_tooltip),
             )
+    }
+
+    /// One top-level block of the file's markdown preview — the `list` item
+    /// renderer. [`Self::render_file_markdown_preview`] feeds the parser and
+    /// owns the item count; this rebuilds the render context for the block
+    /// the viewport asks about, so a block outside the overdraw costs
+    /// nothing.
+    fn render_file_preview_block(
+        &mut self,
+        relative_path: &str,
+        index: usize,
+        centered: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let palette = MarkdownPalette::from_theme(&theme);
+        let metrics =
+            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let mut preview_selection = self.file_preview_selection.clone();
+        let Some(editor_state) = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .map(|editor| {
+                preview_selection.annotations = editor.annotations.clone();
+                editor.state.clone()
+            })
+        else {
+            return div().into_any_element();
+        };
+        let reader_selection = preview_selection.clone();
+        let reader_editor_state = editor_state;
+        let reader_title = tr!("speed_reader.preview_title", path = relative_path);
+        let reader_waku = cx.entity().downgrade();
+        let mut ctx = MarkdownCtx::new(
+            format!("file-preview-{relative_path}"),
+            &palette,
+            metrics,
+            preview_selection,
+        )
+        .with_families(crate::fonts::current(cx))
+        .with_math_enabled(self.state.render_math)
+        .with_guided_reading(self.guided_reading())
+        .with_standalone_context_menu(self.menu_handle("file-preview-math", cx))
+        .with_context_menu_items(Rc::new(move |cx| {
+            let source = reader_selection
+                .selection
+                .borrow()
+                .selected_text()
+                .unwrap_or_else(|| reader_editor_state.read(cx).content().to_owned());
+            let waku = reader_waku.clone();
+            let title = reader_title.clone();
+            vec![MenuItem::new(
+                tr!("speed_reader.go_fast"),
+                move |window, cx| {
+                    let _ = waku.update(cx, |this, cx| {
+                        this.open_speed_reader(title.clone(), source.clone(), window, cx);
+                    });
+                },
+            )]
+        }))
+        .with_link_items(self.markdown_link_menu_items.clone())
+        .with_link_handler(self.markdown_link_handler.clone());
+        if let Some(highlights) = self.file_preview_search_highlights(relative_path) {
+            ctx = ctx.with_search_highlights(highlights);
+        }
+        let (block, count) = {
+            let cache = self.file_preview_markdown.borrow();
+            let Some((_, view)) = cache.as_ref().filter(|(path, _)| path == relative_path) else {
+                return div().into_any_element();
+            };
+            match md::render::markdown_block(view, &ctx, index) {
+                Some(block) => (block, view.block_count()),
+                None => return div().into_any_element(),
+            }
+        };
+        self.markdown_document_item(block, index, count, centered, metrics, theme.text)
+    }
+
+    /// The `list` item shell a virtualized markdown document wraps each
+    /// top-level block in: the content column's centering and padding, plus
+    /// the inter-block gap the unvirtualized container applied as `gap`.
+    fn markdown_document_item(
+        &self,
+        block: AnyElement,
+        index: usize,
+        count: usize,
+        centered: bool,
+        metrics: MarkdownMetrics,
+        text_color: Hsla,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .when(centered, |element| element.flex().justify_center())
+            .child(
+                div()
+                    .when(centered, |element| {
+                        element.w_full().max_w(px(CONTENT_MAX_WIDTH)).min_w_0()
+                    })
+                    .px(px(16.0))
+                    .when(index == 0, |element| element.pt(px(14.0)))
+                    .pb(if index + 1 == count {
+                        px(24.0 + metrics.line_height * FILE_SCROLL_PAD_LINES)
+                    } else {
+                        px(metrics.block_gap)
+                    })
+                    .text_color(text_color)
+                    .child(block),
+            )
+            .into_any_element()
     }
 
     /// Picks up an external edit to a file the user has not modified here.

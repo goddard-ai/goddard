@@ -1,0 +1,1 @@
+- Large Markdown files and deliverables open much faster in the file viewer and deliverable page — the preview renders only the part of the document on screen instead of laying out the whole file up front, which also makes scrolling big documents smoother.

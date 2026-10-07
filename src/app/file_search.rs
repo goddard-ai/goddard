@@ -693,7 +693,11 @@ impl Waku {
     fn preview_search_anchor(&self, matches: &[TextSearchMatch]) -> usize {
         let registry = self.file_preview_selection.registry.borrow();
         let entries = registry.entries();
-        let viewport_top = self.file_preview_scroll_handle.bounds().top();
+        let viewport_top = self
+            .file_search
+            .as_ref()
+            .and_then(|search| self.preview_list_state(&search.path))
+            .map_or_else(|| px(0.), |list| list.viewport_bounds().top());
         let mut cursor = 0;
         let mut last: Option<(usize, Pixels)> = None;
         for (index, found) in matches.iter().enumerate() {
@@ -724,9 +728,10 @@ impl Waku {
 
     /// Scrolls the preview so the current match is comfortably visible.
     /// Called from the preview's render path: the registry holds the last
-    /// painted frame's geometry, and because the document is not
-    /// virtualized the only miss is the first frame a different file's
-    /// preview mounts — the retry covers that one frame.
+    /// painted frame's geometry, and the document mounts only the viewport's
+    /// blocks — a miss means the match's block is off screen, so the retry
+    /// first reveals its list item, then the next pass lands the pixel
+    /// offset once its glyphs register.
     pub(super) fn apply_pending_preview_search_reveal(
         &mut self,
         relative_path: &str,
@@ -787,7 +792,17 @@ impl Waku {
                 })
         };
         let Some(bounds) = bounds else {
-            if attempt < 1 {
+            // The preview mounts only the viewport's blocks, so the match's
+            // glyphs register only after its list item scrolls into view —
+            // reveal the item, then retry so the pixel-accurate pass below
+            // can finish the reveal.
+            if attempt < 4 {
+                if let Some(list) = self.preview_list_state(relative_path) {
+                    list.scroll_to_reveal_item(md::render::block_index_of_ordinal(
+                        target.ordinal,
+                    ));
+                    cx.notify();
+                }
                 let relative_path = relative_path.to_owned();
                 cx.on_next_frame(window, move |this, window, cx| {
                     this.reveal_preview_search_match(
@@ -801,18 +816,20 @@ impl Waku {
             }
             return;
         };
-        let scroll = &self.file_preview_scroll_handle;
-        let viewport = scroll.bounds();
-        let current = scroll.offset();
+        let Some(list) = self.preview_list_state(relative_path) else {
+            return;
+        };
+        let viewport = list.viewport_bounds();
+        let current = list.scroll_px_offset_for_scrollbar();
         if let Some(next) = revealed_scroll_offset(
             current.y,
-            scroll.max_offset().y,
+            list.max_offset_for_scrollbar().y,
             bounds.top(),
             bounds.size.height,
             viewport.top(),
             viewport.bottom(),
         ) {
-            scroll.set_offset(point(current.x, next));
+            list.set_offset_from_scrollbar(point(current.x, next));
             cx.notify();
         }
     }

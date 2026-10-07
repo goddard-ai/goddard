@@ -199,6 +199,26 @@ impl Scrollable for ScrollHandle {
     }
 }
 
+/// A surface chooses its scrollable per render — a file's preview is a
+/// `ListState`, its source view a `ScrollHandle`.
+impl Scrollable for Box<dyn Scrollable> {
+    fn viewport_height(&self) -> Pixels {
+        (**self).viewport_height()
+    }
+
+    fn max_offset(&self) -> Pixels {
+        (**self).max_offset()
+    }
+
+    fn scrolled(&self) -> Pixels {
+        (**self).scrolled()
+    }
+
+    fn scroll_to(&self, offset: Pixels) {
+        (**self).scroll_to(offset);
+    }
+}
+
 fn scroll_to(surface: &impl Scrollable, offset: Pixels, max_offset: Pixels) {
     surface.scroll_to(offset.clamp(Pixels::ZERO, max_offset));
 }

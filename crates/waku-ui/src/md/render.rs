@@ -1396,6 +1396,11 @@ impl MarkdownView {
         self.parser.text().len()
     }
 
+    /// The source text the parser currently holds.
+    pub fn source(&self) -> &str {
+        self.parser.text()
+    }
+
     pub fn set_text(&mut self, text: &str, mend: bool) {
         self.set_text_with_soft_breaks_as_newlines(text, mend, false);
     }
@@ -1521,6 +1526,32 @@ impl MarkdownView {
             .iter()
             .chain(self.tail.iter())
             .map(|top| &top.block)
+    }
+
+    /// Top-level display block at `index` — settled blocks, then the mended
+    /// tail, in the same order [`markdown`] paints.
+    fn block(&self, index: usize) -> Option<&Block> {
+        let all = &self.parser.tree().blocks;
+        let settled = if self.tail.is_empty() {
+            all.len()
+        } else {
+            self.parser.display_tail_start()
+        };
+        if index < settled {
+            all.get(index).map(|top| &top.block)
+        } else {
+            self.tail.get(index - settled).map(|top| &top.block)
+        }
+    }
+
+    /// Top-level display block count — the item count a `list`-virtualized
+    /// document surface hands its `ListState`.
+    pub fn block_count(&self) -> usize {
+        if self.tail.is_empty() {
+            self.parser.tree().blocks.len()
+        } else {
+            self.parser.display_tail_start() + self.tail.len()
+        }
     }
 
     /// Whether a table appears anywhere, including nested in a quote or list
@@ -3040,6 +3071,64 @@ pub fn markdown<'a>(view: &'a MarkdownView, ctx: &Ctx<'a>) -> Option<AnyElement>
     markdown_capped(view, ctx, usize::MAX)
 }
 
+/// Render top-level block `index` of `view`'s document — the item callback
+/// for a `list`-virtualized surface. [`markdown`] walks every block to build
+/// one element tree; a `list` mounts only the viewport's rows, so a large
+/// document's flatten and layout cost stays proportional to what is on
+/// screen. Ordinals come from the same block-stride scheme [`markdown`] uses,
+/// so selection keys and search-match ordinals stay identical across both
+/// paths. Streaming veils and the trailing cap belong to [`markdown`] — a
+/// document surface is complete and non-streaming.
+pub fn markdown_block<'a>(
+    view: &'a MarkdownView,
+    ctx: &Ctx<'a>,
+    index: usize,
+) -> Option<AnyElement> {
+    let block = view.block(index)?;
+    view.sync_style(ctx.palette, &ctx.metrics, &ctx.families, ctx.guided_reading);
+    let ctx = ctx.with_cache(view);
+    ctx.next_ordinal.set(block_ordinal_base(index));
+    view.volatile_from
+        .set(block_ordinal_base(view.parser.display_tail_start()));
+    let element = render_block(block, &ctx);
+    debug_assert!(
+        ctx.next_ordinal.get() - block_ordinal_base(index) < 1 << BLOCK_ORDINAL_STRIDE_BITS,
+        "a single block overflowed its ordinal stride"
+    );
+    Some(element)
+}
+
+/// Wrap a standalone markdown surface's container in its context menu, when
+/// the ctx carries one — the affordance [`markdown`] applies to the document
+/// element. A `list`-virtualized surface applies it to the list's container
+/// instead, covering every mounted row.
+pub fn standalone_context_menu<E>(element: E, ctx: &Ctx) -> AnyElement
+where
+    E: ParentElement + Styled + InteractiveElement + IntoElement + 'static,
+{
+    if ctx.wrap_context_menu
+        && (ctx.math_enabled
+            || ctx.file_link_root.is_some()
+            || ctx.link_items.is_some()
+            || ctx.context_menu_items.is_some())
+        && let Some(menu) = &ctx.context_menu
+    {
+        let extra_items = ctx.context_menu_items.clone();
+        context_menu(
+            element,
+            SharedString::from(format!("context-menu-{}", ctx.row)),
+            menu,
+            move |cx| {
+                extra_items
+                    .as_ref()
+                    .map_or_else(Vec::new, |items| items(cx))
+            },
+        )
+    } else {
+        element.into_any_element()
+    }
+}
+
 /// Like [`markdown`], but builds only the trailing `max_blocks` top-level
 /// blocks. The live reasoning peek shows a tail-pinned viewport while a
 /// thought streams, and building the whole growing document every pulse tick
@@ -3102,29 +3191,7 @@ fn markdown_capped<'a>(
         .flex_col()
         .gap(px(ctx.metrics.block_gap))
         .children(children);
-    Some(
-        if ctx.wrap_context_menu
-            && (ctx.math_enabled
-                || ctx.file_link_root.is_some()
-                || ctx.link_items.is_some()
-                || ctx.context_menu_items.is_some())
-            && let Some(menu) = &ctx.context_menu
-        {
-            let extra_items = ctx.context_menu_items.clone();
-            context_menu(
-                element,
-                SharedString::from(format!("context-menu-{}", ctx.row)),
-                menu,
-                move |cx| {
-                    extra_items
-                        .as_ref()
-                        .map_or_else(Vec::new, |items| items(cx))
-                },
-            )
-        } else {
-            element.into_any_element()
-        },
-    )
+    Some(standalone_context_menu(element, &ctx))
 }
 
 fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
@@ -5567,4 +5634,98 @@ mod tests {
             vec![(19..27, "/repo/real.sh".to_owned())]
         );
     }
+
+    /// The per-block render entry a `list`-virtualized document uses: every
+    /// top-level block produces an element and nothing past the count does.
+    #[test]
+    fn markdown_block_covers_every_document_block() {
+        let palette = palette();
+        let source = "# Title\n\npara *one*\n\n- a\n- b\n\nlast";
+        let mut view = MarkdownView::document();
+        view.set_text(source, false);
+        assert_eq!(view.source(), source);
+        assert_eq!(view.block_count(), view.blocks().count());
+        let ctx = Ctx::new("doc", &palette, Metrics::BODY, TranscriptSelection::default());
+        for index in 0..view.block_count() {
+            assert!(
+                markdown_block(&view, &ctx, index).is_some(),
+                "block {index} rendered nothing"
+            );
+        }
+        assert!(markdown_block(&view, &ctx, view.block_count()).is_none());
+    }
+
+    /// The contract the file and plan previews rely on: a `list` over
+    /// `markdown_block` asks only for the viewport's blocks, so a large
+    /// document's per-frame work stays proportional to what is on screen
+    /// rather than its length.
+    #[gpui::test]
+    fn a_virtualized_document_mounts_only_the_viewports_blocks(cx: &mut TestAppContext) {
+        struct TestWindow {
+            list: gpui::ListState,
+            document: Rc<MarkdownView>,
+            palette: Rc<Palette>,
+            mounted: Rc<RefCell<Vec<usize>>>,
+        }
+
+        impl gpui::Render for TestWindow {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                let mounted = self.mounted.clone();
+                let document = self.document.clone();
+                let palette = self.palette.clone();
+                gpui::list(self.list.clone(), move |index, _window, _cx| {
+                    mounted.borrow_mut().push(index);
+                    let ctx =
+                        Ctx::new("doc", &palette, Metrics::BODY, TranscriptSelection::default());
+                    markdown_block(&document, &ctx, index)
+                        .unwrap_or_else(|| div().into_any_element())
+                })
+                .size_full()
+            }
+        }
+
+        let source = (0..400)
+            .map(|index| format!("Paragraph number {index}, long enough to fill a row."))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let mut document = MarkdownView::document();
+        document.set_text(&source, false);
+        let block_count = document.block_count();
+        assert_eq!(block_count, 400);
+        let mounted = Rc::new(RefCell::new(Vec::new()));
+        let list = gpui::ListState::new(block_count, gpui::ListAlignment::Top, px(0.));
+        let (_view, cx) = cx.add_window_view(|_, _| TestWindow {
+            list: list.clone(),
+            document: Rc::new(document),
+            palette: Rc::new(palette()),
+            mounted: mounted.clone(),
+        });
+        // The window's first paint happens at the maximized test size —
+        // discard it so `first_frame` counts only the resized draw.
+        mounted.borrow_mut().clear();
+        cx.simulate_resize(size(px(400.), px(160.)));
+        cx.run_until_parked();
+
+        let first_frame = mounted.borrow().clone();
+        assert!(!first_frame.is_empty());
+        assert!(
+            first_frame.len() < block_count / 4,
+            "a 160px viewport should mount a fraction of {block_count} blocks, got {}",
+            first_frame.len()
+        );
+        assert!(first_frame.iter().all(|index| *index < block_count));
+
+        mounted.borrow_mut().clear();
+        list.scroll_to(gpui::ListOffset {
+            item_ix: block_count - 1,
+            offset_in_item: px(0.),
+        });
+        cx.update(|_, cx| cx.refresh_windows());
+        cx.run_until_parked();
+        assert!(
+            mounted.borrow().contains(&(block_count - 1)),
+            "scrolling to the end must mount the last block"
+        );
+    }
+
 }

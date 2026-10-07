@@ -1366,6 +1366,10 @@ struct RightPanelFileEditor {
     pending_position: Option<(usize, usize)>,
     /// A Markdown heading fragment waiting for the file's first read.
     pending_heading: Option<String>,
+    /// Virtualized scroll state for the markdown preview — one top-level
+    /// block per list item. Per editor so a file keeps its scroll offset and
+    /// measured block heights across surface switches and cache evictions.
+    preview_list: ListState,
     /// Pinned selection highlights with comments — this editor's share of the
     /// session's annotation set. Painted inside the field, counted in the
     /// composer chip, drained into the next submission alongside the
@@ -3520,7 +3524,6 @@ pub struct Waku {
     /// the way `skills_detail_markdown` caches the skill document.
     file_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
     file_preview_selection: TranscriptSelection,
-    file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
     /// The `.wireframe.json` preview's scroll region — separate from the
     /// markdown preview's so neither inherits the other's offset.
@@ -3532,7 +3535,9 @@ pub struct Waku {
     plan_docs: HashMap<Uuid, PlanDoc>,
     plan_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
     plan_preview_selection: TranscriptSelection,
-    plan_preview_scroll_handle: ScrollHandle,
+    /// Virtualized scroll state for the plan document view — reset whenever
+    /// `plan_markdown` re-keys, the same granularity the parsed cache keeps.
+    plan_preview_list_state: ListState,
     plan_preview_scrollbar: Rc<ScrollbarState>,
     /// Transient, snapshot-based speed reader opened from Markdown surfaces.
     speed_reader: Option<speed_reader::SpeedReader>,
@@ -7306,7 +7311,6 @@ impl Waku {
                 right_panel_editor_scrollbar: ScrollbarState::new(),
                 file_preview_markdown: RefCell::new(None),
                 file_preview_selection: TranscriptSelection::default(),
-                file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
                 wireframe_preview_scroll_handle: ScrollHandle::new(),
                 wireframe_preview_scrollbar: ScrollbarState::new(),
@@ -7314,7 +7318,7 @@ impl Waku {
                 plan_annotations,
                 plan_markdown: RefCell::new(None),
                 plan_preview_selection: TranscriptSelection::default(),
-                plan_preview_scroll_handle: ScrollHandle::new(),
+                plan_preview_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 plan_preview_scrollbar: ScrollbarState::new(),
                 speed_reader: None,
                 right_panel_pending_tab_reveal: None,
