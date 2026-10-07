@@ -8955,6 +8955,43 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
         )
         .unwrap();
     assert_eq!(backend.boss.report_target(&employee), Some(plan.session_id));
+    // Pending reports to a planning supervisor must not hold task_state
+    // while the Boss asks whether that supervisor is still active. Use a
+    // nonblocking assertion so a regression fails instead of hanging.
+    let weak_backend = Arc::downgrade(&backend);
+    backend.boss.set_session_active(Arc::new(move |session_id| {
+        let backend = weak_backend.upgrade().unwrap();
+        assert!(backend.task_state.try_lock().is_some());
+        backend.session_active(session_id)
+    }));
+    backend
+        .agent
+        .note_driver_event(employee.session_id, &DriverEvent::TurnStarted);
+    {
+        let mut state = backend.task_state.lock();
+        let supervisor = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == plan.session_id)
+            .unwrap();
+        supervisor
+            .queued_messages
+            .push(crate::model::QueuedMessage::agent(
+                "unfinished report",
+                Some(employee.session_id),
+            ));
+    }
+    backend.run_summon_scheduler();
+    {
+        let mut state = backend.task_state.lock();
+        let supervisor = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == plan.session_id)
+            .unwrap();
+        assert_eq!(supervisor.queued_messages.len(), 1);
+        supervisor.queued_messages.clear();
+    }
     // Elapse the window and the sweep archives the session; afterwards
     // it is a plain archived managed task — no more summons, and a
     // report would escalate to the boss session instead.

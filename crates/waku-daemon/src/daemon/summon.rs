@@ -56,51 +56,62 @@ impl WakuBackend {
     /// Durable supervisor queues are also the record of reports waiting
     /// for their sender. Reconciliation covers a finish with no boss wake.
     fn employee_update_targets(&self) -> Vec<Uuid> {
-        let state = self.task_state.lock();
-        state
+        // Resolving a planning supervisor calls back into task_state. Snapshot
+        // the queued senders first so that callback never reenters this lock.
+        let candidates: Vec<_> = self
+            .task_state
+            .lock()
             .sessions
             .iter()
-            .filter(|session| {
-                session.queued_messages.iter().any(|message| {
-                    let crate::model::QueuedMessageSource::Agent { sent_by } = message.source
-                    else {
-                        return false;
-                    };
-                    sent_by.is_some_and(|sender| {
+            .map(|session| {
+                let senders: Vec<_> = session
+                    .queued_messages
+                    .iter()
+                    .filter_map(|message| match message.source {
+                        crate::model::QueuedMessageSource::Agent { sent_by } => sent_by,
+                        _ => None,
+                    })
+                    .collect();
+                (session.id, senders)
+            })
+            .filter(|(_, senders)| !senders.is_empty())
+            .collect();
+        candidates
+            .into_iter()
+            .filter_map(|(session_id, senders)| {
+                senders
+                    .into_iter()
+                    .any(|sender| {
                         self.boss.employee(sender).is_some_and(|employee| {
-                            self.boss.report_target(&employee) == Some(session.id)
+                            self.boss.report_target(&employee) == Some(session_id)
                         })
                     })
-                })
+                    .then_some(session_id)
             })
-            .map(|session| session.id)
             .collect()
     }
 
     fn deliver_settled_employee_updates(&self) {
         let events = self.event_source.lock().clone();
         for target in self.employee_update_targets() {
-            let waiting = self
+            let sender = self
                 .task_state
                 .lock()
                 .sessions
                 .iter()
                 .find(|session| session.id == target)
                 .and_then(|session| {
-                    session.queued_messages.iter().find(|message| {
-                        matches!(
-                            message.source,
-                            crate::model::QueuedMessageSource::Agent { .. }
-                        )
-                    })
-                })
-                .is_some_and(|message| {
-                    let crate::model::QueuedMessageSource::Agent { sent_by } = message.source
-                    else {
-                        return false;
-                    };
-                    employee_update_streaming(target, sent_by, &self.agent, &self.boss)
+                    session
+                        .queued_messages
+                        .iter()
+                        .find_map(|message| match message.source {
+                            crate::model::QueuedMessageSource::Agent { sent_by } => Some(sent_by),
+                            _ => None,
+                        })
                 });
+            let waiting = sender.is_some_and(|sent_by| {
+                employee_update_streaming(target, sent_by, &self.agent, &self.boss)
+            });
             if waiting {
                 continue;
             }
