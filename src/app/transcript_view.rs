@@ -2308,38 +2308,6 @@ impl Waku {
                 self.render_boss_trigger_row(anchor, &theme, cx)
             }
         };
-        let briefing_marker = self
-            .voice_briefing_playback
-            .filter(|playback| playback.playing)
-            .and_then(|playback| playback.message_id)
-            .and_then(|message_id| {
-                let TranscriptRowKind::Message(message_index) = kind else {
-                    return None;
-                };
-                let message = self
-                    .transcript_display_session()?
-                    .messages
-                    .get(message_index)?;
-                if message.id != message_id || !navigation_rail_fits {
-                    return None;
-                }
-                let (top_inset, line_height) = self.message_marker_geometry(message);
-                Some(
-                    div()
-                        .absolute()
-                        .left(px(-(NEW_CONTENT_DOT_GAP + 14.0)))
-                        .top(px(top_inset + (line_height - 14.0) / 2.0))
-                        .child(icon(
-                            if self.briefing_clips.contains_key(&message_id) {
-                                "icons/headphones-generated.svg"
-                            } else {
-                                "icons/headphones.svg"
-                            },
-                            14.0,
-                            theme.text_secondary,
-                        )),
-                )
-            });
         let new_content_dot = self
             .transcript_new_content_dot
             .filter(|dot| {
@@ -2455,12 +2423,9 @@ impl Waku {
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .min_w_0()
                     .when_some(
-                        new_content_dot.filter(|_| briefing_marker.is_none()),
+                        new_content_dot,
                         |column, dot| column.relative().child(dot),
                     )
-                    .when_some(briefing_marker, |column, marker| {
-                        column.relative().child(marker)
-                    })
                     .child(inner)
                     .when_some(match_flash_overlay, |column, overlay| {
                         column.relative().child(overlay)
