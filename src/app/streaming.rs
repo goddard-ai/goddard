@@ -1055,8 +1055,10 @@ impl Waku {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
                 }
                 // The selected session's finish is already on screen; only a
-                // turn settling out of view gets the sound. A queued follow-up
-                // means the task keeps working, so that settle stays quiet.
+                // user-facing turn settling out of view gets the sound.
+                // Employees stay quiet even when their follow-up queue drains.
+                // A queued follow-up means the task keeps working, so that
+                // settle stays quiet too.
                 let finished = self
                     .state
                     .sessions
@@ -1077,7 +1079,9 @@ impl Waku {
                 });
                 if self.state.completion_sound_enabled
                     && self.state.selected_session != Some(session_id)
-                    && finished.is_some_and(|session| session.queued_messages.is_empty())
+                    && finished.is_some_and(|session| {
+                        !self.session_is_employee(session) && session.queued_messages.is_empty()
+                    })
                     && inside_focus
                     && !managed_goal_turn
                 {
