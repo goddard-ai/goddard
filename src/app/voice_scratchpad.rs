@@ -132,9 +132,6 @@ const RECORDING_GLOW: u32 = 0xFF85B6;
 /// The live record dot's breathing cycle — one full opacity sweep,
 /// ~70% to 100% and back.
 const RECORDING_DOT_PERIOD: Duration = Duration::from_millis(1500);
-/// The dictation caret's blink cycle — visible a touch over half of each
-/// pass, the square wave a text field's caret runs.
-const CARET_BLINK_PERIOD: Duration = Duration::from_millis(1060);
 /// The text model that scrubs finished dictation — reached through the
 /// same Vercel AI Gateway credential the transcription socket uses.
 const CLEANUP_MODEL_ID: &str = "alibaba/qwen3.8-27b";
@@ -1019,6 +1016,15 @@ impl ScratchpadTranscript {
             .is_none_or(is_sentence_punct)
     }
 
+    /// Whether the append point's paragraph has nothing painted — no
+    /// text, no bullets, or none exists at all. It owns no row: the live
+    /// row carries the record dot at the slot its first words land.
+    fn append_point_unwritten(&self) -> bool {
+        self.paragraphs.last().is_none_or(|paragraph| {
+            paragraph.text.is_empty() && paragraph.bullets.is_empty()
+        })
+    }
+
     /// Remove the append point's trailing word — a command's first half
     /// consumed it — along with any punctuation and whitespace that rode
     /// along.
@@ -1721,15 +1727,19 @@ impl ScratchpadTranscript {
     }
 
     /// The selection key `node` paints under — `vs-p-{i}` for a paragraph,
-    /// `vs-b-{i}` at index j for a bullet, `vs-p-live` for the empty
-    /// session's live row.
+    /// `vs-b-{i}` at index j for a bullet, `vs-p-live` for the live row:
+    /// the empty session's row, or the append point's while its paragraph
+    /// is still unwritten and owns no row of its own.
     fn node_key(&self, node: ScratchpadNode) -> md::selection::TextKey {
         match node {
             ScratchpadNode::Paragraph(index) => {
-                if index < self.paragraphs.len() {
-                    md::selection::TextKey::new(format!("vs-p-{index}"), 0)
-                } else {
+                let live = index >= self.paragraphs.len()
+                    || (index + 1 == self.paragraphs.len()
+                        && self.append_point_unwritten());
+                if live {
                     md::selection::TextKey::new("vs-p-live", 0)
+                } else {
+                    md::selection::TextKey::new(format!("vs-p-{index}"), 0)
                 }
             }
             ScratchpadNode::Bullet(paragraph, bullet) => {
@@ -1739,12 +1749,14 @@ impl ScratchpadTranscript {
     }
 
     /// The node a painted element's key addresses — the live row reads as
-    /// paragraph zero.
+    /// the append point's paragraph (index zero while none exists).
     fn node_for_key(&self, key: &md::selection::TextKey) -> Option<ScratchpadNode> {
         let row = key.row.as_ref();
         if let Some(rest) = row.strip_prefix("vs-p-") {
             if rest == "live" {
-                return Some(ScratchpadNode::Paragraph(0));
+                return Some(ScratchpadNode::Paragraph(
+                    self.paragraphs.len().saturating_sub(1),
+                ));
             }
             return rest.parse().ok().map(ScratchpadNode::Paragraph);
         }
@@ -4625,6 +4637,12 @@ impl Waku {
                 annotation_target,
                 Some(AnnotationTarget::Paragraph(target)) if target == index
             );
+            // An armed paragraph with nothing written paints no row — the
+            // live row carries the record dot at the slot its first words
+            // land, so the dot never sits under an empty line.
+            if is_current && transcript.append_point_unwritten() {
+                continue;
+            }
             if !first_drawn {
                 blocks = blocks.child(
                     div()
@@ -4733,13 +4751,6 @@ impl Waku {
                         })
                         .when(show_dot, |row| {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
-                        })
-                        // The caret trails the dot at the row's trailing
-                        // edge — where the next dictated word lands —
-                        // matching the annotation box's dot-then-caret
-                        // order.
-                        .when(show_dot, |row| {
-                            row.child(scratchpad_dictation_caret(14.0, muted, status, theme))
                         })
                         .when_some(ghost, |row, ghost| row.child(ghost))
                         .when_some(landing_ghost, |row, ghost| row.child(ghost)),
@@ -4914,10 +4925,13 @@ impl Waku {
                 }));
             }
         }
-        // A fresh session's empty scratchpad still shows its live row —
-        // interim speech paints beside the dot until the first finalized
-        // chunk gives it a paragraph to land in.
-        if transcript.paragraphs.is_empty() {
+        // The live row holds the append point's slot while nothing is
+        // written there — a fresh session's empty transcript, or the
+        // armed paragraph an advance left unwritten. Interim speech
+        // paints beside the dot until the first finalized chunk gives it
+        // a paragraph to land in; an open annotation box owns the dot
+        // instead.
+        if transcript.append_point_unwritten() && annotation_target.is_none() {
             let flat = scratchpad_paragraph_text(
                 "",
                 &transcript.interim,
@@ -4947,8 +4961,7 @@ impl Waku {
                                 theme.selection,
                                 false,
                             ))
-                            .child(scratchpad_dot_on_line(14.0, muted, status, theme))
-                            .child(scratchpad_dictation_caret(14.0, muted, status, theme)),
+                            .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
                     )
                     // Nothing is written here yet — the live row is the
                     // insertion point, so the click lands the caret and
@@ -5246,18 +5259,7 @@ impl Waku {
                     // it paints unwrapped, straight past the box. The
                     // full-width div gives it a definite wrap column, the
                     // same treatment `selectable_flat_text` gives the rows.
-                    // The dictation caret wraps inside the same column so it
-                    // lands at the end of the last line.
-                    .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .flex_wrap()
-                            .items_end()
-                            .child(text_element)
-                            .child(scratchpad_dictation_caret(13.0, muted, scratchpad.status, theme)),
-                    )
+                    .child(div().w_full().min_w_0().child(text_element))
                     .when(
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
@@ -5687,41 +5689,6 @@ fn scratchpad_dot_on_line(
         .flex_none()
         .mt(px((text_size * 1.618_034 - 15.0).max(0.0) / 2.0))
         .child(scratchpad_dot(muted, status, theme))
-}
-
-/// The dictation caret: a 1.5px accent sliver a text line tall, painted
-/// where the next dictated word lands — the live row, the current
-/// paragraph's tail, or inside the open annotation box. It blinks on the
-/// shared pulse clock while the stream is live; a muted or dead session
-/// holds it solid, as does reduce-motion.
-fn scratchpad_dictation_caret(
-    text_size: f32,
-    muted: bool,
-    status: ScratchpadStatus,
-    theme: &Theme,
-) -> AnyElement {
-    let color = theme.accent;
-    let caret = move || {
-        div()
-            .flex_none()
-            .w(px(1.5))
-            .h(px(text_size * 1.618_034))
-            .bg(color)
-    };
-    let live = !muted
-        && !matches!(
-            status,
-            ScratchpadStatus::MicDenied | ScratchpadStatus::ConnectionLost
-        );
-    if !live {
-        return caret().into_any_element();
-    }
-    motion::pulse(CARET_BLINK_PERIOD, move |phase| {
-        caret()
-            .opacity(if phase < 0.55 { 1.0 } else { 0.0 })
-            .into_any_element()
-    })
-    .into_any_element()
 }
 
 /// The cleanup spinner at a cleaning node's tail — the same shared-clock
@@ -6171,6 +6138,51 @@ mod tests {
         transcript.append_finalized("a fresh thought");
         assert_eq!(transcript.paragraphs[1].text, "still dictating");
         assert_eq!(transcript.paragraphs[2].text, "a fresh thought");
+    }
+
+    #[test]
+    fn an_unwritten_append_point_paints_on_the_live_row() {
+        // An armed-but-empty paragraph owns no row — its node keys out
+        // to the live row's slot so the record dot, a caret, or a grab
+        // there find the painted element. It takes its own row once text
+        // lands.
+        let mut transcript = ScratchpadTranscript::default();
+        assert!(transcript.append_point_unwritten());
+        transcript.append_finalized("the plan");
+        assert!(!transcript.append_point_unwritten());
+        // Clicking out of a note box arms a fresh paragraph at the end.
+        transcript.annotate(0);
+        transcript.append_finalized("a note");
+        transcript.commit_annotation();
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert!(transcript.paragraphs[1].text.is_empty());
+        assert!(transcript.append_point_unwritten());
+        assert_eq!(
+            transcript.node_key(ScratchpadNode::Paragraph(1)),
+            md::selection::TextKey::new("vs-p-live", 0)
+        );
+        assert_eq!(
+            transcript.node_for_key(&md::selection::TextKey::new("vs-p-live", 0)),
+            Some(ScratchpadNode::Paragraph(1))
+        );
+        transcript.append_finalized("moving on");
+        assert!(!transcript.append_point_unwritten());
+        assert_eq!(
+            transcript.node_key(ScratchpadNode::Paragraph(1)),
+            md::selection::TextKey::new("vs-p-1", 0)
+        );
+        // Unwritten means nothing painted at all — an emptied paragraph
+        // that still holds bullets keeps its own row and key.
+        transcript.paragraphs[1].text.clear();
+        transcript.paragraphs[1].bullets.push(ScratchpadBullet {
+            text: "a kept note".to_owned(),
+            depth: 0,
+        });
+        assert!(!transcript.append_point_unwritten());
+        assert_eq!(
+            transcript.node_key(ScratchpadNode::Paragraph(1)),
+            md::selection::TextKey::new("vs-p-1", 0)
+        );
     }
 
     #[test]
