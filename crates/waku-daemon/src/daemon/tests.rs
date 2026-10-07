@@ -1714,11 +1714,13 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     };
     assert_eq!(buckets.len(), 1);
     assert_eq!(buckets[0]["id"], echoed);
-    assert!(memory(MemoryOperation::Overview {
-        bucket: None,
-        project: None,
-    })
-    .is_ok());
+    assert!(
+        memory(MemoryOperation::Overview {
+            bucket: None,
+            project: None,
+        })
+        .is_ok()
+    );
 
     // Named buckets stay boss-owned; `create` stays a boss operation.
     assert!(

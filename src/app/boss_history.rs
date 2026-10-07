@@ -478,7 +478,10 @@ mod tests {
     fn rotate(old: &mut AgentSession, next: &mut AgentSession) {
         let marker = "Boss session rotated.";
         old.push_message(MessageRole::System, marker);
-        let mut link = Message::new(MessageRole::System, format!("<boss-rotation-link:{}>", old.id));
+        let mut link = Message::new(
+            MessageRole::System,
+            format!("<boss-rotation-link:{}>", old.id),
+        );
         link.hidden = true;
         old.messages.push(link);
         old.archived_at = Some(10);
@@ -486,7 +489,10 @@ mod tests {
         let mut marker_session = AgentSession::new(next.project_id, next.provider);
         marker_session.push_message(MessageRole::System, marker);
         next.messages.insert(0, marker_session.messages.remove(0));
-        let mut link = Message::new(MessageRole::System, format!("<boss-rotation-link:{}>", old.id));
+        let mut link = Message::new(
+            MessageRole::System,
+            format!("<boss-rotation-link:{}>", old.id),
+        );
         link.hidden = true;
         next.messages.insert(1, link);
         for block in &mut next.transcript_blocks {

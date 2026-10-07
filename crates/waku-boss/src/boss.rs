@@ -3140,9 +3140,8 @@ impl BossService {
         } else {
             caller.context("missing Boss caller")?.to_string()
         };
-        let buckets = waku_memory_engine::buckets::BucketStore::open(
-            self.root.join("files/memory-engine"),
-        )?;
+        let buckets =
+            waku_memory_engine::buckets::BucketStore::open(self.root.join("files/memory-engine"))?;
         let mut known_buckets = buckets.list_buckets()?;
         let active_employee = caller.filter(|caller| {
             state
@@ -3173,12 +3172,8 @@ impl BossService {
                     .as_ref()
                     .map(|get| get())
                     .unwrap_or_default();
-                let (id, path) = resolve_memory_bucket(
-                    bucket,
-                    project,
-                    own_project_path.as_deref(),
-                    &catalog,
-                )?;
+                let (id, path) =
+                    resolve_memory_bucket(bucket, project, own_project_path.as_deref(), &catalog)?;
                 (Some(id), path)
             }
             None => (None, None),
@@ -3329,14 +3324,7 @@ impl BossService {
                     .expect("bucket-addressed ops resolve a target");
                 bucket = Some(bucket_id.clone());
                 compression = buckets
-                    .submit_summary(
-                        &bucket_access,
-                        &principal,
-                        &bucket_id,
-                        start,
-                        end,
-                        &text,
-                    )?
+                    .submit_summary(&bucket_access, &principal, &bucket_id, start, end, &text)?
                     .map(serde_json::to_value)
                     .transpose()?;
             }
@@ -3375,15 +3363,12 @@ impl BossService {
                 let candidates = legacy_memory_candidates(&self.root, &source)?;
                 if !dry_run {
                     for candidate in &candidates {
-                        let text = format!(
-                            "Imported from {}\n\n{}",
-                            candidate.source, candidate.text
-                        );
+                        let text =
+                            format!("Imported from {}\n\n{}", candidate.source, candidate.text);
                         let retry_key = format!(
                             "legacy-{}",
                             Sha256::digest(
-                                format!("{}\0{}", candidate.source, candidate.text)
-                                    .as_bytes()
+                                format!("{}\0{}", candidate.source, candidate.text).as_bytes()
                             )
                             .iter()
                             .map(|byte| format!("{byte:02x}"))
@@ -3397,8 +3382,7 @@ impl BossService {
                             &text,
                             &retry_key,
                         )?;
-                        compression =
-                            result.compression.map(serde_json::to_value).transpose()?;
+                        compression = result.compression.map(serde_json::to_value).transpose()?;
                     }
                 }
                 bucket = Some(bucket_id.clone());

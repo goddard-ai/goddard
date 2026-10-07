@@ -1916,9 +1916,15 @@ fn memory_leaf(
                 _ => bail!("usage: {command} scan [BUCKET|--project PROJECT] QUERY"),
             },
             "zoom" => match (pos.len(), project) {
-                (2, Some(project)) => json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
-                (2, None) => json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
-                (3, None) => json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?}),
+                (2, Some(project)) => {
+                    json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
+                }
+                (2, None) => {
+                    json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
+                }
+                (3, None) => {
+                    json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?})
+                }
                 _ => bail!("usage: {command} zoom [BUCKET|--project PROJECT] START END"),
             },
             _ => bail!("usage: {command} {operation} [BUCKET|--project PROJECT] [QUERY|START END]"),

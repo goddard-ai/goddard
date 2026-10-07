@@ -57,7 +57,11 @@ impl WakuBackend {
                 "Boss session rotation: boss_id={} old_session_id={} new_session_id={} boss_rotation_context_threshold={} context_tokens={} context_window={}; provider prompt cache cold",
                 identity.id,
                 active,
-                journal.intent.as_ref().expect("begun rotation").new_session_id,
+                journal
+                    .intent
+                    .as_ref()
+                    .expect("begun rotation")
+                    .new_session_id,
                 policy.context_threshold,
                 usage.tokens,
                 usage.window.unwrap_or_default(),
@@ -116,7 +120,10 @@ impl WakuBackend {
                 next.pending_provider_context = Some(boss_rotation_handoff(old, marker));
                 next.push_message(MessageRole::System, marker);
                 next.push_message(MessageRole::System, &predecessor);
-                next.messages.last_mut().expect("rotation link was appended").hidden = true;
+                next.messages
+                    .last_mut()
+                    .expect("rotation link was appended")
+                    .hidden = true;
                 state.push_session(next);
                 // Stage the initialized chat before publishing its id.
                 self.task_store.save(&mut state)?;
@@ -146,9 +153,16 @@ impl WakuBackend {
         {
             next.push_message(MessageRole::System, marker);
         }
-        if !next.messages.iter().any(|message| message.content == predecessor) {
+        if !next
+            .messages
+            .iter()
+            .any(|message| message.content == predecessor)
+        {
             next.push_message(MessageRole::System, &predecessor);
-            next.messages.last_mut().expect("rotation link was appended").hidden = true;
+            next.messages
+                .last_mut()
+                .expect("rotation link was appended")
+                .hidden = true;
         }
         let old = state
             .session_mut(intent.old_session_id)
@@ -162,9 +176,16 @@ impl WakuBackend {
             old.push_message(MessageRole::System, marker);
         }
         let old_link = format!("<boss-rotation-link:{}>", intent.old_session_id);
-        if !old.messages.iter().any(|message| message.content == old_link) {
+        if !old
+            .messages
+            .iter()
+            .any(|message| message.content == old_link)
+        {
             old.push_message(MessageRole::System, &old_link);
-            old.messages.last_mut().expect("rotation link was appended").hidden = true;
+            old.messages
+                .last_mut()
+                .expect("rotation link was appended")
+                .hidden = true;
         }
         old.archived_at.get_or_insert(now);
         old.updated_at = now;
