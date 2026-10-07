@@ -97,7 +97,7 @@ Two hard-won rules:
   while text streamed at 10% was this one flag.
 
 **Pulse ticks, ≤ 60 Hz.** All repeating animation rides the shared
-self-parking clock in [src/ui/motion.rs](../../src/ui/motion.rs): loaders read
+self-parking clock in [src/ui/motion.rs](../../crates/waku-ui/src/ui/motion.rs): loaders read
 a phase from a shared epoch, leases expire 300 ms after the loader last
 painted, and the clock parks when no leases remain. Never use
 `with_animation(...).repeat()` — it re-arms `request_animation_frame` every
@@ -118,7 +118,7 @@ veil at ≈ 30 Hz, the reasoning veil at ≈ 15 Hz, both leasing
 **Overlay scrollbars are the classic violator of both cadences.** A streaming
 surface moves its content every commit, so the bar sits in its reveal hold for
 the whole turn — and the hold is constant-opacity, needing zero repaints.
-[src/ui/scrollbar.rs](../../src/ui/scrollbar.rs) therefore schedules a single
+[src/ui/scrollbar.rs](../../crates/waku-ui/src/ui/scrollbar.rs) therefore schedules a single
 one-shot wake for hold expiry and rides the pulse clock only through the
 350 ms fade. Driving frames through the hold pinned the pane at pulse rate the
 moment any scrollbar became visible.
@@ -142,7 +142,7 @@ moment any scrollbar became visible.
   commit and each slide rebuilds the window from a fresh view. The full trace
   renders once the turn settles.
 - `markdown_tail` and block-index element ordinals
-  (`block_ix << 16 | position`, [src/md/render.rs](../../src/md/render.rs)) let
+  (`block_ix << 16 | position`, [src/md/render.rs](../../crates/waku-ui/src/md/render.rs)) let
   a capped walk hand settled blocks the same flatten-cache and veil keys as a
   full walk.
 - `MarkdownView::set_text` derives the mended display tail only when content
@@ -152,7 +152,7 @@ moment any scrollbar became visible.
 ## Markdown math
 
 Inline `$…$` and display `$$…$$` formulas use the native RaTeX engine
-([src/md/math.rs](../../src/md/math.rs)). Parsing TeX, loading embedded font
+([src/md/math.rs](../../crates/waku-ui/src/md/math.rs)). Parsing TeX, loading embedded font
 outlines, producing SVGs and rasterizing them all run on the background
 executor. A frame only queues cache misses and reads completed results.
 The General setting **Render math expressions** is enabled by default.

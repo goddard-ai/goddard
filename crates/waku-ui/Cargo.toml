@@ -1,0 +1,42 @@
+[package]
+name = "waku-ui"
+version = "0.1.0"
+edition = "2024"
+description = "GPUI foundation cluster for Goddard's desktop app: theme, text input, UI helpers, and markdown rendering"
+license = "GPL-3.0-only"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+gpui = { git = "https://github.com/goddard-ai/zed", branch = "main" }
+# Native Mermaid SVG rendering; GPUI handles rasterization.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
+parking_lot = "0.12"
+pulldown-cmark = "0.13"
+# Native, offline math typesetting; all layout and raster work runs on workers.
+ratex-parser = "=0.1.14"
+ratex-layout = "=0.1.14"
+ratex-types = "=0.1.14"
+ratex-svg = { version = "=0.1.14", features = ["embed-fonts"] }
+regex = "1"
+# YAML frontmatter fields in the markdown file preview (same parser waku-core
+# uses for command and skill metadata).
+serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
+serde_json = "1.0"
+unicode-linebreak = "0.1.5"
+unicode-script = "0.5"
+unicode-segmentation = "1.12"
+url = "2"
+uuid = { version = "1.18", features = ["v4", "serde"] }
+waku-client = { path = "../waku-client" }
+waku-localization = { path = "../waku-localization" }
+waku-protocol = { path = "../waku-protocol" }
+
+# `test-support` has to stay test-only. It compiles a loop into gpui's
+# `flush_effects` that draws every dirty window right there, so with the
+# feature on a shipping build every notify pays a full frame the moment it
+# happens instead of coalescing into the display link's next one.
+[dev-dependencies]
+gpui = { git = "https://github.com/goddard-ai/zed", branch = "main", features = [
+  "test-support",
+] }

@@ -39,10 +39,7 @@ mod custom_commands;
 pub mod daemon;
 mod diagnostics;
 mod driver;
-mod fonts;
-mod input;
 mod keybindings;
-mod md;
 mod platform;
 mod query;
 mod review_diff;
@@ -50,9 +47,12 @@ mod shell_integration;
 #[cfg(unix)]
 mod ssh;
 mod terminal;
-mod theme;
-mod ui;
 mod updater;
+
+// The GPUI foundation cluster — theme, text input, shared UI elements, and
+// markdown rendering — lives in `waku-ui`; these re-exports keep `crate::…`
+// paths working for the rest of the app.
+pub use waku_ui::{fonts, input, md, theme, ui};
 
 pub use waku_client::{
     checkpoint, command_env, composer_complete, git_branch, git_commit, i18n, identity, model,
@@ -431,6 +431,14 @@ pub fn run() {
         crate::app::init_drafts_keys(cx);
         crate::app::init_shortcuts_dialog_keys(cx);
         crate::terminal::init_command_bar_keys(cx);
+        // Platform appearance/material primitives stay in the host; the
+        // foundation crate reaches them through this installed hook set.
+        waku_ui::host::install_host_platform(waku_ui::host::HostPlatform {
+            increase_contrast: crate::platform::increase_contrast,
+            reduce_transparency: crate::platform::reduce_transparency,
+            set_window_appearance: crate::platform::set_window_appearance,
+            configure_sidebar_material: crate::platform::configure_sidebar_material,
+        });
         crate::theme::init(cx);
         crate::platform::init_reduce_motion(cx);
 

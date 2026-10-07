@@ -15,7 +15,7 @@ pub mod text_field;
 pub mod thinking;
 pub mod tooltip;
 
-use crate::model::{ActivityKind, ProviderKind, SessionStatus};
+use waku_client::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::shortcut::ShortcutHint;
 
@@ -452,11 +452,11 @@ pub fn status_color(theme: &Theme, status: SessionStatus) -> Hsla {
 /// The icon a transcript activity row renders: a delegation call gets the
 /// bot glyph instead of the generic tool wrench so a subagent hand-off reads
 /// differently from an ordinary tool call.
-pub fn activity_row_icon(activity: &crate::model::ActivityItem) -> &'static str {
+pub fn activity_row_icon(activity: &waku_client::model::ActivityItem) -> &'static str {
     if activity
         .tool_name
         .as_deref()
-        .is_some_and(crate::model::is_delegation_tool_name)
+        .is_some_and(waku_client::model::is_delegation_tool_name)
     {
         return "icons/bot.svg";
     }

@@ -415,7 +415,7 @@ buttons; use the app's existing host connection affordance.
 6. **Wire keyboard and text handling.** Give headers/rows and Show more/less
    stable ids,
    `track_focus`, `tab_index`, `tab_group`/`tab_stop`, `focus_visible`, and
-   `on_activation`/`on_activation_app` from [src/ui/mod.rs](../../src/ui/mod.rs)
+   `on_activation`/`on_activation_app` from [src/ui/mod.rs](../../crates/waku-ui/src/ui/mod.rs)
    (`280–327`). Use one roving tab stop per virtualized viewport: Up/Down and
    Home/End move among visible items, Enter/Space open tasks or toggle sections;
    Left folds a section and Right opens it. Tab traverses the history expander

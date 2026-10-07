@@ -1,6 +1,6 @@
 # Text field key bindings
 
-Every chord `TextInput` binds ([`input::init`](../../src/input.rs)), what it
+Every chord `TextInput` binds ([`input::init`](../../crates/waku-ui/src/input.rs)), what it
 does, and where that behaviour comes from. The composer is a multi-line field,
 so most chords are defined by the unit they operate on:
 

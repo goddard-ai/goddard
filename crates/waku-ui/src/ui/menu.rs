@@ -62,7 +62,7 @@ const MENU_CONTEXT: &str = "Menu";
 /// Deferred paint order for open menus and picker surfaces: above every
 /// full-window overlay — Big Picture's layer sits at 7 — since a menu's
 /// trigger may live inside one.
-pub(crate) const MENU_PAINT_PRIORITY: usize = 8;
+pub const MENU_PAINT_PRIORITY: usize = 8;
 
 /// Vertical gap between a trigger and its anchored card.
 const TRIGGER_GAP: f32 = 4.0;
@@ -898,7 +898,7 @@ fn resolve_flyout_placement(
 ///
 /// Also used directly by the transcript's annotation surfaces, which anchor to
 /// a painted glyph rect rather than to an element trigger.
-pub(crate) struct FloatingSurface {
+pub struct FloatingSurface {
     child: AnyElement,
     /// `None` anchors to the surface's own containing block: the element is
     /// laid out stretched over its nearest positioned ancestor and reads that
@@ -910,12 +910,12 @@ pub(crate) struct FloatingSurface {
     margin: Pixels,
 }
 
-pub(crate) struct FloatingSurfaceState {
+pub struct FloatingSurfaceState {
     child_layout_id: LayoutId,
 }
 
 impl FloatingSurface {
-    pub(crate) fn new(
+    pub fn new(
         child: AnyElement,
         trigger: Bounds<Pixels>,
         preferred: MenuAlign,
@@ -935,7 +935,7 @@ impl FloatingSurface {
     /// snapshot: laid out stretched over the nearest positioned ancestor, it
     /// resolves the trigger from its own rect at prepaint, tracking an anchor
     /// that moves between renders without a frame of lag.
-    pub(crate) fn anchored_to_parent(
+    pub fn anchored_to_parent(
         child: AnyElement,
         preferred: MenuAlign,
         gap: Pixels,
@@ -953,7 +953,7 @@ impl FloatingSurface {
     /// A flyout anchored beside its containing block — vertically centered on
     /// the parent row it stems from, flipping to the other side when it fits
     /// better there.
-    pub(crate) fn anchored_beside_parent(child: AnyElement, gap: Pixels, margin: Pixels) -> Self {
+    pub fn anchored_beside_parent(child: AnyElement, gap: Pixels, margin: Pixels) -> Self {
         Self {
             child,
             trigger: None,

@@ -409,3 +409,41 @@ Do not estimate bytes from source lines. Compare mbx storage statistics and
 managed target/incremental footprints over the same workload and retention
 window. Use coherent domain crates; cover the hot areas without making one
 crate per helper or generated file.
+
+## Recorded measurements
+
+### `waku-ui` foundation extraction — 2026-10-07
+
+The first UI-ownership unit: `src/input.rs`, `src/theme.rs`, `src/ui/`, and
+`src/md/` (plus the self-contained `src/fonts.rs`, ~29k lines) moved to
+`crates/waku-ui` with host re-exports preserving `crate::` paths. Platform
+appearance/material primitives stayed in the host behind
+`waku_ui::host::HostPlatform`, installed before `theme::init`.
+
+Method: `mbx check` at the workspace root (default members), dev profile
+`[optimized + debuginfo]`, rustc/cargo 1.98.1, mbx 1.21.0, `jobs = 4`,
+macOS aarch64, same worktree. Wall times are `time` on the same command; dirty
+units are the run's `Checking`/`Compiling` lines. Raw logs under the worktree's
+gitignored `temp/`: `before-*.log`, `after-*.log`, `after-build-app.log`.
+
+| Edit | Before wall | Dirty units (before) | After wall | Dirty units (after) |
+| --- | ---: | --- | ---: | --- |
+| touch input.rs | 21.0 s | waku (+espeak-rs-sys, espeak-rs, piper-rs incidentals) | 16.6 s | waku-ui, waku |
+| touch theme.rs | 15.4 s | waku, waku-daemon, waku-core | 14.9 s | waku-ui, waku |
+| touch md/render.rs | 13.3 s | waku, waku-daemon, waku-core | 17.0 s | waku-ui, waku |
+| edit input.rs (const 300→301 ms) | 12.5 s | waku, waku-daemon, waku-core | 17.4 s | waku-ui, waku |
+| touch src/app/composer.rs (consumer) | — | (not measured before) | 17.4 s | waku |
+
+Two discarded after-runs under ambient load ~55 (the `dev` worktree's watcher
+building concurrently): 27.4 s and 61.0 s. Keep measurement runs away from
+watcher builds.
+
+Read: check-time for a foundation edit is unchanged within noise — touching a
+moved file re-checks `waku-ui` (~29k lines) and then `waku` (~215k), because a
+dirtied dependency unit rebuilds its dependents. `waku` itself is ~12% smaller,
+which is where its ~1–4 s improvement comes from. The earned property is
+ownership, not yet latency: foundation edits stay inside one crate boundary,
+and later panel crates can take `waku-ui` without `Waku`. The
+`GODDARD_COMMIT_SHA=-dirty` env churn noted in the review still recompiles the
+daemon/core build-script units on checkout-status changes, unrelated to this
+move.

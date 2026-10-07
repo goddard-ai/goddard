@@ -79,7 +79,7 @@ impl TextGeometry {
         }
     }
 
-    pub(crate) fn is_missing(&self) -> bool {
+    pub fn is_missing(&self) -> bool {
         match self {
             Self::Text(layout) => layout_missing(layout),
             Self::Math(layout) => layout.is_missing(),

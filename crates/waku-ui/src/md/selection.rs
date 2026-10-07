@@ -703,6 +703,91 @@ pub fn line_range(text: &str, offset: usize) -> Range<usize> {
     start..end
 }
 
+// Draft-persistence bridges. `ComposerDraft*` records live in
+// `waku_protocol::persistence`; the impls sit here, next to the selection
+// types they convert, because the orphan rule bars them from the app crate
+// now that `md` is its own crate.
+
+use waku_protocol::persistence::{
+    ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftFileAnnotation,
+};
+
+impl From<&Span> for ComposerDraftAnnotationSpan {
+    fn from(span: &Span) -> Self {
+        Self {
+            row: span.key.row.to_string(),
+            index: span.key.index,
+            start: span.range.start,
+            end: span.range.end,
+            text: span.text.to_string(),
+            block_break: span.block_break,
+        }
+    }
+}
+
+impl From<ComposerDraftAnnotationSpan> for Span {
+    fn from(span: ComposerDraftAnnotationSpan) -> Self {
+        Self {
+            key: TextKey::new(span.row, span.index),
+            range: span.start..span.end,
+            text: Rc::from(span.text),
+            block_break: span.block_break,
+            copy: Rc::default(),
+        }
+    }
+}
+
+impl From<&FileAnnotation> for ComposerDraftFileAnnotation {
+    fn from(file: &FileAnnotation) -> Self {
+        Self {
+            path: file.path.clone(),
+            start: file.range.start,
+            end: file.range.end,
+            start_line: file.start_line,
+            end_line: file.end_line,
+            source: file.source.as_deref().map(str::to_owned),
+            plan_session: file.plan_session,
+        }
+    }
+}
+
+impl From<ComposerDraftFileAnnotation> for FileAnnotation {
+    fn from(file: ComposerDraftFileAnnotation) -> Self {
+        Self {
+            path: file.path,
+            range: file.start..file.end,
+            start_line: file.start_line,
+            end_line: file.end_line,
+            source: file.source.map(Rc::from),
+            plan_session: file.plan_session,
+        }
+    }
+}
+
+impl From<&TranscriptAnnotation> for ComposerDraftAnnotation {
+    fn from(annotation: &TranscriptAnnotation) -> Self {
+        Self {
+            id: annotation.id,
+            message_id: annotation.message_id,
+            spans: annotation.spans.iter().map(Into::into).collect(),
+            comment: annotation.comment.clone(),
+            file: annotation.file.as_ref().map(Into::into),
+        }
+    }
+}
+
+impl From<ComposerDraftAnnotation> for TranscriptAnnotation {
+    fn from(annotation: ComposerDraftAnnotation) -> Self {
+        Self {
+            id: annotation.id,
+            message_id: annotation.message_id,
+            spans: annotation.spans.into_iter().map(Into::into).collect(),
+            comment: annotation.comment,
+            file: annotation.file.map(Into::into),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

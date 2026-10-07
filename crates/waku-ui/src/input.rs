@@ -664,20 +664,20 @@ pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2002}";
 
 /// A session reference's chip icon — the same chat glyph the sidebar and
 /// the session attachment chip carry.
-pub(crate) const ATOM_SESSION_ICON: &str = "icons/chat.svg";
+pub const ATOM_SESSION_ICON: &str = "icons/chat.svg";
 
 /// The chip glyph a planning-session atom paints — the compass the
 /// sidebar's planning rows and the `@` popup's planning rows carry.
-pub(crate) const ATOM_PLANNING_ICON: &str = "icons/compass.svg";
+pub const ATOM_PLANNING_ICON: &str = "icons/compass.svg";
 
 /// A collapsed paste's chip icon — the same file glyph the pasted-block
 /// attachment chip carries.
-pub(crate) const ATOM_PASTED_ICON: &str = "icons/file.svg";
+pub const ATOM_PASTED_ICON: &str = "icons/file.svg";
 
 /// The chip glyph a reference atom paints — the same icon the reference's
 /// own surfaces carry (the sidebar's Projects row, the boss page's
 /// Personas and Deliverables tabs, the memory brain's database glyph).
-pub(crate) fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
+pub fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
     use waku_protocol::model::AtomRefKind;
     match kind {
         AtomRefKind::Project => "icons/projects.svg",
@@ -3223,7 +3223,7 @@ pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
 /// does: a square face reads small at [`ATOM_ICON_SCALE`], and the extra
 /// width comes out of the slot's trailing en space, tightening the gap
 /// before the label so the chip reads as one unit.
-pub(crate) const ATOM_AVATAR_SCALE: f32 = 0.9;
+pub const ATOM_AVATAR_SCALE: f32 = 0.9;
 
 /// The painted bounds a session mention's avatar takes inside
 /// [`ATOM_ICON_SLOT`]'s reserved width — a step in from the chip's edge with
@@ -4959,7 +4959,23 @@ mod tests {
     #[gpui::test]
     fn enter_confirms_the_open_autocomplete(cx: &mut TestAppContext) {
         cx.update(super::init);
-        cx.update(crate::app::init_composer_autocomplete);
+        // Mirrors the host's `app::autocomplete::init`: the popup's accept
+        // keys live on the `ComposerAutocomplete > TextInput` context and
+        // must win over the field's own `enter`/`tab` bindings.
+        cx.update(|cx| {
+            cx.bind_keys([
+                gpui::KeyBinding::new(
+                    "enter",
+                    crate::ui::menu::ConfirmEntry,
+                    Some("ComposerAutocomplete > TextInput"),
+                ),
+                gpui::KeyBinding::new(
+                    "tab",
+                    crate::ui::menu::ConfirmEntry,
+                    Some("ComposerAutocomplete > TextInput"),
+                ),
+            ]);
+        });
         cx.update(|cx| super::install_composer_enter_swap(false, cx));
         let confirms: Rc<RefCell<usize>> = Rc::default();
         let (harness, cx) = cx.add_window_view({

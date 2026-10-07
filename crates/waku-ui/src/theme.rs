@@ -50,7 +50,7 @@ static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
 /// setting forces it on regardless of the app toggle.
 pub fn set_high_contrast(enabled: bool) {
     HIGH_CONTRAST.store(
-        enabled || crate::platform::increase_contrast(),
+        enabled || crate::host::increase_contrast(),
         Ordering::Relaxed,
     );
 }
@@ -64,12 +64,12 @@ fn high_contrast() -> bool {
 /// `cx`, so the setting reaches it through a static. Themes are built once
 /// and republished on changes, so a process-level flag is enough.
 static BORDER_INTENSITY: AtomicU32 =
-    AtomicU32::new(crate::persistence::DEFAULT_BORDER_INTENSITY.to_bits());
+    AtomicU32::new(waku_client::persistence::DEFAULT_BORDER_INTENSITY.to_bits());
 
 /// Store the "Border intensity" preference [`border_floors`] reads: 1.0 is
 /// the palettes' solved contrast, 0.0 erases the lines.
 pub fn set_border_intensity(intensity: f32) {
-    let intensity = crate::persistence::sanitized_border_intensity(intensity);
+    let intensity = waku_client::persistence::sanitized_border_intensity(intensity);
     BORDER_INTENSITY.store(intensity.to_bits(), Ordering::Relaxed);
 }
 
@@ -1587,10 +1587,10 @@ pub fn apply_theme_preference(
     window: &mut Window,
     cx: &mut App,
 ) {
-    crate::platform::set_window_appearance(window, native_override(settings));
+    crate::host::set_window_appearance(window, native_override(settings));
     // "Reduce transparency" kills the vibrancy the effect relies on; the
     // sidebar paints solid as if the toggle were off.
-    let sidebar_transparent = sidebar_transparent && !crate::platform::reduce_transparency();
+    let sidebar_transparent = sidebar_transparent && !crate::host::reduce_transparency();
     let system_dark = matches!(
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
@@ -1610,7 +1610,7 @@ pub fn apply_theme_preference(
         theme.sidebar = theme.sidebar_drag_background;
     }
     set_active_theme(theme, cx);
-    crate::platform::configure_sidebar_material(
+    crate::host::configure_sidebar_material(
         window,
         theme.sidebar_drag_background,
         is_dark,
@@ -1659,7 +1659,7 @@ mod tests {
             )
         );
         BORDER_INTENSITY.store(
-            crate::persistence::DEFAULT_BORDER_INTENSITY.to_bits(),
+            waku_client::persistence::DEFAULT_BORDER_INTENSITY.to_bits(),
             Ordering::Relaxed,
         );
         HIGH_CONTRAST.store(false, Ordering::Relaxed);

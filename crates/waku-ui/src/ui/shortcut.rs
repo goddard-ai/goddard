@@ -263,6 +263,17 @@ mod tests {
         Styled, div, px,
     };
 
+    gpui::actions!(
+        test_shortcuts,
+        [NewSession, SwitchProjectForward, ToggleSidebar]
+    );
+
+    /// The host's platform helper, duplicated so the crate's tests stay
+    /// platform-correct without depending on `crate::platform`.
+    const fn primary_shortcut<'a>(macos: &'a str, other: &'a str) -> &'a str {
+        if cfg!(target_os = "macos") { macos } else { other }
+    }
+
     fn keystroke(modifiers: Modifiers, key: &str) -> KeybindingKeystroke {
         KeybindingKeystroke::from_keystroke(Keystroke {
             modifiers,
@@ -351,7 +362,7 @@ mod tests {
     fn resolve_reads_the_live_keymap(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             cx.bind_keys([
-                KeyBinding::new("secondary-n", crate::NewSession, None),
+                KeyBinding::new("secondary-n", NewSession, None),
                 KeyBinding::new("secondary-c", crate::input::Copy, Some("TextInput")),
             ]);
         });
@@ -366,10 +377,10 @@ mod tests {
         cx.update(|window, cx| window.focus(&other_focus, cx));
         cx.update(|window, cx| {
             assert_eq!(
-                ShortcutHint::action(&crate::NewSession)
+                ShortcutHint::action(&NewSession)
                     .resolve(window, cx)
                     .as_deref(),
-                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
+                Some(primary_shortcut("⌘N", "Ctrl+N"))
             );
             // Copy's binding lives on the unfocused TextInput context, so the
             // focused stack cannot see it.
@@ -381,7 +392,7 @@ mod tests {
                 ShortcutHint::action_in(&crate::input::Copy, &field_focus)
                     .resolve(window, cx)
                     .as_deref(),
-                Some(crate::platform::primary_shortcut("⌘C", "Ctrl+C"))
+                Some(primary_shortcut("⌘C", "Ctrl+C"))
             );
             assert_eq!(
                 ShortcutHint::text("⌘V").resolve(window, cx).as_deref(),
@@ -397,8 +408,8 @@ mod tests {
         // can take it.
         cx.update(|cx| {
             cx.bind_keys([
-                KeyBinding::new("secondary-n", crate::NewSession, None),
-                KeyBinding::new("secondary-n", crate::SwitchProjectForward, None),
+                KeyBinding::new("secondary-n", NewSession, None),
+                KeyBinding::new("secondary-n", SwitchProjectForward, None),
             ]);
         });
         let (view, cx) = cx.add_window_view(|_, cx| Harness {
@@ -411,28 +422,28 @@ mod tests {
         cx.update(|window, cx| {
             // The winner's own hint resolves as usual.
             assert_eq!(
-                ShortcutHint::action(&crate::SwitchProjectForward)
+                ShortcutHint::action(&SwitchProjectForward)
                     .resolve(window, cx)
                     .as_deref(),
-                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
+                Some(primary_shortcut("⌘N", "Ctrl+N"))
             );
             // The shadowed binding resolves only once the shadowing action is
             // declared a propagator.
             assert_eq!(
-                ShortcutHint::action(&crate::NewSession).resolve(window, cx),
+                ShortcutHint::action(&NewSession).resolve(window, cx),
                 None
             );
             assert_eq!(
-                ShortcutHint::action(&crate::NewSession)
-                    .shadowed_by(&crate::SwitchProjectForward)
+                ShortcutHint::action(&NewSession)
+                    .shadowed_by(&SwitchProjectForward)
                     .resolve(window, cx)
                     .as_deref(),
-                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N"))
+                Some(primary_shortcut("⌘N", "Ctrl+N"))
             );
             // An unrelated action does not lift the shadow.
             assert_eq!(
-                ShortcutHint::action(&crate::NewSession)
-                    .shadowed_by(&crate::ToggleSidebar)
+                ShortcutHint::action(&NewSession)
+                    .shadowed_by(&ToggleSidebar)
                     .resolve(window, cx),
                 None
             );

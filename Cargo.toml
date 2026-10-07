@@ -10,7 +10,7 @@ name = "goddard"
 path = "src/main.rs"
 
 [workspace]
-members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map", "crates/waku-localization", "crates/waku-boss", "crates/waku-base", "crates/waku-exec", "crates/waku-git", "crates/waku-sessions", "crates/waku-drivers", "crates/waku-store", "crates/waku-vcs", "crates/waku-workspace", "crates/waku-server"]
+members = ["crates/waku-client", "crates/waku-core", "crates/waku-daemon", "crates/waku-protocol", "crates/waku-computer-use", "crates/waku-agent", "crates/waku-share", "crates/waku-memory-engine", "crates/waku-repo-map", "crates/waku-localization", "crates/waku-boss", "crates/waku-base", "crates/waku-exec", "crates/waku-git", "crates/waku-sessions", "crates/waku-drivers", "crates/waku-store", "crates/waku-vcs", "crates/waku-workspace", "crates/waku-server", "crates/waku-ui"]
 default-members = [
   ".",
   "crates/waku-client",
@@ -28,6 +28,7 @@ default-members = [
   "crates/waku-vcs",
   "crates/waku-workspace",
   "crates/waku-server",
+  "crates/waku-ui",
 ]
 resolver = "2"
 
@@ -58,12 +59,7 @@ parking_lot = "0.12"
 rquickjs = "0.12.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-# YAML frontmatter fields in the markdown file preview (same parser waku-core
-# uses for command and skill metadata).
-serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
 unicode-segmentation = "1.12"
-unicode-linebreak = "0.1.5"
-unicode-script = "0.5"
 # The voice scratchpad's streaming transcription socket — same feature set
 # waku-client uses for its own WebSocket traffic.
 tungstenite = { version = "0.30", default-features = false, features = [
@@ -79,17 +75,10 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 waku-client = { path = "crates/waku-client" }
 waku-localization = { path = "crates/waku-localization" }
 waku-protocol = { path = "crates/waku-protocol" }
-pulldown-cmark = "0.13"
+waku-ui = { path = "crates/waku-ui" }
 # QR for the daemon connect link; default features pull renderers we paint
 # ourselves instead.
 qrcode = { version = "0.14", default-features = false }
-# Native, offline math typesetting; all layout and raster work runs on workers.
-ratex-parser = "=0.1.14"
-ratex-layout = "=0.1.14"
-ratex-types = "=0.1.14"
-ratex-svg = { version = "=0.1.14", features = ["embed-fonts"] }
-# Native Mermaid SVG rendering; GPUI handles rasterization.
-mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 regex = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 posthog-rs = { version = "0.27.0", default-features = false, features = ["async-client"] }

@@ -9,7 +9,7 @@
 - Mark `#[track_caller]` on any function whose return value is an element (or
   an element-bearing component, like `MenuChip::new`) that a caller drops into
   its tree, so the label reports the call site instead of a line inside the
-  helper. `src/ui/` constructors follow this; `render_*` helpers in `src/app/`
+  helper. `crates/waku-ui/src/ui/` constructors follow this; `render_*` helpers in `src/app/`
   may opt in the same way when the call site is the identifying location.
 - Do not mark `Render`/`RenderOnce::render` implementations — the attribute
   would point every element built inside at gpui's `ViewElement` internals

@@ -200,13 +200,13 @@ const FILES = [
   "src/app/components.rs",
   "src/app/streaming.rs",
   "src/app/sessions.rs",
-  "src/md/render.rs",
-  "src/md/parser.rs",
-  "src/md/highlight.rs",
+  "crates/waku-ui/src/md/render.rs",
+  "crates/waku-ui/src/md/parser.rs",
+  "crates/waku-ui/src/md/highlight.rs",
   "src/persistence.rs",
   "src/model.rs",
   "src/driver/codex.rs",
-  "src/ui/scrollbar.rs",
+  "crates/waku-ui/src/ui/scrollbar.rs",
 ];
 
 const CODE_SAMPLES: { language: string; lines: string[] }[] = [
