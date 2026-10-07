@@ -11370,6 +11370,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "dirs 6.0.0",
+ "dispatch2",
  "ed25519-dalek 2.2.0",
  "embed-resource",
  "flate2",

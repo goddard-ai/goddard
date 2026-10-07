@@ -1337,6 +1337,8 @@ thread_local! {
     static PLAYING_BRIEFING:
         std::cell::RefCell<Option<objc2::rc::Retained<objc2_avf_audio::AVAudioPlayer>>> =
         const { std::cell::RefCell::new(None) };
+    static BRIEFING_VOLUME: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+    static BRIEFING_PLAYBACK_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The bundled sounds' embedded MP3 payloads.
@@ -1420,6 +1422,8 @@ pub fn play_briefing_audio(bytes: &[u8], volume: f32) -> Option<std::time::Durat
     unsafe {
         player.setVolume(volume);
         if player.play() {
+            BRIEFING_PLAYBACK_GENERATION.set(BRIEFING_PLAYBACK_GENERATION.get().wrapping_add(1));
+            BRIEFING_VOLUME.set(volume);
             PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = Some(player));
             Some(duration)
         } else {
@@ -1436,13 +1440,11 @@ pub fn play_briefing_audio(_: &[u8], _: f32) -> Option<std::time::Duration> {
 /// Apply a changed briefing volume to the currently loaded player.
 #[cfg(target_os = "macos")]
 pub fn set_briefing_audio_volume(volume: f32) {
+    let volume = waku_client::persistence::sanitized_completion_sound_volume(volume);
+    BRIEFING_VOLUME.set(volume);
     PLAYING_BRIEFING.with_borrow(|slot| {
         if let Some(player) = slot.as_ref() {
-            unsafe {
-                player.setVolume(waku_client::persistence::sanitized_completion_sound_volume(
-                    volume,
-                ))
-            };
+            unsafe { player.setVolume(volume) };
         }
     });
 }
@@ -1454,8 +1456,21 @@ pub fn set_briefing_audio_volume(_: f32) {}
 pub fn pause_briefing_audio() -> Option<std::time::Duration> {
     PLAYING_BRIEFING.with_borrow(|slot| {
         let player = slot.as_ref()?;
-        unsafe { player.pause() };
-        briefing_audio_status().map(|(_, remaining)| remaining)
+        let remaining = briefing_audio_status()?.1;
+        let generation = BRIEFING_PLAYBACK_GENERATION.get().wrapping_add(1);
+        BRIEFING_PLAYBACK_GENERATION.set(generation);
+        unsafe { player.setVolume_fadeDuration(0.0, 0.15) };
+        let when = dispatch2::DispatchTime::try_from(std::time::Duration::from_millis(150)).ok()?;
+        let _ = dispatch2::DispatchQueue::main().after(when, move || {
+            if BRIEFING_PLAYBACK_GENERATION.get() == generation {
+                PLAYING_BRIEFING.with_borrow(|slot| {
+                    if let Some(player) = slot.as_ref() {
+                        unsafe { player.pause() };
+                    }
+                });
+            }
+        });
+        Some(remaining)
     })
 }
 
@@ -1469,6 +1484,8 @@ pub fn pause_briefing_audio() -> Option<std::time::Duration> {
 pub fn restart_briefing_audio() -> Option<std::time::Duration> {
     PLAYING_BRIEFING.with_borrow(|slot| {
         let player = slot.as_ref()?;
+        BRIEFING_PLAYBACK_GENERATION.set(BRIEFING_PLAYBACK_GENERATION.get().wrapping_add(1));
+        unsafe { player.setVolume(BRIEFING_VOLUME.get()) };
         unsafe { player.setCurrentTime(0.0) };
         if !unsafe { player.play() } {
             return None;
@@ -1486,6 +1503,8 @@ pub fn restart_briefing_audio() -> Option<std::time::Duration> {
 pub fn resume_briefing_audio() -> Option<std::time::Duration> {
     PLAYING_BRIEFING.with_borrow(|slot| {
         let player = slot.as_ref()?;
+        BRIEFING_PLAYBACK_GENERATION.set(BRIEFING_PLAYBACK_GENERATION.get().wrapping_add(1));
+        unsafe { player.setVolume(BRIEFING_VOLUME.get()) };
         if !unsafe { player.play() } {
             return None;
         }
@@ -1517,6 +1536,7 @@ pub fn briefing_audio_status() -> Option<(bool, std::time::Duration)> {
 
 #[cfg(target_os = "macos")]
 pub fn stop_briefing_audio() {
+    BRIEFING_PLAYBACK_GENERATION.set(BRIEFING_PLAYBACK_GENERATION.get().wrapping_add(1));
     PLAYING_BRIEFING.with_borrow_mut(|slot| *slot = None);
 }
 

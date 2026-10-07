@@ -104,6 +104,7 @@ gpui = { git = "https://github.com/goddard-ai/zed", branch = "main", features = 
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std"] }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
   "std",
   "AUComponent",
