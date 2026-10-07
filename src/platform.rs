@@ -314,11 +314,7 @@ mod voice_gate {
     }
 
     /// Read a CoreAudio property's raw bytes, or `None` on any failure.
-    fn audio_property_data(
-        object: AudioObjectID,
-        selector: u32,
-        scope: u32,
-    ) -> Option<Vec<u8>> {
+    fn audio_property_data(object: AudioObjectID, selector: u32, scope: u32) -> Option<Vec<u8>> {
         let mut address = AudioObjectPropertyAddress {
             mSelector: selector,
             mScope: scope,
@@ -391,7 +387,8 @@ mod voice_gate {
                 ) else {
                     return false;
                 };
-                let buffers = u32::from_ne_bytes(config[0..4].try_into().unwrap_or([0; 4])) as usize;
+                let buffers =
+                    u32::from_ne_bytes(config[0..4].try_into().unwrap_or([0; 4])) as usize;
                 (0..buffers).any(|index| {
                     config
                         .get(8 + index * 16..)
@@ -402,8 +399,8 @@ mod voice_gate {
             .map(|device| {
                 let uid = audio_property_string(device, kAudioDevicePropertyDeviceUID)
                     .unwrap_or_default();
-                let name = audio_property_string(device, kAudioObjectPropertyName)
-                    .unwrap_or_default();
+                let name =
+                    audio_property_string(device, kAudioObjectPropertyName).unwrap_or_default();
                 (device, uid, name)
             })
             .collect()
@@ -515,13 +512,15 @@ mod voice_gate {
         if DEVICE_LISTENER_INSTALLED.swap(true, Ordering::Relaxed) {
             return;
         }
-        let listener = RcBlock::new(|_count: u32, _addresses: NonNull<AudioObjectPropertyAddress>| {
-            if let Ok(hook) = DEVICE_CHANGE_HOOK.lock()
-                && let Some(hook) = hook.as_ref()
-            {
-                hook();
-            }
-        });
+        let listener = RcBlock::new(
+            |_count: u32, _addresses: NonNull<AudioObjectPropertyAddress>| {
+                if let Ok(hook) = DEVICE_CHANGE_HOOK.lock()
+                    && let Some(hook) = hook.as_ref()
+                {
+                    hook();
+                }
+            },
+        );
         let block = &*listener as *const _ as *mut _;
         // The device list covers plugs and unplugs; the default-input
         // property covers macOS retargeting the default without one

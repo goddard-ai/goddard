@@ -1966,9 +1966,7 @@ impl Waku {
                     cx,
                     {
                         let enabled = self.state.transcript_keep_scroll_on_send;
-                        move |this, _, cx| {
-                            this.set_transcript_keep_scroll_on_send(!enabled, cx)
-                        }
+                        move |this, _, cx| this.set_transcript_keep_scroll_on_send(!enabled, cx)
                     },
                 ),
                 theme,
@@ -2502,14 +2500,11 @@ impl Waku {
                 let mut items = Vec::with_capacity(devices.len() + 1);
                 items.push({
                     let weak = weak.clone();
-                    MenuItem::new(
-                        tr!("settings.microphone_system_default"),
-                        move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_voice_input_device_uid(String::new(), cx);
-                            });
-                        },
-                    )
+                    MenuItem::new(tr!("settings.microphone_system_default"), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.set_voice_input_device_uid(String::new(), cx);
+                        });
+                    })
                     .selected(selected_uid.is_empty())
                 });
                 items.extend(devices.iter().map(|device| {

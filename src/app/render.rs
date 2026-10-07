@@ -898,7 +898,8 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
-                        } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some() {
+                        } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some()
+                        {
                             self.render_boss_page(window, cx)
                         } else if let Some(deliverable_page) = deliverable_page {
                             deliverable_page
@@ -931,9 +932,7 @@ impl Render for Waku {
                         } else {
                             self.transcript_pane
                                 .clone()
-                                .cached(
-                                    StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                                )
+                                .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                                 .into_any_element()
                         },
                     )

@@ -1104,11 +1104,9 @@ impl Waku {
     ) {
         // A cancel that landed mid-pipeline already dropped the entry —
         // discard the clip rather than caching it.
-        let Some(PendingBriefing { play, manual, .. }) = PendingBriefing::take_current(
-            &mut self.briefing_pending,
-            message_id,
-            request_id,
-        ) else {
+        let Some(PendingBriefing { play, manual, .. }) =
+            PendingBriefing::take_current(&mut self.briefing_pending, message_id, request_id)
+        else {
             return;
         };
         let sequence = if manual { None } else { sequence };
@@ -1145,8 +1143,7 @@ impl Waku {
                         }
                     }
                 }
-                if play && (sequence.is_none() || !self.briefed_messages.contains(&message_id))
-                {
+                if play && (sequence.is_none() || !self.briefed_messages.contains(&message_id)) {
                     // AVAudioPlayer must start on the UI thread, so the
                     // bytes ride the spawn back rather than playing from
                     // the executor.

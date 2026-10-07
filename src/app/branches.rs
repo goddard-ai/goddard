@@ -87,10 +87,7 @@ impl Waku {
     /// Git repository — a pending, missing, or failed probe is not a verdict,
     /// so Git affordances stay until the answer is in.
     pub(super) fn workspace_path_confirmed_non_git(&self, path: &std::path::Path) -> bool {
-        matches!(
-            self.branch_snapshots.peek(path).as_deref(),
-            Some(Ok(None))
-        )
+        matches!(self.branch_snapshots.peek(path).as_deref(), Some(Ok(None)))
     }
 
     /// The same verdict for `project_id`'s ordinary checkout.
@@ -196,8 +193,7 @@ impl Waku {
                         // cannot host the worktree an unstarted draft plans —
                         // the pick would fail at first submit.
                         let downgraded = matches!(&result, Ok(None))
-                            && waku
-                                .downgrade_gitless_worktree_drafts(&fetch_path, fetch_owner);
+                            && waku.downgrade_gitless_worktree_drafts(&fetch_path, fetch_owner);
                         let selected = waku
                             .selected_workspace_path()
                             .is_some_and(|path| path == fetch_path);

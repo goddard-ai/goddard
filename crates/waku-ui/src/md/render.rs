@@ -1418,7 +1418,12 @@ impl MarkdownView {
             .prompt_references
             .take()
             .filter(|(source, _)| source == text)
-            .unwrap_or_else(|| (text.to_owned(), super::prompt_refs::display(text).into_owned()));
+            .unwrap_or_else(|| {
+                (
+                    text.to_owned(),
+                    super::prompt_refs::display(text).into_owned(),
+                )
+            });
         self.set_text_with_soft_breaks_as_newlines(&display, mend, true);
         self.prompt_references = Some((source, display));
     }
@@ -2075,9 +2080,15 @@ fn text_element_with_selection(
                     let target = waku_protocol::model::ReferenceContext::decode_reference(url)
                         .map(|(context, target)| {
                             let path = Path::new(&target);
-                            if let Ok(relative) = path.strip_prefix(context.workspace())
-                                .or_else(|_| path.strip_prefix(&context.project_root)) {
-                                context.workspace().join(relative).to_string_lossy().into_owned()
+                            if let Ok(relative) = path
+                                .strip_prefix(context.workspace())
+                                .or_else(|_| path.strip_prefix(&context.project_root))
+                            {
+                                context
+                                    .workspace()
+                                    .join(relative)
+                                    .to_string_lossy()
+                                    .into_owned()
                             } else if path.is_absolute() {
                                 target
                             } else {
@@ -5645,7 +5656,12 @@ mod tests {
         view.set_text(source, false);
         assert_eq!(view.source(), source);
         assert_eq!(view.block_count(), view.blocks().count());
-        let ctx = Ctx::new("doc", &palette, Metrics::BODY, TranscriptSelection::default());
+        let ctx = Ctx::new(
+            "doc",
+            &palette,
+            Metrics::BODY,
+            TranscriptSelection::default(),
+        );
         for index in 0..view.block_count() {
             assert!(
                 markdown_block(&view, &ctx, index).is_some(),
@@ -5675,8 +5691,12 @@ mod tests {
                 let palette = self.palette.clone();
                 gpui::list(self.list.clone(), move |index, _window, _cx| {
                     mounted.borrow_mut().push(index);
-                    let ctx =
-                        Ctx::new("doc", &palette, Metrics::BODY, TranscriptSelection::default());
+                    let ctx = Ctx::new(
+                        "doc",
+                        &palette,
+                        Metrics::BODY,
+                        TranscriptSelection::default(),
+                    );
                     markdown_block(&document, &ctx, index)
                         .unwrap_or_else(|| div().into_any_element())
                 })
@@ -5727,5 +5747,4 @@ mod tests {
             "scrolling to the end must mount the last block"
         );
     }
-
 }

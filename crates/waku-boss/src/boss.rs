@@ -17,8 +17,7 @@ use waku_protocol::boss::{
     ExpiryCause, INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate,
     MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, PlanActor,
     PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition,
-    SummonTicket, WaveMember,
-    WaveMemberOutcome, WaveNotification,
+    SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification,
 };
 use waku_protocol::model::ProviderKind;
 
@@ -668,9 +667,12 @@ impl BossService {
     /// would otherwise linger until expiry. The flag check keeps a routine
     /// steer from paying `update`'s clone-and-diff.
     pub fn clear_employee_blocker(&self, session_id: Uuid) -> anyhow::Result<()> {
-        let flagged = self.state.lock().employees.iter().any(|employee| {
-            employee.session_id == session_id && employee.blocker.is_some()
-        });
+        let flagged = self
+            .state
+            .lock()
+            .employees
+            .iter()
+            .any(|employee| employee.session_id == session_id && employee.blocker.is_some());
         if !flagged {
             return Ok(());
         }
@@ -1038,11 +1040,13 @@ impl BossService {
             }
             let allowed = matches!(
                 (current, outcome),
-                (PlanOutcome::Approved, PlanOutcome::Completed | PlanOutcome::Abandoned)
-                    | (
-                        PlanOutcome::Completed | PlanOutcome::Abandoned,
-                        PlanOutcome::Approved,
-                    )
+                (
+                    PlanOutcome::Approved,
+                    PlanOutcome::Completed | PlanOutcome::Abandoned
+                ) | (
+                    PlanOutcome::Completed | PlanOutcome::Abandoned,
+                    PlanOutcome::Approved,
+                )
             );
             anyhow::ensure!(
                 allowed,
@@ -1679,8 +1683,7 @@ impl BossService {
     }
 
     pub fn expire(&self, session: Uuid) -> anyhow::Result<Option<BossEmployee>> {
-        let employee =
-            self.begin_finishing(session, false, true, ExpiryCause::Finished)?;
+        let employee = self.begin_finishing(session, false, true, ExpiryCause::Finished)?;
         if employee.is_some() {
             self.complete_expiry(session, None)?;
         }
@@ -1779,10 +1782,9 @@ impl BossService {
                 if cause.counts_interruption()
                     && let Some(ticket) = &mut entry.ticket
                 {
-                    ticket.interruptions.push(InterruptionRecord {
-                        cause,
-                        at: now,
-                    });
+                    ticket
+                        .interruptions
+                        .push(InterruptionRecord { cause, at: now });
                     if ticket.interruptions.len() > INTERRUPTION_HISTORY_CAP {
                         let overflow = ticket.interruptions.len() - INTERRUPTION_HISTORY_CAP;
                         ticket.interruptions.drain(..overflow);
@@ -2652,11 +2654,7 @@ impl BossService {
                     state: self.document(),
                 })
             }
-            BossOperation::SetPlanItemState {
-                plan,
-                item,
-                state,
-            } => {
+            BossOperation::SetPlanItemState { plan, item, state } => {
                 self.set_plan_item_state(caller, &plan, item, state)?;
                 Ok(BossResult::State {
                     state: self.document(),
@@ -3410,20 +3408,16 @@ impl BossService {
             .ok_or_else(|| anyhow!("employee persona is unavailable"))?;
         let permitted = !path.starts_with("memory/")
             && employee
-            .pinned_files
-            .iter()
-            .any(|file| path == file || path.starts_with(&format!("{file}/")))
+                .pinned_files
+                .iter()
+                .any(|file| path == file || path.starts_with(&format!("{file}/")))
             || path == format!("personas/{}/PERSONA.md", persona.id);
         // Directory discovery reveals only ancestors of a granted file/folder.
         let ancestor = directory
             && (path.is_empty()
-                || employee
-                            .pinned_files
-                            .iter()
-                    .cloned()
-                    .any(|file| {
-                        !file.starts_with("memory/") && file.starts_with(&format!("{path}/"))
-                    }));
+                || employee.pinned_files.iter().cloned().any(|file| {
+                    !file.starts_with("memory/") && file.starts_with(&format!("{path}/"))
+                }));
         if !permitted && !ancestor {
             bail!("persona does not grant access to this Boss file");
         }
@@ -4811,9 +4805,19 @@ mod tests {
             })
             .unwrap();
 
-        assert!(service.retire_expired(100 + 23 * 60 * 60).unwrap().is_empty());
+        assert!(
+            service
+                .retire_expired(100 + 23 * 60 * 60)
+                .unwrap()
+                .is_empty()
+        );
         assert!(service.is_employee(session_id));
-        assert!(service.retire_expired(100 + 24 * 60 * 60).unwrap().is_empty());
+        assert!(
+            service
+                .retire_expired(100 + 24 * 60 * 60)
+                .unwrap()
+                .is_empty()
+        );
         let retired = service.retire_expired(101 + 24 * 60 * 60).unwrap();
         assert_eq!(retired.len(), 1);
         assert_eq!(retired[0].session_id, session_id);
@@ -4866,7 +4870,10 @@ mod tests {
         );
         assert!(boss.markdown.contains("employee caps"));
         assert!(boss.markdown.contains("Personal buckets remain Boss-only"));
-        assert!(boss.markdown.contains("automatically receive read and insert access"));
+        assert!(
+            boss.markdown
+                .contains("automatically receive read and insert access")
+        );
     }
 
     #[test]
@@ -5280,10 +5287,7 @@ mod tests {
                     permissions: PersonaPermissions {
                         ..Default::default()
                     },
-                    pinned_files: vec![
-                        "docs/release.md".into(),
-                        "memory/work/old.md".into(),
-                    ],
+                    pinned_files: vec!["docs/release.md".into(), "memory/work/old.md".into()],
                     expired: false,
                     expired_at: None,
                     blocker: None,
@@ -6283,8 +6287,8 @@ mod tests {
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
             let BossOperation::UpsertPersona { persona } = serde_json::from_value::<BossOperation>(
-                    serde_json::json!({ "type": "upsertPersona", "persona": persona }),
-                )
+                serde_json::json!({ "type": "upsertPersona", "persona": persona }),
+            )
             .unwrap() else {
                 panic!("expected upsertPersona");
             };
@@ -6409,8 +6413,6 @@ mod tests {
         assert_ne!(state.identity.avatar_seed, boss_seed);
         fs::remove_dir_all(root).unwrap();
     }
-
-
 }
 
 #[cfg(test)]
@@ -6440,13 +6442,13 @@ mod memory_op_tests {
                         },
                     },
                 )
-        .unwrap()
-        else {
+                .unwrap()
+            else {
                 panic!("create bucket returns metadata")
-        };
+            };
             buckets.into_iter().next().unwrap()["id"]
                 .as_str()
-        .unwrap()
+                .unwrap()
                 .to_owned()
         };
         let shared = create("Shared");
@@ -7378,7 +7380,9 @@ mod memory_op_tests {
         service
             .request_resource_update(session, ticket(), builds(1), parked)
             .unwrap();
-        service.begin_finishing(session, false, false, ExpiryCause::Finished).unwrap();
+        service
+            .begin_finishing(session, false, false, ExpiryCause::Finished)
+            .unwrap();
         let released = service.complete_expiry(session, None).unwrap();
         assert!(released.contains(&held_two));
         assert!(released.contains(&parked));
@@ -7559,7 +7563,14 @@ mod memory_op_tests {
         };
         let member = |title: &str| {
             service
-                .prepare_employee(boss, persona, title.into(), None, EmployeeGoal::Errand, None)
+                .prepare_employee(
+                    boss,
+                    persona,
+                    title.into(),
+                    None,
+                    EmployeeGoal::Errand,
+                    None,
+                )
                 .unwrap()
         };
 
@@ -7599,9 +7610,7 @@ mod memory_op_tests {
         service
             .begin_finishing(stopped.session_id, false, false, ExpiryCause::Finished)
             .unwrap();
-        service
-            .complete_expiry(stopped.session_id, None)
-            .unwrap();
+        service.complete_expiry(stopped.session_id, None).unwrap();
         let record = service.employee(stopped.session_id).unwrap();
         let expiry = record.expiry.as_ref().unwrap();
         assert_eq!(expiry.cause, ExpiryCause::Stopped);
@@ -7747,7 +7756,6 @@ mod memory_op_tests {
         assert_eq!(plan.items[3].state, PlanItemState::Dropped);
         fs::remove_dir_all(root).unwrap();
     }
-
 
     #[test]
     fn plan_outcome_lifecycle_is_audited_and_reopens() {
@@ -7897,7 +7905,11 @@ mod memory_op_tests {
             );
         }
         assert!(service.plan_assignment("plans/missing.md", None).is_err());
-        assert!(service.plan_assignment(&Uuid::new_v4().to_string(), None).is_err());
+        assert!(
+            service
+                .plan_assignment(&Uuid::new_v4().to_string(), None)
+                .is_err()
+        );
         // Done or dropped items and closed plans refuse new tags.
         let plan = service
             .update_plan_items(
@@ -8028,12 +8040,12 @@ mod memory_op_tests {
         let draft = add_plan(&service, test_plan("plans/draft.md"));
         let approved = test_plan("plans/approved.md");
         let approved_id = add_plan(&service, approved);
-        service.finalize_plan("plans/approved.md", None, 10).unwrap();
+        service
+            .finalize_plan("plans/approved.md", None, 10)
+            .unwrap();
         let abandoned = test_plan("plans/dead.md");
         let abandoned_id = add_plan(&service, abandoned);
-        service
-            .finalize_plan("plans/dead.md", None, 5)
-            .unwrap();
+        service.finalize_plan("plans/dead.md", None, 5).unwrap();
         service
             .set_plan_outcome(Some(boss), "plans/dead.md", PlanOutcome::Abandoned)
             .unwrap();

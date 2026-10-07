@@ -182,9 +182,7 @@ impl From<ComposerDraftKey> for ComposerDraftTarget {
         match key {
             ComposerDraftKey::NewSession(project_id) => Self::NewSession { project_id },
             ComposerDraftKey::Session(session_id) => Self::Session { session_id },
-            ComposerDraftKey::Deliverable(deliverable_id) => {
-                Self::Deliverable { deliverable_id }
-            }
+            ComposerDraftKey::Deliverable(deliverable_id) => Self::Deliverable { deliverable_id },
         }
     }
 }
@@ -227,9 +225,7 @@ impl ComposerDrafts {
         match key {
             ComposerDraftKey::NewSession(project_id) => self.new_sessions.get(&project_id),
             ComposerDraftKey::Session(session_id) => self.sessions.get(&session_id),
-            ComposerDraftKey::Deliverable(deliverable_id) => {
-                self.deliverables.get(&deliverable_id)
-            }
+            ComposerDraftKey::Deliverable(deliverable_id) => self.deliverables.get(&deliverable_id),
         }
     }
 
@@ -576,14 +572,17 @@ mod tests {
             "start_line": 1,
             "end_line": 1,
         });
-        let parsed =
-            serde_json::from_value::<ComposerDraftFileAnnotation>(legacy).unwrap();
+        let parsed = serde_json::from_value::<ComposerDraftFileAnnotation>(legacy).unwrap();
         assert_eq!(parsed.plan_session, None);
         // `None` never serializes — the format stays identical for files.
         let plain = ComposerDraftFileAnnotation {
             plan_session: None,
             ..annotation.clone()
         };
-        assert!(!serde_json::to_string(&plain).unwrap().contains("plan_session"));
+        assert!(
+            !serde_json::to_string(&plain)
+                .unwrap()
+                .contains("plan_session")
+        );
     }
 }

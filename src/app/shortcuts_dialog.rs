@@ -482,12 +482,10 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         ),
         (
             "shortcuts.section.terminal",
-            vec![
-                text_row(
-                    tr!("shortcuts.clear_scrollback"),
-                    crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
-                ),
-            ],
+            vec![text_row(
+                tr!("shortcuts.clear_scrollback"),
+                crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
+            )],
         ),
         (
             "shortcuts.section.palette",
@@ -700,13 +698,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         ),
         (
             "shortcuts.section.editor",
-            vec![
-                bound(
-                    tr!("shortcuts.exit_fullscreen_panel"),
-                    ExitPanelFullscreen,
-                    Some("PanelFullscreen && !Terminal"),
-                ),
-            ],
+            vec![bound(
+                tr!("shortcuts.exit_fullscreen_panel"),
+                ExitPanelFullscreen,
+                Some("PanelFullscreen && !Terminal"),
+            )],
         ),
         (
             "shortcuts.section.dialogs",

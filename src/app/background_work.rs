@@ -988,52 +988,54 @@ impl Waku {
                 return None;
             }
             let focus = self.transcript_control_focus("header-git-status", cx);
-            Some(div()
-                .id("header-git-status")
-                .track_focus(&focus)
-                .tab_index(0)
-                .h(px(28.0))
-                .px(px(7.0))
-                .rounded(px(9.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .cursor_default()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .when(additions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.success)
-                            .child(format!("+{additions}")),
-                    )
-                })
-                .when(deletions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.danger)
-                            .child(format!("-{deletions}")),
-                    )
-                })
-                .tooltip(Tooltip::text(tr!("environment.changes")))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation();
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
+            Some(
+                div()
+                    .id("header-git-status")
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(28.0))
+                    .px(px(7.0))
+                    .rounded(px(9.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|style| style.bg(theme.overlay))
+                    .active(|style| style.bg(theme.overlay_strong))
+                    .when(additions > 0, |button| {
+                        button.child(
+                            div()
+                                .text_color(theme.success)
+                                .child(format!("+{additions}")),
+                        )
+                    })
+                    .when(deletions > 0, |button| {
+                        button.child(
+                            div()
+                                .text_color(theme.danger)
+                                .child(format!("-{deletions}")),
+                        )
+                    })
+                    .tooltip(Tooltip::text(tr!("environment.changes")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
-                    }
-                }))
-                .into_any_element())
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .into_any_element(),
+            )
         });
         let pull_request = session.and_then(|session| {
             if managed {

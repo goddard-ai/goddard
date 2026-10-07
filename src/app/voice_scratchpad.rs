@@ -400,9 +400,8 @@ impl VoiceScratchpad {
                 fade.fresh
                     .iter()
                     .map(|&(start, at)| {
-                        let t = (now.duration_since(at).as_secs_f32()
-                            / WORD_FADE.as_secs_f32())
-                        .min(1.0);
+                        let t = (now.duration_since(at).as_secs_f32() / WORD_FADE.as_secs_f32())
+                            .min(1.0);
                         (start, ease_out_quint()(t))
                     })
                     .collect()
@@ -453,7 +452,9 @@ impl VoiceScratchpad {
         }
         let index = transcript.paragraphs.len().saturating_sub(1);
         let paragraph = transcript.paragraphs.last();
-        let text = paragraph.map(|paragraph| paragraph.text.as_str()).unwrap_or("");
+        let text = paragraph
+            .map(|paragraph| paragraph.text.as_str())
+            .unwrap_or("");
         let mut painted = text.to_owned();
         let tail = strip_interim_terminators(&transcript.interim);
         append_word_text(&mut painted, &tail);
@@ -650,8 +651,7 @@ fn note_landing(
     if current.settled <= prev.settled
         || current.edited
         || prev.tail_start >= prev.painted.len()
-        || current.painted.as_bytes()[..prev.settled]
-            != prev.painted.as_bytes()[..prev.settled]
+        || current.painted.as_bytes()[..prev.settled] != prev.painted.as_bytes()[..prev.settled]
     {
         return;
     }
@@ -891,8 +891,7 @@ impl ScratchpadTranscript {
                 continue;
             }
             if self.edit_armable()
-                && let Some((taken, after)) =
-                    seam_edit_command(self.append_point_text(), rest)
+                && let Some((taken, after)) = seam_edit_command(self.append_point_text(), rest)
             {
                 self.strip_append_point_words(taken);
                 self.arm_edit();
@@ -1025,9 +1024,9 @@ impl ScratchpadTranscript {
     /// pending row: the record dot sits on the blank line its first
     /// words land in.
     fn append_point_unwritten(&self) -> bool {
-        self.paragraphs.last().is_none_or(|paragraph| {
-            paragraph.text.is_empty() && paragraph.bullets.is_empty()
-        })
+        self.paragraphs
+            .last()
+            .is_none_or(|paragraph| paragraph.text.is_empty() && paragraph.bullets.is_empty())
     }
 
     /// Whether the append point's paragraph paints a row this frame —
@@ -1089,10 +1088,7 @@ impl ScratchpadTranscript {
     /// The earliest voice command in `text` — "okay next" anywhere, plus
     /// "okay, let's make an edit" while it can still arm. Returns which
     /// fired and the text on either side of its consumed span.
-    fn split_command<'a>(
-        &self,
-        text: &'a str,
-    ) -> Option<(ScratchpadCommand, &'a str, &'a str)> {
+    fn split_command<'a>(&self, text: &'a str) -> Option<(ScratchpadCommand, &'a str, &'a str)> {
         let mut hit = next_command_span(text).map(|span| (ScratchpadCommand::Next, span));
         if self.edit_armable()
             && let Some(span) = edit_command_span(text)
@@ -1174,8 +1170,7 @@ impl ScratchpadTranscript {
                 continue;
             }
             if self.edit_armable()
-                && let Some((taken, after)) =
-                    seam_edit_command(self.append_point_text(), rest)
+                && let Some((taken, after)) = seam_edit_command(self.append_point_text(), rest)
             {
                 self.strip_append_point_words(taken);
                 self.arm_edit();
@@ -1708,7 +1703,10 @@ impl ScratchpadTranscript {
     fn append_point_caret(&self) -> CaretPos {
         CaretPos {
             node: ScratchpadNode::Paragraph(self.paragraphs.len().saturating_sub(1)),
-            offset: self.paragraphs.last().map_or(0, |paragraph| paragraph.text.len()),
+            offset: self
+                .paragraphs
+                .last()
+                .map_or(0, |paragraph| paragraph.text.len()),
         }
     }
 
@@ -1805,7 +1803,11 @@ impl ScratchpadTranscript {
         self.neighbor_node(caret.node, forward)
             .map(|node| CaretPos {
                 node,
-                offset: if forward { 0 } else { self.node_text(node).len() },
+                offset: if forward {
+                    0
+                } else {
+                    self.node_text(node).len()
+                },
             })
             .unwrap_or(caret)
     }
@@ -2446,7 +2448,10 @@ fn next_command_span(text: &str) -> Option<(usize, usize)> {
 /// read the same.
 fn edit_command_span(text: &str) -> Option<(usize, usize)> {
     let spans = word_spans(text);
-    let words: Vec<&str> = spans.iter().map(|&(start, end)| &text[start..end]).collect();
+    let words: Vec<&str> = spans
+        .iter()
+        .map(|&(start, end)| &text[start..end])
+        .collect();
     for start in 0..words.len() {
         if let Some(len) = edit_command_len(&words[start..]) {
             return Some((spans[start].0, spans[start + len - 1].1));
@@ -2927,7 +2932,9 @@ fn run_transcription_worker(
                         break StreamEnd::Ended;
                     }
                 }
-                if paused_since.get().is_some_and(|since| since.elapsed() > PAUSE_WATCHDOG)
+                if paused_since
+                    .get()
+                    .is_some_and(|since| since.elapsed() > PAUSE_WATCHDOG)
                     && sent_since_pause
                 {
                     eprintln!(
@@ -2978,7 +2985,8 @@ impl Waku {
     }
 
     fn selected_voice_scratchpad_mut(&mut self) -> Option<&mut VoiceScratchpad> {
-        self.voice_scratchpads.get_mut(&self.state.selected_session?)
+        self.voice_scratchpads
+            .get_mut(&self.state.selected_session?)
     }
 
     /// Whether the scratchpad panel is the chat column's content right now:
@@ -3158,8 +3166,7 @@ impl Waku {
             if let Some(scratchpad) = this.voice_scratchpads.get_mut(&session_id)
                 && scratchpad.transcript.caret.is_none()
             {
-                scratchpad.transcript.caret =
-                    Some(scratchpad.transcript.append_point_caret());
+                scratchpad.transcript.caret = Some(scratchpad.transcript.append_point_caret());
                 scratchpad.transcript.caret_typing = false;
                 cx.notify();
             }
@@ -3178,9 +3185,7 @@ impl Waku {
     /// refused.
     fn ensure_voice_capture(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         match crate::platform::microphone_access() {
-            crate::platform::CaptureAccess::Granted => {
-                self.begin_voice_capture(session_id, cx)
-            }
+            crate::platform::CaptureAccess::Granted => self.begin_voice_capture(session_id, cx),
             crate::platform::CaptureAccess::Undetermined => {
                 let tx = self.voice_scratchpad_tx.clone();
                 let wake = self.event_wake_tx.clone();
@@ -3231,8 +3236,7 @@ impl Waku {
         // row instead of flagging capture live over a dead tap.
         let engine_started = crate::platform::start_voice_listener();
         scratchpad.capture_live = true;
-        scratchpad.input_unavailable =
-            !engine_started || !crate::platform::voice_input_available();
+        scratchpad.input_unavailable = !engine_started || !crate::platform::voice_input_available();
         self.spawn_transcription_worker(session_id, cx);
     }
 
@@ -3534,8 +3538,7 @@ impl Waku {
         }
         let spans = scratchpad.selection.selection.borrow().spans().to_vec();
         if spans.iter().any(|span| !span.range.is_empty()) {
-            scratchpad.transcript.caret =
-                scratchpad.transcript.apply_selection_edit(&spans, text);
+            scratchpad.transcript.caret = scratchpad.transcript.apply_selection_edit(&spans, text);
             scratchpad.transcript.caret_typing = scratchpad.transcript.caret.is_some();
             scratchpad.transcript.caret_anchor = None;
             scratchpad.selection.selection.borrow_mut().clear();
@@ -3563,8 +3566,7 @@ impl Waku {
         }
         let spans = scratchpad.selection.selection.borrow().spans().to_vec();
         if spans.iter().any(|span| !span.range.is_empty()) {
-            scratchpad.transcript.caret =
-                scratchpad.transcript.apply_selection_edit(&spans, "");
+            scratchpad.transcript.caret = scratchpad.transcript.apply_selection_edit(&spans, "");
             scratchpad.transcript.caret_typing = scratchpad.transcript.caret.is_some();
             scratchpad.transcript.caret_anchor = None;
             scratchpad.selection.selection.borrow_mut().clear();
@@ -3625,17 +3627,12 @@ impl Waku {
             } else if vertical {
                 scratchpad.transcript.step_node(caret, !backward)
             } else {
-                scratchpad
-                    .transcript
-                    .move_caret(caret, !backward, word)
+                scratchpad.transcript.move_caret(caret, !backward, word)
             }
         };
         if shift {
             let (anchor, head) = if let Some(anchor) = scratchpad.transcript.caret_anchor {
-                (
-                    anchor,
-                    scratchpad.transcript.caret.unwrap_or(anchor),
-                )
+                (anchor, scratchpad.transcript.caret.unwrap_or(anchor))
             } else if let Some((start, end)) = scratchpad.transcript.spans_endpoints(spans) {
                 (start, end)
             } else {
@@ -3661,11 +3658,7 @@ impl Waku {
                     _ => Vec::new(),
                 }
             };
-            scratchpad
-                .selection
-                .selection
-                .borrow_mut()
-                .set_spans(spans);
+            scratchpad.selection.selection.borrow_mut().set_spans(spans);
         } else {
             let next = if has_selection {
                 // A bare arrow collapses the grab to its edge — it doesn't
@@ -3676,10 +3669,12 @@ impl Waku {
                     .map(|(start, end)| if backward { start } else { end })
                     .unwrap_or_else(|| scratchpad.transcript.append_point_caret())
             } else {
-                step(scratchpad
-                    .transcript
-                    .caret
-                    .unwrap_or_else(|| scratchpad.transcript.append_point_caret()))
+                step(
+                    scratchpad
+                        .transcript
+                        .caret
+                        .unwrap_or_else(|| scratchpad.transcript.append_point_caret()),
+                )
             };
             scratchpad.transcript.caret = Some(next);
             scratchpad.transcript.caret_anchor = None;
@@ -3702,11 +3697,7 @@ impl Waku {
             };
             registry.resolve((0, 0), (last, usize::MAX))
         };
-        scratchpad
-            .selection
-            .selection
-            .borrow_mut()
-            .set_spans(spans);
+        scratchpad.selection.selection.borrow_mut().set_spans(spans);
         let spans = scratchpad.selection.selection.borrow().spans().to_vec();
         if let Some((start, end)) = scratchpad.transcript.spans_endpoints(&spans) {
             scratchpad.transcript.caret_anchor = Some(start);
@@ -3992,8 +3983,7 @@ impl Waku {
                         changed = true;
                     }
                     if let Some(cleaned) = cleaned {
-                        let before =
-                            scratchpad.transcript.clean_target_text(target).to_owned();
+                        let before = scratchpad.transcript.clean_target_text(target).to_owned();
                         if scratchpad
                             .transcript
                             .apply_cleanup(target, start, &raw, &cleaned, edit)
@@ -4162,7 +4152,9 @@ impl Waku {
                                     let at_bottom =
                                         scroll.offset().y <= px(4.0) - scroll.max_offset().y;
                                     let _ = weak.update(cx, |this, _| {
-                                        if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                                        if let Some(scratchpad) =
+                                            this.selected_voice_scratchpad_mut()
+                                        {
                                             scratchpad.follow_tail = at_bottom;
                                         }
                                     });
@@ -4281,10 +4273,8 @@ impl Waku {
                                             return;
                                         }
                                         let grabbed = {
-                                            let selection =
-                                                selection.selection.borrow();
-                                            selection.is_dragging()
-                                                && !selection.is_empty()
+                                            let selection = selection.selection.borrow();
+                                            selection.is_dragging() && !selection.is_empty()
                                         };
                                         if !grabbed {
                                             return;
@@ -4295,25 +4285,14 @@ impl Waku {
                                             else {
                                                 return;
                                             };
-                                            if scratchpad
-                                                .transcript
-                                                .annotation_target
-                                                .is_none()
-                                            {
+                                            if scratchpad.transcript.annotation_target.is_none() {
                                                 window.focus(&focus, cx);
-                                            } else if scratchpad
-                                                .transcript
-                                                .annotation_blank()
-                                            {
+                                            } else if scratchpad.transcript.annotation_blank() {
                                                 scratchpad.transcript.exit_annotation();
                                                 window.focus(&focus, cx);
                                                 cx.notify();
                                             } else {
-                                                scratchpad
-                                                    .selection
-                                                    .selection
-                                                    .borrow_mut()
-                                                    .clear();
+                                                scratchpad.selection.selection.borrow_mut().clear();
                                                 cx.notify();
                                             }
                                         });
@@ -4348,7 +4327,12 @@ impl Waku {
     /// the composer card's top edge, right-aligned at the frame's 18px
     /// inset. The row is a sibling of the scroll region, so it never
     /// scrolls; the caller paints it last so it reads over the bottom fade.
-    fn render_scratchpad_controls(&self, overlap: f32, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_scratchpad_controls(
+        &self,
+        overlap: f32,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let Some(scratchpad) = self.selected_voice_scratchpad() else {
             return div();
         };
@@ -4494,9 +4478,7 @@ impl Waku {
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
                 // Space activates; Enter keeps traveling — while the
                 // scratchpad is up it sends the transcript.
-                if !event.keystroke.modifiers.modified()
-                    && event.keystroke.key == "space"
-                {
+                if !event.keystroke.modifiers.modified() && event.keystroke.key == "space" {
                     let _ = weak.update(cx, |this, cx| action(this, window, cx));
                     cx.stop_propagation();
                 }
@@ -4613,15 +4595,18 @@ impl Waku {
             .on_key_down(cx.listener(Self::voice_scratchpad_edit_key))
             // A fresh press retires the caret — the drag re-selects and the
             // click handlers sort out annotation or a new insertion point.
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
-                    && scratchpad.transcript.caret.take().is_some()
-                {
-                    scratchpad.transcript.caret_anchor = None;
-                    scratchpad.transcript.caret_typing = false;
-                    cx.notify();
-                }
-            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
+                        && scratchpad.transcript.caret.take().is_some()
+                    {
+                        scratchpad.transcript.caret_anchor = None;
+                        scratchpad.transcript.caret_typing = false;
+                        cx.notify();
+                    }
+                }),
+            )
             // Painted before any row, so the frame's selection registry
             // holds exactly the text elements this frame put on screen.
             .child(md::render::frame_reset(selection.clone()))
@@ -4698,9 +4683,9 @@ impl Waku {
             // The swap already landed in the model — the morph only
             // repaints: the row's prior text lifts and dissolves while the
             // rewritten span resolves beneath it.
-            let ghost = morph.zip(morph_t).map(|(morph, t)| {
-                scratchpad_morph_ghost(&morph.old, t, theme.text, &ui_family)
-            });
+            let ghost = morph
+                .zip(morph_t)
+                .map(|(morph, t)| scratchpad_morph_ghost(&morph.old, t, theme.text, &ui_family));
             let paragraph_focus = row_focuses[index].0.clone();
             let paragraph_div = div()
                 .id(SharedString::from(format!("vs-paragraph-{index}")))
@@ -4805,8 +4790,7 @@ impl Waku {
                 let morph_t = morph.map(|morph| {
                     (morph.started.elapsed().as_secs_f32() / CLEANUP_MORPH.as_secs_f32()).min(1.0)
                 });
-                let fades =
-                    scratchpad.fade_boundaries(&format!("b{index}-{bullet_index}"), now);
+                let fades = scratchpad.fade_boundaries(&format!("b{index}-{bullet_index}"), now);
                 let mut runs = Vec::new();
                 push_fade_runs(
                     &mut runs,
@@ -4834,7 +4818,9 @@ impl Waku {
                     copy: Rc::default(),
                 };
                 let bullet_row = div()
-                    .id(SharedString::from(format!("vs-bullet-{index}-{bullet_index}")))
+                    .id(SharedString::from(format!(
+                        "vs-bullet-{index}-{bullet_index}"
+                    )))
                     .w_full()
                     .relative()
                     .rounded(px(4.0))
@@ -5192,7 +5178,9 @@ impl Waku {
                 &font(ui_family),
                 theme.text_secondary,
             );
-            gpui::StyledText::new(text).with_runs(runs).into_any_element()
+            gpui::StyledText::new(text)
+                .with_runs(runs)
+                .into_any_element()
         } else {
             text.into_any_element()
         };
@@ -5221,7 +5209,12 @@ impl Waku {
             .items_start()
             // Clicks inside the box don't re-target the paragraph.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(scratchpad_dot_on_line(13.0, muted, scratchpad.status, theme))
+            .child(scratchpad_dot_on_line(
+                13.0,
+                muted,
+                scratchpad.status,
+                theme,
+            ))
             .child(
                 div()
                     .min_w_0()
@@ -5335,7 +5328,9 @@ impl Waku {
                                         .focus_visible(|row| row.bg(theme.overlay))
                                         .child(tr!("voice_scratchpad.discard_keep"))
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
+                                            if let Some(scratchpad) =
+                                                this.selected_voice_scratchpad_mut()
+                                            {
                                                 scratchpad.confirm_discard = false;
                                             }
                                             cx.notify();
@@ -5596,21 +5591,16 @@ fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> AnyEl
 /// text's origin and wrap column exactly instead of approximating
 /// them with insets.
 fn scratchpad_morph_ghost(old: &str, t: f32, color: Hsla, ui_family: &SharedString) -> Div {
-    div()
-        .absolute()
-        .top(px(-3.0 * t))
-        .left_0()
-        .right_0()
-        .child(
-            gpui::StyledText::new(old.to_owned()).with_runs(vec![TextRun {
-                len: old.len(),
-                font: font(ui_family.clone()),
-                color: color.opacity(1.0 - t),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }]),
-        )
+    div().absolute().top(px(-3.0 * t)).left_0().right_0().child(
+        gpui::StyledText::new(old.to_owned()).with_runs(vec![TextRun {
+            len: old.len(),
+            font: font(ui_family.clone()),
+            color: color.opacity(1.0 - t),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }]),
+    )
 }
 
 /// The dot's offset centers it on the first text line — GPUI's default phi
@@ -5973,9 +5963,7 @@ mod tests {
             let generation = pad.generation;
             assert_eq!(
                 pad.apply_mute(false),
-                CaptureDirective::Resume {
-                    detach_sink: false
-                }
+                CaptureDirective::Resume { detach_sink: false }
             );
             assert!(!pad.muted);
             // A parked pad owned no worker — nothing to retire.
@@ -6029,9 +6017,7 @@ mod tests {
             pad.status = ScratchpadStatus::MicDenied;
             assert_eq!(
                 pad.apply_mute(false),
-                CaptureDirective::Resume {
-                    detach_sink: false
-                }
+                CaptureDirective::Resume { detach_sink: false }
             );
         });
     }
@@ -6065,7 +6051,10 @@ mod tests {
         assert!(transcript.interim.is_empty());
         assert_eq!(transcript.to_message(), "half a thought");
         transcript.append_finalized("half a thought again");
-        assert_eq!(transcript.to_message(), "half a thought half a thought again");
+        assert_eq!(
+            transcript.to_message(),
+            "half a thought half a thought again"
+        );
     }
 
     #[test]
@@ -6101,7 +6090,10 @@ mod tests {
             vec!["first", "inserted one", "inserted two", "second"]
         );
         assert_eq!(
-            bullets.iter().map(|bullet| bullet.depth).collect::<Vec<_>>(),
+            bullets
+                .iter()
+                .map(|bullet| bullet.depth)
+                .collect::<Vec<_>>(),
             vec![0, 1, 1, 0]
         );
     }
@@ -6291,7 +6283,10 @@ mod tests {
     fn edit_command_splits_on_word_runs() {
         // "Let's" arrives as "lets" or "let" + "'s" — both read as the
         // phrase, and casing and punctuation ride with the command.
-        assert_eq!(split_edit_command("okay let's make an edit"), Some(("", "")));
+        assert_eq!(
+            split_edit_command("okay let's make an edit"),
+            Some(("", ""))
+        );
         assert_eq!(split_edit_command("ok lets make an edit"), Some(("", "")));
         assert_eq!(
             split_edit_command("note. Okay, let's make an edit — shorten it"),
@@ -6827,7 +6822,10 @@ mod tests {
         ));
         // And it still types where the user left it.
         assert!(transcript.insert_at_caret("!"));
-        assert_eq!(transcript.paragraphs[0].text, "Alpha, gamma !more words and.");
+        assert_eq!(
+            transcript.paragraphs[0].text,
+            "Alpha, gamma !more words and."
+        );
     }
 
     #[test]
@@ -6920,12 +6918,23 @@ mod tests {
 
     #[test]
     fn stream_part_dedicated_pause_types() {
-        for ty in ["transcription-paused", "transcription.paused", "transcript-paused"] {
+        for ty in [
+            "transcription-paused",
+            "transcription.paused",
+            "transcript-paused",
+        ] {
             let (events, terminal) = dispatched_parts(&format!(r#"{{"type":"{ty}"}}"#));
             assert!(!terminal, "{ty}");
-            assert!(matches!(events.as_slice(), [ScratchpadEvent::Paused]), "{ty}");
+            assert!(
+                matches!(events.as_slice(), [ScratchpadEvent::Paused]),
+                "{ty}"
+            );
         }
-        for ty in ["transcription-resumed", "transcription.resumed", "transcript-resumed"] {
+        for ty in [
+            "transcription-resumed",
+            "transcription.resumed",
+            "transcript-resumed",
+        ] {
             let (events, terminal) = dispatched_parts(&format!(r#"{{"type":"{ty}"}}"#));
             assert!(!terminal, "{ty}");
             assert!(
@@ -7148,7 +7157,10 @@ mod tests {
         let mut transcript = ScratchpadTranscript::default();
         let t0 = Instant::now();
         transcript.set_interim_at("the end okay".to_owned(), t0);
-        transcript.set_interim_at("the end okay next".to_owned(), t0 + Duration::from_millis(30));
+        transcript.set_interim_at(
+            "the end okay next".to_owned(),
+            t0 + Duration::from_millis(30),
+        );
         assert_eq!(transcript.paragraphs.len(), 2);
         assert!(transcript.interim.is_empty());
     }
@@ -7333,7 +7345,8 @@ mod tests {
                  and sixty pixels of box width so every line must wrap inside the box \
                  rather than slide off its right edge toward the window"
                 .to_owned();
-            let styled = gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
+            let styled =
+                gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
             self.text_layout = Some(styled.layout().clone());
             let ghost_styled =
                 gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
@@ -7371,16 +7384,16 @@ mod tests {
                                 .child(ghost_styled),
                         ),
                 );
-            div().size_full().child(
-                div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
+            div()
+                .size_full()
+                .child(div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
                     FloatingSurface::anchored_to_parent(
                         box_content.into_any_element(),
                         MenuAlign::BelowLeft,
                         px(4.0),
                         px(8.0),
                     ),
-                )),
-            )
+                )))
         }
     }
 
@@ -7532,7 +7545,12 @@ mod tests {
                 .flex()
                 .gap(px(8.0))
                 .items_start()
-                .child(scratchpad_dot_on_line(13.0, false, ScratchpadStatus::Live, &theme))
+                .child(scratchpad_dot_on_line(
+                    13.0,
+                    false,
+                    ScratchpadStatus::Live,
+                    &theme,
+                ))
                 .child(
                     div()
                         .debug_selector(|| "ann-inner".into())
@@ -7545,16 +7563,16 @@ mod tests {
                         .gap(px(4.0))
                         .child(div().w_full().min_w_0().child(text_element)),
                 );
-            div().size_full().child(
-                div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
+            div()
+                .size_full()
+                .child(div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
                     FloatingSurface::anchored_to_parent(
                         box_content.into_any_element(),
                         MenuAlign::BelowLeft,
                         px(4.0),
                         px(8.0),
                     ),
-                )),
-            )
+                )))
         }
     }
 
@@ -7585,15 +7603,7 @@ mod tests {
         fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let theme = Theme::current(cx);
             let ui_family = crate::fonts::current(cx).ui;
-            let flat = scratchpad_paragraph_text(
-                self.text,
-                "",
-                &[],
-                &[],
-                1.0,
-                &ui_family,
-                &theme,
-            );
+            let flat = scratchpad_paragraph_text(self.text, "", &[], &[], 1.0, &ui_family, &theme);
             div().size_full().child(
                 div().w(px(400.0)).child(
                     div()
@@ -7658,8 +7668,9 @@ mod tests {
 
     #[gpui::test]
     fn written_row_dot_trails_under_the_text(cx: &mut gpui::TestAppContext) {
-        let (_view, cx) =
-            cx.add_window_view(|_, _| PendingRowHarness { text: "first words land" });
+        let (_view, cx) = cx.add_window_view(|_, _| PendingRowHarness {
+            text: "first words land",
+        });
         cx.run_until_parked();
         let row = cx
             .debug_bounds("pending-row")

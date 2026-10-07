@@ -268,11 +268,7 @@ pub(super) fn load_remote_boss_state(
     client: &waku_client::DaemonClient,
 ) -> Option<waku_client::boss::BossState> {
     let waku_client::ResponsePayload::Settings { settings } = client
-        .request(
-            Uuid::nil(),
-            Uuid::nil(),
-            waku_client::Command::GetSettings,
-        )
+        .request(Uuid::nil(), Uuid::nil(), waku_client::Command::GetSettings)
         .ok()?
     else {
         return None;
@@ -452,9 +448,7 @@ pub(super) fn merged_planning_activation_target(
     }
     sessions
         .iter()
-        .find(|session| {
-            session.planning.is_some() && !known_session_ids.contains(&session.id)
-        })
+        .find(|session| session.planning.is_some() && !known_session_ids.contains(&session.id))
         .map(|session| session.id)
 }
 
@@ -2924,9 +2918,7 @@ impl Waku {
             crate::persistence::ComposerDraftKey::NewSession(project_id) => {
                 self.daemon_for_project(project_id)
             }
-            crate::persistence::ComposerDraftKey::Deliverable(_) => {
-                Some(self.daemons.local())
-            }
+            crate::persistence::ComposerDraftKey::Deliverable(_) => Some(self.daemons.local()),
         }
     }
 
@@ -7337,8 +7329,7 @@ impl Waku {
                     // under the top anchor and the first measured frame trues it up.
                     let mut provisional = self.transcript_rows.viewport_bounds().size.height;
                     if provisional <= Pixels::ZERO {
-                        provisional =
-                            self.anchored_transcript_rows.viewport_bounds().size.height;
+                        provisional = self.anchored_transcript_rows.viewport_bounds().size.height;
                     }
                     self.transcript_anchor_end_space.set(provisional);
                     self.transcript_anchor_following.set(true);

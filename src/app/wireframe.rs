@@ -211,13 +211,7 @@ fn finish_rect<T: Styled + ParentElement + IntoElement>(
     force_full: bool,
     theme: &Theme,
 ) -> AnyElement {
-    let element = apply_surface(
-        element,
-        rect.fill,
-        rect.stroke,
-        rect.corner_radius,
-        theme,
-    );
+    let element = apply_surface(element, rect.fill, rect.stroke, rect.corner_radius, theme);
     let element = apply_sizing(
         element,
         rect.width,

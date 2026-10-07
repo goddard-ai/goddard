@@ -271,7 +271,11 @@ mod tests {
     /// The host's platform helper, duplicated so the crate's tests stay
     /// platform-correct without depending on `crate::platform`.
     const fn primary_shortcut<'a>(macos: &'a str, other: &'a str) -> &'a str {
-        if cfg!(target_os = "macos") { macos } else { other }
+        if cfg!(target_os = "macos") {
+            macos
+        } else {
+            other
+        }
     }
 
     fn keystroke(modifiers: Modifiers, key: &str) -> KeybindingKeystroke {
@@ -429,10 +433,7 @@ mod tests {
             );
             // The shadowed binding resolves only once the shadowing action is
             // declared a propagator.
-            assert_eq!(
-                ShortcutHint::action(&NewSession).resolve(window, cx),
-                None
-            );
+            assert_eq!(ShortcutHint::action(&NewSession).resolve(window, cx), None);
             assert_eq!(
                 ShortcutHint::action(&NewSession)
                     .shadowed_by(&SwitchProjectForward)

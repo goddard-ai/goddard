@@ -79,7 +79,11 @@ enum MemoryRecord {
         text: String,
         created_at: u64,
     },
-    Summary { start: u64, end: u64, text: String },
+    Summary {
+        start: u64,
+        end: u64,
+        text: String,
+    },
 }
 
 /// The overview item as the daemon serializes it — `{"type":"note"|"summary"}`.
@@ -515,7 +519,6 @@ pub(super) struct BossGoalRow {
     pub group_id: Option<String>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum BossItem {
     Employee(Uuid),
@@ -550,12 +553,7 @@ fn memory_tree_rows(
     ) {
         let mut children = files
             .iter()
-            .filter(|file| {
-                file.path
-                    .rsplit_once('/')
-                    .map_or("", |(parent, _)| parent)
-                    == parent
-            })
+            .filter(|file| file.path.rsplit_once('/').map_or("", |(parent, _)| parent) == parent)
             .collect::<Vec<_>>();
         children.sort_by(|a, b| {
             b.directory.cmp(&a.directory).then_with(|| {
@@ -601,7 +599,10 @@ pub(super) enum BossCommandContext {
     /// A read-only memory entry the user is asking the Boss to correct —
     /// `path` is the document's `memory/…` path or a record's
     /// `buckets/<name>/note-<seq>` label; `content` is the shown text.
-    MemoryCorrection { path: String, content: String },
+    MemoryCorrection {
+        path: String,
+        content: String,
+    },
     Deliverable {
         path: PathBuf,
         name: String,
@@ -722,7 +723,10 @@ fn boss_state_owning_session(
 ) -> Option<&BossState> {
     states.values().find(|state| {
         state.session_id == Some(session_id)
-            || state.planning.iter().any(|plan| plan.session_id == session_id)
+            || state
+                .planning
+                .iter()
+                .any(|plan| plan.session_id == session_id)
     })
 }
 
@@ -792,39 +796,34 @@ impl Waku {
                     .filter(|employee| {
                         employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
                     })
-                    .map(|employee| {
-                        BossGoalRow {
-                            session_id: employee.session_id,
-                            name: employee.identity.name.clone(),
-                            job_title: employee.job_title.clone(),
-                            lifecycle: employee.lifecycle(),
-                            blocker: employee.blocker.clone(),
-                            created_at: employee.created_at,
-                            expired_at: employee.expired_at,
-                            queued_at: employee.queued_at,
-                            queued_objective: employee
-                                .ticket
-                                .as_ref()
-                                .and_then(|ticket| {
-                                    ticket
-                                        .prompt
-                                        .split("\n\n")
-                                        .map(str::trim)
-                                        .find(|paragraph| !paragraph.is_empty())
-                                        .map(str::to_owned)
-                                }),
-                            queued_project: employee
-                                .ticket
-                                .as_ref()
-                                .map(|ticket| ticket.project.trim())
-                                .filter(|project| !project.is_empty())
-                                .map(str::to_owned),
-                            queue_rank: queue_rank.get(&employee.session_id).copied(),
-                            group_id: employee
-                                .ticket
-                                .as_ref()
-                                .and_then(|ticket| ticket.group_id.clone()),
-                        }
+                    .map(|employee| BossGoalRow {
+                        session_id: employee.session_id,
+                        name: employee.identity.name.clone(),
+                        job_title: employee.job_title.clone(),
+                        lifecycle: employee.lifecycle(),
+                        blocker: employee.blocker.clone(),
+                        created_at: employee.created_at,
+                        expired_at: employee.expired_at,
+                        queued_at: employee.queued_at,
+                        queued_objective: employee.ticket.as_ref().and_then(|ticket| {
+                            ticket
+                                .prompt
+                                .split("\n\n")
+                                .map(str::trim)
+                                .find(|paragraph| !paragraph.is_empty())
+                                .map(str::to_owned)
+                        }),
+                        queued_project: employee
+                            .ticket
+                            .as_ref()
+                            .map(|ticket| ticket.project.trim())
+                            .filter(|project| !project.is_empty())
+                            .map(str::to_owned),
+                        queue_rank: queue_rank.get(&employee.session_id).copied(),
+                        group_id: employee
+                            .ticket
+                            .as_ref()
+                            .and_then(|ticket| ticket.group_id.clone()),
                     })
                     .collect(),
             );
@@ -892,10 +891,9 @@ impl Waku {
                     } else {
                         self.boss_ui.working.insert(employee.session_id);
                     }
-                    if let Some(detail) = boss_queue_detail(
-                        employee,
-                        queue_rank.get(&employee.session_id).copied(),
-                    ) {
+                    if let Some(detail) =
+                        boss_queue_detail(employee, queue_rank.get(&employee.session_id).copied())
+                    {
                         self.boss_ui.queued.insert(employee.session_id, detail);
                     } else if employee.lifecycle()
                         == waku_protocol::boss::EmployeeLifecycle::Dispatching
@@ -987,7 +985,10 @@ impl Waku {
         {
             return;
         }
-        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
         else {
             self.boss_ui.buckets_requested.borrow_mut().remove(&key);
             return;
@@ -1010,10 +1011,7 @@ impl Waku {
             let _ = this.update(cx, |this, cx| {
                 this.boss_ui.buckets_requested.borrow_mut().remove(&key);
                 if let Ok(waku_client::ResponsePayload::Boss {
-                    result:
-                        BossResult::Memory {
-                            buckets: raw, ..
-                        },
+                    result: BossResult::Memory { buckets: raw, .. },
                 }) = result
                 {
                     let buckets = raw
@@ -1045,9 +1043,15 @@ impl Waku {
         {
             return;
         }
-        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
         else {
-            self.boss_ui.memory_files_requested.borrow_mut().remove(&key);
+            self.boss_ui
+                .memory_files_requested
+                .borrow_mut()
+                .remove(&key);
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -1062,9 +1066,7 @@ impl Waku {
                                 Uuid::nil(),
                                 Uuid::nil(),
                                 waku_client::Command::Boss {
-                                    operation: BossOperation::ListFiles {
-                                        path: path.clone(),
-                                    },
+                                    operation: BossOperation::ListFiles { path: path.clone() },
                                 },
                             )
                             .map_err(|error| anyhow::anyhow!("{path}: {error}"))?;
@@ -1086,7 +1088,10 @@ impl Waku {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.boss_ui.memory_files_requested.borrow_mut().remove(&key);
+                this.boss_ui
+                    .memory_files_requested
+                    .borrow_mut()
+                    .remove(&key);
                 if let Ok(files) = result {
                     this.boss_ui.memory_files.insert(key, Rc::new(files));
                 }
@@ -1150,9 +1155,7 @@ impl Waku {
                             .boss_ui
                             .memory_error
                             .as_ref()
-                            .filter(|(error_key, path, _)| {
-                                *error_key == key && path != "memory"
-                            })
+                            .filter(|(error_key, path, _)| *error_key == key && path != "memory")
                             .map(|(_, path, _)| path.as_str());
                         memory_tree_rows(&self.boss_ui.files, &expanded, loading, error)
                     }
@@ -1249,16 +1252,14 @@ impl Waku {
                     })
                     .collect();
                 plans.sort_by_key(|plan| {
-                    std::cmp::Reverse(
-                        plan.finalized_at.unwrap_or_else(|| {
-                            self.state
-                                .sessions
-                                .iter()
-                                .find(|session| session.id == plan.session_id)
-                                .map(|session| session.created_at)
-                                .unwrap_or(0)
-                        }),
-                    )
+                    std::cmp::Reverse(plan.finalized_at.unwrap_or_else(|| {
+                        self.state
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == plan.session_id)
+                            .map(|session| session.created_at)
+                            .unwrap_or(0)
+                    }))
                 });
                 plans
                     .into_iter()
@@ -1478,10 +1479,9 @@ impl Waku {
             let unreachable = tr!("boss.unreachable").to_string();
             match reply {
                 BossReply::List | BossReply::Read | BossReply::Search
-                    if self
-                        .boss_ui
-                        .page
-                        .is_some_and(|(page_key, tab)| page_key == key && tab == BossTab::Memory) =>
+                    if self.boss_ui.page.is_some_and(|(page_key, tab)| {
+                        page_key == key && tab == BossTab::Memory
+                    }) =>
                 {
                     self.boss_ui.memory_loading_folder = None;
                     self.boss_ui.memory_error = Some((
@@ -1546,7 +1546,9 @@ impl Waku {
         }
         if let Some(bucket) = records_bucket.as_ref() {
             self.boss_ui.memory_records_loading = Some((key, bucket.clone()));
-            self.boss_ui.memory_records_error.remove(&(key, bucket.clone()));
+            self.boss_ui
+                .memory_records_error
+                .remove(&(key, bucket.clone()));
         }
         let tree_list_path = list_path.clone();
         cx.spawn(async move |this, cx| {
@@ -1567,9 +1569,7 @@ impl Waku {
                                     Uuid::nil(),
                                     Uuid::nil(),
                                     waku_client::Command::Boss {
-                                        operation: BossOperation::ListFiles {
-                                            path: path.clone(),
-                                        },
+                                        operation: BossOperation::ListFiles { path: path.clone() },
                                     },
                                 )
                                 .map_err(|error| anyhow::anyhow!("{path}: {error}"))?;
@@ -1642,12 +1642,11 @@ impl Waku {
                                     (&mut this.boss_ui.editor, &saved)
                                 {
                                     if editor.persona.is_nil()
-                                        && let Some(persona) = state.personas.iter().rev().find(
-                                            |persona| {
+                                        && let Some(persona) =
+                                            state.personas.iter().rev().find(|persona| {
                                                 persona.name == values[0].trim()
                                                     && persona.markdown == values[1]
-                                            },
-                                        )
+                                            })
                                     {
                                         editor.persona = persona.id;
                                     }
@@ -1711,10 +1710,9 @@ impl Waku {
                                         );
                                     } else if path == "memory" {
                                         this.boss_ui.files = files;
-                                        this.boss_ui.memory_loaded_folders.insert(
-                                            key,
-                                            HashSet::from(["memory".into()]),
-                                        );
+                                        this.boss_ui
+                                            .memory_loaded_folders
+                                            .insert(key, HashSet::from(["memory".into()]));
                                         this.boss_ui.memory_all_folders_loaded.remove(&key);
                                     } else {
                                         this.boss_ui.files.retain(|file| {
@@ -1797,11 +1795,8 @@ impl Waku {
                                 editor.original = values;
                                 editor.original_permissions = permissions;
                             }
-                            let saved_persona = this
-                                .boss_ui
-                                .editor
-                                .as_ref()
-                                .map(|editor| editor.persona);
+                            let saved_persona =
+                                this.boss_ui.editor.as_ref().map(|editor| editor.persona);
                             if !this.boss_editor_dirty(cx) {
                                 this.boss_ui.editor = None;
                             }
@@ -1816,12 +1811,9 @@ impl Waku {
                     Err(error) => {
                         let error = error.to_string();
                         if matches!(reply, BossReply::List | BossReply::Read | BossReply::Search)
-                            && this
-                                .boss_ui
-                                .page
-                                .is_some_and(|(page_key, tab)| {
-                                    page_key == key && tab == BossTab::Memory
-                                })
+                            && this.boss_ui.page.is_some_and(|(page_key, tab)| {
+                                page_key == key && tab == BossTab::Memory
+                            })
                         {
                             this.boss_ui.memory_loading_folder = None;
                             this.boss_ui.memory_error = Some((
@@ -1906,12 +1898,7 @@ impl Waku {
             })
             .cloned();
         if let Some(path) = next {
-            self.boss_request(
-                key,
-                BossOperation::ListFiles { path },
-                BossReply::List,
-                cx,
-            );
+            self.boss_request(key, BossOperation::ListFiles { path }, BossReply::List, cx);
         }
     }
 
@@ -1940,7 +1927,10 @@ impl Waku {
         bucket: String,
         cx: &mut Context<Self>,
     ) {
-        if self.boss_ui.memory_records.contains_key(&(key, bucket.clone()))
+        if self
+            .boss_ui
+            .memory_records
+            .contains_key(&(key, bucket.clone()))
             || self
                 .boss_ui
                 .memory_records_loading
@@ -2309,8 +2299,7 @@ impl Waku {
             let Some(identity) = self.boss_ui.identities.get(id) else {
                 continue;
             };
-            if let Some(image) =
-                self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+            if let Some(image) = self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
             {
                 avatars.insert(*id, image);
             }
@@ -2330,9 +2319,11 @@ impl Waku {
     pub(super) fn all_mention_avatars(&self) -> Rc<HashMap<Uuid, Arc<gpui::RenderImage>>> {
         // Planning sessions stay out of the map on purpose — their chips
         // keep the compass glyph rather than the boss's face.
-        let chats = self.boss_ui.states.values().filter_map(|state| {
-            state.session_id.map(|id| (id, &state.identity))
-        });
+        let chats = self
+            .boss_ui
+            .states
+            .values()
+            .filter_map(|state| state.session_id.map(|id| (id, &state.identity)));
         let employees = self
             .boss_ui
             .identities
@@ -3086,7 +3077,12 @@ impl Waku {
                     .aria_label(tr!("boss.brain_label"))
                     .tooltip(Tooltip::text(tr!("boss.brain_label")))
                     .on_activation(cx, move |this, window, cx| {
-                        let section = this.boss_ui.last_section.get(&key).copied().unwrap_or(BossTab::Memory);
+                        let section = this
+                            .boss_ui
+                            .last_section
+                            .get(&key)
+                            .copied()
+                            .unwrap_or(BossTab::Memory);
                         this.open_boss_page(key, section, window, cx)
                     })
                     .child(icon("icons/brain.svg", 14.0, theme.text_secondary)),
@@ -3110,7 +3106,9 @@ impl Waku {
         let detail = self.boss_ui.queued.get(&session_id)?;
         Some(
             div()
-                .id(SharedString::from(format!("boss-queued-{slot}-{session_id}")))
+                .id(SharedString::from(format!(
+                    "boss-queued-{slot}-{session_id}"
+                )))
                 .flex_none()
                 .size(px(12.0))
                 .flex()
@@ -3137,16 +3135,10 @@ impl Waku {
         // which would read as finished over the pending state.
         let status_indicator = self
             .boss_queued_indicator(id, "sidebar", &theme)
-            .or_else(|| {
-                session.and_then(|session| self.session_status_indicator(session, &theme))
-            })
+            .or_else(|| session.and_then(|session| self.session_status_indicator(session, &theme)))
             .or_else(|| {
                 self.boss_ui.dispatching.contains(&id).then(|| {
-                    motion::spin_slow(icon(
-                        "icons/loader-circle.svg",
-                        12.0,
-                        theme.text_secondary,
-                    ))
+                    motion::spin_slow(icon("icons/loader-circle.svg", 12.0, theme.text_secondary))
                 })
             });
         let selected = sidebar::sidebar_session_selected(
@@ -3160,10 +3152,12 @@ impl Waku {
         let alt_held = self.sidebar_alt_held;
         let (detail, detail_provider) = if alt_held {
             self.boss_ui.queued_model_targets.get(&id).map_or_else(
-                || (
-                    session.map(|session| self.session_sidebar_model_detail(session)),
-                    session.map(|session| session.provider),
-                ),
+                || {
+                    (
+                        session.map(|session| self.session_sidebar_model_detail(session)),
+                        session.map(|session| session.provider),
+                    )
+                },
                 |(key, provider, model, effort)| {
                     let name = self.model_display_name_on(*key, *provider, Some(model));
                     (
@@ -3328,12 +3322,12 @@ impl Waku {
         deliverable_id: Uuid,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(deliverable) = self
-            .boss_ui
-            .states
-            .get(&key)
-            .and_then(|state| state.deliverables.iter().find(|deliverable| deliverable.id == deliverable_id))
-        else {
+        let Some(deliverable) = self.boss_ui.states.get(&key).and_then(|state| {
+            state
+                .deliverables
+                .iter()
+                .find(|deliverable| deliverable.id == deliverable_id)
+        }) else {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
@@ -3493,7 +3487,9 @@ impl Waku {
                 }
             }));
         let row = div()
-            .id(SharedString::from(format!("deliverable-{key:?}-{deliverable_id}")))
+            .id(SharedString::from(format!(
+                "deliverable-{key:?}-{deliverable_id}"
+            )))
             .group(group_name.clone())
             .w_full()
             .min_w_0()
@@ -3566,12 +3562,7 @@ impl Waku {
                                         .items_center()
                                         .justify_center()
                                         .group_hover(group_name.clone(), |style| style.invisible())
-                                        .child(
-                                            div()
-                                                .size(px(7.0))
-                                                .rounded_full()
-                                                .bg(theme.info),
-                                        ),
+                                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
                                 )
                             }),
                     )
@@ -3598,11 +3589,7 @@ impl Waku {
                             // explains it the way the Pinned header does
                             // for tasks.
                             .when(pinned, |line| {
-                                line.child(icon(
-                                    "icons/pin-filled.svg",
-                                    12.0,
-                                    theme.text_tertiary,
-                                ))
+                                line.child(icon("icons/pin-filled.svg", 12.0, theme.text_tertiary))
                             })
                             .child(
                                 div()
@@ -3729,15 +3716,8 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .opacity(0.0)
-            .group_hover(group_name.clone(), |style| {
-                style.w(px(20.0)).opacity(1.0)
-            })
-            .focus_visible(|style| {
-                style
-                    .w(px(20.0))
-                    .opacity(1.0)
-                    .bg(theme.focus_highlight())
-            })
+            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+            .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip_text))
@@ -3871,8 +3851,7 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, deliverable_id, record_visit)) =
-            self.boss_ui.pending_deliverable.take()
+        let Some((key, deliverable_id, record_visit)) = self.boss_ui.pending_deliverable.take()
         else {
             return;
         };
@@ -4114,9 +4093,10 @@ impl Waku {
             .py(px(12.0))
             .border_b_1()
             .border_color(theme.border)
-            .when_some(state.map(|state| state.identity.clone()), |row, identity| {
-                row.child(self.boss_avatar(&identity, 24.0, cx))
-            })
+            .when_some(
+                state.map(|state| state.identity.clone()),
+                |row, identity| row.child(self.boss_avatar(&identity, 24.0, cx)),
+            )
             .child(
                 div()
                     .flex_1()
@@ -4230,35 +4210,38 @@ impl Waku {
             .rounded(px(6.0))
             .p(px(2.0))
             .bg(theme.inset)
-            .children(options.into_iter().enumerate().map(
-                move |(index, (value, label))| {
-                    let selected = value == current;
-                    let on_pick = on_pick.clone();
-                    div()
-                        .id(SharedString::from(format!("{id}-{index}")))
-                        .h(px(20.0))
-                        .px(px(10.0))
-                        .rounded(px(5.0))
-                        .flex()
-                        .items_center()
-                        .text_size(sp(12.5))
-                        .tab_index(0)
-                        .cursor_default()
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .when(selected, |element| {
-                            element.bg(theme.surface).text_color(theme.text)
-                        })
-                        .when(!selected, |element| {
-                            element
-                                .text_color(theme.text_secondary)
-                                .hover(|style| style.text_color(theme.text))
-                        })
-                        .child(SharedString::from(label))
-                        .on_activation(cx, move |this, window, cx| {
-                            on_pick(this, value, window, cx)
-                        })
-                },
-            ))
+            .children(
+                options
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(index, (value, label))| {
+                        let selected = value == current;
+                        let on_pick = on_pick.clone();
+                        div()
+                            .id(SharedString::from(format!("{id}-{index}")))
+                            .h(px(20.0))
+                            .px(px(10.0))
+                            .rounded(px(5.0))
+                            .flex()
+                            .items_center()
+                            .text_size(sp(12.5))
+                            .tab_index(0)
+                            .cursor_default()
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .when(selected, |element| {
+                                element.bg(theme.surface).text_color(theme.text)
+                            })
+                            .when(!selected, |element| {
+                                element
+                                    .text_color(theme.text_secondary)
+                                    .hover(|style| style.text_color(theme.text))
+                            })
+                            .child(SharedString::from(label))
+                            .on_activation(cx, move |this, window, cx| {
+                                on_pick(this, value, window, cx)
+                            })
+                    }),
+            )
     }
 
     /// The section list — virtualized rows plus the shared scrollbar, sized
@@ -4276,9 +4259,7 @@ impl Waku {
                         return div().into_any_element();
                     };
                     weak.upgrade()
-                        .map(|entity| {
-                            entity.update(cx, |this, cx| this.render_boss_item(item, cx))
-                        })
+                        .map(|entity| entity.update(cx, |this, cx| this.render_boss_item(item, cx)))
                         .unwrap_or_else(|| div().into_any_element())
                 })
                 .size_full(),
@@ -4288,7 +4269,6 @@ impl Waku {
                 &self.boss_ui.scrollbar,
             ))
     }
-
 
     // ── Memory ───────────────────────────────────────────────────────────
 
@@ -4344,9 +4324,7 @@ impl Waku {
             self.boss_ui
                 .files
                 .iter()
-                .filter(|file| {
-                    !file.directory && file.path.to_lowercase().contains(&query)
-                })
+                .filter(|file| !file.directory && file.path.to_lowercase().contains(&query))
                 .map(|file| BossItem::File(file.path.clone(), false, 0))
                 .collect()
         };
@@ -4366,9 +4344,7 @@ impl Waku {
                         return div().into_any_element();
                     };
                     weak.upgrade()
-                        .map(|entity| {
-                            entity.update(cx, |this, cx| this.render_boss_item(item, cx))
-                        })
+                        .map(|entity| entity.update(cx, |this, cx| this.render_boss_item(item, cx)))
                         .unwrap_or_else(|| div().into_any_element())
                 })
                 .size_full(),
@@ -4387,9 +4363,12 @@ impl Waku {
                 .text_color(theme.text_secondary)
         };
         let list_pane: AnyElement = if memory_documents {
-            if let Some((_, _, error)) = self.boss_ui.memory_error.as_ref().filter(
-                |(error_key, path, _)| *error_key == key && path == "memory",
-            ) {
+            if let Some((_, _, error)) = self
+                .boss_ui
+                .memory_error
+                .as_ref()
+                .filter(|(error_key, path, _)| *error_key == key && path == "memory")
+            {
                 pane_center(&theme)
                     .gap(px(8.0))
                     .child(div().text_color(theme.text_secondary).child(error.clone()))
@@ -4408,8 +4387,7 @@ impl Waku {
                             }),
                     )
                     .into_any_element()
-            } else if self.boss_ui.pending
-                && self.boss_ui.pending_reply == Some(BossReply::Search)
+            } else if self.boss_ui.pending && self.boss_ui.pending_reply == Some(BossReply::Search)
             {
                 pane_center(&theme)
                     .child(tr!("boss.loading"))
@@ -4509,7 +4487,11 @@ impl Waku {
     /// Active and History over the whole roster — running and queued work
     /// together on one side, finished and retired records on the other. A
     /// Capacity menu sits beside the switch for the queue's model limits.
-    fn render_boss_employees_section(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+    fn render_boss_employees_section(
+        &mut self,
+        key: DaemonKey,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let view = self
             .boss_ui
@@ -4520,14 +4502,8 @@ impl Waku {
         let filter = self.boss_segmented(
             "boss-employees-view",
             vec![
-                (
-                    BossEmployeesView::Active,
-                    tr!("boss.employees_active"),
-                ),
-                (
-                    BossEmployeesView::History,
-                    tr!("boss.employees_history"),
-                ),
+                (BossEmployeesView::Active, tr!("boss.employees_active")),
+                (BossEmployeesView::History, tr!("boss.employees_history")),
             ],
             view,
             cx,
@@ -4697,7 +4673,12 @@ impl Waku {
                 .find(|employee| employee.session_id == id)
         });
         let session = self.state.sessions.iter().find(|session| session.id == id);
-        let job = self.boss_ui.job_titles.get(&id).cloned().unwrap_or_default();
+        let job = self
+            .boss_ui
+            .job_titles
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
         let project = session
             .and_then(|session| {
                 self.state
@@ -4735,9 +4716,8 @@ impl Waku {
         } else {
             session.map(|session| self.session_sidebar_model_detail(session))
         };
-        let status = employee.map(|employee| {
-            self.boss_employee_status_label(employee, session, &theme)
-        });
+        let status =
+            employee.map(|employee| self.boss_employee_status_label(employee, session, &theme));
         let stamp = employee.and_then(|employee| {
             if employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued {
                 employee.queued_at.or(employee.created_at)
@@ -4794,16 +4774,13 @@ impl Waku {
                             .text_size(sp(13.0))
                             .line_height(sp(15.0))
                             .text_color(theme.text_tertiary)
-                            .when(
-                                !detail.is_empty(),
-                                |row| {
-                                    row.child(icon(
-                                        job_icon.unwrap_or_else(|| job_title_icon(&detail)),
-                                        12.0,
-                                        theme.text_tertiary,
-                                    ))
-                                },
-                            )
+                            .when(!detail.is_empty(), |row| {
+                                row.child(icon(
+                                    job_icon.unwrap_or_else(|| job_title_icon(&detail)),
+                                    12.0,
+                                    theme.text_tertiary,
+                                ))
+                            })
                             .child(div().min_w_0().truncate().child(detail))
                             .when_some(blocker, |row, blocker| {
                                 row.child(
@@ -4844,9 +4821,7 @@ impl Waku {
                         .text_right()
                         .text_size(sp(12.0))
                         .text_color(theme.text_ghost)
-                        .child(sidebar::format_time_ago(
-                            unix_time().saturating_sub(stamp),
-                        )),
+                        .child(sidebar::format_time_ago(unix_time().saturating_sub(stamp))),
                 )
             })
             .into_any_element()
@@ -4898,12 +4873,8 @@ impl Waku {
                             tr!("sidebar.status_background"),
                             status_color(theme, SessionStatus::Background),
                         ),
-                        Some(SessionStatus::Failed) => {
-                            (tr!("sidebar.status_failed"), theme.danger)
-                        }
-                        Some(SessionStatus::Idle) => {
-                            (tr!("boss.status_idle"), theme.text_tertiary)
-                        }
+                        Some(SessionStatus::Failed) => (tr!("sidebar.status_failed"), theme.danger),
+                        Some(SessionStatus::Idle) => (tr!("boss.status_idle"), theme.text_tertiary),
                         None => (tr!("boss.goals_status_starting"), theme.text_secondary),
                     }
                 }
@@ -4967,7 +4938,11 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .when(handle.is_open(), |style| style.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tr!("boss.assignment")))
-            .child(icon("icons/ellipsis-vertical.svg", 14.0, theme.text_tertiary));
+            .child(icon(
+                "icons/ellipsis-vertical.svg",
+                14.0,
+                theme.text_tertiary,
+            ));
         Some(popover(
             trigger,
             &handle,
@@ -5104,9 +5079,15 @@ impl Waku {
                     parts.push(tr!("boss.resource_desktop"));
                 }
                 if ticket.reservation.is_some() {
-                    tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
+                    tr!(
+                        "boss.assignment_resources_reserved",
+                        detail = parts.join(" · ")
+                    )
                 } else {
-                    tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
+                    tr!(
+                        "boss.assignment_resources_requested",
+                        detail = parts.join(" · ")
+                    )
                 }
             }
         });
@@ -5179,9 +5160,7 @@ impl Waku {
             .personas
             .iter()
             .find(|persona| persona.id == state.persona_id)
-            .filter(|persona| {
-                query.is_empty() || persona.name.to_lowercase().contains(&query)
-            })
+            .filter(|persona| query.is_empty() || persona.name.to_lowercase().contains(&query))
             .cloned();
         // The detail pane never sits empty while roles exist: the stored
         // selection wins when visible, the first visible row otherwise —
@@ -5200,9 +5179,7 @@ impl Waku {
             .personas_selected
             .get(&key)
             .copied()
-            .filter(|id| {
-                visible.contains(id) || boss_persona.as_ref().is_some_and(|p| p.id == *id)
-            })
+            .filter(|id| visible.contains(id) || boss_persona.as_ref().is_some_and(|p| p.id == *id))
             .or_else(|| {
                 visible
                     .first()
@@ -5236,14 +5213,7 @@ impl Waku {
         if let Some(ref persona) = boss_persona {
             list_column = list_column
                 .child(boss_section_label(&theme, tr!("boss.section_boss"), true))
-                .child(self.render_boss_persona_row(
-                    key,
-                    persona,
-                    true,
-                    selected,
-                    &theme,
-                    cx,
-                ));
+                .child(self.render_boss_persona_row(key, persona, true, selected, &theme, cx));
         }
         if !visible.is_empty() || !has_boss_persona {
             list_column = list_column.child(boss_section_label(
@@ -6117,12 +6087,7 @@ impl Waku {
                             },
                             move |_, cx| {
                                 let _ = waku.update(cx, |waku, cx| {
-                                    waku.set_deliverable_pinned(
-                                        key,
-                                        deliverable_id,
-                                        !pinned,
-                                        cx,
-                                    );
+                                    waku.set_deliverable_pinned(key, deliverable_id, !pinned, cx);
                                 });
                             },
                         )
@@ -6144,12 +6109,7 @@ impl Waku {
                             },
                             move |_, cx| {
                                 let _ = waku.update(cx, |waku, cx| {
-                                    waku.set_deliverable_dormant(
-                                        key,
-                                        deliverable_id,
-                                        !dormant,
-                                        cx,
-                                    );
+                                    waku.set_deliverable_dormant(key, deliverable_id, !dormant, cx);
                                 });
                             },
                         )
@@ -6190,9 +6150,7 @@ impl Waku {
                         let _ = dismiss_waku.update(cx, |waku, cx| {
                             waku.boss_request(
                                 key,
-                                BossOperation::DismissDeliverable {
-                                    id: deliverable_id,
-                                },
+                                BossOperation::DismissDeliverable { id: deliverable_id },
                                 BossReply::List,
                                 cx,
                             );
@@ -6227,23 +6185,25 @@ impl Waku {
                     tr!("boss.loading").to_string()
                 };
                 if failed {
-                    boss_button(format!("boss-memory-folder-retry-{path}"), label.clone(), &theme)
-                        .h(px(30.0))
-                        .w_full()
-                        .pl(px(8.0 + depth as f32 * 16.0))
-                        .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
-                        .child(div().truncate().child(label))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.boss_request(
-                                key,
-                                BossOperation::ListFiles {
-                                    path: path.clone(),
-                                },
-                                BossReply::List,
-                                cx,
-                            );
-                        })
-                        .into_any_element()
+                    boss_button(
+                        format!("boss-memory-folder-retry-{path}"),
+                        label.clone(),
+                        &theme,
+                    )
+                    .h(px(30.0))
+                    .w_full()
+                    .pl(px(8.0 + depth as f32 * 16.0))
+                    .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
+                    .child(div().truncate().child(label))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.boss_request(
+                            key,
+                            BossOperation::ListFiles { path: path.clone() },
+                            BossReply::List,
+                            cx,
+                        );
+                    })
+                    .into_any_element()
                 } else {
                     div()
                         .h(px(30.0))
@@ -6262,12 +6222,7 @@ impl Waku {
                 let selected = self.boss_ui.preview_file.as_ref().is_some_and(
                     |(file_key, selected_path, _)| *file_key == key && selected_path == &path,
                 );
-                let searching = !self
-                    .boss_memory_search
-                    .read(cx)
-                    .content()
-                    .trim()
-                    .is_empty();
+                let searching = !self.boss_memory_search.read(cx).content().trim().is_empty();
                 let display = if searching {
                     path.clone()
                 } else {
@@ -6316,9 +6271,7 @@ impl Waku {
                             {
                                 this.boss_request(
                                     key,
-                                    BossOperation::ListFiles {
-                                        path: path.clone(),
-                                    },
+                                    BossOperation::ListFiles { path: path.clone() },
                                     BossReply::List,
                                     cx,
                                 );
@@ -6326,24 +6279,19 @@ impl Waku {
                             cx.notify();
                         } else {
                             if searching {
-                                let expanded =
-                                    this.boss_ui.memory_expanded.entry(key).or_default();
-                                let mut parent =
-                                    path.rsplit_once('/').map(|(parent, _)| parent);
+                                let expanded = this.boss_ui.memory_expanded.entry(key).or_default();
+                                let mut parent = path.rsplit_once('/').map(|(parent, _)| parent);
                                 while let Some(directory) =
                                     parent.filter(|directory| *directory != "memory")
                                 {
                                     expanded.insert(directory.to_owned());
-                                    parent =
-                                        directory.rsplit_once('/').map(|(parent, _)| parent);
+                                    parent = directory.rsplit_once('/').map(|(parent, _)| parent);
                                 }
                                 this.sync_boss_page_rows();
                             }
                             this.boss_request(
                                 key,
-                                BossOperation::ReadFile {
-                                    path: path.clone(),
-                                },
+                                BossOperation::ReadFile { path: path.clone() },
                                 BossReply::Read,
                                 cx,
                             );
@@ -6457,7 +6405,10 @@ impl Waku {
                             .min_w_0()
                             .flex_1()
                             .child(
-                                div().truncate().text_color(theme.text).child(plan.idea.clone()),
+                                div()
+                                    .truncate()
+                                    .text_color(theme.text)
+                                    .child(plan.idea.clone()),
                             )
                             .child(
                                 div()
@@ -6473,7 +6424,11 @@ impl Waku {
                 let Some(state) = self.boss_ui.states.get(&key).cloned() else {
                     return div().into_any_element();
                 };
-                let Some(persona) = state.personas.iter().find(|persona| persona.id == id).cloned()
+                let Some(persona) = state
+                    .personas
+                    .iter()
+                    .find(|persona| persona.id == id)
+                    .cloned()
                 else {
                     return div().into_any_element();
                 };
@@ -6503,12 +6458,10 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .child(
-                    div().text_color(theme.text_secondary).child(format!(
-                        "{}\n{error}",
-                        tr!("boss.memory_unavailable", path = "memory")
-                    )),
-                )
+                .child(div().text_color(theme.text_secondary).child(format!(
+                    "{}\n{error}",
+                    tr!("boss.memory_unavailable", path = "memory")
+                )))
                 .child(
                     boss_button("boss-memory-preview-list-retry", tr!("boss.retry"), &theme)
                         .child(tr!("boss.retry"))
@@ -6542,21 +6495,17 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .child(
-                    div().text_color(theme.text_secondary).child(format!(
-                        "{}\n{error}",
-                        tr!("boss.memory_unavailable", path = path.clone())
-                    )),
-                )
+                .child(div().text_color(theme.text_secondary).child(format!(
+                    "{}\n{error}",
+                    tr!("boss.memory_unavailable", path = path.clone())
+                )))
                 .child(
                     boss_button("boss-memory-preview-retry", tr!("boss.retry"), &theme)
                         .child(tr!("boss.retry"))
                         .on_activation(cx, move |this, _, cx| {
                             this.boss_request(
                                 key,
-                                BossOperation::ReadFile {
-                                    path: path.clone(),
-                                },
+                                BossOperation::ReadFile { path: path.clone() },
                                 BossReply::Read,
                                 cx,
                             );
@@ -6610,18 +6559,14 @@ impl Waku {
                                 .child(path),
                         )
                         .child(
-                            boss_button(
-                                "boss-memory-correction",
-                                tr!("boss.ask_correct"),
-                                &theme,
-                            )
-                            .child(tr!("boss.ask_correct"))
-                            .on_activation(cx, move |this, _, cx| {
-                                this.chat_with_boss(key, cx);
-                                this.boss_ui.command_memory_correction =
-                                    Some((key, correct_path.clone(), correct_content.clone()));
-                                this.sync_composer_placeholder(cx);
-                            }),
+                            boss_button("boss-memory-correction", tr!("boss.ask_correct"), &theme)
+                                .child(tr!("boss.ask_correct"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.chat_with_boss(key, cx);
+                                    this.boss_ui.command_memory_correction =
+                                        Some((key, correct_path.clone(), correct_content.clone()));
+                                    this.sync_composer_placeholder(cx);
+                                }),
                         ),
                 )
                 .child(
@@ -6708,12 +6653,10 @@ impl Waku {
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .child(
-                    div().text_color(theme.text_secondary).child(format!(
-                        "{}\n{error}",
-                        tr!("boss.bucket_unavailable", bucket = bucket.name.clone())
-                    )),
-                )
+                .child(div().text_color(theme.text_secondary).child(format!(
+                    "{}\n{error}",
+                    tr!("boss.bucket_unavailable", bucket = bucket.name.clone())
+                )))
                 .child(
                     boss_button("boss-memory-records-retry", tr!("boss.retry"), &theme)
                         .child(tr!("boss.retry"))
@@ -6822,15 +6765,18 @@ impl Waku {
                                     &theme,
                                 )
                                 .child(tr!("boss.ask_correct"))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.chat_with_boss(key, cx);
-                                    this.boss_ui.command_memory_correction = Some((
-                                        key,
-                                        correct_label.clone(),
-                                        correct_content.clone(),
-                                    ));
-                                    this.sync_composer_placeholder(cx);
-                                }),
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        this.chat_with_boss(key, cx);
+                                        this.boss_ui.command_memory_correction = Some((
+                                            key,
+                                            correct_label.clone(),
+                                            correct_content.clone(),
+                                        ));
+                                        this.sync_composer_placeholder(cx);
+                                    },
+                                ),
                             ),
                     )
                     .child(div().text_size(sp(13.0)).child(text))
@@ -7166,9 +7112,7 @@ fn boss_queue_ranks(state: &BossState) -> HashMap<Uuid, usize> {
     let mut queued: Vec<&waku_protocol::boss::BossEmployee> = state
         .employees
         .iter()
-        .filter(|employee| {
-            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
-        })
+        .filter(|employee| employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued)
         .collect();
     queued.sort_by_key(|employee| {
         employee
@@ -7283,10 +7227,7 @@ const JOB_TITLE_FALLBACK_ICON: &str = "icons/brain.svg";
 /// database) is listed ahead of generic implementation. Keywords match
 /// exact words only — no stemming or prefix matching.
 const JOB_TITLE_ICON_CATEGORIES: &[(&[&str], &str)] = &[
-    (
-        &["bug", "fix", "bugfix", "debug"],
-        "icons/bug.svg",
-    ),
+    (&["bug", "fix", "bugfix", "debug"], "icons/bug.svg"),
     (
         &[
             "translate",
@@ -7643,7 +7584,10 @@ mod tests {
                 text: "early notes".into(),
             })
         );
-        assert_eq!(memory_record_from_json(&serde_json::json!({"type": "other"})), None);
+        assert_eq!(
+            memory_record_from_json(&serde_json::json!({"type": "other"})),
+            None
+        );
     }
 
     fn boss_employee(created_at: Option<u64>) -> waku_protocol::boss::BossEmployee {
@@ -7741,9 +7685,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn evicted_avatars_requeue_instead_of_keeping_their_fallback(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn evicted_avatars_requeue_instead_of_keeping_their_fallback(cx: &mut gpui::TestAppContext) {
         let renderer = cx.update(|cx| cx.svg_renderer());
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#ffffff"/></svg>"##;
         let image = renderer.render_single_frame(svg.as_bytes(), 1.0).unwrap();
@@ -8009,8 +7951,16 @@ mod tests {
     #[test]
     fn queue_ranks_follow_ticket_sequence() {
         let mut state = boss_state_for_queue_test();
-        let head = employee(1, waku_protocol::boss::EmployeeLifecycle::Queued, Some(ticket(7, Vec::new())));
-        let tail = employee(2, waku_protocol::boss::EmployeeLifecycle::Queued, Some(ticket(3, Vec::new())));
+        let head = employee(
+            1,
+            waku_protocol::boss::EmployeeLifecycle::Queued,
+            Some(ticket(7, Vec::new())),
+        );
+        let tail = employee(
+            2,
+            waku_protocol::boss::EmployeeLifecycle::Queued,
+            Some(ticket(3, Vec::new())),
+        );
         let working = employee(3, waku_protocol::boss::EmployeeLifecycle::Working, None);
         state.employees = vec![head.clone(), tail.clone(), working.clone()];
 
@@ -8033,7 +7983,10 @@ mod tests {
         let limited = employee(
             3,
             EmployeeLifecycle::Queued,
-            Some(ticket(1, vec![AdmissionBlocker::ModelLimit { used: 6, limit: 6 }])),
+            Some(ticket(
+                1,
+                vec![AdmissionBlocker::ModelLimit { used: 6, limit: 6 }],
+            )),
         );
         assert_eq!(
             boss_queue_detail(&limited, Some(1)),
@@ -8096,5 +8049,4 @@ mod tests {
             revision: 0,
         }
     }
-
 }

@@ -160,13 +160,9 @@ async fn ensure_voice(
         if target.is_file() {
             continue;
         }
-        let bytes = fetch(
-            http,
-            executor,
-            &format!("{VOICES_BASE_URL}/{stem}{suffix}"),
-        )
-        .await
-        .with_context(|| format!("downloading piper voice {voice}"))?;
+        let bytes = fetch(http, executor, &format!("{VOICES_BASE_URL}/{stem}{suffix}"))
+            .await
+            .with_context(|| format!("downloading piper voice {voice}"))?;
         let staged = target.with_extension("part");
         std::fs::File::create(&staged)
             .and_then(|mut file| file.write_all(&bytes))
@@ -182,8 +178,8 @@ async fn fetch(
     executor: &gpui::BackgroundExecutor,
     url: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let request = gpui::http_client::Request::get(url)
-        .body(gpui::http_client::AsyncBody::empty())?;
+    let request =
+        gpui::http_client::Request::get(url).body(gpui::http_client::AsyncBody::empty())?;
     let exchange = async {
         let mut response = http.send(request).await?;
         let status = response.status();
@@ -242,7 +238,10 @@ fn espeak_data_directory(executable: &std::path::Path) -> Option<PathBuf> {
             return Some(dir.to_path_buf());
         }
         let resources = dir.join("Resources");
-        resources.join("espeak-ng-data").is_dir().then_some(resources)
+        resources
+            .join("espeak-ng-data")
+            .is_dir()
+            .then_some(resources)
     })
 }
 
@@ -448,10 +447,7 @@ mod tests {
 
     #[test]
     fn piper_voice_or_default_enforces_the_catalog_boundary() {
-        assert_eq!(
-            piper_voice_or_default("en_US-ryan-high"),
-            "en_US-ryan-high"
-        );
+        assert_eq!(piper_voice_or_default("en_US-ryan-high"), "en_US-ryan-high");
         assert_eq!(
             piper_voice_or_default(" en_US-ljspeech-high "),
             "en_US-ljspeech-high"

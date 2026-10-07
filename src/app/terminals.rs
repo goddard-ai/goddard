@@ -1273,8 +1273,7 @@ impl Waku {
         // guess below.
         let boss_owned = self.boss_ui.page.is_some()
             || (self.session_surface_active()
-                && (self.boss_chat_key().is_some()
-                    || self.selected_surface_boss_key().is_some()));
+                && (self.boss_chat_key().is_some() || self.selected_surface_boss_key().is_some()));
         if boss_owned && self.open_terminal_project_switcher(window, cx) {
             cx.notify();
             return;

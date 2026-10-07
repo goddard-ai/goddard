@@ -673,11 +673,8 @@ impl Waku {
                     // carries — so this switch and every later handoff read
                     // one canonical record. Failure only skips the durable
                     // copy; the envelope still goes out.
-                    let _ = client.request(
-                        session_id,
-                        Uuid::nil(),
-                        waku_client::Command::IndexSession,
-                    );
+                    let _ =
+                        client.request(session_id, Uuid::nil(), waku_client::Command::IndexSession);
                     let asked = questions.len();
                     let evaluate =
                         should_evaluate && asked > 0 && eval_payload_fits(&state, &questions);

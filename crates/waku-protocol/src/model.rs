@@ -1303,7 +1303,10 @@ impl Project {
                     .iter()
                     .map(|index| disambiguated_project_label(&projects[*index], depth))
                     .collect::<Vec<_>>();
-                if labels.iter().collect::<std::collections::HashSet<_>>().len()
+                if labels
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
                     == members.len()
                     || depth >= deepest
                 {
@@ -8141,7 +8144,14 @@ mod tests {
             .push(QueuedMessage::new("user draft"));
 
         let turn_id = Uuid::new_v4();
-        assert!(session.adopt_submitted_prompt("parked prompt", turn_id, queued_id, None, false, None));
+        assert!(session.adopt_submitted_prompt(
+            "parked prompt",
+            turn_id,
+            queued_id,
+            None,
+            false,
+            None
+        ));
 
         // Only the matching entry left; the delivered message reuses its id.
         assert_eq!(session.queued_messages.len(), 1);
@@ -8950,8 +8960,9 @@ mod tests {
     #[test]
     fn resolve_display_names_keeps_projectless_labels_untouched() {
         let home = dirs::home_dir().expect("test user has a home directory");
-        let projectless_path =
-            home.join(crate::identity::HOME_DIRECTORY_NAME).join("projects/chat");
+        let projectless_path = home
+            .join(crate::identity::HOME_DIRECTORY_NAME)
+            .join("projects/chat");
         let mut projectless = Project::from_path(projectless_path);
         projectless.name = Project::PROJECTLESS_NAME.to_owned();
         // A user directory literally named "No project" collides with the
@@ -8962,6 +8973,9 @@ mod tests {
         Project::resolve_display_names(&mut projects);
         assert!(projects[0].is_projectless());
         assert_eq!(projects[0].resolved_name, None);
-        assert_eq!(projects[1].resolved_name.as_deref(), Some("scratch/No project"));
+        assert_eq!(
+            projects[1].resolved_name.as_deref(),
+            Some("scratch/No project")
+        );
     }
 }

@@ -787,9 +787,7 @@ mod tests {
 
     #[test]
     fn the_report_trigger_round_trips_and_defaults_off() {
-        use crate::model::{
-            ReportTrigger, ReportTriggerBoundary, ReportTriggerKind,
-        };
+        use crate::model::{ReportTrigger, ReportTriggerBoundary, ReportTriggerKind};
         let event_id = Uuid::new_v4();
         let employee = Uuid::new_v4();
         let trigger = ReportTrigger {

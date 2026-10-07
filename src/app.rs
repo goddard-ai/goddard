@@ -1351,7 +1351,10 @@ struct RightPanelFileEditor {
     /// Parsed `.wireframe.json`, keyed by a hash of the content it came
     /// from — the preview re-parses only when the text changes rather
     /// than once a frame.
-    wireframe: Option<(u64, Result<waku_protocol::wireframe::Wireframe, waku_protocol::wireframe::WireframeError>)>,
+    wireframe: Option<(
+        u64,
+        Result<waku_protocol::wireframe::Wireframe, waku_protocol::wireframe::WireframeError>,
+    )>,
     /// A read is in flight on the background executor. Set from the moment the
     /// editor is created, because `render` may not touch the filesystem: until
     /// the first read lands the editor is empty and locked, and that means

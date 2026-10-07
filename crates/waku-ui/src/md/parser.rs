@@ -521,10 +521,7 @@ fn parse_started_block(cursor: &mut Cursor, soft_breaks_as_newlines: bool) -> Ve
                         // pulldown-cmark drops each item's marker number — the
                         // item's range starts at its marker, so read it back.
                         let number = if ordered_start.is_some() {
-                            cursor
-                                .source
-                                .get(range.start..)
-                                .and_then(list_item_number)
+                            cursor.source.get(range.start..).and_then(list_item_number)
                         } else {
                             None
                         };

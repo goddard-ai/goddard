@@ -15,9 +15,9 @@ pub mod text_field;
 pub mod thinking;
 pub mod tooltip;
 
-use waku_client::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::shortcut::ShortcutHint;
+use waku_client::model::{ActivityKind, ProviderKind, SessionStatus};
 
 /// A small circular gauge: a ring whose arc fills clockwise from 12
 /// o'clock over `percent`, over a faint full track ring. `None` draws the

@@ -263,9 +263,7 @@ pub(super) fn next_unread_completion(
                 let chat_shown = boss_states
                     .get(key)
                     .and_then(|state| state.session_id)
-                    .is_some_and(|chat| {
-                        excluded.is_some_and(|excluded| excluded.contains(&chat))
-                    });
+                    .is_some_and(|chat| excluded.is_some_and(|excluded| excluded.contains(&chat)));
                 if !chat_shown
                     && starred_tier.is_none_or(|(_, want)| !want)
                     && sidebar_deliverable_unread(boss_states, *key, *id)

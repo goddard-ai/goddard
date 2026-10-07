@@ -106,7 +106,10 @@ mod tests {
 
     #[test]
     fn parse_routes_only_the_goddard_scheme() {
-        assert_eq!(parse_deep_link("https://goddard.ai/new-task?prompt=x"), None);
+        assert_eq!(
+            parse_deep_link("https://goddard.ai/new-task?prompt=x"),
+            None
+        );
         assert_eq!(parse_deep_link("waku://new-task?prompt=x"), None);
         assert_eq!(parse_deep_link("not a url"), None);
         assert_eq!(parse_deep_link("goddard://connect?address=ws://x"), None);
@@ -143,9 +146,6 @@ mod tests {
     fn merged_prompt_appends_instead_of_replacing() {
         assert_eq!(merged_prompt("", "do it"), "do it");
         assert_eq!(merged_prompt("   ", "do it"), "do it");
-        assert_eq!(
-            merged_prompt("wip note  ", "do it"),
-            "wip note\n\ndo it"
-        );
+        assert_eq!(merged_prompt("wip note  ", "do it"), "wip note\n\ndo it");
     }
 }

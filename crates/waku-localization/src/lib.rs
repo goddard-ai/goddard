@@ -55,8 +55,7 @@ pub fn translate_args(key: &str, args: &[(&'static str, String)]) -> String {
 /// uses `translate_args` because formatted messages necessarily allocate.
 pub fn translate_cow(key: &'static str) -> Cow<'static, str> {
     install();
-    crate::_rust_i18n_try_translate(&rust_i18n::locale(), key)
-        .unwrap_or(Cow::Borrowed(key))
+    crate::_rust_i18n_try_translate(&rust_i18n::locale(), key).unwrap_or(Cow::Borrowed(key))
 }
 
 /// The locales this catalog ships, sorted.
@@ -162,9 +161,6 @@ mod tests {
             waku_protocol::i18n::translate_in("zh-CN", "settings.general"),
             "通用"
         );
-        assert_eq!(
-            waku_protocol::i18n::translate("missing.key"),
-            "missing.key"
-        );
+        assert_eq!(waku_protocol::i18n::translate("missing.key"), "missing.key");
     }
 }

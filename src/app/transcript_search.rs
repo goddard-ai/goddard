@@ -315,11 +315,7 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> Option<SearchHighlights> {
-        if let Some(search) = self
-            .transcript_search
-            .as_ref()
-            .filter(|search| search.open)
-        {
+        if let Some(search) = self.transcript_search.as_ref().filter(|search| search.open) {
             let matches = search.matches_by_message.get(&message_index)?.clone();
             let active = search
                 .current
@@ -441,18 +437,9 @@ impl Waku {
         } else {
             let regex = literal_find_regex(query);
             let (matches, _) = if matches!(role, MessageRole::User | MessageRole::Assistant) {
-                md::render::markdown_search_matches(
-                    &content,
-                    &regex,
-                    MAX_TRANSCRIPT_SEARCH_MATCHES,
-                )
+                md::render::markdown_search_matches(&content, &regex, MAX_TRANSCRIPT_SEARCH_MATCHES)
             } else {
-                md::render::plain_search_matches(
-                    &content,
-                    0,
-                    &regex,
-                    MAX_TRANSCRIPT_SEARCH_MATCHES,
-                )
+                md::render::plain_search_matches(&content, 0, &regex, MAX_TRANSCRIPT_SEARCH_MATCHES)
             };
             let active = matches.first().cloned();
             (Rc::new(matches), active)

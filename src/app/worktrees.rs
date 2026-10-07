@@ -257,9 +257,11 @@ impl Waku {
                     && !session.is_busy()
                     && matches!(session.workspace, SessionWorkspace::NewWorktree { .. })
                     && self.daemons.session_owner(session.id) == owner
-                    && self.state.projects.iter().any(|project| {
-                        project.id == session.project_id && project.path == path
-                    })
+                    && self
+                        .state
+                        .projects
+                        .iter()
+                        .any(|project| project.id == session.project_id && project.path == path)
             })
             .map(|session| session.id)
             .collect();

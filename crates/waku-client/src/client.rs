@@ -893,9 +893,16 @@ fn run_client(
                             subscriber.send((request_id, parts.clone())).is_ok()
                         });
                     }
-                    ServerMessage::BossBrowseRequested { request_id, session_id, url, title } => {
+                    ServerMessage::BossBrowseRequested {
+                        request_id,
+                        session_id,
+                        url,
+                        title,
+                    } => {
                         inner.boss_browse_subscribers.lock().retain(|subscriber| {
-                            subscriber.send((request_id, session_id, url.clone(), title.clone())).is_ok()
+                            subscriber
+                                .send((request_id, session_id, url.clone(), title.clone()))
+                                .is_ok()
                         });
                     }
                     ServerMessage::FriendSessionClosed {

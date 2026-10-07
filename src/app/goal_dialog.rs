@@ -31,9 +31,7 @@ fn managed_goal_prompt(objective: &str, continuing: bool) -> String {
     } else {
         "Start working toward this goal."
     };
-    format!(
-        "{MANAGED_GOAL_PROMPT_PREFIX}{objective}\n{instruction}{MANAGED_GOAL_PROMPT_SUFFIX}"
-    )
+    format!("{MANAGED_GOAL_PROMPT_PREFIX}{objective}\n{instruction}{MANAGED_GOAL_PROMPT_SUFFIX}")
 }
 
 /// The trailing sentence every managed-goal prompt shares — with the prefix
@@ -1132,9 +1130,9 @@ mod tests {
         let mut nudge = QueuedMessage::new(CONTINUE_PROMPT);
         nudge.hidden = true;
         assert!(!queued_message_is_managed_goal(&nudge));
-        assert!(!queued_message_is_managed_goal(&QueuedMessage::new(format!(
-            "{MANAGED_GOAL_PROMPT_PREFIX}Ship it"
-        ))));
+        assert!(!queued_message_is_managed_goal(&QueuedMessage::new(
+            format!("{MANAGED_GOAL_PROMPT_PREFIX}Ship it")
+        )));
     }
 
     #[test]

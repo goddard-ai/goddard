@@ -798,9 +798,7 @@ impl Waku {
             // can finish the reveal.
             if attempt < 4 {
                 if let Some(list) = self.preview_list_state(relative_path) {
-                    list.scroll_to_reveal_item(md::render::block_index_of_ordinal(
-                        target.ordinal,
-                    ));
+                    list.scroll_to_reveal_item(md::render::block_index_of_ordinal(target.ordinal));
                     cx.notify();
                 }
                 let relative_path = relative_path.to_owned();

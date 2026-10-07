@@ -943,9 +943,8 @@ impl Waku {
                 VoiceGateEvent::MicAccess(false) => {
                     if self.dictation_pending_permission {
                         self.dictation_pending_permission = false;
-                        self.dictation_state = super::DictationState::Error(
-                            tr!("composer.dictation_mic_denied"),
-                        );
+                        self.dictation_state =
+                            super::DictationState::Error(tr!("composer.dictation_mic_denied"));
                     }
                     // No mic means nothing to gate with — speak as today.
                     self.replay_pending_boss_speech(cx);

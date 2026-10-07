@@ -1253,16 +1253,7 @@ fn toggle_keyboard_anchored(
     else {
         return;
     };
-    open_menu(
-        handle,
-        anchor,
-        focus_target,
-        true,
-        false,
-        None,
-        window,
-        cx,
-    );
+    open_menu(handle, anchor, focus_target, true, false, None, window, cx);
 }
 
 /// The shared half of both dropdown surfaces: a trigger that records its bounds

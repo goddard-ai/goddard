@@ -83,8 +83,7 @@ pub trait TranslationCatalog: Sync + Send {
     fn try_translate(&self, locale: &str, key: &str) -> Option<String>;
 }
 
-static CATALOG: std::sync::OnceLock<&'static dyn TranslationCatalog> =
-    std::sync::OnceLock::new();
+static CATALOG: std::sync::OnceLock<&'static dyn TranslationCatalog> = std::sync::OnceLock::new();
 
 /// Install the process's catalog. The first install wins; later calls are
 /// ignored so the registration is idempotent across entry points.
@@ -203,5 +202,4 @@ mod tests {
             AppLanguage::English
         );
     }
-
 }

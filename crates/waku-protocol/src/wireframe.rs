@@ -348,7 +348,11 @@ pub enum WireframeError {
     /// The document exceeds the defensive node bound.
     TooManyNodes { count: usize, max: usize },
     /// A screen's dimensions are non-finite or non-positive.
-    InvalidScreen { name: String, width: f32, height: f32 },
+    InvalidScreen {
+        name: String,
+        width: f32,
+        height: f32,
+    },
 }
 
 impl fmt::Display for WireframeError {
@@ -490,9 +494,10 @@ mod tests {
 
     #[test]
     fn enforces_the_node_bound() {
-        let children = std::iter::repeat_n(r#"{"type":"rect","height":10}"#, MAX_WIREFRAME_NODES + 1)
-            .collect::<Vec<_>>()
-            .join(",");
+        let children =
+            std::iter::repeat_n(r#"{"type":"rect","height":10}"#, MAX_WIREFRAME_NODES + 1)
+                .collect::<Vec<_>>()
+                .join(",");
         let doc = format!(
             r#"{{"version":1,"name":"x","screens":[{{"name":"s","width":100,
                "height":100,"root":{{"type":"frame","children":[{children}]}}}}]}}"#

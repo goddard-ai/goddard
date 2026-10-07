@@ -4601,6 +4601,7 @@ mod tests {
         point, prelude::*, px,
     };
 
+    use super::{ATOM_ICON_SLOT, AtomPaint, TokenClass};
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, InputEvent, Paste, SearchPaint, TextInput,
@@ -4609,7 +4610,6 @@ mod tests {
         previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
         word_range_at,
     };
-    use super::{ATOM_ICON_SLOT, AtomPaint, TokenClass};
 
     struct InputHarness {
         input: Entity<TextInput>,
@@ -4946,9 +4946,11 @@ mod tests {
             div()
                 .w(px(300.))
                 .key_context("ComposerAutocomplete")
-                .on_action(cx.listener(move |_, _: &crate::ui::menu::ConfirmEntry, _, _| {
-                    *confirms.borrow_mut() += 1;
-                }))
+                .on_action(
+                    cx.listener(move |_, _: &crate::ui::menu::ConfirmEntry, _, _| {
+                        *confirms.borrow_mut() += 1;
+                    }),
+                )
                 .child(self.composer.clone())
         }
     }

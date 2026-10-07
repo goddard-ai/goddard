@@ -304,10 +304,7 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
             .split('&')
             .find_map(|pair| pair.strip_prefix("message="))
             .and_then(|value| Uuid::parse_str(value).ok());
-        return TranscriptLinkRoute::Task(
-            Uuid::parse_str(id.trim_end_matches('/')).ok(),
-            message,
-        );
+        return TranscriptLinkRoute::Task(Uuid::parse_str(id.trim_end_matches('/')).ok(), message);
     }
     let Some(path) = markdown_file_link_path(target) else {
         return TranscriptLinkRoute::External;
@@ -1177,11 +1174,7 @@ fn is_wireframe_document(relative_path: &str) -> bool {
 /// Whether the pane draws this `.wireframe.json` as themed elements
 /// rather than text — the experiment flag and the per-file source toggle
 /// both decide.
-fn file_shows_wireframe(
-    editor: &RightPanelFileEditor,
-    relative_path: &str,
-    enabled: bool,
-) -> bool {
+fn file_shows_wireframe(editor: &RightPanelFileEditor, relative_path: &str, enabled: bool) -> bool {
     enabled && !editor.show_source && is_wireframe_document(relative_path)
 }
 
@@ -1475,8 +1468,7 @@ const GOALS_PANEL_SECTION_GAP: f32 = 12.0;
 fn boss_goal_row_height(font_size: f32) -> f32 {
     // Whole-pixel heights keep fractional measurement from accumulating
     // at the preview's cutoff.
-    (GOALS_PANEL_ROW_HEIGHT
-        * waku_client::persistence::sanitized_ui_font_size(font_size)
+    (GOALS_PANEL_ROW_HEIGHT * waku_client::persistence::sanitized_ui_font_size(font_size)
         / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
         .ceil()
         .max(GOALS_PANEL_ROW_HEIGHT)
@@ -1611,12 +1603,9 @@ fn boss_goal_status(
         .map(|goal| goal.status);
     match row.lifecycle {
         EmployeeLifecycle::Queued => (BossGoalBucket::Pending, BossGoalStatus::Queued),
-        EmployeeLifecycle::Dispatching => {
-            (BossGoalBucket::Running, BossGoalStatus::Starting)
-        }
+        EmployeeLifecycle::Dispatching => (BossGoalBucket::Running, BossGoalStatus::Starting),
         EmployeeLifecycle::Expired => {
-            let status = if session.is_some_and(|session| session.status == SessionStatus::Failed)
-            {
+            let status = if session.is_some_and(|session| session.status == SessionStatus::Failed) {
                 BossGoalStatus::Failed
             } else if row.blocker.is_some() {
                 BossGoalStatus::Attention
@@ -1651,9 +1640,7 @@ fn boss_goal_status(
             let status = match goal_status {
                 Some(crate::model::ThreadGoalStatus::Blocked) => BossGoalStatus::Blocked,
                 Some(crate::model::ThreadGoalStatus::Paused) => BossGoalStatus::Paused,
-                Some(crate::model::ThreadGoalStatus::UsageLimited) => {
-                    BossGoalStatus::UsageLimited
-                }
+                Some(crate::model::ThreadGoalStatus::UsageLimited) => BossGoalStatus::UsageLimited,
                 _ => match session.map(|session| session.status) {
                     Some(SessionStatus::Waiting) => BossGoalStatus::NeedsInput,
                     Some(SessionStatus::Connecting) => BossGoalStatus::Starting,
@@ -2032,11 +2019,10 @@ mod tests {
                     .debug_bounds("finished-row-4")
                     .expect("fifth row painted");
                 let toggle = cx.debug_bounds("history-toggle").expect("toggle painted");
-                let row_height =
-                    px((GOALS_PANEL_ROW_HEIGHT * font_size
-                        / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
-                        .ceil()
-                        .max(GOALS_PANEL_ROW_HEIGHT));
+                let row_height = px((GOALS_PANEL_ROW_HEIGHT * font_size
+                    / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
+                    .ceil()
+                    .max(GOALS_PANEL_ROW_HEIGHT));
                 assert!((f32::from(last_row.size.height - row_height)).abs() < 0.1);
                 assert!(
                     (f32::from(viewport.bottom() - last_row.bottom())).abs() < 0.1,
@@ -2774,8 +2760,7 @@ mod tests {
             (BossGoalBucket::Finished, BossGoalStatus::Attention)
         );
         let mut complete_session = session(SessionStatus::Idle);
-        complete_session.thread_goal =
-            Some(thread_goal(crate::model::ThreadGoalStatus::Complete));
+        complete_session.thread_goal = Some(thread_goal(crate::model::ThreadGoalStatus::Complete));
         assert_eq!(
             boss_goal_status(&expired, Some(&complete_session)),
             (BossGoalBucket::Finished, BossGoalStatus::Complete)
@@ -2955,12 +2940,11 @@ impl Waku {
                         // the needle is unknown here, so the flash carries
                         // no glyph washes, just the row.
                         if let Some(message_id) = message_id {
-                            self.pending_transcript_match =
-                                Some(PendingTranscriptMatch {
-                                    session_id: id,
-                                    message_id,
-                                    query: String::new(),
-                                });
+                            self.pending_transcript_match = Some(PendingTranscriptMatch {
+                                session_id: id,
+                                message_id,
+                                query: String::new(),
+                            });
                         }
                         self.select_session(id, cx)
                     }
@@ -3348,7 +3332,11 @@ impl Waku {
                 .and_then(|session| session.planning.as_ref())
                 .map(|planning| planning.plan_file.clone())
         {
-            if self.plan_docs.get(&session_id).is_some_and(PlanDoc::has_content) {
+            if self
+                .plan_docs
+                .get(&session_id)
+                .is_some_and(PlanDoc::has_content)
+            {
                 self.mount_plan_tab(session_id, plan_file);
             } else {
                 let key = self.daemons.session_owner(session_id);
@@ -4789,9 +4777,10 @@ impl Waku {
                                 div()
                                     .px(px(14.0))
                                     .relative()
-                                    .children(queue_bounds.map(
-                                        super::autocomplete::composer_card_bounds_probe,
-                                    ))
+                                    .children(
+                                        queue_bounds
+                                            .map(super::autocomplete::composer_card_bounds_probe),
+                                    )
                                     .child(card),
                             ),
                             None => {
@@ -6230,10 +6219,7 @@ impl Waku {
                 RightPanelSurface::Files,
                 tr!("right_panel.files_description"),
             ),
-            (
-                RightPanelSurface::Diff,
-                tr!("right_panel.diff_description"),
-            ),
+            (RightPanelSurface::Diff, tr!("right_panel.diff_description")),
             (
                 RightPanelSurface::Goals,
                 tr!("right_panel.goals_description"),
@@ -6759,16 +6745,12 @@ impl Waku {
             self.unmount_deliverable_page(cx);
             return None;
         };
-        let deliverable = self
-            .boss_ui
-            .states
-            .get(&key)
-            .and_then(|state| {
-                state
-                    .deliverables
-                    .iter()
-                    .find(|deliverable| deliverable.id == deliverable_id && !deliverable.directory)
-            });
+        let deliverable = self.boss_ui.states.get(&key).and_then(|state| {
+            state
+                .deliverables
+                .iter()
+                .find(|deliverable| deliverable.id == deliverable_id && !deliverable.directory)
+        });
         let Some((deliverable_title, relative_path)) = deliverable.and_then(|deliverable| {
             std::path::Path::new(&deliverable.path)
                 .file_name()
@@ -6840,8 +6822,7 @@ impl Waku {
                 .right_panel_file_editors
                 .get(&relative_path)
                 .is_none_or(|editor| !editor.show_source);
-        let preview =
-            !image_mode && !wireframe_mode && is_markdown && self.state.markdown_preview;
+        let preview = !image_mode && !wireframe_mode && is_markdown && self.state.markdown_preview;
         let body = if image_mode {
             self.render_file_image_preview(&relative_path, cx)
         } else if wireframe_mode {
@@ -7452,8 +7433,7 @@ impl Waku {
         // wireframe never renders the TextInput the focus would land on.
         if focus_pending
             && image_preview::image_format_for_name(relative_path).is_none()
-            && !(self.state.wireframes_experiment_enabled
-                && is_wireframe_document(relative_path))
+            && !(self.state.wireframes_experiment_enabled && is_wireframe_document(relative_path))
         {
             let focus = state.read(cx).focus();
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
@@ -8010,7 +7990,9 @@ impl Waku {
                     .min_h_0()
                     .child(
                         div()
-                            .id(SharedString::from(format!("file-wireframe-{relative_path}")))
+                            .id(SharedString::from(format!(
+                                "file-wireframe-{relative_path}"
+                            )))
                             .size_full()
                             .overflow_y_scroll()
                             .track_scroll(&self.wireframe_preview_scroll_handle)
@@ -8301,7 +8283,10 @@ impl Waku {
         {
             return;
         }
-        let Some(client) = self.daemons.supervisor(key).map(|supervisor| supervisor.client())
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
         else {
             self.plan_docs.insert(
                 session_id,
@@ -8462,18 +8447,16 @@ impl Waku {
         .with_link_handler(self.markdown_link_handler.clone());
         let item_waku = cx.entity().downgrade();
         let document = md::render::standalone_context_menu(
-            div()
-                .size_full()
-                .child(
-                    list(list_state.clone(), move |index, _window, cx| {
-                        item_waku
-                            .update(cx, |this, cx| {
-                                this.render_plan_preview_block(session_id, index, cx)
-                            })
-                            .unwrap_or_else(|_| div().into_any_element())
-                    })
-                    .size_full(),
-                ),
+            div().size_full().child(
+                list(list_state.clone(), move |index, _window, cx| {
+                    item_waku
+                        .update(cx, |this, cx| {
+                            this.render_plan_preview_block(session_id, index, cx)
+                        })
+                        .unwrap_or_else(|_| div().into_any_element())
+                })
+                .size_full(),
+            ),
             &ctx,
         );
 
@@ -8572,8 +8555,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
         let centered = self.panel_fullscreen_active();
-        let metrics =
-            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
         let mut preview_selection = self.plan_preview_selection.clone();
         preview_selection.annotations =
             self.plan_annotations.entry(session_id).or_default().clone();
@@ -8787,18 +8769,16 @@ impl Waku {
         let item_waku = cx.entity().downgrade();
         let item_path = relative_path.to_owned();
         let document = md::render::standalone_context_menu(
-            div()
-                .size_full()
-                .child(
-                    list(list_state.clone(), move |index, _window, cx| {
-                        item_waku
-                            .update(cx, |this, cx| {
-                                this.render_file_preview_block(&item_path, index, centered, cx)
-                            })
-                            .unwrap_or_else(|_| div().into_any_element())
-                    })
-                    .size_full(),
-                ),
+            div().size_full().child(
+                list(list_state.clone(), move |index, _window, cx| {
+                    item_waku
+                        .update(cx, |this, cx| {
+                            this.render_file_preview_block(&item_path, index, centered, cx)
+                        })
+                        .unwrap_or_else(|_| div().into_any_element())
+                })
+                .size_full(),
+            ),
             &ctx,
         );
 
@@ -8903,8 +8883,7 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let metrics =
-            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
+        let metrics = MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size);
         let mut preview_selection = self.file_preview_selection.clone();
         let Some(editor_state) = self
             .right_panel_file_editors
@@ -9827,9 +9806,7 @@ impl Waku {
             .boss_ui
             .identities
             .get(&row.session_id)
-            .and_then(|identity| {
-                self.boss_avatar_image(&identity.avatar_seed, GOALS_PANEL_AVATAR)
-            });
+            .and_then(|identity| self.boss_avatar_image(&identity.avatar_seed, GOALS_PANEL_AVATAR));
         BossGoalPanelRow {
             session_id: row.session_id,
             height: boss_goal_row_height(self.state.ui_font_size),
@@ -9922,7 +9899,8 @@ impl Waku {
                 .then_with(|| a.session_id.cmp(&b.session_id))
         });
         running.sort_by(|a, b| {
-            b.attention.cmp(&a.attention)
+            b.attention
+                .cmp(&a.attention)
                 .then_with(|| a.created_sort.cmp(&b.created_sort))
                 .then_with(|| a.session_id.cmp(&b.session_id))
         });
@@ -9973,10 +9951,7 @@ impl Waku {
             ongoing_items.push(BossGoalItem::Header {
                 section,
                 label,
-                attention: section_rows
-                    .iter()
-                    .filter(|row| row.attention)
-                    .count(),
+                attention: section_rows.iter().filter(|row| row.attention).count(),
                 collapsed,
                 top_gap: !ongoing_items.is_empty(),
             });
@@ -10025,8 +10000,7 @@ impl Waku {
         let ongoing_list = self.boss_ui.goals_ongoing_list.clone();
         if owner_changed || self.boss_ui.goals_finished_signature != Some(finished_signature) {
             self.boss_ui.goals_finished_signature = Some(finished_signature);
-            finished_list
-                .reset_with_uniform_height(visible_finished.len(), px(row_height));
+            finished_list.reset_with_uniform_height(visible_finished.len(), px(row_height));
         }
         if owner_changed || self.boss_ui.goals_ongoing_signature != Some(ongoing_signature) {
             self.boss_ui.goals_ongoing_signature = Some(ongoing_signature);
@@ -10171,8 +10145,8 @@ impl Waku {
                                     } => {
                                         let theme = Theme::current(cx);
                                         boss_goal_section_header(
-                                            *section, label, *attention, *collapsed,
-                                            *top_gap, key, &weak, &theme,
+                                            *section, label, *attention, *collapsed, *top_gap, key,
+                                            &weak, &theme,
                                         )
                                         .into_any_element()
                                     }
@@ -10550,16 +10524,12 @@ impl Waku {
                 }
                 if let Some((deliverable_key, deliverable_id)) = self.boss_ui.command_deliverable
                     && deliverable_key == key
-                    && let Some(deliverable) = self
-                        .boss_ui
-                        .states
-                        .get(&key)
-                        .and_then(|state| {
-                            state
-                                .deliverables
-                                .iter()
-                                .find(|deliverable| deliverable.id == deliverable_id)
-                        })
+                    && let Some(deliverable) = self.boss_ui.states.get(&key).and_then(|state| {
+                        state
+                            .deliverables
+                            .iter()
+                            .find(|deliverable| deliverable.id == deliverable_id)
+                    })
                 {
                     let path = PathBuf::from(&deliverable.path);
                     return if deliverable.directory {

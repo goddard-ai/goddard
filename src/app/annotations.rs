@@ -2357,9 +2357,10 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let hover = self.annotation_hover.as_ref().filter(|hover| {
-            hover.visible && hover.target == AnnotationTarget::Plan(session_id)
-        })?;
+        let hover = self
+            .annotation_hover
+            .as_ref()
+            .filter(|hover| hover.visible && hover.target == AnnotationTarget::Plan(session_id))?;
         if self
             .annotation_editor
             .as_ref()
@@ -2906,10 +2907,7 @@ impl Waku {
                 };
                 if changed {
                     let _ = waku.update(cx, |this, cx| {
-                        this.annotation_hover_changed(
-                            hit.map(|id| (id, target.clone())),
-                            cx,
-                        );
+                        this.annotation_hover_changed(hit.map(|id| (id, target.clone())), cx);
                     });
                     window.refresh();
                 }
@@ -2955,13 +2953,7 @@ impl Waku {
                 }
                 drop(settled);
                 let _ = waku.update(cx, |this, cx| {
-                    this.open_annotation_editor(
-                        press.id,
-                        false,
-                        target.clone(),
-                        window,
-                        cx,
-                    )
+                    this.open_annotation_editor(press.id, false, target.clone(), window, cx)
                 });
             }
         });

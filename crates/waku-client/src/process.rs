@@ -815,9 +815,7 @@ impl DaemonSupervisor {
         // A stuck exposure port must not keep the daemon itself down — the
         // local listener is the product, the exposed one is recoverable
         // through the next reconfigure.
-        if let Err(error) =
-            apply_daemon_exposure(&process.client(), &exposure, startup_deadline)
-        {
+        if let Err(error) = apply_daemon_exposure(&process.client(), &exposure, startup_deadline) {
             eprintln!("could not expose the Goddard daemon: {error:#}");
         }
         let settings = read_settings(&process.client(), remaining_budget(startup_deadline))?;
@@ -841,8 +839,7 @@ impl DaemonSupervisor {
     /// service manager). Dropping the desktop never shuts this daemon down.
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
         let deadline = Instant::now() + CONNECT_ATTEMPT_TIMEOUT;
-        let client =
-            DaemonClient::connect_before(address, token.clone(), Vec::new(), deadline)?;
+        let client = DaemonClient::connect_before(address, token.clone(), Vec::new(), deadline)?;
         let settings = read_settings(&client, remaining_budget(deadline))?;
         let supervisor = Self::from_target(
             DaemonTarget::Remote {
@@ -1367,10 +1364,9 @@ fn probe_daemon_endpoint(address: &str, token: &str, timeout: Duration) -> bool 
             let token = token.to_owned();
             move || {
                 let deadline = Instant::now() + timeout;
-                let answered =
-                    DaemonClient::connect_before(&address, token, Vec::new(), deadline)
-                        .map(|client| client.probe(remaining_budget(deadline)))
-                        .unwrap_or(false);
+                let answered = DaemonClient::connect_before(&address, token, Vec::new(), deadline)
+                    .map(|client| client.probe(remaining_budget(deadline)))
+                    .unwrap_or(false);
                 let _ = done.send(answered);
             }
         });
@@ -1866,15 +1862,14 @@ mod tests {
                                 matches!(message, waku_protocol::ClientMessage::Hello { .. })
                             })
                         {
-                            let reply = serde_json::to_string(
-                                &waku_protocol::ServerMessage::Hello {
+                            let reply =
+                                serde_json::to_string(&waku_protocol::ServerMessage::Hello {
                                     protocol_version: PROTOCOL_VERSION,
                                     daemon_version: "test".into(),
                                     daemon_commit: None,
                                     agent_cli_available: false,
-                                },
-                            )
-                            .unwrap();
+                                })
+                                .unwrap();
                             if socket
                                 .send(tungstenite::Message::Text(reply.into()))
                                 .is_err()
@@ -1927,7 +1922,10 @@ mod tests {
         let seen: Vec<DaemonRecovery> = reports.try_iter().collect();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].outcome, DaemonRecoveryOutcome::Recovered);
-        assert!(!seen[0].replaced, "an in-place reconnect is not a replacement");
+        assert!(
+            !seen[0].replaced,
+            "an in-place reconnect is not a replacement"
+        );
         assert_eq!(supervisor.status(), DaemonStatus::Connected);
     }
 

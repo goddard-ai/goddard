@@ -32,18 +32,16 @@ use super::{
     active_navigation_turn_index, activity_group_is_live, activity_header_title,
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
     assistant_response_footer_time, boss_trigger_burst_label, boss_trigger_entry_label,
-    boss_trigger_entry_tooltip, boss_trigger_group,
-    compact_driver_error, disclosure_leading_space, fenced_code, fitted_file_tree_width,
-    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
-    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    boss_trigger_entry_tooltip, boss_trigger_group, compact_driver_error, disclosure_leading_space,
+    fenced_code, fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
+    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, next_navigation_turn_index,
     paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, prompt_answer_index,
     push_reasoning_delta, push_transcript_activity, response_footer_message_index,
     response_row_turn_id, retain_fading_working_indicator, row_starts_followup_turn,
     send_holds_transcript_position, session_accepts_turn_output, session_is_reapable,
-    settle_stream_segment,
-    should_refresh_branch_after_activity, should_show_navigation_rail,
+    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, sidebar_slide_right_panel_widths, still_archived_sessions,
     tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
@@ -622,8 +620,8 @@ fn session_atom(marker: usize) -> ComposerInlineAtom {
 fn reference_atoms_splice_their_token_and_chip() {
     use crate::input::INLINE_ATOM_MARKER as M;
     use waku_protocol::model::{
-        AtomRefKind, MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN,
-        MESSAGE_ATOM_REF as REF, atom_visible_text,
+        AtomRefKind, MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, MESSAGE_ATOM_REF as REF,
+        atom_visible_text,
     };
     let atom = ComposerInlineAtom {
         marker: 0,
@@ -643,7 +641,10 @@ fn reference_atoms_splice_their_token_and_chip() {
     let display = atom_display_content(&format!("{M}"), &[atom]);
     assert_eq!(
         display,
-        format!("{OPEN}{REF}{kind}Goddard{END}", kind = AtomRefKind::Project.mark())
+        format!(
+            "{OPEN}{REF}{kind}Goddard{END}",
+            kind = AtomRefKind::Project.mark()
+        )
     );
     assert_eq!(atom_visible_text(&display), "Goddard");
 }
@@ -5698,7 +5699,7 @@ fn plan_doc_settles_per_state_and_retries_failures_on_events_not_frames() {
             revision,
             requested,
             content,
-    };
+        };
     let local = waku_client::DaemonKey::Local;
     assert!(doc(3, true, None).settled(local, 3, true));
     assert!(doc(3, true, None).settled(local, 3, false));

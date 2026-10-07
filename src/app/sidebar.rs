@@ -286,10 +286,12 @@ fn sidebar_recent_deliverables(
 ) {
     let mut live = Vec::new();
     let mut dormant = Vec::new();
-    for (key, deliverable) in states
-        .iter()
-        .flat_map(|(key, state)| state.deliverables.iter().map(move |deliverable| (*key, deliverable)))
-    {
+    for (key, deliverable) in states.iter().flat_map(|(key, state)| {
+        state
+            .deliverables
+            .iter()
+            .map(move |deliverable| (*key, deliverable))
+    }) {
         if deliverable.archived_at.is_some() {
             continue;
         }
@@ -305,9 +307,14 @@ fn sidebar_recent_deliverables(
     // Hosts come out of a HashMap, so ties need a stable key or the order
     // would churn with every rebuild. Pinned rows lead the live list the
     // way pinned tasks lead the sidebar.
-    let order = |(key, deliverable): &(waku_client::DaemonKey, &waku_client::boss::BossDeliverable)| {
-        (std::cmp::Reverse(deliverable.updated_at), *key, deliverable.id)
-    };
+    let order =
+        |(key, deliverable): &(waku_client::DaemonKey, &waku_client::boss::BossDeliverable)| {
+            (
+                std::cmp::Reverse(deliverable.updated_at),
+                *key,
+                deliverable.id,
+            )
+        };
     live.sort_by(|a, b| {
         b.1.pinned_at
             .is_some()
@@ -445,8 +452,7 @@ const DOCK_IND_HEIGHT: f32 = 27.72;
 /// the Sketch tile is rotated +10° about its center, and the circle is
 /// off-center inside it.
 const DOCK_IND_ORB: f32 = 22.68;
-const DOCK_IND_CIRCLES: [(f32, f32); 3] =
-    [(2.016, 3.024), (12.096, 0.252), (21.168, 2.016)];
+const DOCK_IND_CIRCLES: [(f32, f32); 3] = [(2.016, 3.024), (12.096, 0.252), (21.168, 2.016)];
 /// The exported orb webps per tile: (path, canvas, x, y). The canvases
 /// are bigger than the orb — baked padding around the gradient art — so
 /// each image is anchored by the offset that lands its painted disc on
@@ -2291,16 +2297,14 @@ impl Waku {
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_shortcuts(window, cx);
                             }))
-                            .on_key_down(
-                                cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                    if !event.keystroke.modifiers.modified()
-                                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                    {
-                                        this.open_shortcuts(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                if !event.keystroke.modifiers.modified()
+                                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                {
+                                    this.open_shortcuts(window, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
                     )
             })
             .when_some(self.render_transfer_indicator(cx), |footer, ring| {
@@ -6499,9 +6503,8 @@ impl Waku {
         let managed_identity = session_surface
             .then(|| {
                 session.and_then(|session| {
-                    self.managed_session_meta(session.id).map(|(_, identity, job_title)| {
-                        (session.id, identity, job_title)
-                    })
+                    self.managed_session_meta(session.id)
+                        .map(|(_, identity, job_title)| (session.id, identity, job_title))
                 })
             })
             .flatten();
@@ -6622,7 +6625,10 @@ impl Waku {
                         .child(match &managed_identity {
                             Some((session_id, identity, job_title)) => self
                                 .render_managed_session_identity(
-                                    *session_id, identity, job_title, cx,
+                                    *session_id,
+                                    identity,
+                                    job_title,
+                                    cx,
                                 ),
                             None => div()
                                 .min_w_0()
@@ -6657,34 +6663,36 @@ impl Waku {
                                 .then_some(employee_job_title)
                                 .flatten()
                                 .map(|job_title| {
-                            div()
-                                .h(px(22.0))
-                                .max_w(px(180.0))
-                                .px(px(6.0))
-                                .rounded(px(8.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .bg(theme.overlay)
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(icon(
-                                    session
-                                        .and_then(|session| {
-                                            self.boss_ui
-                                                .employee_icons
-                                                .get(&session.id)
-                                                .copied()
-                                                .flatten()
-                                        })
-                                        .map(crate::custom_commands::icon_path)
-                                        .unwrap_or_else(|| super::boss::job_title_icon(job_title)),
-                                    11.0,
-                                    theme.text_tertiary,
-                                ))
-                                .child(div().min_w_0().truncate().child(job_title.clone()))
-                        }),
+                                    div()
+                                        .h(px(22.0))
+                                        .max_w(px(180.0))
+                                        .px(px(6.0))
+                                        .rounded(px(8.0))
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.0))
+                                        .bg(theme.overlay)
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(icon(
+                                            session
+                                                .and_then(|session| {
+                                                    self.boss_ui
+                                                        .employee_icons
+                                                        .get(&session.id)
+                                                        .copied()
+                                                        .flatten()
+                                                })
+                                                .map(crate::custom_commands::icon_path)
+                                                .unwrap_or_else(|| {
+                                                    super::boss::job_title_icon(job_title)
+                                                }),
+                                            11.0,
+                                            theme.text_tertiary,
+                                        ))
+                                        .child(div().min_w_0().truncate().child(job_title.clone()))
+                                }),
                         )
                         .children(agent_preset_label.map(|label| {
                             div()
@@ -7487,7 +7495,10 @@ mod tests {
             boss_state_with_deliverables(vec![older.clone(), expired, edge.clone(), fresh.clone()]),
         );
         // A second host's deliverables merge into the same newest-first ordering.
-        states.insert(remote, boss_state_with_deliverables(vec![remote_fresh.clone()]));
+        states.insert(
+            remote,
+            boss_state_with_deliverables(vec![remote_fresh.clone()]),
+        );
         let (live, dormant) = sidebar_recent_deliverables(&states, now);
         assert_eq!(
             live,
@@ -7841,13 +7852,8 @@ mod tests {
         );
 
         let (live, dormant) = sidebar_recent_deliverables(&states, now);
-        let (visible, fold) = visible_group_rows(
-            &live,
-            &dormant,
-            SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
-            0,
-            0,
-        );
+        let (visible, fold) =
+            visible_group_rows(&live, &dormant, SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE, 0, 0);
         // The pin leads the list and eats a visible slot — the sixth live
         // row folds behind "Show more" ahead of the swept tail.
         assert_eq!(visible, live[..SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE]);

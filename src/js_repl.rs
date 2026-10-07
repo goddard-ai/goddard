@@ -1031,8 +1031,7 @@ impl NativeComputerUseClient {
         deadline: Option<Instant>,
     ) -> anyhow::Result<JsonValue> {
         if self.connection.as_mut().is_some_and(|connection| {
-            connection.exited()
-                || !required_launch_grants(&arguments).is_subset(&connection.grants)
+            connection.exited() || !required_launch_grants(&arguments).is_subset(&connection.grants)
         }) {
             // A dead helper cannot accept requests, and a helper launched
             // before this call's grant was approved would fail the SDK's own
@@ -1389,8 +1388,8 @@ impl HelperConnection {
     ) -> Result<JsonValue, HelperFailure> {
         let id = self.next_id;
         self.next_id += 1;
-        let watchdog = RequestWatchdog::start(self.child.id(), deadline)
-            .map_err(HelperFailure::Failed)?;
+        let watchdog =
+            RequestWatchdog::start(self.child.id(), deadline).map_err(HelperFailure::Failed)?;
         let result = (|| -> Result<JsonValue, HelperFailure> {
             write_message(
                 self.input.as_mut().ok_or_else(|| {
@@ -2007,7 +2006,8 @@ for line in sys.stdin:
     #[cfg(unix)]
     #[test]
     fn existing_profile_approval_adds_the_sdk_launch_grant() {
-        let directory = std::env::temp_dir().join(format!("waku-repl-grant-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("waku-repl-grant-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
         let mut client = test_client(&directory);
         let call = json!({

@@ -715,12 +715,7 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(attachment.name.clone()),
-                )
+                .child(div().min_w_0().truncate().child(attachment.name.clone()))
                 .on_click(move |_, _, cx| {
                     let _ = navigate_waku.update(cx, |this, cx| {
                         this.select_session(session_id, cx);
@@ -877,12 +872,7 @@ fn render_sent_message_attachments(
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(icon(icon_path, 11.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .child(attachment.name.clone()),
-                )
+                .child(div().min_w_0().truncate().child(attachment.name.clone()))
                 .on_click(move |_, _, cx| {
                     let _ = click_waku.update(cx, |this, cx| {
                         this.open_path_in_default_app(&click_path, cx);

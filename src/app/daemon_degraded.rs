@@ -177,16 +177,12 @@ impl Waku {
         let card = div()
             .id("daemon-restart-dialog-card")
             .key_context(DIALOG_CONTEXT)
-            .on_action(
-                cx.listener(|waku, _: &ConfirmDaemonRestart, window, cx| {
-                    waku.confirm_daemon_restart(window, cx)
-                }),
-            )
-            .on_action(
-                cx.listener(|waku, _: &DismissDaemonRestart, window, cx| {
-                    waku.dismiss_daemon_restart(window, cx)
-                }),
-            )
+            .on_action(cx.listener(|waku, _: &ConfirmDaemonRestart, window, cx| {
+                waku.confirm_daemon_restart(window, cx)
+            }))
+            .on_action(cx.listener(|waku, _: &DismissDaemonRestart, window, cx| {
+                waku.dismiss_daemon_restart(window, cx)
+            }))
             .tab_group()
             .tab_stop(false)
             .w_full()
@@ -242,7 +238,10 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
-            .child(motion::scrim_enter("daemon-restart-dialog-layer-enter", scrim))
+            .child(motion::scrim_enter(
+                "daemon-restart-dialog-layer-enter",
+                scrim,
+            ))
             .p(px(24.0))
             .flex()
             .items_center()
@@ -251,7 +250,10 @@ impl Waku {
                 MouseButton::Left,
                 cx.listener(|waku, _, window, cx| waku.dismiss_daemon_restart(window, cx)),
             )
-            .child(motion::modal_enter("daemon-restart-dialog-card-enter", card));
+            .child(motion::modal_enter(
+                "daemon-restart-dialog-card-enter",
+                card,
+            ));
         Some(gpui::deferred(layer).with_priority(4).into_any_element())
     }
 }

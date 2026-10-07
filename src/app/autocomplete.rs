@@ -852,7 +852,10 @@ impl Waku {
     /// daemon's automations an ask can pause, resume, or rework. `None`
     /// off boss surfaces — the tokens mean nothing to a plain provider
     /// session.
-    fn mentionable_boss_refs(&self, surface: &composer::ComposerCard) -> Vec<composer::ComposerRef> {
+    fn mentionable_boss_refs(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> Vec<composer::ComposerRef> {
         let Some(key) = self.surface_boss_key(surface) else {
             return Vec::new();
         };
@@ -1286,7 +1289,12 @@ impl Waku {
         marker: usize,
         cx: &mut Context<Self>,
     ) {
-        self.record_atom_for(surface, composer::ComposerAtomKind::Ref(reference), marker, cx);
+        self.record_atom_for(
+            surface,
+            composer::ComposerAtomKind::Ref(reference),
+            marker,
+            cx,
+        );
     }
 
     fn record_atom_for(

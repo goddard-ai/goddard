@@ -181,10 +181,7 @@ mod tests {
         assert_eq!(super::psi_some_avg10(body), Some(24.56));
         // The `full` line must not leak into the read, and a malformed body
         // is `None`, not a stall report.
-        assert_eq!(
-            super::psi_some_avg10("full avg10=99.0\n"),
-            None
-        );
+        assert_eq!(super::psi_some_avg10("full avg10=99.0\n"), None);
         assert_eq!(super::psi_some_avg10("garbage\n"), None);
     }
 

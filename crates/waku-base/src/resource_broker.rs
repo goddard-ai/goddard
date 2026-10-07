@@ -202,16 +202,12 @@ impl Broker {
                     borrowed = true;
                 } else {
                     // Explicit acquisitions by a task that already holds resources cannot wait for expansion.
-                    if ledger
-                        .reservations
-                        .iter()
-                        .any(|r| {
-                            r.task == task
-                                && r.granted_at.is_some()
-                                && !r.released
-                                && !r.resources.is_empty()
-                        })
-                    {
+                    if ledger.reservations.iter().any(|r| {
+                        r.task == task
+                            && r.granted_at.is_some()
+                            && !r.released
+                            && !r.resources.is_empty()
+                    }) {
                         bail!(
                             "task already holds resources; pass parent for subset reuse or release before acquiring a new set"
                         );
@@ -994,18 +990,12 @@ mod tests {
         // Device-free acquire, release, and cancel never spawn xcrun+ps —
         // they report "not probed" instead of a live inventory.
         let status = h.broker.operate(task, acquisition(build(), None)).unwrap();
-        assert_eq!(
-            status.observation_errors,
-            ["device inventory not probed"]
-        );
+        assert_eq!(status.observation_errors, ["device inventory not probed"]);
         let status = h
             .broker
             .operate(task, ResourceOperation::Release { id: id(&status) })
             .unwrap();
-        assert_eq!(
-            status.observation_errors,
-            ["device inventory not probed"]
-        );
+        assert_eq!(status.observation_errors, ["device inventory not probed"]);
         // Status still runs the real (cached) observation — its errors are
         // genuine probe failures, never the skip marker.
         let status = h

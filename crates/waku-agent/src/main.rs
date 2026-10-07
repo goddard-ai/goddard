@@ -208,11 +208,14 @@ fn discovery(args: &[String]) -> anyhow::Result<bool> {
     let content_options = ["--text", "--file", "--json", "--json-file"];
     let Some((marker, index)) = args.iter().enumerate().find_map(|(i, arg)| {
         let is_content = i > 0 && content_options.contains(&args[i - 1].as_str());
-        (!is_content && matches!(arg.as_str(), "--help" | "-h" | "--schema")).then_some((arg.as_str(), i))
+        (!is_content && matches!(arg.as_str(), "--help" | "-h" | "--schema"))
+            .then_some((arg.as_str(), i))
     }) else {
         return Ok(false);
     };
-    let command_index = (1..=index).rev().find(|end| schema()["commands"].get(args[..*end].join(" ")).is_some());
+    let command_index = (1..=index)
+        .rev()
+        .find(|end| schema()["commands"].get(args[..*end].join(" ")).is_some());
     let Some(command_index) = command_index else {
         let attempted = args[..index].join(" ");
         bail!("unknown command `{attempted}`; run `goddard-agent schema` to list command paths");
@@ -963,8 +966,12 @@ struct PersonaUpsertInput {
     icon: Option<Option<CustomCommandIcon>>,
 }
 
-fn deserialize_optional_icon<'de, D>(deserializer: D) -> Result<Option<Option<CustomCommandIcon>>, D::Error>
-where D: serde::Deserializer<'de> {
+fn deserialize_optional_icon<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<CustomCommandIcon>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
     Option::<CustomCommandIcon>::deserialize(deserializer).map(Some)
 }
 
@@ -1109,9 +1116,30 @@ fn run() -> anyhow::Result<()> {
             boss_everyday(&action, arguments.collect())
         }
         "prompt" | "read" => task_everyday(&subcommand, arguments.collect()),
-        "create" if arguments.clone().next().is_some_and(|arg| arg.starts_with("--")) => task_create(arguments.collect()),
-        "map" if arguments.clone().next().is_some_and(|arg| arg.starts_with("--")) => task_map(arguments.collect()),
-        "search" if arguments.clone().next().is_some_and(|arg| arg.starts_with("--")) => task_search(arguments.collect()),
+        "create"
+            if arguments
+                .clone()
+                .next()
+                .is_some_and(|arg| arg.starts_with("--")) =>
+        {
+            task_create(arguments.collect())
+        }
+        "map"
+            if arguments
+                .clone()
+                .next()
+                .is_some_and(|arg| arg.starts_with("--")) =>
+        {
+            task_map(arguments.collect())
+        }
+        "search"
+            if arguments
+                .clone()
+                .next()
+                .is_some_and(|arg| arg.starts_with("--")) =>
+        {
+            task_search(arguments.collect())
+        }
         "models" => {
             if arguments.next().is_some() {
                 bail!("`models` takes no arguments");
@@ -1367,8 +1395,15 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
     let operation = args.first().cloned().unwrap_or_default();
     if matches!(
         group,
-        "rename" | "avatar" | "speak" | "report-blocker" | "open" | "browse" | "terminal" | "stop"
-        | "resume"
+        "rename"
+            | "avatar"
+            | "speak"
+            | "report-blocker"
+            | "open"
+            | "browse"
+            | "terminal"
+            | "stop"
+            | "resume"
     ) {
         args.insert(0, group.to_owned());
         return boss_admin_leaf(&args);
@@ -1440,21 +1475,50 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             Ok(())
         }
         ("persona", "upsert") => {
-            let (_, opts) = flags(args, &["id", "name", "file", "text", "json", "json-file"], false)?;
+            let (_, opts) = flags(
+                args,
+                &["id", "name", "file", "text", "json", "json-file"],
+                false,
+            )?;
             let is_new = opts.contains_key("new");
             let id = opts.get("id");
             if is_new == id.is_some() {
                 bail!("choose exactly one of --new or --id ID");
             }
-            let persona_id = id.map(|id| id.parse().context("invalid persona ID")).transpose()?.unwrap_or_else(Uuid::nil);
+            let persona_id = id
+                .map(|id| id.parse().context("invalid persona ID"))
+                .transpose()?
+                .unwrap_or_else(Uuid::nil);
             let advanced = opts.contains_key("json") || opts.contains_key("json-file");
             let persona = if advanced {
-                if opts.contains_key("file") || opts.contains_key("text") || opts.contains_key("name") { bail!("--json/--json-file cannot be combined with --name, --text, or --file"); }
-                let input: PersonaUpsertInput = serde_json::from_str(&json_input(&opts)?).context("invalid persona configuration")?;
-                waku_protocol::boss::BossPersonaUpsert { id: persona_id, name: input.name, markdown: input.markdown, pinned_files: input.pinned_files, permissions: input.permissions, icon: input.icon }
+                if opts.contains_key("file")
+                    || opts.contains_key("text")
+                    || opts.contains_key("name")
+                {
+                    bail!("--json/--json-file cannot be combined with --name, --text, or --file");
+                }
+                let input: PersonaUpsertInput = serde_json::from_str(&json_input(&opts)?)
+                    .context("invalid persona configuration")?;
+                waku_protocol::boss::BossPersonaUpsert {
+                    id: persona_id,
+                    name: input.name,
+                    markdown: input.markdown,
+                    pinned_files: input.pinned_files,
+                    permissions: input.permissions,
+                    icon: input.icon,
+                }
             } else {
-                let name = opts.get("name").ok_or_else(|| anyhow!("persona upsert requires --name"))?;
-                waku_protocol::boss::BossPersonaUpsert { id: persona_id, name: name.clone(), markdown: raw_input(&opts)?, pinned_files: Vec::new(), permissions: Default::default(), icon: None }
+                let name = opts
+                    .get("name")
+                    .ok_or_else(|| anyhow!("persona upsert requires --name"))?;
+                waku_protocol::boss::BossPersonaUpsert {
+                    id: persona_id,
+                    name: name.clone(),
+                    markdown: raw_input(&opts)?,
+                    pinned_files: Vec::new(),
+                    permissions: Default::default(),
+                    icon: None,
+                }
             };
             print_boss(boss_request(Op::UpsertPersona { persona })?)
         }
@@ -1526,9 +1590,15 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                         _ => bail!("usage: boss memory scan [BUCKET|--project PROJECT] QUERY"),
                     },
                     "zoom" => match (pos.len(), project) {
-                        (2, Some(project)) => json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
-                        (2, None) => json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
-                        (3, None) => json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?}),
+                        (2, Some(project)) => {
+                            json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
+                        }
+                        (2, None) => {
+                            json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
+                        }
+                        (3, None) => {
+                            json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?})
+                        }
                         _ => {
                             bail!("usage: boss memory zoom [BUCKET|--project PROJECT] START END")
                         }
@@ -1548,7 +1618,11 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             }
             let dry_run = options
                 .get("dry-run")
-                .map(|value| value.parse::<bool>().context("--dry-run must be true or false"))
+                .map(|value| {
+                    value
+                        .parse::<bool>()
+                        .context("--dry-run must be true or false")
+                })
                 .transpose()?
                 .unwrap_or(true);
             let operation = waku_protocol::boss::MemoryOperation::MigrateLegacy {
@@ -1581,8 +1655,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 bail!("usage: boss plan items PLAN --json-file ITEMS.json");
             }
             let items: Vec<waku_protocol::boss::PlanItemInput> =
-                serde_json::from_str(&json_input(&opts)?)
-                    .context("invalid work item list")?;
+                serde_json::from_str(&json_input(&opts)?).context("invalid work item list")?;
             print_boss(boss_request(Op::UpdatePlanItems {
                 plan: pos[0].clone(),
                 items,
@@ -1677,8 +1750,8 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 bail!("usage: boss employee plan EMPLOYEE_ID --json JSON");
             }
             let id: Uuid = pos[0].parse().context("invalid employee ID")?;
-            let input: serde_json::Value = serde_json::from_str(&json_input(&opts)?)
-                .context("invalid setPlan payload")?;
+            let input: serde_json::Value =
+                serde_json::from_str(&json_input(&opts)?).context("invalid setPlan payload")?;
             let mut action = serde_json::Map::new();
             action.insert("type".into(), json!("setPlan"));
             for key in ["plan", "item"] {
@@ -2072,35 +2145,110 @@ fn task_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
 }
 
 fn task_create(args: Vec<String>) -> anyhow::Result<()> {
-    let (_, opts) = flags(args, &["project", "workspace", "base-branch", "provider", "model", "title", "effort", "service-tier", "context-window", "text", "file"], false)?;
-    let project = opts.get("project").ok_or_else(|| anyhow!("create requires --project PATH"))?;
+    let (_, opts) = flags(
+        args,
+        &[
+            "project",
+            "workspace",
+            "base-branch",
+            "provider",
+            "model",
+            "title",
+            "effort",
+            "service-tier",
+            "context-window",
+            "text",
+            "file",
+        ],
+        false,
+    )?;
+    let project = opts
+        .get("project")
+        .ok_or_else(|| anyhow!("create requires --project PATH"))?;
     let prompt = raw_input(&opts)?;
-    if prompt.trim().is_empty() { bail!("prompt must not be empty"); }
+    if prompt.trim().is_empty() {
+        bail!("prompt must not be empty");
+    }
     let workspace = opts.get("workspace").map(String::as_str).unwrap_or("local");
-    let workspace: AgentWorkspace = match workspace { "local" => AgentWorkspace::Local, "worktree" => AgentWorkspace::Worktree, _ => bail!("--workspace must be local or worktree") };
+    let workspace: AgentWorkspace = match workspace {
+        "local" => AgentWorkspace::Local,
+        "worktree" => AgentWorkspace::Worktree,
+        _ => bail!("--workspace must be local or worktree"),
+    };
     let base_branch = opts.get("base-branch").cloned();
-    if workspace == AgentWorkspace::Worktree && base_branch.is_none() { bail!("--base-branch is required with --workspace worktree"); }
+    if workspace == AgentWorkspace::Worktree && base_branch.is_none() {
+        bail!("--base-branch is required with --workspace worktree");
+    }
     let command = Command::AgentCreateSession {
         provider: opts.get("provider").map(|p| provider_kind(p)).transpose()?,
-        model: opts.get("model").cloned(), project: project.into(), workspace, base_branch,
-        prompt, title: opts.get("title").cloned(), reasoning_effort: opts.get("effort").cloned(),
-        service_tier: opts.get("service-tier").cloned(), context_window: opts.get("context-window").cloned(),
+        model: opts.get("model").cloned(),
+        project: project.into(),
+        workspace,
+        base_branch,
+        prompt,
+        title: opts.get("title").cloned(),
+        reasoning_effort: opts.get("effort").cloned(),
+        service_tier: opts.get("service-tier").cloned(),
+        context_window: opts.get("context-window").cloned(),
     };
     match connect()?.request(request_session_id(), Uuid::nil(), command)? {
-        ResponsePayload::AgentSessionCreated { session_id } => { println!("{}", json!({"task_id":session_id})); Ok(()) }
+        ResponsePayload::AgentSessionCreated { session_id } => {
+            println!("{}", json!({"task_id":session_id}));
+            Ok(())
+        }
         other => bail!("unexpected response: {other:?}"),
     }
 }
 
 fn task_map(args: Vec<String>) -> anyhow::Result<()> {
-    let (_, opts) = flags(args, &["text", "file", "path", "intent", "max-tokens", "anchors", "known-paths"], false)?;
+    let (_, opts) = flags(
+        args,
+        &[
+            "text",
+            "file",
+            "path",
+            "intent",
+            "max-tokens",
+            "anchors",
+            "known-paths",
+        ],
+        false,
+    )?;
     let query = raw_input(&opts)?;
-    let intent: ProjectMapIntent = opts.get("intent").map(|v| serde_json::from_value(json!(v)).context("--intent must be locate, understand, or change")).transpose()?.unwrap_or_default();
-    let anchors = opts.get("anchors").map(|v| serde_json::from_str(v).context("--anchors must be a JSON string array")).transpose()?.unwrap_or_default();
-    let known_paths = opts.get("known-paths").map(|v| serde_json::from_str(v).context("--known-paths must be a JSON path array")).transpose()?.unwrap_or_default();
-    let command = Command::AgentProjectMap { query, path: opts.get("path").map(PathBuf::from), max_tokens: opts.get("max-tokens").map(|v|v.parse().context("--max-tokens must be an integer")).transpose()?, intent, anchors, known_paths };
+    let intent: ProjectMapIntent = opts
+        .get("intent")
+        .map(|v| {
+            serde_json::from_value(json!(v))
+                .context("--intent must be locate, understand, or change")
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let anchors = opts
+        .get("anchors")
+        .map(|v| serde_json::from_str(v).context("--anchors must be a JSON string array"))
+        .transpose()?
+        .unwrap_or_default();
+    let known_paths = opts
+        .get("known-paths")
+        .map(|v| serde_json::from_str(v).context("--known-paths must be a JSON path array"))
+        .transpose()?
+        .unwrap_or_default();
+    let command = Command::AgentProjectMap {
+        query,
+        path: opts.get("path").map(PathBuf::from),
+        max_tokens: opts
+            .get("max-tokens")
+            .map(|v| v.parse().context("--max-tokens must be an integer"))
+            .transpose()?,
+        intent,
+        anchors,
+        known_paths,
+    };
     match connect()?.request(request_session_id(), Uuid::nil(), command)? {
-        ResponsePayload::AgentProjectMap { result } => { println!("{}", serde_json::to_string_pretty(&result)?); Ok(()) }
+        ResponsePayload::AgentProjectMap { result } => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
         other => bail!("unexpected response: {other:?}"),
     }
 }
@@ -2108,10 +2256,27 @@ fn task_map(args: Vec<String>) -> anyhow::Result<()> {
 fn task_search(args: Vec<String>) -> anyhow::Result<()> {
     let (_, opts) = flags(args, &["text", "file", "last-turns"], false)?;
     let query = raw_input(&opts)?;
-    if query.trim().is_empty() { bail!("search query must not be empty"); }
-    let last_turns = opts.get("last-turns").map(|v|v.parse().context("--last-turns must be a positive integer")).transpose()?;
-    match connect()?.request(request_session_id(), Uuid::nil(), Command::AgentSearchSessions { query, last_turns })? {
-        ResponsePayload::AgentSessionSearch { hits } => { println!("{}", serde_json::to_string_pretty(&json!({"results":hits,"session_link_hint":session_link_hint()}))?); Ok(()) }
+    if query.trim().is_empty() {
+        bail!("search query must not be empty");
+    }
+    let last_turns = opts
+        .get("last-turns")
+        .map(|v| v.parse().context("--last-turns must be a positive integer"))
+        .transpose()?;
+    match connect()?.request(
+        request_session_id(),
+        Uuid::nil(),
+        Command::AgentSearchSessions { query, last_turns },
+    )? {
+        ResponsePayload::AgentSessionSearch { hits } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &json!({"results":hits,"session_link_hint":session_link_hint()})
+                )?
+            );
+            Ok(())
+        }
         other => bail!("unexpected response: {other:?}"),
     }
 }
@@ -2358,8 +2523,13 @@ fn parse_boss_operation(payload: &str) -> anyhow::Result<waku_protocol::boss::Bo
     if matches!(operation, "view" | "roster" | "context") {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
-        enum NoInputBossOperation { View, Roster, Context }
-        let _: NoInputBossOperation = serde_json::from_str(payload).context("no-input Boss operation accepts no fields")?;
+        enum NoInputBossOperation {
+            View,
+            Roster,
+            Context,
+        }
+        let _: NoInputBossOperation =
+            serde_json::from_str(payload).context("no-input Boss operation accepts no fields")?;
     }
     serde_json::from_str(payload)
         .context("`boss` takes a typed JSON operation; run `goddard-agent schema`")
@@ -2909,9 +3079,19 @@ mod tests {
         assert!(!commands.contains_key("boss file"));
         assert!(!commands.contains_key("boss employee stop"));
         for (path, leaf) in &commands {
-            assert_eq!(leaf["command"].as_str(), Some(path.as_str()), "schema command path mismatch");
-            assert!(leaf["inputs"].is_object(), "{path} must describe its inputs");
-            assert!(leaf["outputs"].is_object(), "{path} must describe its output");
+            assert_eq!(
+                leaf["command"].as_str(),
+                Some(path.as_str()),
+                "schema command path mismatch"
+            );
+            assert!(
+                leaf["inputs"].is_object(),
+                "{path} must describe its inputs"
+            );
+            assert!(
+                leaf["outputs"].is_object(),
+                "{path} must describe its output"
+            );
             assert!(leaf["example"].is_string(), "{path} must have an example");
             assert!(
                 leaf["inputs"].get("input").is_none(),

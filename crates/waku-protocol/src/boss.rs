@@ -289,7 +289,11 @@ impl ExpiryCause {
     pub fn reports(self) -> bool {
         matches!(
             self,
-            Self::Failed | Self::ExitedMidTurn | Self::Restarted | Self::ParkedWork | Self::UnansweredAsk
+            Self::Failed
+                | Self::ExitedMidTurn
+                | Self::Restarted
+                | Self::ParkedWork
+                | Self::UnansweredAsk
         )
     }
 
@@ -1146,9 +1150,7 @@ impl BossState {
                 let linked = |item: Option<Uuid>| {
                     self.employees
                         .iter()
-                        .filter(|entry| {
-                            entry.plan_id == Some(plan.id) && entry.item_id == item
-                        })
+                        .filter(|entry| entry.plan_id == Some(plan.id) && entry.item_id == item)
                         .collect::<Vec<_>>()
                 };
                 let tagged = self
@@ -1175,9 +1177,7 @@ impl BossState {
                         entry.plan_id == Some(plan.id)
                             && entry
                                 .item_id
-                                .is_none_or(|item| {
-                                    plan.items.iter().all(|known| known.id != item)
-                                })
+                                .is_none_or(|item| plan.items.iter().all(|known| known.id != item))
                     })
                     .collect::<Vec<_>>();
                 let employee_activity = self
@@ -1461,7 +1461,9 @@ pub enum BossOperation {
     /// so the transcript, workspace, and provider cursor all survive.
     /// Same caller gate as `control`: the human, the boss, or the
     /// employee's supervisor. A record that is not expired refuses.
-    Resume { session_id: Uuid },
+    Resume {
+        session_id: Uuid,
+    },
     /// An employee flags that its job needs supervisor attention — a
     /// blocker, a decision, or a failure. The report interrupts the
     /// supervisor's running turn when the runtime can take it and stays on
