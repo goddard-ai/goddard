@@ -1,1 +1,0 @@
-- Keep composer and transcript chips together when text wraps, so chip labels remain readable on narrow lines.
