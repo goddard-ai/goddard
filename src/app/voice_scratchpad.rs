@@ -4454,11 +4454,11 @@ impl Waku {
             .on_click({
                 let weak = weak.clone();
                 move |event: &ClickEvent, window, cx| {
-                    // Enter is the scratchpad's send wherever focus sits —
-                    // the pill's keyboard activation is Space alone, so the
-                    // synthesized Enter click must not fire the action.
-                    if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
-                    {
+                    // A keyboard click is synthesized on the focused pill's
+                    // Enter/Space key-up — Space already fired the action on
+                    // key-down and Enter is the scratchpad's send, so neither
+                    // may fire it here.
+                    if matches!(event, ClickEvent::Keyboard(_)) {
                         return;
                     }
                     let _ = weak.update(cx, |this, cx| action(this, window, cx));
@@ -4745,11 +4745,10 @@ impl Waku {
                         .when_some(landing_ghost, |row, ghost| row.child(ghost)),
                 )
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                    // A focused row's keyboard Enter arrives as this
-                    // synthesized click — while the scratchpad is up Enter
-                    // sends the transcript instead of annotating.
-                    if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
-                    {
+                    // A keyboard click is the focused row's Enter/Space
+                    // key-up arriving a second time — Enter sends the
+                    // transcript and Space already annotated on key-down.
+                    if matches!(event, ClickEvent::Keyboard(_)) {
                         return;
                     }
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
@@ -4884,9 +4883,8 @@ impl Waku {
                     )
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         // Same rule as the paragraph row — a keyboard
-                        // Enter clicks here; Enter sends instead.
-                        if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
-                        {
+                        // click is a key-up re-fire, not a new annotate.
+                        if matches!(event, ClickEvent::Keyboard(_)) {
                             return;
                         }
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
@@ -4976,8 +4974,14 @@ impl Waku {
             // and drops the editing caret — focus goes home to the
             // composer so typing resumes the draft. A drag that ended over
             // open space is no click-out: the gesture only meant to
-            // select.
+            // select. Neither is a keyboard click — the focused surface
+            // synthesizes one on Enter/Space key-up, which is the send
+            // chord or edit text arriving a second time, not a pointer
+            // leaving the transcript.
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                if matches!(event, ClickEvent::Keyboard(_)) {
+                    return;
+                }
                 if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                     if scratchpad_click_was_drag(event, &scratchpad.selection) {
                         return;
@@ -6683,6 +6687,57 @@ mod tests {
         assert!(!transcript.caret_typing);
         assert!(transcript.caret.is_none());
         assert!(!transcript.insert_at_caret("y"));
+    }
+
+    #[test]
+    fn stream_events_leave_the_typing_caret_standing() {
+        // Dictation keeps streaming under an edit — partials, finals, an
+        // "okay next" advance, the silence auto-stop's solidify, and a
+        // cleanup rewrite can all land while a caret stands. None may
+        // retire or re-home it: an event that dropped the caret hands the
+        // next keystroke to the composer draft.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("alpha beta");
+        let spans = vec![md::selection::Span {
+            key: md::selection::TextKey::new("vs-p-0", 0),
+            range: 6..10,
+            text: "alpha beta".into(),
+            block_break: false,
+            copy: Rc::default(),
+        }];
+        transcript.caret = transcript.apply_selection_edit(&spans, "");
+        transcript.caret_typing = transcript.caret.is_some();
+        assert!(transcript.insert_at_caret("gamma"));
+        assert_eq!(transcript.paragraphs[0].text, "alpha gamma");
+        // The caret's own paragraph is the append point — interim and
+        // finalized speech keep landing past it.
+        transcript.set_interim("more".to_owned());
+        transcript.append_finalized("more words");
+        transcript.set_interim("and".to_owned());
+        transcript.solidify_interim();
+        assert_eq!(transcript.paragraphs[0].text, "alpha gamma more words and");
+        // A spoken "okay next" advances the append point off the caret's
+        // paragraph; a cleanup rewrite then shifts the caret's offset.
+        transcript.append_finalized("okay next");
+        let raw = transcript.paragraphs[0].text.clone();
+        assert!(transcript.apply_cleanup(
+            CleanTarget::Node(ScratchpadNode::Paragraph(0)),
+            0,
+            &raw,
+            "Alpha, gamma more words and.",
+            true,
+        ));
+        assert!(transcript.caret_typing);
+        assert!(matches!(
+            transcript.caret,
+            Some(CaretPos {
+                node: ScratchpadNode::Paragraph(0),
+                offset: 13,
+            })
+        ));
+        // And it still types where the user left it.
+        assert!(transcript.insert_at_caret("!"));
+        assert_eq!(transcript.paragraphs[0].text, "Alpha, gamma !more words and.");
     }
 
     #[test]
