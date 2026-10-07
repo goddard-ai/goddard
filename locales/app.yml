@@ -2736,6 +2736,8 @@ session.reverting_message_title:
   en: Reverting Message…
 session.voice_briefing_generate:
   en: Generate voice briefing
+session.voice_briefing_generated:
+  en: Voice briefing generated — replay
 session.voice_briefing_generating:
   en: Briefing…
 session.voice_briefing_cancel:

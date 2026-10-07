@@ -389,7 +389,13 @@ pub(super) fn render_message_footer(
                         14.0,
                         footer_color,
                     ))
-                    .tooltip(Tooltip::text(tr_cow!("session.voice_briefing_generate")))
+                    .tooltip(Tooltip::text(
+                        if matches!(voice_briefing, Some(VoiceBriefingFooter::Generated)) {
+                            tr_cow!("session.voice_briefing_generated")
+                        } else {
+                            tr_cow!("session.voice_briefing_generate")
+                        },
+                    ))
                     .on_activation_app(move |_, cx| {
                         let _ = brief_waku.update(cx, |this, cx| {
                             this.request_voice_briefing(message_id, cx);
