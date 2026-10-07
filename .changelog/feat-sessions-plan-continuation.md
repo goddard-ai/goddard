@@ -1,0 +1,1 @@
+- Employees working on an approved plan now wake their supervisor when they finish, including successful goal work, with the plan queue and blockers needed to continue.

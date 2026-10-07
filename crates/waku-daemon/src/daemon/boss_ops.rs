@@ -1298,9 +1298,11 @@ impl WakuBackend {
         // The work kind the summon fixed decides whether a clean finish
         // reports: an errand's lands with the supervisor (escalating to
         // the boss when the supervisor cannot take prompts), while a
-        // goal's stays silent — the record lists on the client's Goals
-        // page instead. An interruption reports for either kind, and so
-        // does a settle that left prompts parked or an ask unanswered.
+        // unlinked goal's stays silent — the record lists on the client's
+        // Goals page instead. Approved plan work always wakes its supervisor
+        // with the durable queue so it can review and advance the chain.
+        // An interruption reports for either kind, and so does a settle
+        // that left prompts parked or an ask unanswered.
         // Cancelled queued tickets skip `finishing` and arrive already expired.
         // Keep their cancellation transcript and teardown, but do not wake
         // the supervisor for work it cancelled before launch. Running stops
@@ -1309,8 +1311,10 @@ impl WakuBackend {
         let cancelled_while_queued = employee.cancelled
             && employee.ticket.is_some()
             && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Expired;
+        let continuation = self.boss.plan_continuation_context(&employee);
         let reports = !cancelled_while_queued
             && (employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
+                || continuation.is_some()
                 || employee.blocker.is_some()
                 || failed
                 || interrupted);
@@ -1384,6 +1388,9 @@ impl WakuBackend {
             prompt.push_str(&format!(
                 " Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}"
             ));
+            if let Some(continuation) = continuation {
+                prompt.push_str(&continuation);
+            }
             // The marker carries the settle's verdict: interruption-class
             // causes mark `interrupted`; failure still outranks a flagged
             // blocker when the settle itself was clean.

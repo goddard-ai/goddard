@@ -1649,6 +1649,60 @@ impl BossService {
         Ok(flagged.unwrap())
     }
 
+    /// A durable execution snapshot for a plan completion wake. The ordered
+    /// items and approved document are the dispatch brief; settled assignments
+    /// remain evidence to review, never implicit item completion or retry.
+    pub fn plan_continuation_context(&self, employee: &BossEmployee) -> Option<String> {
+        let state = self.document();
+        let plan = state.planning.iter().find(|plan| {
+            Some(plan.id) == employee.plan_id && plan.finalized_at.is_some() && !plan.terminal()
+        })?;
+        let linked: Vec<_> = state
+            .employees
+            .iter()
+            .chain(state.retired_employees.iter())
+            .filter(|entry| entry.plan_id == Some(plan.id))
+            .map(|entry| {
+                serde_json::json!({
+                    "sessionId": entry.session_id,
+                    "itemId": entry.item_id,
+                    "state": entry.lifecycle(),
+                    "blocker": entry.blocker,
+                    "expiry": entry.expiry,
+                })
+            })
+            .collect();
+        let head = plan
+            .items
+            .iter()
+            .find(|item| item.state == PlanItemState::ToDo);
+        let next = head
+            .filter(|_| {
+                !state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .any(|entry| entry.plan_id == Some(plan.id) && !entry.expired)
+            })
+            .filter(|item| {
+                !state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .any(|entry| entry.plan_id == Some(plan.id) && entry.item_id == Some(item.id))
+            })
+            .map(|item| item.id);
+        let snapshot = serde_json::json!({
+            "plan": plan,
+            "employees": linked,
+            "nextDispatchableItemId": next,
+            "firstUnresolvedItemId": head.map(|item| item.id),
+        });
+        Some(format!(
+            "\n\nApproved plan continuation: {snapshot}\nReview the finished employee's evidence and record the item outcome explicitly. Continue this approved plan without waiting for a human nudge: dispatch the first unresolved item once its preceding work is done or dropped. Derive its bounded assignment from its title and the approved plan document (readFile plan.planFile); tag the summon with this plan and item. Existing live assignments must settle first; expired assignments require review, not automatic redispatch. Keep failed or blocked work unresolved until its cause is resolved; resume or replace it only after that resolution. When every item is done or dropped and all linked work has settled, record the plan outcome. Escalate only decisions requiring the user. Refresh plan state before dispatch; this snapshot may have aged while queued."
+        ))
+    }
+
     /// Where an employee's report lands: its live supervisor, escalating to
     /// the boss session when the supervisor cannot take prompts — expired,
     /// retired from the roster, archived after finalization, or never an
@@ -7652,6 +7706,72 @@ mod memory_op_tests {
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn plan_continuation_preserves_order_and_requires_review_after_restart() {
+        let root = std::env::temp_dir().join(format!("boss-plan-continuation-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let mut plan = test_plan("plans/chain.md");
+        plan.finalized_at = Some(1);
+        let plan_id = add_plan(&service, plan);
+        let plan = service
+            .update_plan_items(
+                Some(boss),
+                "chain.md",
+                vec![
+                    PlanItemInput {
+                        id: None,
+                        title: "Build".into(),
+                    },
+                    PlanItemInput {
+                        id: None,
+                        title: "Verify".into(),
+                    },
+                ],
+            )
+            .unwrap();
+        let mut employee = service
+            .prepare_employee(
+                boss,
+                service.document().personas[0].id,
+                "Build".into(),
+                None,
+                EmployeeGoal::Goal,
+                None,
+            )
+            .unwrap();
+        employee.plan_id = Some(plan_id);
+        employee.item_id = Some(plan.items[0].id);
+        employee.blocker = Some("Resolve the build failure".into());
+        employee.set_lifecycle(EmployeeLifecycle::Expired, 1);
+        service.add_employee(employee.clone()).unwrap();
+        // Retirement releases the identity, not unresolved plan evidence.
+        assert_eq!(service.retire_expired(u64::MAX).unwrap().len(), 1);
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        let snapshot = service.plan_continuation_context(&employee).unwrap();
+        assert!(snapshot.contains("\"nextDispatchableItemId\":null"));
+        assert!(snapshot.contains("Resolve the build failure"));
+        assert!(snapshot.contains("plans/chain.md"));
+        // A completion report cannot itself advance the queue. Only the
+        // supervisor's explicit resolution exposes the next ordered unit.
+        service
+            .set_plan_item_state(
+                Some(boss),
+                "chain.md",
+                plan.items[0].id,
+                PlanItemState::Done,
+            )
+            .unwrap();
+        let snapshot = service.plan_continuation_context(&employee).unwrap();
+        assert!(snapshot.contains(&format!(
+            "\"nextDispatchableItemId\":\"{}\"",
+            plan.items[1].id
+        )));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -4446,6 +4446,48 @@ fn a_parked_report_keeps_its_trigger_through_the_mirror() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Approved plan work reports even when a clean goal would otherwise be silent.
+#[test]
+fn a_plan_goal_finish_wakes_the_idle_boss_once_with_the_queue() {
+    let root = std::env::temp_dir().join(format!("boss-plan-wake-{}", Uuid::new_v4()));
+    let (backend, _supervisor, employee_id, parent, _child) = employee_finish_fixture(&root);
+    let mut plan = boss_plan("plans/chain.md", &["Build", "Verify"]);
+    plan.finalized_at = Some(1);
+    let plan_id = plan.id;
+    let item_id = plan.items[0].id;
+    backend.boss.add_plan(plan).unwrap();
+    backend
+        .boss
+        .set_employee_plan(
+            employee_id,
+            Some(Some(plan_id.to_string())),
+            Some(Some(item_id)),
+        )
+        .unwrap();
+    for _ in 0..2 {
+        backend
+            .finish_boss_employee(
+                employee_id,
+                false,
+                waku_protocol::boss::EmployeeSettle::TurnFinished,
+            )
+            .unwrap();
+    }
+    let prompts = parent.prompts.lock();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("Approved plan continuation:"));
+    assert!(prompts[0].contains("plans/chain.md"));
+    assert!(prompts[0].contains("Verify"));
+    assert!(prompts[0].contains("\"nextDispatchableItemId\":null"));
+    assert!(prompts[0].contains("Tests passed"));
+    assert_eq!(
+        backend.boss.document().planning[0].items[0].state,
+        waku_protocol::boss::PlanItemState::ToDo
+    );
+    drop(prompts);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// The kind fixed at summon — not any persona grant — is what makes a
 /// clean finish report: the same fixture, tagged `errand` instead of
 /// `goal`, delivers its transcript index to the supervisor.
