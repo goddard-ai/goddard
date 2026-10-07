@@ -1,0 +1,1 @@
+- Mermaid code fences in the transcript now render as diagrams; invalid or oversized diagrams keep their selectable source code.

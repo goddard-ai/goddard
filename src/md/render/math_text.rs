@@ -3,7 +3,7 @@
 //! runs. Plain paragraphs continue to use GPUI's ordinary StyledText fast path.
 
 use super::*;
-use crate::md::math;
+use crate::md::{math, mermaid};
 use crate::ui::menu::MenuItem;
 use gpui::{
     App, AvailableSpace, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId,
@@ -24,14 +24,36 @@ pub struct MathData {
     pub(super) spans: Vec<MathSpan>,
     cache: RefCell<LayoutCache>,
     active_link: Rc<Cell<Option<usize>>>,
+    pub(super) mermaid: bool,
 }
 
 impl MathData {
     pub fn new(spans: Vec<MathSpan>) -> Self {
         Self {
             spans,
+            mermaid: false,
             cache: RefCell::new(LayoutCache::default()),
             active_link: Rc::new(Cell::new(None)),
+        }
+    }
+
+    // Treat a diagram as one atomic source span, reusing math selection,
+    // width fitting and the shaped-source fallback while work is pending.
+    pub fn mermaid(source: Arc<str>) -> Self {
+        let mut data = Self::new(vec![MathSpan {
+            range: 0..source.len(),
+            latex: source,
+            display: true,
+        }]);
+        data.mermaid = true;
+        data
+    }
+
+    fn copy_label(&self) -> String {
+        if self.mermaid {
+            tr!("common.copy_code")
+        } else {
+            tr!("common.copy_expression")
         }
     }
 }
@@ -40,6 +62,7 @@ impl MathData {
 struct LayoutCache {
     style: Option<(f32, f32, f32)>,
     keys: Vec<math::Key>,
+    diagram_key: Option<mermaid::Key>,
     metrics: Vec<Option<math::Metrics>>,
     tokens: Vec<Token>,
     flow: Option<(f32, TextAlign, Rc<Flow>)>,
@@ -303,7 +326,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
             if let Some(index) = hit.formula_at(event.position) {
                 menu.set_context_items(vec![copy_expression_item(
                     data.spans[index].latex.clone(),
-                    tr!("common.copy_expression"),
+                    data.copy_label(),
                 )]);
             } else if let Some(items) = &commit_items
                 && let Some(sha) = super::commit_ref_at(
@@ -341,7 +364,7 @@ pub(super) fn element(flat: Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement
             let items = if indexes.len() == 1 {
                 vec![copy_expression_item(
                     data.spans[indexes[0]].latex.clone(),
-                    tr!("common.copy_expression"),
+                    data.copy_label(),
                 )]
             } else if !indexes.is_empty() {
                 // Keyboard invocation can choose every expression in this
@@ -451,6 +474,14 @@ impl Element for MathText {
         let mut cache = data.cache.borrow_mut();
         if cache.style != Some((font_size, line_height, scale)) {
             cache.style = Some((font_size, line_height, scale));
+            cache.diagram_key = data.mermaid.then(|| {
+                mermaid::Key::new(
+                    data.spans[0].latex.clone(),
+                    font_size,
+                    scale,
+                    self.palette.is_dark,
+                )
+            });
             cache.keys = data
                 .spans
                 .iter()
@@ -468,7 +499,11 @@ impl Element for MathText {
             cache.flow = None;
             cache.intrinsic_flow = None;
         }
-        let images = math::request(&cache.keys, window.current_view(), cx);
+        let images = if let Some(key) = &cache.diagram_key {
+            mermaid::request(std::slice::from_ref(key), window.current_view(), cx)
+        } else {
+            math::request(&cache.keys, window.current_view(), cx)
+        };
         let metrics = images
             .iter()
             .map(|image| image.as_ref().map(|image| image.metrics))
@@ -489,7 +524,7 @@ impl Element for MathText {
         drop(cache);
         let flat = self.flat.clone();
         let geometry = self.geometry.clone();
-        let alignment = if data.spans.len() == 1 && data.spans[0].display {
+        let alignment = if !data.mermaid && data.spans.len() == 1 && data.spans[0].display {
             TextAlign::Center
         } else {
             style.text_align

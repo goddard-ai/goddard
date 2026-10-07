@@ -2354,7 +2354,11 @@ fn text_element_with_selection(
 }
 
 fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
-    if ctx.math_enabled && flat.math.is_some() {
+    if flat
+        .math
+        .as_ref()
+        .is_some_and(|data| ctx.math_enabled || data.mermaid)
+    {
         return math_text::element(flat.clone(), key, ctx);
     }
     let runs = match ctx
@@ -3561,7 +3565,9 @@ fn render_code_block_toned(
             annotation_refs: Vec::new(),
             commit_refs: Vec::new(),
             file_refs: Vec::new(),
-            math: None,
+            math: language
+                .filter(|tag| tag.eq_ignore_ascii_case("mermaid"))
+                .map(|_| Rc::new(math_text::MathData::mermaid(Arc::from(code)))),
             // The fence wraps only a whole-block grab; a partial selection
             // copies raw code.
             copy: Rc::new(CopySpec {
@@ -4943,6 +4949,32 @@ mod tests {
         );
         assert_runs_tile(&empty);
         assert!(empty.runs.is_empty());
+    }
+
+    #[test]
+    fn mermaid_fences_dispatch_to_diagrams_without_changing_copy_source() {
+        for language in ["mermaid", "Mermaid", "rust"] {
+            let source = "flowchart LR\n A[Start] --> B[Done]";
+            let mut view = MarkdownView::new();
+            view.set_text(&format!("```{language}\n{source}\n```"), false);
+            let palette = palette();
+            let ctx = Ctx::new(
+                "test",
+                &palette,
+                Metrics::BODY,
+                TranscriptSelection::default(),
+            );
+            assert!(markdown(&view, &ctx).is_some());
+            let flats = view.flats.borrow();
+            let flat = flats.values().next().unwrap();
+            assert_eq!(flat.text.as_ref(), source);
+            assert_eq!(
+                flat.math.as_ref().is_some_and(|data| data.mermaid),
+                language != "rust"
+            );
+            assert_eq!(flat.copy.prefix.as_ref(), format!("```{language}\n"));
+            assert_eq!(flat.copy.suffix.as_ref(), "\n```");
+        }
     }
 
     #[test]

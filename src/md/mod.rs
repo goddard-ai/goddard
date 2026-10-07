@@ -1,6 +1,7 @@
 mod escape;
 pub mod highlight;
 mod math;
+mod mermaid;
 pub mod mend;
 pub mod parser;
 mod prompt_refs;

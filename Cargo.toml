@@ -88,6 +88,8 @@ ratex-parser = "=0.1.14"
 ratex-layout = "=0.1.14"
 ratex-types = "=0.1.14"
 ratex-svg = { version = "=0.1.14", features = ["embed-fonts"] }
+# Native Mermaid SVG rendering; GPUI handles rasterization.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 regex = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 posthog-rs = { version = "0.27.0", default-features = false, features = ["async-client"] }
