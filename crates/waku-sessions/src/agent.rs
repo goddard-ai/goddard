@@ -482,6 +482,18 @@ impl AgentState {
             .is_some_and(|pending| pending.iter().any(|steer| steer.context.is_some()))
     }
 
+    /// Inspect steers awaiting acceptance without consuming their provenance.
+    pub fn has_pending_steer_matching(
+        &self,
+        session_id: Uuid,
+        matches: impl Fn(&AgentPrompt) -> bool,
+    ) -> bool {
+        self.pending_steers
+            .lock()
+            .get(&session_id)
+            .is_some_and(|pending| pending.iter().any(matches))
+    }
+
     /// Remember a steer injection so the provider's `steerAccepted` echo can
     /// be attributed to its sender.
     pub fn record_pending_steer(&self, session_id: Uuid, prompt: AgentPrompt) {

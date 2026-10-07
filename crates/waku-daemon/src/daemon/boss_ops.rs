@@ -1353,11 +1353,13 @@ impl WakuBackend {
                 Some(ExpiryCause::Stopped) => "was stopped and expired".to_owned(),
                 _ => "has finished and expired".to_owned(),
             };
-            let blocker = employee
-                .blocker
-                .as_deref()
-                .map(|note| format!(" It flagged a blocker: {note}"))
-                .unwrap_or_default();
+            let blocker = match employee.blocker.as_deref() {
+                Some(note) if self.employee_blocker_reported(supervisor, session_id, note)? => {
+                    " It flagged a blocker.".to_owned()
+                }
+                Some(note) => format!(" It flagged a blocker: {note}"),
+                None => String::new(),
+            };
             let mut prompt = format!(
                 "Employee {} ({session_id}) {detail}.{ordinal}{blocker}",
                 employee.identity.name
@@ -1429,6 +1431,56 @@ impl WakuBackend {
         // This finish may have resolved a wave — drain its notice.
         self.deliver_wave_notifications();
         Ok(())
+    }
+
+    /// The report may be in the transcript, parked durably, or awaiting a
+    /// steer's echo. Reuse those delivery records so expiry does not quote
+    /// the same blocker again, including after a daemon restart.
+    fn employee_blocker_reported(
+        &self,
+        supervisor: Uuid,
+        employee: Uuid,
+        blocker: &str,
+    ) -> anyhow::Result<bool> {
+        use crate::model::{ReportTrigger, ReportTriggerKind};
+        let normalize = |text: &str| {
+            text.trim()
+                .trim_end_matches(['.', '!', '?'])
+                .split_whitespace()
+                .map(str::to_lowercase)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let blocker = normalize(blocker);
+        let matches = |content: &str, trigger: Option<&ReportTrigger>| {
+            trigger.is_some_and(|trigger| {
+                trigger.employee == employee && trigger.kind == ReportTriggerKind::Blocker
+            }) && content
+                .split_once("reports a blocker that needs your attention: ")
+                .is_some_and(|(_, report)| normalize(report) == blocker)
+        };
+        if self.agent.has_pending_steer_matching(supervisor, |steer| {
+            matches(&steer.prompt, steer.report_trigger.as_ref())
+        }) {
+            return Ok(true);
+        }
+        let mut state = self.task_state.lock();
+        let Some(session) = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == supervisor)
+        else {
+            return Ok(false);
+        };
+        self.task_store.hydrate(session)?;
+        Ok(session
+            .messages
+            .iter()
+            .any(|message| matches(&message.content, message.report_trigger.as_ref()))
+            || session
+                .queued_messages
+                .iter()
+                .any(|queued| matches(&queued.content, queued.report_trigger.as_ref())))
     }
 
     /// `control`'s `setWorkspace` action: one operation that stops the

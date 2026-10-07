@@ -4551,6 +4551,10 @@ fn report_blocker_interrupts_the_supervisor_and_marks_the_finish() {
         .unwrap();
     assert!(parent_capture.prompts.lock().is_empty());
     assert!(backend.agent.has_queued(supervisor));
+    let finish = backend.agent.pop_queued(supervisor).unwrap();
+    assert!(finish.prompt.contains("It flagged a blocker."));
+    assert!(!finish.prompt.contains("build is red"));
+    assert!(finish.prompt.contains("Its transcript index follows."));
     // And only an employee may flag: the boss itself cannot.
     assert!(
         backend
@@ -4564,6 +4568,92 @@ fn report_blocker_interrupts_the_supervisor_and_marks_the_finish() {
             .is_err()
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_reported_blocker_is_not_quoted_again_at_expiry() {
+    use waku_protocol::boss::{BossOperation, EmployeeSettle};
+    for (queued, final_blocker, repeated) in [
+        (false, "build is red", true),
+        (false, " BUILD   is red. ", true),
+        (true, "build is red", true),
+        (false, "release needs approval", false),
+    ] {
+        let root = std::env::temp_dir().join(format!("boss-blocker-dedupe-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee, parent, _child) = employee_finish_fixture(&root);
+        if queued {
+            // A streaming employee's report parks durably until its turn settles.
+            backend
+                .agent
+                .note_driver_event(employee, &DriverEvent::TurnStarted);
+        }
+        backend
+            .handle_boss_operation(
+                Some(employee),
+                BossOperation::ReportBlocker {
+                    message: "build is red".into(),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        if queued {
+            assert!(parent.prompts.lock().is_empty());
+            assert!(backend.agent.has_queued(supervisor));
+        } else {
+            assert_eq!(parent.prompts.lock().len(), 1);
+        }
+        backend
+            .boss
+            .set_employee_blocker(employee, final_blocker.into())
+            .unwrap();
+        // Force the finish path to consult the durable delivery record rather
+        // than relying on loaded transcript messages (as after a restart).
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == supervisor)
+                .unwrap();
+            session.messages.clear();
+            session.queued_messages.clear();
+            session.detail_loaded = false;
+        }
+        backend
+            .finish_boss_employee(employee, false, EmployeeSettle::TurnFinished)
+            .unwrap();
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        let finish = session
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .chain(
+                session
+                    .queued_messages
+                    .iter()
+                    .map(|message| message.content.as_str()),
+            )
+            .find(|content| content.contains("has finished and expired"))
+            .expect("expiry still reports its transcript index");
+        assert!(finish.contains("Its transcript index follows."));
+        if repeated {
+            assert!(finish.contains("It flagged a blocker."), "{finish}");
+            assert!(!finish.contains("build is red"), "{finish}");
+            assert!(!finish.contains("It flagged a blocker:"), "{finish}");
+        } else {
+            assert!(
+                finish.contains("It flagged a blocker: release needs approval"),
+                "{finish}"
+            );
+        }
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 /// An expiring employee must tell attached clients its runtime ended —
