@@ -1,0 +1,1 @@
+- When a task can no longer accept an immediate steer, the composer keeps the prompt in the draft instead of silently adding it to the follow-up queue.
