@@ -1264,14 +1264,18 @@ impl Waku {
             cx.notify();
             return;
         }
-        // Over the boss chat the terminal first earns a project: the
-        // switcher lists the registered projects, and the pick becomes the
-        // terminal's root. No registered projects — the chord falls back
-        // to the usual guess below.
-        if self.session_surface_active()
-            && self.boss_chat_key().is_some()
-            && self.open_terminal_project_switcher(window, cx)
-        {
+        // Over a boss-owned surface the terminal first earns a project:
+        // the switcher lists the registered projects, and the pick becomes
+        // the terminal's root. The question reaches past the chat itself —
+        // the boss's page, a planning session, or a deliverable's preview
+        // page all live in the boss-minted project and answer it the same
+        // way. No registered projects — the chord falls back to the usual
+        // guess below.
+        let boss_owned = self.boss_ui.page.is_some()
+            || (self.session_surface_active()
+                && (self.boss_chat_key().is_some()
+                    || self.selected_surface_boss_key().is_some()));
+        if boss_owned && self.open_terminal_project_switcher(window, cx) {
             cx.notify();
             return;
         }
