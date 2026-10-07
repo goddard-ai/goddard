@@ -1,0 +1,1 @@
+- Employee sessions now offer the same right-panel tabs as regular tasks, while Goals stays exclusive to boss chat.

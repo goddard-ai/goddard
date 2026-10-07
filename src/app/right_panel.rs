@@ -1313,6 +1313,10 @@ fn managed_panel_surface(surface: &RightPanelSurface) -> bool {
     )
 }
 
+fn session_panel_surface(surface: &RightPanelSurface) -> bool {
+    !matches!(surface, RightPanelSurface::Goals)
+}
+
 pub(super) fn reusable_surface_index(
     surfaces: &[RightPanelSurface],
     requested: &RightPanelSurface,
@@ -2041,6 +2045,30 @@ mod tests {
                 assert_eq!(toggle.origin.y, viewport.bottom() + px(4.0));
             }
         }
+    }
+
+    #[test]
+    fn session_panels_allow_normal_surfaces_but_hide_goals() {
+        let session_surfaces = [
+            RightPanelSurface::Browser(Uuid::nil()),
+            RightPanelSurface::Terminal(Uuid::nil()),
+            RightPanelSurface::BackgroundWork {
+                key: BackgroundWorkKey::new(BackgroundWorkKind::Process, "process"),
+                title: String::new(),
+            },
+            RightPanelSurface::Files,
+            RightPanelSurface::Diff,
+            RightPanelSurface::File("README.md".into()),
+            RightPanelSurface::GitHub(Uuid::nil()),
+            RightPanelSurface::Goals,
+        ];
+        assert_eq!(
+            session_surfaces
+                .iter()
+                .map(session_panel_surface)
+                .collect::<Vec<_>>(),
+            [true, true, true, true, true, true, true, false],
+        );
     }
 
     #[test]
@@ -3239,11 +3267,17 @@ impl Waku {
     }
 
     /// What the current owner lets into its strip: sessions and main-area
-    /// terminals take everything, a managed session takes only file
-    /// previews, webviews, and side chats, a project page takes its issue/PR
-    /// details and files rooted at the project, and pages without their own
-    /// surface take nothing.
+    /// terminals take everything except Boss-only goals, employees take the
+    /// same surfaces as other sessions except goals, a project page takes its
+    /// issue/PR details and files rooted at the project, and pages without
+    /// their own surface take nothing.
     fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
+        let owner = self.active_right_panel_owner();
+        if let RightPanelOwner::Session(id) = owner {
+            if self.boss_ui.managed.contains(&id) {
+                return session_panel_surface(surface);
+            }
+        }
         if self.managed_panel_owner() {
             return match surface {
                 RightPanelSurface::Goals => {
@@ -3252,9 +3286,9 @@ impl Waku {
                 _ => managed_panel_surface(surface),
             };
         }
-        match self.active_right_panel_owner() {
+        match owner {
             RightPanelOwner::Session(_) | RightPanelOwner::Terminal(_) | RightPanelOwner::Bare => {
-                true
+                session_panel_surface(surface)
             }
             RightPanelOwner::Projects(_) => matches!(
                 surface,
