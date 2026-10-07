@@ -81,13 +81,16 @@ function fixture(options: { attached?: boolean } = {}) {
             composer_drafts_experiment_enabled: false,
             sandbox_experiment_enabled: false, sandbox_default_enabled: false,
             keep_awake: false, qa_branch: 'qa', auto_prompts: [],
+            boss_experiment_enabled: false, boss_rotation_disabled: false,
+            boss_rotation_context_threshold: 0.8,
+            wireframes_experiment_enabled: false,
           } };
         case 'loadTaskState':
           return {
             type: 'taskState',
             defaultCwd: '/repo',
             projectlessRoot: null,
-            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0, temporary: false, starred: false }],
+            projects: [{ id: 'project', name: 'Project', path: '/repo', created_at: 0, temporary: false, starred: false, submissions_enabled: false }],
             sessions: [history],
           };
         case 'probeProvider':
@@ -163,13 +166,13 @@ describe('mobile runtime history', () => {
       .toMatchObject({ content: 'Review changes carefully', display_content: '/review changes' });
   });
 
-  test('queues a steer while assistant text is streaming', async () => {
+  test('rejects a steer while assistant text is streaming', async () => {
     const f = fixture();
     f.queryClient.setQueryData(f.key, f.history);
     await f.runtime.attachSession(f.history);
-    await f.runtime.steerPrompt(f.current(), 'Follow up');
+    await expect(f.runtime.steerPrompt(f.current(), 'Follow up')).rejects.toThrow('no longer accept a steer');
     expect(f.commands.some((command) => command.type === 'steer')).toBe(false);
-    expect(f.current().queued_messages?.at(-1)?.content).toBe('Follow up');
+    expect(f.current().queued_messages?.at(-1)?.content).not.toBe('Follow up');
   });
 
   test('queues expanded command content without starting another provider turn', async () => {
