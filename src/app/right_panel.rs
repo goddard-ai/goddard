@@ -1460,17 +1460,23 @@ fn tab_scroll_fade(
     .w(px(TAB_SCROLL_FADE_WIDTH))
 }
 
-/// The Goals panel's compact row geometry: a two-line base row, a small
-/// third line only for attention reasons, and a finished-history viewport
-/// bounded to five rows or 45% of the panel body while ongoing work exists —
-/// Show more expands history into the panel's flexible share instead.
-const GOALS_PANEL_ROW_HEIGHT: f32 = 48.0;
-const GOALS_PANEL_REASON_HEIGHT: f32 = 16.0;
+/// The Goals panel's compact row geometry: uniform two-line rows and a
+/// finished-history viewport bounded to five complete rows while ongoing
+/// work exists. Show more expands history into the panel's flexible share.
+const GOALS_PANEL_ROW_HEIGHT: f32 = 50.0;
 const GOALS_PANEL_RECENT_LIMIT: usize = 5;
-const GOALS_PANEL_FINISHED_MAX_HEIGHT: f32 = 240.0;
-const GOALS_PANEL_FINISHED_HEIGHT_FRACTION: f32 = 0.45;
 const GOALS_PANEL_AVATAR: f32 = 16.0;
 const GOALS_PANEL_SECTION_GAP: f32 = 12.0;
+
+fn boss_goal_row_height(font_size: f32) -> f32 {
+    // Whole-pixel heights keep fractional measurement from accumulating
+    // at the preview's cutoff.
+    (GOALS_PANEL_ROW_HEIGHT
+        * waku_client::persistence::sanitized_ui_font_size(font_size)
+        / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
+        .ceil()
+        .max(GOALS_PANEL_ROW_HEIGHT)
+}
 
 /// The coarse execution bucket that decides which Goals section a row
 /// renders under — the specific [`BossGoalStatus`] stays on the row.
@@ -1550,8 +1556,7 @@ impl BossGoalStatus {
         }
     }
 
-    /// Whether the status earns the row's small reason line and counts
-    /// toward a section's "needs attention" tally.
+    /// Whether the status counts toward a section's "needs attention" tally.
     fn attention(self) -> bool {
         matches!(
             self,
@@ -1666,6 +1671,7 @@ fn boss_goal_status(
 /// virtualized builder touches only prepared data.
 struct BossGoalPanelRow {
     session_id: Uuid,
+    height: f32,
     bucket: BossGoalBucket,
     status: BossGoalStatus,
     title: String,
@@ -1674,8 +1680,7 @@ struct BossGoalPanelRow {
     project_label: String,
     worktree: bool,
     updated_label: Option<String>,
-    reason: Option<String>,
-    reason_attention: bool,
+    attention: bool,
     aria: String,
     updated_sort: u64,
     created_sort: u64,
@@ -1788,7 +1793,7 @@ fn boss_goal_section_header(
 /// The compact two-line goal row: status icon and task title, then an
 /// indented detail line — project folder and name, a "·" separator, the
 /// employee's avatar and name, and the worktree fork hugging the trailing
-/// relative update time. Attention states add a small reason line.
+/// relative update time.
 /// Activation defers to `on_activation_app` so the list item builder never
 /// re-leases Waku.
 #[track_caller]
@@ -1825,17 +1830,14 @@ fn boss_goal_panel_row_element(
                 .into_any_element()
         },
     );
-    let reason_color = if row.reason_attention {
-        row.status.marker().1.color(&theme)
-    } else {
-        theme.text_tertiary
-    };
     let session_id = row.session_id;
     let activate_waku = waku.clone();
     div()
         .id(SharedString::from(format!("boss-goal-{session_id}")))
         .when(row.destination, |element| element.tab_index(0))
         .w_full()
+        .h(px(row.height))
+        .flex_none()
         .px(px(8.0))
         .py(px(7.0))
         .rounded(px(8.0))
@@ -1938,25 +1940,108 @@ fn boss_goal_panel_row_element(
                     )
                 }),
         )
-        .when_some(row.reason.clone(), |element, reason| {
-            element.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .truncate()
-                    .pl(px(18.0))
-                    .text_size(sp(11.5))
-                    .line_height(sp(14.0))
-                    .text_color(reason_color)
-                    .child(reason),
-            )
-        })
 }
 
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FinishedGoalsLayoutHarness {
+        ongoing: bool,
+    }
+
+    impl Render for FinishedGoalsLayoutHarness {
+        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let row_height = boss_goal_row_height(f32::from(window.rem_size()));
+            let rows = ListState::new(5, gpui::ListAlignment::Top, px(row_height))
+                .with_uniform_item_height(px(row_height));
+            div()
+                .w(px(400.0))
+                .h(px(700.0))
+                .flex()
+                .flex_col()
+                .child(div().h(px(28.0)).flex_none())
+                .child(
+                    div()
+                        .when(self.ongoing, |element| {
+                            element.flex_none().h(px(5.0 * row_height))
+                        })
+                        .when(!self.ongoing, |element| {
+                            element.flex_1().min_h_0().max_h(px(5.0 * row_height))
+                        })
+                        .debug_selector(|| "finished-viewport".into())
+                        .child(
+                            list(rows, move |index, _, cx| {
+                                let row = Arc::new(BossGoalPanelRow {
+                                    session_id: Uuid::from_u128(index as u128 + 1),
+                                    height: row_height,
+                                    bucket: BossGoalBucket::Finished,
+                                    status: BossGoalStatus::Attention,
+                                    title: "A completed goal with a long task title".into(),
+                                    employee_name: "Dinah".into(),
+                                    avatar: None,
+                                    project_label: "Goddard".into(),
+                                    worktree: true,
+                                    updated_label: Some("23h".into()),
+                                    attention: true,
+                                    aria: "Open task".into(),
+                                    updated_sort: 0,
+                                    created_sort: 0,
+                                    rank_sort: 0,
+                                    destination: false,
+                                });
+                                boss_goal_panel_row_element(&row, &WeakEntity::new_invalid(), cx)
+                                    .debug_selector(move || format!("finished-row-{index}"))
+                                    .into_any_element()
+                            })
+                            .size_full(),
+                        ),
+                )
+                .child(
+                    div()
+                        .h(px(28.0))
+                        .mt(px(4.0))
+                        .flex_none()
+                        .debug_selector(|| "history-toggle".into()),
+                )
+                .when(self.ongoing, |element| {
+                    element.child(div().flex_1().min_h_0())
+                })
+        }
+    }
+
+    #[gpui::test]
+    fn finished_preview_keeps_the_fifth_row_above_show_more(cx: &mut gpui::TestAppContext) {
+        for ongoing in [false, true] {
+            let (_, cx) = cx.add_window_view(|_, _| FinishedGoalsLayoutHarness { ongoing });
+            for font_size in [11.0, 14.0, 20.0] {
+                cx.update(|window, _| {
+                    window.set_rem_size(px(font_size));
+                    window.refresh();
+                });
+                cx.run_until_parked();
+                let viewport = cx
+                    .debug_bounds("finished-viewport")
+                    .expect("viewport painted");
+                let last_row = cx
+                    .debug_bounds("finished-row-4")
+                    .expect("fifth row painted");
+                let toggle = cx.debug_bounds("history-toggle").expect("toggle painted");
+                let row_height =
+                    px((GOALS_PANEL_ROW_HEIGHT * font_size
+                        / waku_client::persistence::DEFAULT_UI_FONT_SIZE)
+                        .ceil()
+                        .max(GOALS_PANEL_ROW_HEIGHT));
+                assert!((f32::from(last_row.size.height - row_height)).abs() < 0.1);
+                assert!(
+                    (f32::from(viewport.bottom() - last_row.bottom())).abs() < 0.1,
+                    "ongoing={ongoing}, font_size={font_size}, viewport={viewport:?}, last_row={last_row:?}",
+                );
+                assert_eq!(toggle.origin.y, viewport.bottom() + px(4.0));
+            }
+        }
+    }
 
     #[test]
     fn transcript_file_links_route_by_the_active_workspace() {
@@ -3114,6 +3199,7 @@ impl Waku {
         }
         let owner = self.active_right_panel_owner();
         if owner == self.right_panel_live_owner {
+            self.initialize_boss_goals_panel(cx);
             return;
         }
         let parked = self.take_active_right_panel_state();
@@ -3122,6 +3208,21 @@ impl Waku {
         let incoming = RightPanelSessionState::take_or_closed(&mut self.right_panel_states, owner);
         self.right_panel_live_owner = owner;
         self.restore_right_panel_state(incoming, cx);
+        self.initialize_boss_goals_panel(cx);
+    }
+
+    /// Apply the boss chat's default once per daemon, leaving explicit tabs
+    /// and later visibility choices intact. Boss pages do not claim it.
+    fn initialize_boss_goals_panel(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
+            return;
+        };
+        if !self.boss_ui.goals_panel_initialized.insert(key) {
+            return;
+        }
+        if self.right_panel_surfaces.is_empty() && !self.git_panel_visible {
+            self.add_right_panel_surface(RightPanelSurface::Goals, true, cx);
+        }
     }
 
     /// Whether the live strip belongs to a boss-managed session — an
@@ -9438,18 +9539,6 @@ impl Waku {
             }
         });
         let destination = session.is_some();
-        let reason = if row.lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued {
-            // A queued wait reason is not a routine row line.
-            None
-        } else if let Some(blocker) = &row.blocker {
-            Some(blocker.clone())
-        } else if status.attention() {
-            Some(status_label.clone())
-        } else if !destination {
-            Some(tr!("boss.goals_task_unavailable"))
-        } else {
-            None
-        };
         let avatar = self
             .boss_ui
             .identities
@@ -9459,6 +9548,7 @@ impl Waku {
             });
         BossGoalPanelRow {
             session_id: row.session_id,
+            height: boss_goal_row_height(self.state.ui_font_size),
             bucket,
             status,
             title: title.clone(),
@@ -9467,8 +9557,7 @@ impl Waku {
             project_label,
             worktree: worktree_name.is_some(),
             updated_label,
-            reason,
-            reason_attention: row.blocker.is_some() || status.attention(),
+            attention: row.blocker.is_some() || status.attention(),
             aria: tr!(
                 "boss.goals_open_task",
                 title = title,
@@ -9549,9 +9638,7 @@ impl Waku {
                 .then_with(|| a.session_id.cmp(&b.session_id))
         });
         running.sort_by(|a, b| {
-            b.reason
-                .is_some()
-                .cmp(&a.reason.is_some())
+            b.attention.cmp(&a.attention)
                 .then_with(|| a.created_sort.cmp(&b.created_sort))
                 .then_with(|| a.session_id.cmp(&b.session_id))
         });
@@ -9604,7 +9691,7 @@ impl Waku {
                 label,
                 attention: section_rows
                     .iter()
-                    .filter(|row| row.reason.is_some())
+                    .filter(|row| row.attention)
                     .count(),
                 collapsed,
                 top_gap: !ongoing_items.is_empty(),
@@ -9613,19 +9700,21 @@ impl Waku {
                 ongoing_items.extend(section_rows.iter().cloned().map(BossGoalItem::Row));
             }
         }
-        // Reset a viewport only when its item sequence or a row's height
+        // Reset a viewport when its item sequence or scaled row height
         // changes — count-preserving reorders reset too, but title and
         // timestamp ticks never do.
+        let row_height = boss_goal_row_height(self.state.ui_font_size);
         let finished_signature = {
             let mut hasher = DefaultHasher::new();
+            row_height.to_bits().hash(&mut hasher);
             for row in &visible_finished {
                 row.session_id.hash(&mut hasher);
-                row.reason.is_some().hash(&mut hasher);
             }
             hasher.finish()
         };
         let ongoing_signature = {
             let mut hasher = DefaultHasher::new();
+            row_height.to_bits().hash(&mut hasher);
             for item in &ongoing_items {
                 match item {
                     BossGoalItem::Header {
@@ -9642,7 +9731,6 @@ impl Waku {
                     BossGoalItem::Row(row) => {
                         1u8.hash(&mut hasher);
                         row.session_id.hash(&mut hasher);
-                        row.reason.is_some().hash(&mut hasher);
                     }
                 }
             }
@@ -9654,11 +9742,11 @@ impl Waku {
         if owner_changed || self.boss_ui.goals_finished_signature != Some(finished_signature) {
             self.boss_ui.goals_finished_signature = Some(finished_signature);
             finished_list
-                .reset_with_uniform_height(visible_finished.len(), px(GOALS_PANEL_ROW_HEIGHT));
+                .reset_with_uniform_height(visible_finished.len(), px(row_height));
         }
         if owner_changed || self.boss_ui.goals_ongoing_signature != Some(ongoing_signature) {
             self.boss_ui.goals_ongoing_signature = Some(ongoing_signature);
-            ongoing_list.reset_with_uniform_height(ongoing_items.len(), px(GOALS_PANEL_ROW_HEIGHT));
+            ongoing_list.reset_with_uniform_height(ongoing_items.len(), px(row_height));
         }
         self.boss_ui.goals_list_owner = Some(key);
         let offline = matches!(key, waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
@@ -9692,22 +9780,12 @@ impl Waku {
                 &theme,
             ));
             if !finished_collapsed {
-                // The preview caps at five rows or 45% of the panel body
-                // while ongoing work exists; expanding hands history the
+                // The preview reserves five complete rows while ongoing
+                // work exists; expanding hands history the
                 // larger flex share, bounded by its real height, so Show
                 // more visibly reveals older rows instead of only
                 // lengthening a hidden scroll area.
-                let estimate: f32 = visible_finished
-                    .iter()
-                    .map(|row| {
-                        GOALS_PANEL_ROW_HEIGHT
-                            + if row.reason.is_some() {
-                                GOALS_PANEL_REASON_HEIGHT
-                            } else {
-                                0.0
-                            }
-                    })
-                    .sum();
+                let estimate = visible_finished.len() as f32 * row_height;
                 let ongoing_exists = !ongoing_items.is_empty();
                 let scrollbar = self.boss_ui.goals_finished_scrollbar.clone();
                 let list_state = finished_list.clone();
@@ -9717,10 +9795,7 @@ impl Waku {
                     div()
                         .relative()
                         .when(ongoing_exists && !history_expanded, |element| {
-                            element
-                                .flex_none()
-                                .h(px(estimate.min(GOALS_PANEL_FINISHED_MAX_HEIGHT)))
-                                .max_h(gpui::relative(GOALS_PANEL_FINISHED_HEIGHT_FRACTION))
+                            element.flex_none().h(px(estimate))
                         })
                         .when(ongoing_exists && history_expanded, |element| {
                             element
