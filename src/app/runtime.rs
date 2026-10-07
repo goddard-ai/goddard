@@ -6458,9 +6458,18 @@ impl Waku {
         if !submission.hidden
             && let Some(command) = self.composer_boss_command()
         {
+            // Submission clears the deliverable page, so capture its routing
+            // before extracting the boss command's attachment.
+            let queue_background = self.live_deliverable_page().is_some();
             let (session_id, submission) =
                 self.boss_command_submission_parts(command, submission, cx);
-            self.submit_composer_submission_to(session_id, submission, cx);
+            self.submit_composer_submission_to_with_canned(
+                session_id,
+                submission,
+                None,
+                queue_background,
+                cx,
+            );
             return;
         }
         let Some(session) = self.selected_session() else {
@@ -6510,7 +6519,7 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        self.submit_composer_submission_to_with_canned(session_id, submission, None, cx);
+        self.submit_composer_submission_to_with_canned(session_id, submission, None, false, cx);
     }
 
     pub(super) fn submit_canned_prompt_to(
@@ -6524,6 +6533,7 @@ impl Waku {
             session_id,
             ComposerSubmission::plain(prompt),
             Some(action_id),
+            false,
             cx,
         );
     }
@@ -6533,6 +6543,7 @@ impl Waku {
         session_id: Uuid,
         submission: ComposerSubmission,
         canned: Option<&'static str>,
+        queue_background: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self
@@ -6562,7 +6573,7 @@ impl Waku {
                 },
             );
         }
-        if session.status == SessionStatus::Background {
+        if session.status == SessionStatus::Background && !queue_background {
             self.steer_session_submission(session.id, submission, cx);
             return;
         }
@@ -6580,6 +6591,12 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        // A deliverable command must wait behind the boss's active turn,
+        // even when the user invokes the composer's steer shortcut.
+        if !submission.hidden && self.live_deliverable_page().is_some() {
+            self.submit_composer_submission(submission, cx);
+            return;
+        }
         // The armed boss command's steer lands in the boss's live turn —
         // or queues behind it — the same retargeting a plain send takes.
         if !submission.hidden

@@ -6094,6 +6094,7 @@ impl Waku {
                         {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if prompt.trim().is_empty()
+                            && this.live_deliverable_page().is_none()
                             && this.composer_attachments.is_empty()
                             && this.composer_inline_atoms.is_empty()
                             && !this.has_annotations()
@@ -6125,6 +6126,11 @@ impl Waku {
                                 this.steer_big_picture_submission(submission, cx);
                             }
                         } else if empty_draft {
+                            // The deliverable composer owns no boss turn
+                            // controls, including an empty-field queue steer.
+                            if this.live_deliverable_page().is_some() {
+                                return;
+                            }
                             if !this.big_picture.is_open() && this.accept_displayed_suggestion(cx) {
                                 // A suggestion chip owns ⌘⏎ while the
                                 // composer is empty — its hint advertises

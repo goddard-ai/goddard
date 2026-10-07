@@ -4503,7 +4503,12 @@ impl Waku {
             || !self.composer_attachments.is_empty()
             || !self.composer_inline_atoms.is_empty()
             || self.has_annotations();
-        match self.composer_submit_action_for(session, preparing, has_draft) {
+        let submit_action = if self.live_deliverable_page().is_some() {
+            composer::ComposerSubmitAction::Send
+        } else {
+            self.composer_submit_action_for(session, preparing, has_draft)
+        };
+        match submit_action {
             composer::ComposerSubmitAction::Send if self.selected_session().is_some() => {
                 // The focused field clears itself before the owner sees its
                 // event; here the owner is acting on the field's behalf, so

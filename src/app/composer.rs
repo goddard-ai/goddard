@@ -5834,7 +5834,11 @@ impl Waku {
             || (interactive && self.voice_scratchpad_sendable());
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
-        let submit_action = self.composer_submit_action_for(session, preparing, has_draft);
+        let submit_action = if interactive && self.live_deliverable_page().is_some() {
+            ComposerSubmitAction::Send
+        } else {
+            self.composer_submit_action_for(session, preparing, has_draft)
+        };
         let escape_stop_armed = session.is_some_and(|session| {
             self.escape_stop_confirmation
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
