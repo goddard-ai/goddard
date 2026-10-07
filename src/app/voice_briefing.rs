@@ -603,7 +603,7 @@ impl Waku {
         let can_skip = playback.is_some()
             || self.briefing_queue.waiting.is_some()
             || !self.speech_clip_queue.is_empty();
-        if !self.state.voice_briefing_enabled && !can_skip {
+        if playback.is_none() && !can_skip {
             return None;
         }
         let playing = playback.is_some_and(|playback| playback.playing);
