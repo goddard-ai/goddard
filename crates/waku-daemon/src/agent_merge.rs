@@ -90,9 +90,7 @@ pub(crate) fn submit(
     verify(source, &target, &rebased_head)?;
     let final_source_head = git_text(source, &["rev-parse", "--verify", "HEAD"])?;
     if final_source_head.trim() != rebased_head {
-        bail!(
-            "the submitting worktree changed during verification; QA branch was not advanced"
-        );
+        bail!("the submitting worktree changed during verification; QA branch was not advanced");
     }
     clean(source).context("the submitting worktree changed during verification")?;
     no_operation(source)?;

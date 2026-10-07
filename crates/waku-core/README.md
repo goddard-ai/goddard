@@ -1,10 +1,9 @@
 # waku-core
 
-`waku-core` is Goddard's daemon-only runtime. It contains the native session
-drivers, provider discovery and model metadata, task persistence, attachment
-storage, workspace filesystem and Git services, Computer Use process control,
-and daemon-owned settings. It depends on the serializable contract in
-[`waku-protocol`](../waku-protocol), but contains no desktop transport or UI.
+`waku-core` preserves the existing `waku_core::` API as a compatibility facade
+for [`waku-daemon`](../waku-daemon). The daemon library hosts provider sessions,
+task persistence, workspace services, and daemon-owned settings through the
+extracted runtime crates. Desktop clients use [`waku-client`](../waku-client).
 
 The transport is an authenticated WebSocket (loopback by default). Requests
 have stable UUIDs for idempotency; session events carry monotonically
@@ -14,7 +13,7 @@ are ignored.
 
 `DaemonClient` lives in [`waku-client`](../waku-client), which is what Goddard
 Desktop depends on. `serve` and `WakuBackend` are used by the `goddard-daemon`
-binary.
+binary in `waku-daemon`.
 
 Configuration ownership is explicit:
 

@@ -13,7 +13,7 @@ fn pin(key: &str) -> &'static str {
         .expect("whistle-engine.pin missing value")
 }
 
-fn main() {
+pub fn configure() {
     println!("cargo:rerun-if-changed=whistle-engine.pin");
     println!("cargo:rerun-if-env-changed=WAKU_NEEDLE_LIB_DIR");
     println!("cargo:rustc-check-cfg=cfg(whistle_native)");

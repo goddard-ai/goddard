@@ -13,10 +13,10 @@ use waku_protocol::{
 fn main() -> anyhow::Result<()> {
     // Register the embedded locale catalog with waku-protocol before any wire
     // type renders text in this process.
-    waku_core::i18n::install();
-    waku_core::command_env::raise_open_file_limit();
+    waku_daemon::i18n::install();
+    waku_daemon::command_env::raise_open_file_limit();
     let mut migration = waku_protocol::migration::migrate_home_directory();
-    migration.extend(waku_core::migration::migrate_data_directory());
+    migration.extend(waku_daemon::migration::migrate_data_directory());
     for failure in &migration.failures {
         eprintln!(
             "Goddard: could not migrate {} to {} ({:#}); starting with fresh state — restart to retry",
@@ -70,17 +70,17 @@ fn main() -> anyhow::Result<()> {
             })?;
     }
 
-    let task_path = waku_core::persistence::StateStore::default_path();
+    let task_path = waku_daemon::persistence::StateStore::default_path();
     // Request-thread panics unwind without killing the daemon — the log is
     // the only trace a wedged handler leaves.
-    waku_core::stats::install_panic_log(task_path.parent().unwrap_or(&task_path));
-    let settings = waku_core::DaemonSettingsStore::open_with_legacy(
-        waku_core::DaemonSettings::default_path(),
+    waku_daemon::stats::install_panic_log(task_path.parent().unwrap_or(&task_path));
+    let settings = waku_daemon::DaemonSettingsStore::open_with_legacy(
+        waku_daemon::DaemonSettings::default_path(),
         [task_path.with_file_name("settings.json")],
     )
     .context("could not load daemon settings")?;
-    let task_store = waku_core::persistence::StateStore::daemon(task_path);
-    let backend = waku_core::daemon::WakuBackend::new(settings, task_store)?;
+    let task_store = waku_daemon::persistence::StateStore::daemon(task_path);
+    let backend = waku_daemon::daemon::WakuBackend::new(settings, task_store)?;
     // Agent-scoped credentials dial back through this address; it is the
     // bound socket, not the `--bind` request.
     backend.set_daemon_address(address.to_string());
@@ -88,12 +88,12 @@ fn main() -> anyhow::Result<()> {
     // Scheduled automations tick whether or not a client ever connects;
     // starting here is what makes them daemon-owned.
     backend.start_automations();
-    waku_core::serve(
+    waku_daemon::serve(
         listener,
         token,
         backend.clone(),
         shutdown,
-        waku_core::ServerOptions {
+        waku_daemon::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),
             allow_shutdown: arguments.parent_pid.is_some(),
             build_commit: option_env!("GODDARD_COMMIT_SHA").map(str::to_owned),

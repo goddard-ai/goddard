@@ -1,7 +1,10 @@
 //! Platform build metadata: the checked-out commit, republished so the
 //! daemon's hello handshake can report what it was built from.
 
+mod native_whistle;
+
 fn main() {
+    native_whistle::configure();
     println!("cargo:rerun-if-changed=build.rs");
     export_commit_sha();
 }

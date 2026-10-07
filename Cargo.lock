@@ -11490,6 +11490,13 @@ dependencies = [
 name = "waku-core"
 version = "0.1.0"
 dependencies = [
+ "waku-daemon",
+]
+
+[[package]]
+name = "waku-daemon"
+version = "0.1.0"
+dependencies = [
  "alacritty_terminal",
  "anyhow",
  "base64 0.22.1",
@@ -11529,16 +11536,6 @@ dependencies = [
  "waku-workspace",
  "windows-sys 0.61.2",
  "zip 8.6.0",
-]
-
-[[package]]
-name = "waku-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "waku-core",
- "waku-protocol",
 ]
 
 [[package]]

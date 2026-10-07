@@ -1,7 +1,9 @@
 # goddard-daemon
 
 `goddard-daemon` is the standalone process that hosts Goddard's provider sessions.
-It defaults to a loopback-only listener, authenticates clients with
+Its library provides the daemon backend and orchestration services; `waku-core`
+re-exports that library for existing Rust callers. The executable defaults to a
+loopback-only listener, authenticates clients with
 `GODDARD_DAEMON_TOKEN`, and
 prints one JSON readiness record to stdout containing its address, protocol
 version, and process ID.
