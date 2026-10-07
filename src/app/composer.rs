@@ -5053,6 +5053,10 @@ impl Waku {
         // parked queue instead of covering its rows. The cell goes stale
         // the moment the card unmounts, so it is cleared on every miss.
         let queue_bounds = self.composer_autocomplete.queue_bounds_cell();
+        if self.live_deliverable_page().is_some() {
+            queue_bounds.set(None);
+            return None;
+        }
         let Some(session) = self.selected_session() else {
             queue_bounds.set(None);
             return None;
