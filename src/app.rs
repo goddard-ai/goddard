@@ -3354,6 +3354,7 @@ pub struct Waku {
     sidebar_width: f32,
     right_panel_visible: bool,
     right_panel_width: f32,
+    boss_deliverable_width: f32,
     /// The Git panel shares the right panel's slot and never shows with it:
     /// opening one dismisses the other. See `git_panel.rs`.
     git_panel_visible: bool,
@@ -5636,6 +5637,12 @@ impl Waku {
             RIGHT_PANEL_MIN_WIDTH,
             RIGHT_PANEL_MAX_WIDTH,
         );
+        let boss_deliverable_width = sanitize_panel_width(
+            state.boss_deliverable_width,
+            DEFAULT_RIGHT_PANEL_WIDTH,
+            RIGHT_PANEL_MIN_WIDTH,
+            RIGHT_PANEL_MAX_WIDTH,
+        );
         let git_panel_width = sanitize_panel_width(
             state.git_panel_width,
             DEFAULT_GIT_PANEL_WIDTH,
@@ -5650,6 +5657,7 @@ impl Waku {
         );
         state.sidebar_width = sidebar_width;
         state.right_panel_width = right_panel_width;
+        state.boss_deliverable_width = boss_deliverable_width;
         state.git_panel_width = git_panel_width;
         state.git_panel_top_height = git_panel_top_height;
         // First launch has no persisted frame yet; seed from the freshly
@@ -7246,6 +7254,7 @@ impl Waku {
                 sidebar_width,
                 right_panel_visible,
                 right_panel_width,
+                boss_deliverable_width,
                 // Starts closed; `restore_ui_state` mounts the selected
                 // task's parked strip — Git panel included — right after.
                 git_panel_visible: false,

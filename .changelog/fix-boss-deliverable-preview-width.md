@@ -1,0 +1,1 @@
+- Resizing the deliverable preview now remembers its width separately from the Boss chat panel.

@@ -3488,6 +3488,7 @@ impl Waku {
         // persists through `state.right_panel_sessions`, not globally.
         self.state.sidebar_width = self.sidebar_width;
         self.state.right_panel_width = self.right_panel_width;
+        self.state.boss_deliverable_width = self.boss_deliverable_width;
         self.state.git_panel_width = self.git_panel_width;
         self.state.git_panel_top_height = self.git_panel_top_height;
         self.save();

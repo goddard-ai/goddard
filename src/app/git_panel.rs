@@ -610,6 +610,8 @@ impl Waku {
     pub(super) fn right_panel_slot_width(&self) -> f32 {
         if self.git_panel_visible {
             self.git_panel_width
+        } else if self.live_deliverable_page().is_some() {
+            self.boss_deliverable_width
         } else {
             self.right_panel_width
         }
@@ -620,6 +622,8 @@ impl Waku {
     pub(super) fn right_panel_slot_width_mut(&mut self) -> &mut f32 {
         if self.git_panel_visible {
             &mut self.git_panel_width
+        } else if self.live_deliverable_page().is_some() {
+            &mut self.boss_deliverable_width
         } else {
             &mut self.right_panel_width
         }

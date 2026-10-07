@@ -1799,6 +1799,8 @@ struct AppState {
     sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
+    #[serde(default = "default_right_panel_width")]
+    boss_deliverable_width: f32,
     /// `None` on state files written before the Git panel remembered its
     /// own width — the shared `right_panel_width` was serving as it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2248,6 +2250,8 @@ pub struct PersistedState {
     pub sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
+    #[serde(default = "default_right_panel_width")]
+    pub boss_deliverable_width: f32,
     /// The Git panel shares the right panel's slot but remembers its own
     /// width.
     #[serde(default = "default_git_panel_width")]
@@ -2637,6 +2641,7 @@ impl PersistedState {
             sidebar_project_order: Vec::new(),
             sidebar_collapsed_groups: default_sidebar_collapsed_groups(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            boss_deliverable_width: DEFAULT_RIGHT_PANEL_WIDTH,
             git_panel_width: DEFAULT_GIT_PANEL_WIDTH,
             git_panel_top_height: DEFAULT_GIT_PANEL_TOP_HEIGHT,
             markdown_preview: false,
@@ -3117,6 +3122,7 @@ impl PersistedState {
             sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_collapsed_groups: self.sidebar_collapsed_groups.clone(),
             right_panel_width: self.right_panel_width,
+            boss_deliverable_width: self.boss_deliverable_width,
             git_panel_width: Some(self.git_panel_width),
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
@@ -3288,6 +3294,7 @@ impl PersistedState {
         self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_collapsed_groups = app_state.sidebar_collapsed_groups;
         self.right_panel_width = app_state.right_panel_width;
+        self.boss_deliverable_width = app_state.boss_deliverable_width;
         // Pre-split state files have no Git panel width of their own; the
         // shared width they kept was serving as it, so it seeds the first
         // launch under the new field.
@@ -5596,6 +5603,20 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_state(serde_json::from_value(app_state).unwrap());
         assert_eq!(restored.git_panel_width, 320.0);
+    }
+
+    #[test]
+    fn boss_deliverable_width_round_trips_separately_from_chat_width() {
+        let mut state = PersistedState::empty();
+        state.right_panel_width = 640.0;
+        state.boss_deliverable_width = 748.0;
+
+        let encoded = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(encoded).unwrap());
+
+        assert_eq!(restored.right_panel_width, 640.0);
+        assert_eq!(restored.boss_deliverable_width, 748.0);
     }
 
     #[test]
