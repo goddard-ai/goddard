@@ -1,0 +1,1 @@
+- Cmd+C now copies selected text from Markdown deliverable previews and file previews.
