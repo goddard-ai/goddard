@@ -770,6 +770,7 @@ impl Waku {
                                 waku.apply_transcript_landing(attention, cx);
                             }
                             waku.refresh_composer_sources(cx);
+                            waku.ensure_recent_boss_history(cx);
                         }
                     }
                     Err(error) => {
@@ -795,6 +796,7 @@ impl Waku {
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
+        self.ensure_recent_boss_history(cx);
         // The scratchpad's mic follows the visible chat — the outgoing
         // session's dictation pauses here, not when its panel repaints.
         self.sync_voice_scratchpad_capture();

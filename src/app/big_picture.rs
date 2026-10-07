@@ -1573,6 +1573,9 @@ impl Waku {
             TranscriptRowKind::TurnFold(turn_id) => {
                 self.render_card_turn_fold_row(session, turn_id, &theme)
             }
+            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+                div().into_any_element()
+            }
             TranscriptRowKind::WorkingIndicator => {
                 self.render_card_working_indicator_row(session, &theme)
             }

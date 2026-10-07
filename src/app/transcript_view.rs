@@ -501,8 +501,7 @@ impl Waku {
                     )
             })?;
         let ticket = employee.ticket.as_ref()?;
-        let queued =
-            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
+        let queued = employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
         let detail = if queued {
             self.boss_ui
                 .queued
@@ -549,9 +548,15 @@ impl Waku {
                 parts.push(tr!("boss.resource_desktop"));
             }
             if ticket.reservation.is_some() {
-                tr!("boss.assignment_resources_reserved", detail = parts.join(" · "))
+                tr!(
+                    "boss.assignment_resources_reserved",
+                    detail = parts.join(" · ")
+                )
             } else {
-                tr!("boss.assignment_resources_requested", detail = parts.join(" · "))
+                tr!(
+                    "boss.assignment_resources_requested",
+                    detail = parts.join(" · ")
+                )
             }
         });
         Some(
@@ -1397,6 +1402,24 @@ impl Waku {
         current: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.boss_history_session(session_id).is_some() {
+            self.pin_transcript_for_disclosure();
+            for history in self.boss_ui.chat_history.values_mut() {
+                if let Some(entry) = history.sessions.get_mut(&session_id) {
+                    entry.expanded_blocks.insert(block_index, !current);
+                }
+            }
+            if let Some(row) = self.transcript_row_kinds.borrow().iter().position(|row| {
+                *row == TranscriptRowKind::BossHistory(
+                    session_id,
+                    BossHistoryRow::TurnBlock(block_index),
+                )
+            }) {
+                self.remeasure_transcript_rows(row..row + 1);
+            }
+            cx.notify();
+            return;
+        }
         if self.state.selected_session != Some(session_id) {
             let Some(view) = self.side_chat_views.get_mut(&session_id) else {
                 return;
@@ -1427,7 +1450,13 @@ impl Waku {
         current: bool,
         cx: &mut Context<Self>,
     ) {
-        let block_index = if self.state.selected_session == Some(session_id) {
+        let block_index = if let Some(entry) = self.boss_history_session(session_id) {
+            entry
+                .session
+                .transcript_blocks
+                .iter()
+                .position(|block| block.activities.iter().any(|activity| activity.id == id))
+        } else if self.state.selected_session == Some(session_id) {
             self.selected_transcript_blocks()
                 .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
@@ -1446,6 +1475,24 @@ impl Waku {
         let Some(block_index) = block_index else {
             return;
         };
+        if self.boss_history_session(session_id).is_some() {
+            self.pin_transcript_for_disclosure();
+            self.expanded_activity_items.insert(id, !current);
+            if current {
+                self.activity_diffs.borrow_mut().remove(&id);
+                self.activity_diff_viewports.borrow_mut().remove(&id);
+            }
+            if let Some(row) = self.transcript_row_kinds.borrow().iter().position(|row| {
+                *row == TranscriptRowKind::BossHistory(
+                    session_id,
+                    BossHistoryRow::TurnBlock(block_index),
+                )
+            }) {
+                self.remeasure_transcript_rows(row..row + 1);
+            }
+            cx.notify();
+            return;
+        }
         if self.state.selected_session != Some(session_id) {
             self.expanded_activity_items.insert(id, !current);
             if current {
@@ -1587,7 +1634,10 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> Option<UserMessageAction> {
-        let session = self.selected_session()?;
+        let session = self.transcript_display_session()?;
+        if self.boss_ui.history_render_session.get().is_some() {
+            return None;
+        }
         let message = session.messages.get(message_index)?;
         if message.role != MessageRole::User
             || message.hidden
@@ -1701,7 +1751,10 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> Option<AssistantMessageAction> {
-        let session = self.selected_session()?;
+        let session = self.transcript_display_session()?;
+        if self.boss_ui.history_render_session.get().is_some() {
+            return None;
+        }
         let message = session.messages.get(message_index)?;
         if message.role != MessageRole::Assistant
             || assistant_response_footer_index(session, message_index) != Some(message_index)
@@ -1879,6 +1932,37 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let kind = self.transcript_row_kinds.borrow().get(index).copied();
+        let (session_id, content_index) = match kind {
+            Some(TranscriptRowKind::BossHistoryBoundary(id)) => {
+                return self.render_boss_history_boundary(id, cx);
+            }
+            Some(TranscriptRowKind::BossHistory(id, row)) => {
+                let Some(entry) = self.boss_history_session(id) else {
+                    return div().into_any_element();
+                };
+                let Some(local) = entry.content_index(row) else {
+                    return div().into_any_element();
+                };
+                (Some(id), local)
+            }
+            _ => (None, index),
+        };
+        let previous = self.boss_ui.history_render_session.replace(session_id);
+        let element =
+            self.transcript_content_row(index, content_index, navigation_rail_fits, window, cx);
+        self.boss_ui.history_render_session.set(previous);
+        element
+    }
+
+    fn transcript_content_row(
+        &mut self,
+        index: usize,
+        content_index: usize,
+        navigation_rail_fits: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
         let composer = self.composer.clone();
@@ -1888,14 +1972,21 @@ impl Waku {
         // transcript's row kinds — several allocations proportional to the
         // session — once for every visible row, every frame.
         let (row_count, kind, starts_followup_turn, opening_trigger, follows_opening_trigger) = {
-            let kinds = self.transcript_row_kinds.borrow();
+            let cached = self.transcript_row_kinds.borrow();
+            let historical = self
+                .boss_ui
+                .history_render_session
+                .get()
+                .and_then(|id| self.boss_history_session(id))
+                .map(|entry| entry.cached_rows());
+            let kinds = historical.as_deref().map(Vec::as_slice).unwrap_or(&cached);
             let kind = kinds
-                .get(index)
+                .get(content_index)
                 .copied()
                 .unwrap_or(TranscriptRowKind::Message(index));
-            let session = self.selected_session();
+            let session = self.transcript_display_session();
             let starts_followup_turn = session.is_some_and(|session| {
-                row_starts_followup_turn(session, &kinds, index)
+                row_starts_followup_turn(session, kinds, content_index)
                     || boss_trigger_starts_followup_turn(session, kind)
             });
             let is_opening_trigger = |candidate: TranscriptRowKind| {
@@ -1909,12 +2000,12 @@ impl Waku {
                     })
             };
             let opening_trigger = is_opening_trigger(kind);
-            let follows_opening_trigger = index
+            let follows_opening_trigger = content_index
                 .checked_sub(1)
                 .and_then(|previous| kinds.get(previous))
                 .is_some_and(|previous| is_opening_trigger(*previous));
             (
-                kinds.len(),
+                cached.len(),
                 kind,
                 starts_followup_turn,
                 opening_trigger,
@@ -1922,11 +2013,14 @@ impl Waku {
             )
         };
         let response_turn_id = self
-            .selected_session()
+            .transcript_display_session()
             .and_then(|session| response_row_turn_id(session, kind));
         let inner = match kind {
+            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+                div().into_any_element()
+            }
             TranscriptRowKind::Message(message_index) => self
-                .selected_session()
+                .transcript_display_session()
                 .and_then(|session| {
                     session
                         .messages
@@ -2011,7 +2105,7 @@ impl Waku {
                             &palette,
                             metrics,
                             animate_streaming,
-                            self.state.selected_session,
+                            self.transcript_display_session().map(|session| session.id),
                             &self.transcript_selection,
                             cx,
                         )
@@ -2056,7 +2150,14 @@ impl Waku {
                             ctx = ctx.with_session_mentions(Rc::default(), avatars);
                         }
                     }
-                    if let Some(highlights) = self.transcript_search_highlights(message_index) {
+                    if let Some(highlights) = self
+                        .boss_ui
+                        .history_render_session
+                        .get()
+                        .is_none()
+                        .then(|| self.transcript_search_highlights(message_index))
+                        .flatten()
+                    {
                         ctx = ctx.with_search_highlights(highlights);
                     }
                     // Replies may cite the annotations their prompt carried
@@ -2073,7 +2174,7 @@ impl Waku {
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(
-                                self.selected_session()
+                                self.transcript_display_session()
                                     .and_then(|session| self.workspace_path_for_session(session)),
                                 message.visible_content(),
                             )
@@ -2110,7 +2211,7 @@ impl Waku {
                         push: landed_push,
                         push_focus: self
                             .transcript_control_focus(format!("landed-push-{}", message.id), cx),
-                        archive_session_id: self.selected_session().and_then(|session| {
+                        archive_session_id: self.transcript_display_session().and_then(|session| {
                             (session.archived_at.is_none() && !session.is_side_chat())
                                 .then_some(session.id)
                         }),
@@ -2118,7 +2219,7 @@ impl Waku {
                             .transcript_control_focus(format!("landed-archive-{}", message.id), cx),
                     });
                     let transfer_notice = self
-                        .selected_session()
+                        .transcript_display_session()
                         .and_then(|session| self.transfer_notice_state(session, &message, cx));
                     let rendered = render_message(
                         MessageRender {
@@ -2181,7 +2282,7 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnBlock(block_index) => self
-                .selected_session()
+                .transcript_display_session()
                 .and_then(|session| {
                     session.transcript_blocks.get(block_index).map(|block| {
                         self.render_activities_row(
@@ -2215,7 +2316,10 @@ impl Waku {
                 let TranscriptRowKind::Message(message_index) = kind else {
                     return None;
                 };
-                let message = self.selected_session()?.messages.get(message_index)?;
+                let message = self
+                    .transcript_display_session()?
+                    .messages
+                    .get(message_index)?;
                 if message.id != message_id || !navigation_rail_fits {
                     return None;
                 }
@@ -2242,7 +2346,7 @@ impl Waku {
                 navigation_rail_fits && {
                     matches!(kind, TranscriptRowKind::Message(message_index)
                     if self
-                        .selected_session()
+                        .transcript_display_session()
                         .and_then(|session| session.messages.get(message_index))
                         .is_some_and(|message| message.id == dot.message_id))
                 }
@@ -2259,7 +2363,7 @@ impl Waku {
                 // Follow the first rendered line, which may be a heading or
                 // compact status notice rather than body-sized Markdown.
                 let (top_inset, line_height) = self
-                    .selected_session()
+                    .transcript_display_session()
                     .and_then(|session| {
                         session
                             .messages
@@ -2303,7 +2407,7 @@ impl Waku {
                     && !cx.reduce_motion()
                     && matches!(kind, TranscriptRowKind::Message(row_message) if row_message == flash.message_index)
                     && self
-                        .selected_session()
+                        .transcript_display_session()
                         .and_then(|session| session.messages.get(flash.message_index))
                         .is_some_and(|message| message.id == flash.message_id)
             })
@@ -2387,7 +2491,7 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let session = self.selected_session();
+        let session = self.transcript_display_session();
         let group_name = SharedString::from(format!("assistant-response-footer-{turn_id}"));
         let mut column = div()
             .w_full()
@@ -2542,15 +2646,31 @@ impl Waku {
     }
 
     fn remeasure_notice_message(&self, message_id: Uuid) {
-        let Some(message_index) = self.selected_session().and_then(|session| {
+        if let Some(message_index) = self.selected_session().and_then(|session| {
             session
                 .messages
                 .iter()
                 .position(|message| message.id == message_id)
-        }) else {
-            return;
-        };
-        self.remeasure_transcript_message(message_index);
+        }) {
+            self.remeasure_transcript_message(message_index);
+        } else if let Some(history) = self
+            .boss_chat_key()
+            .and_then(|key| self.boss_ui.chat_history.get(&key))
+        {
+            if let Some((id, index)) = history.sessions.iter().find_map(|(id, entry)| {
+                entry
+                    .session
+                    .messages
+                    .iter()
+                    .position(|message| message.id == message_id)
+                    .map(|index| (*id, index))
+            }) {
+                self.remeasure_transcript_row(TranscriptRowKind::BossHistory(
+                    id,
+                    BossHistoryRow::Message(index),
+                ));
+            }
+        }
     }
 
     /// Track the pointer over a changed-files row. A dwell opens the row's
@@ -2709,13 +2829,16 @@ impl Waku {
         if self.changed_files_diffs.contains_key(&turn_id) {
             return;
         }
-        let Some((session_id, turn_count)) = self.selected_session().and_then(|session| {
-            session
-                .turns
-                .iter()
-                .find(|turn| turn.id == turn_id)
-                .map(|turn| (session.id, turn.turn_count))
-        }) else {
+        let Some((session_id, turn_count)) =
+            self.transcript_session_for_turn(turn_id)
+                .and_then(|session| {
+                    session
+                        .turns
+                        .iter()
+                        .find(|turn| turn.id == turn_id)
+                        .map(|turn| (session.id, turn.turn_count))
+                })
+        else {
             return;
         };
         let Some(project_path) = self
@@ -2794,7 +2917,7 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let session = self.selected_session()?;
+        let session = self.transcript_display_session()?;
         let Some(checkpoint) = session
             .turns
             .iter()
@@ -3348,7 +3471,7 @@ impl Waku {
     ) -> AnyElement {
         let expanded = self.expanded_turns.contains(&turn_id);
         let label = self
-            .selected_session()
+            .transcript_display_session()
             .map(|session| turn_fold_label(session, turn_id))
             .unwrap_or_else(|| tr!("transcript.worked"));
         div()
@@ -3401,7 +3524,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let group = self
-            .selected_session()
+            .transcript_display_session()
             .map(|session| {
                 boss_trigger_group(session, anchor)
                     .into_iter()
@@ -3923,7 +4046,9 @@ impl Waku {
                     )
                 })
         });
-        let expanded = if self.state.selected_session == Some(session_id) {
+        let expanded = if let Some(entry) = self.boss_history_session(session_id) {
+            entry.expanded_blocks.get(&block_index).copied()
+        } else if self.state.selected_session == Some(session_id) {
             self.activities_expanded.get(&block_index).copied()
         } else {
             self.side_chat_views

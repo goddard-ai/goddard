@@ -6270,6 +6270,12 @@ boss.command_hint:
   en: Messages go to %{name}
 boss.save_first:
   en: Save or discard your changes before selecting another document.
+boss.history_loading:
+  en: Loading earlier conversation…
+boss.history_load:
+  en: Load earlier conversation
+boss.history_retry:
+  en: Retry loading earlier conversation
 boss.unreachable:
   en: The boss's daemon is unavailable.
 boss.project_required:

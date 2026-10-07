@@ -170,6 +170,9 @@ enum BossDeliverablesFilter {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    pub chat_history: HashMap<DaemonKey, super::boss_history::BossChatHistory>,
+    /// Scoped to building one archived row; composer and callbacks keep the live owner.
+    pub history_render_session: Cell<Option<Uuid>>,
     pub(super) goal_rows: HashMap<DaemonKey, Arc<Vec<BossGoalRow>>>,
     /// The Goals panel's two scroll regions: a bounded Finished history on
     /// top and the In progress/Pending sections below. Fold and history
@@ -324,6 +327,8 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            chat_history: HashMap::new(),
+            history_render_session: Cell::new(None),
             goal_rows: HashMap::new(),
             goals_finished_list: ListState::new(0, ListAlignment::Top, px(240.0)),
             goals_finished_scrollbar: ScrollbarState::new(),

@@ -4247,6 +4247,7 @@ mod automations;
 mod background_work;
 mod big_picture;
 mod boss;
+mod boss_history;
 mod boss_moods;
 mod branches;
 mod close_dialog;

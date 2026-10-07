@@ -50,14 +50,21 @@ impl Waku {
     }
 
     fn scan_transcript_rows_fingerprint(&self) -> u64 {
-        self.selected_session()
-            .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                transcript_rows_fingerprint(
-                    session,
-                    &self.expanded_turns,
-                    self.blocked_checkpoint_turn(session.id),
-                )
-            })
+        let revision = self
+            .boss_chat_key()
+            .and_then(|key| self.boss_ui.chat_history.get(&key))
+            .map_or(0, |history| history.revision);
+        mix(
+            self.selected_session()
+                .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
+                    transcript_rows_fingerprint(
+                        session,
+                        &self.expanded_turns,
+                        self.blocked_checkpoint_turn(session.id),
+                    )
+                }),
+            revision,
+        )
     }
 
     fn fold_transcript_row_kinds_if_stale(&self, fingerprint: u64) -> usize {
@@ -66,6 +73,17 @@ impl Waku {
             let session = self.selected_session();
             let mut contexts = self.transcript_reference_contexts.borrow_mut();
             contexts.clear();
+            let (history, _) = self.boss_history_chain();
+            for id in history {
+                if let Some(entry) = self.boss_history_session(id) {
+                    contexts.extend(
+                        entry
+                            .reference_contexts
+                            .iter()
+                            .map(|(turn, context)| (*turn, context.clone())),
+                    );
+                }
+            }
             if let Some(session) = session {
                 let mut seen = HashSet::new();
                 for prompt in session
@@ -109,13 +127,23 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
-        self.selected_session().map_or_else(Vec::new, |session| {
-            folded_transcript_row_kinds(
-                session,
-                &self.expanded_turns,
-                self.blocked_checkpoint_turn(session.id),
-            )
-        })
+        let Some(session) = self.selected_session() else {
+            return Vec::new();
+        };
+        let pending = self.blocked_checkpoint_turn(session.id);
+        if let Some(key) = self.boss_chat_key() {
+            return self.boss_ui.chat_history.get(&key).map_or_else(
+                || {
+                    super::boss_history::BossChatHistory::default().transcript_rows(
+                        session,
+                        &self.expanded_turns,
+                        pending,
+                    )
+                },
+                |history| history.transcript_rows(session, &self.expanded_turns, pending),
+            );
+        }
+        folded_transcript_row_kinds(session, &self.expanded_turns, pending)
     }
 
     /// The response footer's copy content and timestamp for `message_index`,
@@ -132,6 +160,9 @@ impl Waku {
         &self,
         message_index: usize,
     ) -> (Option<SharedString>, Option<u64>) {
+        if let Some(footer) = self.historical_footer(message_index) {
+            return footer;
+        }
         self.refresh_transcript_row_kinds_for_frame();
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.assistant_footer_fingerprint.get() != fingerprint {
@@ -166,10 +197,18 @@ impl Waku {
         self.refresh_transcript_row_kinds_for_frame();
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.transcript_navigation_turns_fingerprint.get() != fingerprint {
+            let kinds = self.transcript_row_kinds.borrow();
             let turns = self
                 .selected_session()
                 .map(|session| {
-                    transcript_navigation_turns(session, &self.transcript_row_kinds.borrow())
+                    if let Some(history) = self
+                        .boss_chat_key()
+                        .and_then(|key| self.boss_ui.chat_history.get(&key))
+                    {
+                        history.navigation_turns(session, &kinds)
+                    } else {
+                        transcript_navigation_turns(session, &kinds)
+                    }
                 })
                 .unwrap_or_default();
             *self.transcript_navigation_turns.borrow_mut() = Rc::new(turns);
@@ -405,9 +444,7 @@ impl Waku {
         // message rather than wherever the reader left the transcript. A
         // parked link for a different session is stale — drop it.
         if let Some(pending) = self.pending_transcript_match.take() {
-            if pending.session_id == session_id
-                && self.reveal_transcript_match(&pending, cx)
-            {
+            if pending.session_id == session_id && self.reveal_transcript_match(&pending, cx) {
                 self.transcript_landing =
                     Some((session_id, TranscriptLanding::MatchReveal(pending)));
                 return;
@@ -611,11 +648,17 @@ impl Waku {
     }
 
     pub(super) fn remeasure_changed_files(&self, turn_id: Uuid) {
-        let target = self
-            .selected_session()
+        self.sync_transcript_rows();
+        let target = self.selected_session()
             .and_then(|session| response_footer_message_index(session, turn_id))
-            .map(|message_index| TranscriptRowKind::ResponseFooter(turn_id, message_index))
-            .unwrap_or(TranscriptRowKind::ChangedFiles(turn_id));
+            .map(|index| TranscriptRowKind::ResponseFooter(turn_id, index))
+            .or_else(|| self.transcript_row_kinds.borrow().iter().find(|kind| {
+                let content = match **kind { TranscriptRowKind::BossHistory(_, row) => row.content(), row => row };
+                matches!(content, TranscriptRowKind::ResponseFooter(id, _) | TranscriptRowKind::ChangedFiles(id) if id == turn_id)
+            }).copied());
+        let Some(target) = target else {
+            return;
+        };
         self.remeasure_transcript_row(target);
     }
 
@@ -625,7 +668,7 @@ impl Waku {
             .transcript_row_kinds
             .borrow()
             .iter()
-            .position(|kind| *kind == target);
+            .position(|kind| transcript_row_matches_target(*kind, target));
         if let Some(row) = row {
             self.remeasure_transcript_rows(row..row + 1);
         }
@@ -636,6 +679,8 @@ impl Waku {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum TranscriptRowKind {
+    BossHistory(Uuid, BossHistoryRow),
+    BossHistoryBoundary(Uuid),
     Message(usize),
     TurnBlock(usize),
     TurnFold(Uuid),
@@ -659,6 +704,61 @@ pub(super) enum TranscriptRowKind {
     /// anchor report's message id: the first opening report of a turn, or
     /// the first of an adjacent run accepted into an open turn.
     BossTrigger(Uuid),
+}
+
+/// Session-local content keys keep disclosure anchors stable as historical
+/// rows are inserted and folded. The outer key adds the owning session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(super) enum BossHistoryRow {
+    Message(usize),
+    TurnBlock(usize),
+    TurnFold(Uuid),
+    ResponseFooter(Uuid, usize),
+    ChangedFiles(Uuid),
+    WorkingIndicator,
+    BossTrigger(Uuid),
+}
+
+impl BossHistoryRow {
+    pub(super) fn from_content(row: TranscriptRowKind) -> Option<Self> {
+        Some(match row {
+            TranscriptRowKind::Message(a) => Self::Message(a),
+            TranscriptRowKind::TurnBlock(a) => Self::TurnBlock(a),
+            TranscriptRowKind::TurnFold(a) => Self::TurnFold(a),
+            TranscriptRowKind::ResponseFooter(a, b) => Self::ResponseFooter(a, b),
+            TranscriptRowKind::ChangedFiles(a) => Self::ChangedFiles(a),
+            TranscriptRowKind::WorkingIndicator => Self::WorkingIndicator,
+            TranscriptRowKind::BossTrigger(a) => Self::BossTrigger(a),
+            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+                return None;
+            }
+        })
+    }
+
+    pub(super) fn content(self) -> TranscriptRowKind {
+        match self {
+            Self::Message(a) => TranscriptRowKind::Message(a),
+            Self::TurnBlock(a) => TranscriptRowKind::TurnBlock(a),
+            Self::TurnFold(a) => TranscriptRowKind::TurnFold(a),
+            Self::ResponseFooter(a, b) => TranscriptRowKind::ResponseFooter(a, b),
+            Self::ChangedFiles(a) => TranscriptRowKind::ChangedFiles(a),
+            Self::WorkingIndicator => TranscriptRowKind::WorkingIndicator,
+            Self::BossTrigger(a) => TranscriptRowKind::BossTrigger(a),
+        }
+    }
+}
+
+/// Indexes are session-local; only UUID-owned rows can match an unqualified
+/// target across session boundaries.
+fn transcript_row_matches_target(kind: TranscriptRowKind, target: TranscriptRowKind) -> bool {
+    kind == target
+        || matches!(
+            target,
+            TranscriptRowKind::TurnFold(_)
+                | TranscriptRowKind::ResponseFooter(..)
+                | TranscriptRowKind::ChangedFiles(_)
+                | TranscriptRowKind::BossTrigger(_)
+        ) && matches!(kind, TranscriptRowKind::BossHistory(_, row) if row.content() == target)
 }
 
 /// How long a settled turn's working indicator stays mounted while it fades
@@ -789,8 +889,9 @@ pub(super) fn transcript_navigation_turns(
                     .map(|offset| message_index + 1 + offset)
                     .unwrap_or(session.messages.len()),
             );
-        let turn_running =
-            message.turn_id.is_some_and(|turn_id| running_turns.contains(&turn_id));
+        let turn_running = message
+            .turn_id
+            .is_some_and(|turn_id| running_turns.contains(&turn_id));
         let response = (!turn_running)
             .then(|| {
                 session.messages[message_index + 1..next_user_index]
@@ -981,7 +1082,9 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
                 | TranscriptRowKind::WorkingIndicator
-                | TranscriptRowKind::BossTrigger(_) => None,
+                | TranscriptRowKind::BossTrigger(_)
+                | TranscriptRowKind::BossHistory(..)
+                | TranscriptRowKind::BossHistoryBoundary(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1320,10 +1423,7 @@ pub(super) fn folded_transcript_row_kinds(
         if turn.status == TurnStatus::Running {
             continue;
         }
-        let turn_rows = rows_by_turn
-            .get(&turn.id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
+        let turn_rows = rows_by_turn.get(&turn.id).map(Vec::as_slice).unwrap_or(&[]);
         if let Some(message_index) = response_footer_message_index_from_rows(session, turn_rows) {
             response_footers.insert(turn.id, message_index);
         }
@@ -1542,7 +1642,9 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::BossTrigger(_) => None,
+        | TranscriptRowKind::BossTrigger(_)
+        | TranscriptRowKind::BossHistory(..)
+        | TranscriptRowKind::BossHistoryBoundary(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1557,7 +1659,9 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
             | TranscriptRowKind::WorkingIndicator
-            | TranscriptRowKind::BossTrigger(_) => None,
+            | TranscriptRowKind::BossTrigger(_)
+            | TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1581,7 +1685,9 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
         | TranscriptRowKind::WorkingIndicator
-        | TranscriptRowKind::BossTrigger(_) => false,
+        | TranscriptRowKind::BossTrigger(_)
+        | TranscriptRowKind::BossHistory(..)
+        | TranscriptRowKind::BossHistoryBoundary(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1620,7 +1726,9 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
                 .find(|message| message.id == message_id)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::BossHistory(..)
+        | TranscriptRowKind::BossHistoryBoundary(_) => None,
     }
 }
 
@@ -1636,7 +1744,9 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .filter(|message| message.role == MessageRole::Assistant)?
                 .turn_id
         }
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::BossHistory(..)
+        | TranscriptRowKind::BossHistoryBoundary(_) => None,
         // The marker precedes the response it woke — like the prompt it
         // stands in for, it is not part of the response's hover group.
         TranscriptRowKind::BossTrigger(_) => None,
@@ -2086,4 +2196,39 @@ pub(super) fn boss_trigger_burst_label(group: &[crate::model::ReportTrigger]) ->
         label = format!("{label} · {suffix}");
     }
     label
+}
+
+#[cfg(test)]
+mod history_row_target_tests {
+    use super::*;
+
+    #[test]
+    fn live_row_remeasurement_never_aliases_historical_message_or_block_indexes() {
+        let session = Uuid::new_v4();
+        let historical_message =
+            TranscriptRowKind::BossHistory(session, BossHistoryRow::Message(0));
+        let historical_block =
+            TranscriptRowKind::BossHistory(session, BossHistoryRow::TurnBlock(0));
+        assert!(!transcript_row_matches_target(
+            historical_message,
+            TranscriptRowKind::Message(0)
+        ));
+        assert!(!transcript_row_matches_target(
+            historical_block,
+            TranscriptRowKind::TurnBlock(0)
+        ));
+        assert!(transcript_row_matches_target(
+            historical_message,
+            historical_message
+        ));
+        let turn = Uuid::new_v4();
+        assert!(transcript_row_matches_target(
+            TranscriptRowKind::BossHistory(session, BossHistoryRow::TurnFold(turn)),
+            TranscriptRowKind::TurnFold(turn),
+        ));
+        assert!(!transcript_row_matches_target(
+            TranscriptRowKind::BossHistory(session, BossHistoryRow::TurnFold(turn)),
+            TranscriptRowKind::TurnFold(Uuid::new_v4()),
+        ));
+    }
 }
