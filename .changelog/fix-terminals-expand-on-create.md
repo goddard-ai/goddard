@@ -1,1 +1,0 @@
-- Running a project script with the sidebar's Terminals group folded no longer hides the new terminal — the group now expands and scrolls to the new row whenever a terminal is created.

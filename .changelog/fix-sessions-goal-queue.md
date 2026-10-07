@@ -1,1 +1,0 @@
-- Goal reminders from `/goal` no longer appear in the follow-up queue or the transcript. A prompt you queue now always sends ahead of an automatic goal reminder, and the app only evaluates goal progress once the task is actually idle.

@@ -1,1 +1,0 @@
-- Interrupted turns now name who ended them — a turn cut short by the daemon, provider, or an expiring employee reads "Interrupted after Ns" instead of "You stopped after Ns", and an interrupted expiry leaves a notice naming the cause.

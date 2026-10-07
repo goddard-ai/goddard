@@ -1,1 +1,0 @@
-- Computer Use tasks can ask to attach to a browser's real signed-in profile, so agents can work in pages where the user is already logged in; attaching needs its own approval and the exact app window. Computer Use remains an experimental opt-in.

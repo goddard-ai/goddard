@@ -1,1 +1,0 @@
-- Manage scheduled automations from the Boss: list schedules and recent run status, create or edit automations, pause or resume them, and delete them.

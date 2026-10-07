@@ -1,1 +1,0 @@
-- A terminal the boss opens now appears only in the app window you asked it from, not every connected client.

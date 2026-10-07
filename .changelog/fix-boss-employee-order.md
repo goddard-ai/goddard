@@ -1,1 +1,0 @@
-- Boss employees in the sidebar now list newest summon first and hold their position — a row no longer jumps as the employee works or finishes; completed employees still fold behind Show more.

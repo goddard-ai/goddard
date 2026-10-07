@@ -1,1 +1,0 @@
-- Placed the brain control inside the Boss sidebar button, sharing its row highlight while keeping memory navigation separate.

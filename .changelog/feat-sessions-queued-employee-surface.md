@@ -1,1 +1,0 @@
-- Open a queued employee from the sidebar to read the prompt waiting for dispatch, then send the boss a message with that employee attached as context.

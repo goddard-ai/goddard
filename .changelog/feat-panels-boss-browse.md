@@ -1,1 +1,0 @@
-- Ask the boss to open an `http` or `https` page in the boss chat’s right panel; the browser tab appears for the user there.

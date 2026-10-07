@@ -1,1 +1,0 @@
-- Supervisor prompts to a running employee now steer into its open turn instead of waiting for the turn to finish — `goddard-agent boss prompt` and `goddard-agent prompt` default to interrupt delivery; pass `--delivery queue` (or `delivery: "queue"` on the control op) to park a message behind the current work.

@@ -1,1 +1,0 @@
-- Fixed icons that rendered blank: the sidebar's Automations row, the voice-briefing headphones in the command palette and transcript footer, the composer pause button while a briefing plays, the composer-drafts experiment card, and the Cloudflare and OpenRouter provider logos in Settings.

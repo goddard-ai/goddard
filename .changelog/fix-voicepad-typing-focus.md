@@ -1,1 +1,0 @@
-- Typing an edit into the VoicePad transcript no longer jumps to the composer mid-word — pressing Space at the edit caret kept ending the edit and diverting the rest of what you typed into the draft.

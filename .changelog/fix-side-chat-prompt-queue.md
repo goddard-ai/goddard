@@ -1,1 +1,0 @@
-- Side chats now show the pending follow-up queue above their composer, like the main chat — a queued message can be steered into the running turn, pulled back into the lane's composer for editing, or removed.

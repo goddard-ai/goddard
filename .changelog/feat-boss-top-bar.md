@@ -1,1 +1,0 @@
-- Boss and employee sessions show a top bar with the worker's avatar, name, and job title — double-click the name to rename it or the avatar for a new face — and their right panel offers just file previews, Browser tabs, and side chats.

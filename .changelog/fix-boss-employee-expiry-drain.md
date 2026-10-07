@@ -1,1 +1,0 @@
-- Fixed Boss employees expiring in the middle of a tool call when a follow-up landed right as their turn ended — the finish now waits for the running turn to settle instead of cutting it short.

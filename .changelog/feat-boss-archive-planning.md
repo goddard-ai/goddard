@@ -1,1 +1,0 @@
-- Abandoned planning sessions can now be dismissed: right-click a plan's sidebar row and choose Archive, or select the session and press ⌘⇧A — it leaves the sidebar and stays out of Settings → Archived chats like other Boss sessions.

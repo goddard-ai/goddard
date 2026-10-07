@@ -1,1 +1,0 @@
-- The Boss now delegates waits to employees instead of polling itself — watching a task, waiting on an employee, or rechecking a condition is summoned work, and its own `goddard-agent resource` acquires are refused — so the Boss stays available for your next request.

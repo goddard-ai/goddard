@@ -1,1 +1,0 @@
-- Boss summons can pin an employee's reasoning effort with `reasoningEffort`, validated against the resolved model's supported efforts — an unsupported id fails the summon instead of silently running at another effort.

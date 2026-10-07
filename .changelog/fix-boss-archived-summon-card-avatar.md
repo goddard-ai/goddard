@@ -1,1 +1,0 @@
-- The summon card a Boss chat leaves in its transcript keeps the employee's avatar, name, job title, and icon after the employee retires or its task is archived.

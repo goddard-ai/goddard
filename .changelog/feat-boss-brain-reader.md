@@ -1,1 +1,0 @@
-- The Boss's Brain button now opens the last section you visited. Browse Memory in an expandable tree of named buckets — documents render as Markdown previews, and a read-only Records view lists each named bucket's notes and summaries. Use Ask Boss to correct to send a selected memory to the Boss as a correction request; memory remains Boss-managed.

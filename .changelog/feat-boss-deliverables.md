@@ -1,1 +1,0 @@
-- Boss-published files are now called deliverables: the sidebar section reads Recent deliverables, row menus and composer context use the same name, and the boss's `publishBundle`/`dismissBundle` operations are `publishDeliverable`/`dismissDeliverable` (pin, sweep, archive, and mark-viewed renamed to match). Saved bundles carry over automatically.

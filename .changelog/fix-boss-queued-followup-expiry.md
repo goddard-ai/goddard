@@ -1,1 +1,0 @@
-- Queueing a follow-up for a Boss employee that is finishing its turn no longer loses the message — it now delivers first when the employee is resumed.

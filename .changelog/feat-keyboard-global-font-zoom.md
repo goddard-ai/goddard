@@ -1,1 +1,0 @@
-- ⌘= / ⌘− now step the interface, code, and terminal font sizes together wherever the focus is, and ⌘0 resets all three to their defaults. Big Picture moved from ⌘0 to ⌃`.

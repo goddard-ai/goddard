@@ -1,1 +1,0 @@
-- Approving a plan now hands implementation to the boss: finalizing reports the approved design to the boss chat, which coordinates the work there — the planning session stays open briefly for questions instead of building it itself.

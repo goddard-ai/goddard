@@ -1,1 +1,0 @@
-- Hovering a suggested-action chip above the composer — including a voicing briefing's pause/resume — no longer turns the chip transparent; it darkens slightly in light themes and lightens in dark themes.

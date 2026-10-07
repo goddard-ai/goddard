@@ -1,1 +1,0 @@
-- Enable Composer dictation in Settings → Experiments to record up to 30 seconds and insert an offline Whistle transcription at the caret on Apple silicon Macs; the first use downloads the model. Disabled by default.

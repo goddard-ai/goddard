@@ -1,1 +1,0 @@
-- The voice scratchpad now marks sentences being cleaned with a small spinner at the end of their paragraph, the recording dot breathes while dictation is live, the hint line bolds "enter", and the Mute pill holds a fixed width across the toggle.

@@ -1,1 +1,0 @@
-- **[Experimental]** Turn on Boss and employee tasks in Settings → Experiments. The experiment is on in development builds and off in release builds unless enabled. Employee avatars recover from a failed or evicted raster instead of staying on the initials fallback. Employee chats omit Jev turn-status markers.

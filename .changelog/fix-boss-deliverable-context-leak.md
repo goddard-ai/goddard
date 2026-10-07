@@ -1,1 +1,0 @@
-- Returning to the boss chat from a deliverable's preview page — via Back, Escape, or clicking the boss row — no longer keeps the file attached to the next message; the deliverable only rides along while its page is on screen.

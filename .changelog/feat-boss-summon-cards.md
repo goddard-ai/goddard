@@ -1,1 +1,0 @@
-- When the boss summons an employee, its transcript now shows a live card with the employee's name, job title, current status, and their freshest reply line — updating as the employee works, and opening the employee's chat on click.

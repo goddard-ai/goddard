@@ -1,1 +1,0 @@
-- Toggling the sidebar with a right panel open no longer snaps the panel narrower at the start of the animation or wider at the end. The panel keeps its width while the chat column gives way, and only yields once the chat reaches its minimum — growing back just as smoothly when the sidebar hides.

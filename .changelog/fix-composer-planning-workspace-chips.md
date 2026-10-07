@@ -1,1 +1,0 @@
-- A planning session's composer no longer shows project, workspace, and branch chips — plans always run in the boss's own workspace, so the pickers' slot now carries the boss's avatar and name instead.

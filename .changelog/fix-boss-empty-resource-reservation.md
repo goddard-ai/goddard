@@ -1,1 +1,0 @@
-- Boss employees no longer dead-lock when their work needs a native build slot or a device — a summon admission that declared no host resources used to block the employee's first `resource` call instead of letting it acquire capacity.

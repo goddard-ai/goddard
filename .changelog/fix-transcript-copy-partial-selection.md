@@ -1,1 +1,0 @@
-- Copying part of a message or other markdown text now puts the rendered text on the clipboard; markdown syntax such as `**` or `##` is included only when the selection covers a whole block like a paragraph or list item.

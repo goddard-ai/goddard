@@ -1,1 +1,0 @@
-- A daemon that stops answering but is still running no longer restarts itself — running tasks keep their provider processes while Goddard reconnects. If it stays unresponsive, a banner explains the state and offers a "Restart daemon" action that first confirms the restart interrupts running work.

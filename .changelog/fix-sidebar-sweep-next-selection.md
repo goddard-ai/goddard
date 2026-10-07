@@ -1,1 +1,0 @@
-- Sweeping the task you're viewing into the sidebar's Dormant group now selects the next task in the list instead of leaving the shelved task open.

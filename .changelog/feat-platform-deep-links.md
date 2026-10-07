@@ -1,1 +1,0 @@
-- On macOS, other apps and scripts can open `goddard://` links: `goddard://new-task?prompt=<text>` lands on a new task with the prompt already in the composer — it never sends itself — and `goddard://task/<id>` links now open that task from outside the app too.

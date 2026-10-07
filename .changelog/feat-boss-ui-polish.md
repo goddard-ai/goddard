@@ -1,1 +1,0 @@
-- Made the Boss brain page easier to scan with clearer file controls, editor fields, and permission toggles.

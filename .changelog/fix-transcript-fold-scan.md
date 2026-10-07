@@ -1,1 +1,0 @@
-- Returning to a long transcript — most noticeably a busy Boss chat — no longer stalls while settled turns are re-folded.

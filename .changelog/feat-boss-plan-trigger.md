@@ -1,1 +1,0 @@
-- Approving a planning session's design returns you to its boss chat, where a "finalized its design" notice names the approved plan and links back to the planning session while it's still open.

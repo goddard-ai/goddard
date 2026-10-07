@@ -1,1 +1,0 @@
-- Employees can publish their own work as deliverables with `goddard-agent boss deliverable publish` — the file or folder must live inside the employee's assigned workspace, and it lands in the sidebar's deliverables section like boss-published ones. Deliverable management (pin, dismiss, archive) stays boss-only.

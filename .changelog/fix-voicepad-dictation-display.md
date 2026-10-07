@@ -1,1 +1,0 @@
-- In the VoicePad scratchpad, dictating no longer flickers or ghosts when partial words resolve into final text — provisional and settled words are now a single laid-out line — and annotation and bullet text wrap inside their boxes instead of running off the edge.

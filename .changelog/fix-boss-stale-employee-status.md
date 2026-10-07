@@ -1,1 +1,0 @@
-- Employees that failed or expired no longer keep showing a working spinner in the sidebar; the row now reflects that the session ended.

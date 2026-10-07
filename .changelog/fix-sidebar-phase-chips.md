@@ -1,1 +1,0 @@
-- Sidebar task rows and the selected task's title bar no longer show a Planning phase chip, and the "Hide Planning chips on task rows" setting is gone.

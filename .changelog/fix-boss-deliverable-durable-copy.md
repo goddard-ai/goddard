@@ -1,1 +1,0 @@
-- Deliverables published from an employee's workspace now keep working after that workspace is cleaned up — publish stores a copy of the file or folder instead of pointing at the original path, so archiving the employee's chat no longer breaks its sidebar entries.

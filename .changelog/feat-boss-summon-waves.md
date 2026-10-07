@@ -1,1 +1,0 @@
-- A boss can group employee summons into a wave by passing the same `groupId`: the daemon reports once when every member finishes, fails, or is cancelled — including waves cancelled entirely — instead of leaving the boss to track each employee's finish.

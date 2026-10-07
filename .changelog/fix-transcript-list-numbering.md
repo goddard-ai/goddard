@@ -1,1 +1,0 @@
-- Ordered lists in transcripts keep the numbers the author typed — a prompt or message that lists "3, 7, 9" no longer renumbers itself to "1, 2, 3".

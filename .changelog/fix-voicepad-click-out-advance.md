@@ -1,1 +1,0 @@
-- Clicking out of a VoicePad note box commits it and moves dictation to a fresh paragraph instead of resuming the annotated one, and ⌥M pauses capture without losing an open note.

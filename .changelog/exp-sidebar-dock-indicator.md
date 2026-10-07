@@ -1,1 +1,0 @@
-- With the experimental quick-action dock on, the sidebar's bottom-left strip shows a cluster of mini dock orbs instead of the settings and keyboard-shortcut buttons while the dock is hidden; hovering the strip still raises it.

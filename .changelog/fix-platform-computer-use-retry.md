@@ -1,1 +1,0 @@
-- Fixed a "Broken pipe" failure that could stop a Computer Use task when its native helper restarted between actions; the action now transparently resumes on a fresh helper when it is certain nothing ran.

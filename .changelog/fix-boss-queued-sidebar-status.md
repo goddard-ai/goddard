@@ -1,1 +1,0 @@
-- Boss employees waiting in the summon queue no longer look finished in the sidebar and on summon cards — they show an hourglass whose tooltip names the wait reason, such as a full model slot limit.

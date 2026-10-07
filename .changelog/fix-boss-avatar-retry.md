@@ -1,1 +1,0 @@
-- Boss and employee avatars retry temporary rendering failures instead of immediately staying on a letter placeholder.

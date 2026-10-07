@@ -1,1 +1,0 @@
-- Boss employee icons now describe the job: summon accepts an icon override and personas carry a default from an expanded icon set, while titles without either choice match work categories — bug fixing, localization, packaging, infrastructure, database — and fall back to a brain glyph instead of a generic person.

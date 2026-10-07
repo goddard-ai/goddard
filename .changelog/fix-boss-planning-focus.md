@@ -1,1 +1,0 @@
-- A planning session the boss starts with `createPlan` no longer pulls you away from the task you're viewing: the new plan appears under the boss in the sidebar and only opens automatically while you're already in the boss chat.

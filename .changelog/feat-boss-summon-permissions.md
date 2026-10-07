@@ -1,1 +1,0 @@
-- Boss summon accepts per-field `permissions` overrides for named memory bucket IDs, integrations, delegation, and Computer Use; `control` gains `setPermissions` to revise a live employee's grants without editing the persona.

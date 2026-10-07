@@ -1,1 +1,0 @@
-- The Git panel in a standalone terminal follows its current directory, showing the nearest repository's branch, history, and staging area, or an empty state outside a repository.

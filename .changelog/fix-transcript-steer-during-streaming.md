@@ -1,1 +1,0 @@
-- Keep queued prompts' Steer action available while text streams, and show a steered prompt in the transcript until it is delivered.

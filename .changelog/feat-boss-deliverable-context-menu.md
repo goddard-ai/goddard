@@ -1,1 +1,0 @@
-- A deliverable's preview page offers the same right-click menu as a chat message — Copy Selection, Search with Google, Copy Message, and Send to Friend — acting on the published document's text.

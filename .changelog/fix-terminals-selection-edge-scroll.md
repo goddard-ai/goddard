@@ -1,1 +1,0 @@
-- Selecting terminal text now scrolls through history while you hold the pointer near the top or bottom edge.

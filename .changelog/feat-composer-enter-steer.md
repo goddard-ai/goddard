@@ -1,1 +1,0 @@
-- New Settings → General toggle "Enter steers the running turn" swaps the composer's Enter chords: Enter steers the draft into the running turn and ⌘Enter queues it. Shift+Enter still inserts a line break.

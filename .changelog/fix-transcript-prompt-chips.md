@@ -1,1 +1,0 @@
-- Transcript reference chips have equal padding on both edges and a slightly wider gap between their icon or employee avatar and label, including chips that open a sent prompt.

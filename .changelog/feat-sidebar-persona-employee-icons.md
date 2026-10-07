@@ -1,1 +1,0 @@
-- Assign an icon to each Boss persona to show beside its employees' job titles in the sidebar and top bar; a custom employee icon takes precedence. The bot icon stays exclusive to custom commands — it can't be assigned to employees or personas.

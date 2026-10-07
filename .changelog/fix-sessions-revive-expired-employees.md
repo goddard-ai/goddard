@@ -1,1 +1,0 @@
-- Prompt or steer an expired employee to resume its session and transcript. If its name has already been assigned to someone else, Goddard explains that you need to summon a new employee.

@@ -1,1 +1,0 @@
-- Summoned employees now have a larger pool of human names, and Goddard adds an initial when a name is already in use.

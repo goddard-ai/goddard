@@ -1,1 +1,0 @@
-- The Boss chat opens Goals by default: five recent finishes with Show more directly below, then work in progress and queued assignments. Finished goals leave the list after 24 hours while task history stays available. Each compact two-line row opens its task, where blocked reasons remain available, and preview rows stay fully visible at different UI font sizes.

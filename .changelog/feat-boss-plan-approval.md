@@ -1,1 +1,0 @@
-- In a planning session, the **Finalize plan** chip above the composer finalizes the plan in one click — or press ⌘⏎ while the composer is empty; the planning agent's own request to finalize still asks for your approval. Once approval goes out, the session's composer becomes a read-only status card.

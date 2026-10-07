@@ -1,1 +1,0 @@
-- Agents can propose archiving tasks with `goddard-agent archive`, naming one or more tasks in their project and a reason; the proposal shows as an approval card on the agent's own task and nothing is archived until you approve it — approving archives the tasks, closes their side chats, and stops their runtimes like a manual archive.

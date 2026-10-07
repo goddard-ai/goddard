@@ -1,1 +1,0 @@
-- A planning session no longer opens its side panel on a loading screen the moment it starts — the plan tab now appears once the session has written real content to its plan document.

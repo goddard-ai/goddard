@@ -1,1 +1,0 @@
-- While a deliverable's preview page is open, the sidebar's Boss row no longer stays highlighted as selected — the deliverable's own row carries the selection instead.

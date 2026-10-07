@@ -1,1 +1,0 @@
-- Employee mood avatars are now generated locally instead of fetched from an external service — they appear while offline and no avatar seeds leave the machine.

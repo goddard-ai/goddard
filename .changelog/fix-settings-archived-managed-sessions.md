@@ -1,1 +1,0 @@
-- Boss and employee sessions no longer appear in Settings → Archived chats.

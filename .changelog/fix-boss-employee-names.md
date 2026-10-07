@@ -1,1 +1,0 @@
-- Summoned employees draw randomly from the curated name pool instead of following alphabetical order, while keeping names unique on the live roster and reusing retired names.

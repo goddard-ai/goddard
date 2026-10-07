@@ -1,1 +1,0 @@
-- Archived employee sessions now show a muted "Archived" chip in the window's top bar when opened from history or search — viewing one no longer restores it, so the roster stays unchanged.

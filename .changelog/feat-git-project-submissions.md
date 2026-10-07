@@ -1,1 +1,0 @@
-- Employee `merge submit` is now opt-in per project: a worktree employee's submission fails with "submissions not enabled for this project" until the boss enables it with the `setProjectSubmissions` operation.

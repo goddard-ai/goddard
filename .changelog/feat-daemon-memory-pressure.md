@@ -1,1 +1,0 @@
-- The daemon now sheds idle, resumable task runtimes when the operating system reports memory pressure — on macOS, Linux, and Windows — instead of only evicting them after 30 idle minutes. Running turns and queued work are never evicted, and shed tasks reopen on demand.

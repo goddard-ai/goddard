@@ -1,1 +1,0 @@
-- Remote Boss rows now show the configured machine name beneath the Boss name, so you can tell which machine owns each Boss and its employees.

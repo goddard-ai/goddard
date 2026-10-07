@@ -1,1 +1,0 @@
-- A Boss steer that redirects an employee's assignment can now retitle the job in the same action — pass `jobTitle` with the steer and the sidebar row, task header, transcript, and employee list all relabel without queueing an extra prompt or adding a transcript message.

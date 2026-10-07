@@ -1,1 +1,0 @@
-- Employee tasks show a ⋮ button after the job title in the top bar that opens the Assignment popover — the brief, persona, model, workspace, access, and resource state the summon recorded — and queued or starting employees show their assignment card instead of the new-task empty state.

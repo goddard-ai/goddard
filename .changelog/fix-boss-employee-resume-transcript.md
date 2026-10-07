@@ -1,1 +1,0 @@
-- An employee's page now shows the follow-up prompt and the live "Working" indicator when the boss revives a finished employee — previously the transcript stayed stuck on the finished turn until it was reloaded.

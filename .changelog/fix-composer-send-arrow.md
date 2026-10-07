@@ -1,1 +1,0 @@
-- The chat composer's send arrow stays legible over its chrome button artwork in light and dark themes — the designed light underlay now sits beneath the dark arrow instead of recoloring a single icon per state.
