@@ -697,14 +697,51 @@ fn boss_state_owning_session(
     })
 }
 
+fn viewed_plan_just_finalized(
+    previous: Option<&BossState>,
+    current: &BossState,
+    selected_session: Option<Uuid>,
+) -> bool {
+    let Some(previous) = previous.filter(|previous| previous.identity.id == current.identity.id)
+    else {
+        return false;
+    };
+    let Some(session_id) = selected_session else {
+        return false;
+    };
+    previous
+        .planning
+        .iter()
+        .any(|plan| plan.session_id == session_id && plan.finalized_at.is_none())
+        && current
+            .planning
+            .iter()
+            .any(|plan| plan.session_id == session_id && plan.finalized_at.is_some())
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
+        let mut finalized_plan_host = None;
         while let Ok((key, state)) = self.boss_events.try_recv() {
             if self.boss_ui.states.get(&key).is_some_and(|previous| {
                 previous.identity.id == state.identity.id && previous.revision > state.revision
             }) {
                 continue;
+            }
+            // Agent-initiated approval has no BossReply in this client.
+            // Follow its live state transition, but don't redirect when
+            // opening an already-finalized plan or syncing another host.
+            if viewed_plan_just_finalized(
+                self.boss_ui.states.get(&key),
+                &state,
+                self.state.selected_session,
+            ) && !self
+                .state
+                .selected_session
+                .is_some_and(|id| self.boss_ui.plan_finalizing.contains(&id))
+            {
+                finalized_plan_host = Some(key);
             }
             let queue_rank = boss_queue_ranks(&state);
             let rows = Arc::new(
@@ -881,6 +918,9 @@ impl Waku {
                     self.chat_with_boss(key, cx);
                 }
             }
+        }
+        if let Some(key) = finalized_plan_host {
+            self.chat_with_boss(key, cx);
         }
         self.pump_boss_avatars(cx);
         changed
@@ -1602,7 +1642,8 @@ impl Waku {
                             BossResult::PlanFinalized { .. }
                                 if matches!(reply, BossReply::Finalize(_)) =>
                             {
-                                this.boss_request(key, BossOperation::View, BossReply::List, cx);
+                                this.chat_with_boss(key, cx);
+                                this.refresh_boss_state_on(key, cx);
                             }
                             BossResult::Files { files } => {
                                 if let Some((current_key, BossTab::Memory)) = this.boss_ui.page
@@ -7775,6 +7816,54 @@ mod tests {
             Some(chat)
         );
         assert!(boss_state_owning_session(&states, Uuid::new_v4()).is_none());
+    }
+
+    #[test]
+    fn finalizing_the_viewed_plan_returns_to_its_boss_only_once() {
+        let mut previous = boss_state_for_queue_test();
+        let planning = Uuid::new_v4();
+        previous.planning = vec![waku_protocol::boss::BossPlan {
+            id: Uuid::new_v4(),
+            session_id: planning,
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            finalized_at: None,
+            items: Vec::new(),
+            outcome: None,
+            history: Vec::new(),
+        }];
+        let mut current = previous.clone();
+        assert!(!viewed_plan_just_finalized(
+            Some(&previous),
+            &current,
+            Some(planning)
+        ));
+        current.planning[0].finalized_at = Some(100);
+        assert!(viewed_plan_just_finalized(
+            Some(&previous),
+            &current,
+            Some(planning)
+        ));
+        // Loading historical approval, refreshing it, or finalizing a plan
+        // outside the viewed chat must not steal navigation.
+        assert!(!viewed_plan_just_finalized(None, &current, Some(planning)));
+        assert!(!viewed_plan_just_finalized(
+            Some(&current),
+            &current,
+            Some(planning)
+        ));
+        assert!(!viewed_plan_just_finalized(
+            Some(&previous),
+            &current,
+            Some(Uuid::new_v4())
+        ));
+        assert!(!viewed_plan_just_finalized(Some(&previous), &current, None));
+        current.identity.id = Uuid::new_v4();
+        assert!(!viewed_plan_just_finalized(
+            Some(&previous),
+            &current,
+            Some(planning)
+        ));
     }
 
     #[test]

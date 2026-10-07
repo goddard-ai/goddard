@@ -1,1 +1,1 @@
-- When a planning session's design is approved and handed to the boss, the boss chat now marks the turn it woke with a "finalized its design" notice — like the markers employee reports leave — naming the plan and linking back to the planning session while it's still open.
+- Approving a planning session's design returns you to its boss chat, where a "finalized its design" notice names the approved plan and links back to the planning session while it's still open.
