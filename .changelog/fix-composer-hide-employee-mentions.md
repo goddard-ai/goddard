@@ -1,0 +1,1 @@
+- The composer's `@` suggestions no longer include employee sessions; project, file, and other reference suggestions remain available.
