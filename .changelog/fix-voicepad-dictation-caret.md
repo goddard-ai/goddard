@@ -1,0 +1,1 @@
+- The VoicePad scratchpad now blinks a caret where the next dictated word lands — on the live row, at the current paragraph's tail, and inside an open annotation box. Clicking out of a note box commits it and moves dictation to a fresh paragraph instead of resuming the annotated one, and ⌥M pauses capture without losing an open note.

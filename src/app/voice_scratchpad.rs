@@ -132,6 +132,9 @@ const RECORDING_GLOW: u32 = 0xFF85B6;
 /// The live record dot's breathing cycle — one full opacity sweep,
 /// ~70% to 100% and back.
 const RECORDING_DOT_PERIOD: Duration = Duration::from_millis(1500);
+/// The dictation caret's blink cycle — visible a touch over half of each
+/// pass, the square wave a text field's caret runs.
+const CARET_BLINK_PERIOD: Duration = Duration::from_millis(1060);
 /// The text model that scrubs finished dictation — reached through the
 /// same Vercel AI Gateway credential the transcription socket uses.
 const CLEANUP_MODEL_ID: &str = "alibaba/qwen3.8-27b";
@@ -1422,17 +1425,21 @@ impl ScratchpadTranscript {
                     });
                 }
             }
-            None => {
-                // Speech is moving to a fresh paragraph — the closing
-                // one's tail is finished dictation, so it cleans now.
-                self.flush_open_tail();
-                let current = self.current();
-                if !current.text.is_empty() || !current.bullets.is_empty() {
-                    self.paragraphs.push(ScratchpadParagraph::default());
-                }
-                self.main_clean_from = 0;
-            }
+            None => self.advance_append_point(),
         }
+    }
+
+    /// The append point leaves its paragraph: whatever the closing one
+    /// still holds is finished dictation and queues for cleanup, then a
+    /// fresh paragraph opens at the end — unless the last already sits
+    /// clean, in which case it keeps the point.
+    fn advance_append_point(&mut self) {
+        self.flush_open_tail();
+        let current = self.current();
+        if !current.text.is_empty() || !current.bullets.is_empty() {
+            self.paragraphs.push(ScratchpadParagraph::default());
+        }
+        self.main_clean_from = 0;
     }
 
     /// Open the annotation box on a paragraph; an open box moves. The
@@ -1501,10 +1508,12 @@ impl ScratchpadTranscript {
 
     /// Finish annotating the way "okay next" would — the box's content
     /// lands as a bullet at its slot, or an armed edit dispatches its
-    /// instruction tail as the paragraph's rewrite — then close, leaving
-    /// the append point back on the live row. The still-provisional tail
-    /// goes in with it, folded as strip credit so the stream's
-    /// re-delivery of those words doesn't append them a second time.
+    /// instruction tail as the paragraph's rewrite — then close, moving
+    /// the append point to a fresh paragraph at the end so dictation
+    /// keeps going forward instead of resuming inside the annotated
+    /// one. The still-provisional tail goes in with it, folded as strip
+    /// credit so the stream's re-delivery of those words doesn't append
+    /// them a second time.
     fn commit_annotation(&mut self) {
         let Some(target) = self.annotation_target.take() else {
             return;
@@ -1515,6 +1524,7 @@ impl ScratchpadTranscript {
             .to_owned();
         self.fold_span(&interim);
         self.annotation_clean_from = 0;
+        self.advance_append_point();
         // An armed edit splits the box at the phrase: the tail is the
         // rewrite instruction for its paragraph — it dispatches to the
         // cleanup pipeline and never lands as a bullet. Words spoken
@@ -3309,15 +3319,11 @@ impl Waku {
     }
 
     /// Whether ⌥M is the scratchpad's pause key right now: the
-    /// panel owns the chat column and no annotation box has reclaimed
-    /// typing for the composer draft. The transcript's live caret consumes
-    /// the chord's character a level deeper, so one that lands as text
-    /// never reaches the caller this gate answers for.
+    /// panel owns the chat column. An open annotation box doesn't carve
+    /// it out — muting pauses capture while the box and its content
+    /// stand.
     pub(super) fn voice_scratchpad_alt_m_mutes(&self) -> bool {
         self.voice_scratchpad_visible()
-            && self
-                .selected_voice_scratchpad()
-                .is_some_and(|scratchpad| scratchpad.transcript.annotation_target.is_none())
     }
 
     /// ⌥M's pause effect — the same toggle the control row's Mute pill
@@ -4722,6 +4728,9 @@ impl Waku {
                             theme.selection,
                             false,
                         ))
+                        .when(show_dot, |row| {
+                            row.child(scratchpad_dictation_caret(14.0, muted, status, theme))
+                        })
                         .when(cleaning, |row| {
                             row.child(scratchpad_cleanup_spinner(14.0, theme))
                         })
@@ -4936,6 +4945,7 @@ impl Waku {
                                 theme.selection,
                                 false,
                             ))
+                            .child(scratchpad_dictation_caret(14.0, muted, status, theme))
                             .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
                     )
                     // Nothing is written here yet — the live row is the
@@ -5196,6 +5206,7 @@ impl Waku {
         } else {
             None
         };
+        let muted = scratchpad.muted || scratchpad.input_unavailable;
         let box_content = div()
             .min_w(px(240.0))
             .max_w(px(360.0))
@@ -5212,12 +5223,7 @@ impl Waku {
             .items_start()
             // Clicks inside the box don't re-target the paragraph.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(scratchpad_dot_on_line(
-                13.0,
-                scratchpad.muted || scratchpad.input_unavailable,
-                scratchpad.status,
-                theme,
-            ))
+            .child(scratchpad_dot_on_line(13.0, muted, scratchpad.status, theme))
             .child(
                 div()
                     .min_w_0()
@@ -5232,7 +5238,18 @@ impl Waku {
                     // it paints unwrapped, straight past the box. The
                     // full-width div gives it a definite wrap column, the
                     // same treatment `selectable_flat_text` gives the rows.
-                    .child(div().w_full().min_w_0().child(text_element))
+                    // The dictation caret wraps inside the same column so it
+                    // lands at the end of the last line.
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .flex_wrap()
+                            .items_end()
+                            .child(text_element)
+                            .child(scratchpad_dictation_caret(13.0, muted, scratchpad.status, theme)),
+                    )
                     .when(
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
@@ -5664,6 +5681,41 @@ fn scratchpad_dot_on_line(
         .child(scratchpad_dot(muted, status, theme))
 }
 
+/// The dictation caret: a 1.5px accent sliver a text line tall, painted
+/// where the next dictated word lands — the live row, the current
+/// paragraph's tail, or inside the open annotation box. It blinks on the
+/// shared pulse clock while the stream is live; a muted or dead session
+/// holds it solid, as does reduce-motion.
+fn scratchpad_dictation_caret(
+    text_size: f32,
+    muted: bool,
+    status: ScratchpadStatus,
+    theme: &Theme,
+) -> AnyElement {
+    let color = theme.accent;
+    let caret = move || {
+        div()
+            .flex_none()
+            .w(px(1.5))
+            .h(px(text_size * 1.618_034))
+            .bg(color)
+    };
+    let live = !muted
+        && !matches!(
+            status,
+            ScratchpadStatus::MicDenied | ScratchpadStatus::ConnectionLost
+        );
+    if !live {
+        return caret().into_any_element();
+    }
+    motion::pulse(CARET_BLINK_PERIOD, move |phase| {
+        caret()
+            .opacity(if phase < 0.55 { 1.0 } else { 0.0 })
+            .into_any_element()
+    })
+    .into_any_element()
+}
+
 /// The cleanup spinner at a cleaning node's tail — the same shared-clock
 /// loader every spinner rides, offset to sit on the first text line the
 /// way the record dot does.
@@ -6066,6 +6118,75 @@ mod tests {
         // second copy, and fresh speech lands on the live row again.
         transcript.append_finalized("for a moment more");
         assert_eq!(transcript.paragraphs[1].text, "moment more");
+    }
+
+    #[test]
+    fn click_out_leaves_the_append_point_on_a_fresh_paragraph() {
+        // Committing the box by clicking away moves the append point to a
+        // clean paragraph at the end — fresh speech lands there, never
+        // back inside the annotated paragraph.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan");
+        transcript.annotate(0);
+        transcript.append_finalized("a note");
+        transcript.commit_annotation();
+        assert!(transcript.annotation_target.is_none());
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["a note"]);
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert!(transcript.paragraphs[1].text.is_empty());
+        transcript.append_finalized("moving on");
+        assert_eq!(transcript.paragraphs[0].text, "the plan");
+        assert_eq!(transcript.paragraphs[1].text, "moving on");
+        // A subsequent annotation commits the same way — clicking out
+        // always advances rather than re-targeting the annotated row.
+        transcript.annotate(1);
+        transcript.append_finalized("another note");
+        transcript.commit_annotation();
+        assert_eq!(transcript.paragraphs[1].bullets, vec!["another note"]);
+        assert_eq!(transcript.paragraphs.len(), 3);
+        transcript.append_finalized("and on");
+        assert_eq!(transcript.paragraphs[2].text, "and on");
+    }
+
+    #[test]
+    fn click_out_off_an_earlier_paragraph_still_advances() {
+        // The same rule holds when the annotated paragraph isn't the live
+        // one: the append point doesn't resume the in-flight tail, it
+        // opens a fresh paragraph at the end.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan okay next");
+        transcript.append_finalized("still dictating");
+        transcript.annotate(0);
+        transcript.append_finalized("a note");
+        transcript.commit_annotation();
+        assert_eq!(transcript.paragraphs.len(), 3);
+        transcript.append_finalized("a fresh thought");
+        assert_eq!(transcript.paragraphs[1].text, "still dictating");
+        assert_eq!(transcript.paragraphs[2].text, "a fresh thought");
+    }
+
+    #[test]
+    fn mute_preserves_the_open_box_and_its_armed_edit() {
+        // The model half of pausing — the box, its committed words, and
+        // an armed rewrite all survive solidifying the interim, which
+        // folds the provisional tail into the box's instruction.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan is ready");
+        transcript.annotate(0);
+        transcript.append_finalized("a note okay let's make an edit");
+        transcript.set_interim("shorter please".to_owned());
+        transcript.solidify_interim();
+        assert!(transcript.annotation_target.is_some());
+        assert!(transcript.annotation_edit.is_some());
+        assert_eq!(transcript.annotation_text, "a note shorter please");
+        transcript.commit_annotation();
+        let instruction = transcript
+            .cleanup_requests
+            .iter()
+            .find_map(|request| request.edit.clone())
+            .expect("the armed rewrite survived the pause");
+        assert_eq!(instruction, "shorter please");
+        assert_eq!(transcript.paragraphs[0].bullets, vec!["a note"]);
     }
 
     #[test]
