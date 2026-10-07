@@ -1336,7 +1336,14 @@ pub(super) fn model_picker_panel(
     // The horizontal padding is the rows' transparent side gutter — `list`
     // only honors vertical padding on its items, so it lives on the
     // container to keep row fills clear of the panel edge.
-    let mut list_element = div().id("model-picker-list").size_full().px(px(4.0));
+    let autoscroll_list = list_state.clone();
+    let mut list_element = div()
+        .id("model-picker-list")
+        .size_full()
+        .px(px(4.0))
+        .on_drag_move::<FavoriteModelDrag>(move |event, window, _| {
+            start_drag_autoscroll(&autoscroll_list, event.bounds, window);
+        });
     if rows.is_empty() {
         list_element = list_element.p(px(9.0)).child(
             div()
@@ -1479,6 +1486,62 @@ pub(super) fn model_picker_row_shell(
         // The keyboard cursor reads as an accent tint rather than a ring, so
         // it stays legible on the current row's already-filled surface.
         .when(highlighted, |element| element.bg(theme.focus_highlight()))
+}
+
+/// Distance from the list's top or bottom edge where a dragged favorite
+/// starts scrolling it.
+const DRAG_AUTOSCROLL_EDGE: f32 = 40.0;
+/// Scroll speed, in pixels per second, with the pointer at or past the edge.
+const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 700.0;
+
+static DRAG_AUTOSCROLL_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Scrolls the list while a favorite is dragged near its top or bottom edge.
+/// Frames keep coming while the pointer rests there, so a single loop — started
+/// by the first drag move and ended with the drag — drives the scroll, scaled
+/// by frame time and by how deep into the edge zone the pointer is.
+fn start_drag_autoscroll(
+    list_state: &ListState,
+    bounds: Bounds<Pixels>,
+    window: &mut Window,
+) {
+    use std::sync::atomic::Ordering;
+    if DRAG_AUTOSCROLL_ACTIVE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    fn step(
+        list_state: ListState,
+        bounds: Bounds<Pixels>,
+        last_frame: Instant,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if !cx.has_active_drag() {
+            DRAG_AUTOSCROLL_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        let now = Instant::now();
+        let dt = now.duration_since(last_frame).as_secs_f32().min(0.05);
+        let y = window.mouse_position().y;
+        let edge = px(DRAG_AUTOSCROLL_EDGE).min(bounds.size.height / 2.0);
+        let depth = if y < bounds.top() + edge {
+            -((bounds.top() + edge - y) / edge).min(1.0)
+        } else if y > bounds.bottom() - edge {
+            ((y - (bounds.bottom() - edge)) / edge).min(1.0)
+        } else {
+            0.0
+        };
+        if depth != 0.0 {
+            list_state.scroll_by(px(depth * DRAG_AUTOSCROLL_MAX_SPEED * dt));
+        }
+        window.on_next_frame(move |window, cx| step(list_state, bounds, now, window, cx));
+        window.refresh();
+    }
+    let list_state = list_state.clone();
+    let now = Instant::now();
+    window.on_next_frame(move |window, cx| step(list_state, bounds, now, window, cx));
+    window.refresh();
 }
 
 /// A starred model selection dragged within the picker to reorder the

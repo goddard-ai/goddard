@@ -1,0 +1,1 @@
+- The model picker now scrolls smoothly when you drag a favorite model to its top or bottom edge.
