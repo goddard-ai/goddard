@@ -1173,8 +1173,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         : providerPromptOverride.trim()
       const runtime = entries.current.get(session.id)
       if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(session)) {
-        await sendPrompt(session, prompt, attachments, providerPrompt)
-        return
+        throw new Error('This task can no longer accept a steer. Try again when it is running.')
       }
       const pending = pendingSteers.current.get(session.id) ?? []
       pending.push({ providerPrompt, displayContent: prompt, attachments })
