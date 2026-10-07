@@ -364,7 +364,8 @@ impl WakuBackend {
                 history: Vec::new(),
             };
             let (opener, _) = localized!("boss.plan_seed_opener", path = plan_file.clone());
-            let seed = format!("{}\n\n{}", prompt.trim(), opener);
+            let storage = self.boss.plan_file_context(&plan_file)?;
+            let seed = format!("{}\n\n{}\n\n{}", prompt.trim(), opener, storage);
             // Planning is design/drafting work: it defaults to Codex's sol
             // model at medium effort rather than inheriting the boss
             // chat's own pick. Each field the caller supplies still wins —

@@ -1391,7 +1391,11 @@ impl BossService {
     }
 
     pub fn workspace(&self, session: Uuid) -> anyhow::Result<PathBuf> {
-        let path = if self.is_boss_principal(session) {
+        let path = if self.plan(session).is_some() {
+            // Providers that edit `plans/...` directly must reach the same
+            // store as Boss readFile/writeFile, independent of project cwd.
+            self.root.join("files")
+        } else if self.is_boss_principal(session) {
             return self.owned_workspace();
         } else {
             self.root.join("workspaces").join(session.to_string())
@@ -1400,7 +1404,70 @@ impl BossService {
         Ok(path)
     }
 
+    /// The same validated files-root path used by Boss readFile/writeFile.
+    pub fn plan_document_path(&self, plan_file: &str) -> anyhow::Result<PathBuf> {
+        self.file_path(&normalize_plan_file(plan_file)?, false)
+    }
+
+    pub fn plan_file_context(&self, plan_file: &str) -> anyhow::Result<String> {
+        let relative = normalize_plan_file(plan_file)?;
+        let absolute = self.plan_document_path(&relative)?;
+        Ok(format!(
+            "Plan storage: `{relative}` is relative to the Boss files root, at `{}`. Read and edit it only through `goddard-agent boss` readFile/writeFile with path `{relative}`, never through project-relative filesystem writes. For publishDeliverable use the absolute stored path `{}`.",
+            absolute.display(),
+            absolute.display(),
+        ))
+    }
+
     pub fn set_project_context(&self, session: Uuid, path: PathBuf) {
+        // Recover only this session's registered document. Keep the project
+        // original intact, and never replace a document already in Boss files.
+        if let Some(plan) = self.plan(session) {
+            let recover = || -> anyhow::Result<()> {
+                let target = self.plan_document_path(&plan.plan_file)?;
+                if target.exists() {
+                    return Ok(());
+                }
+                let relative = normalize_plan_file(&plan.plan_file)?;
+                let legacy_root = if path.join(&relative).exists() {
+                    path.clone()
+                } else {
+                    self.root.join("workspace")
+                };
+                let source = legacy_root.join(relative);
+                if !source.exists() {
+                    return Ok(());
+                }
+                let project = fs::canonicalize(legacy_root)?;
+                let source = fs::canonicalize(source)?;
+                anyhow::ensure!(
+                    source.starts_with(project),
+                    "legacy plan escapes its project"
+                );
+                anyhow::ensure!(
+                    fs::metadata(&source)?.len() <= MAX_FILE_BYTES as u64,
+                    "legacy plan is too large"
+                );
+                let content = fs::read(source)?;
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                // Publish the complete copy without replacing a concurrent
+                // Boss write. The temporary file lives on the target volume.
+                let temporary = target.with_extension(format!("recover-{}", Uuid::new_v4()));
+                atomic_write(&temporary, &content)?;
+                let linked = fs::hard_link(&temporary, &target);
+                let _ = fs::remove_file(&temporary);
+                match linked {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                    Err(error) => Err(error.into()),
+                }
+            };
+            if let Err(error) = recover() {
+                eprintln!("could not recover legacy plan {}: {error}", plan.plan_file);
+            }
+        }
         self.projects.lock().insert(session, path);
     }
 
@@ -1515,6 +1582,12 @@ impl BossService {
                 } else {
                     format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at {} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. While drafting you may summon employees for design research and audits, but never to build. When the design is ready for the user's approval call `finalizePlan` — the user reviews it before it freezes. Approval ends your design work: the finalized doc is reported to the boss chat and the boss coordinates implementation from there.", plan.idea, plan.plan_file)
                 }
+            })
+            .map(|instructions| {
+                let storage = self.plan(session)
+                    .and_then(|plan| self.plan_file_context(&plan.plan_file).ok())
+                    .unwrap_or_default();
+                format!("{instructions}\n{storage}")
             })
             .unwrap_or_default();
         format!(
@@ -7392,6 +7465,91 @@ mod memory_op_tests {
                 },
             )
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn planning_files_share_the_boss_store_and_recover_project_drafts() {
+        let root = std::env::temp_dir().join(format!("boss-plan-store-{}", Uuid::new_v4()));
+        let project = root.join("project-worktree");
+        fs::create_dir_all(project.join("plans")).unwrap();
+        fs::write(project.join("plans/auth.md"), "legacy draft").unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        let plan = test_plan("plans/auth.md");
+        let session = plan.session_id;
+        add_plan(&service, plan);
+        service.set_project_context(session, project.clone());
+        let stored = service.plan_document_path("auth.md").unwrap();
+        assert_eq!(stored, root.join("files/plans/auth.md"));
+        assert_eq!(service.workspace(session).unwrap(), root.join("files"));
+        assert_eq!(fs::read_to_string(&stored).unwrap(), "legacy draft");
+        assert_eq!(
+            fs::read_to_string(project.join("plans/auth.md")).unwrap(),
+            "legacy draft"
+        );
+
+        // A provider's relative edit and Boss operations address one document.
+        fs::write(
+            service.workspace(session).unwrap().join("plans/auth.md"),
+            "revised",
+        )
+        .unwrap();
+        service.set_project_context(session, project.clone());
+        assert!(
+            matches!(service.handle(Some(session), BossOperation::ReadFile {
+            path: "plans/auth.md".into(),
+        }).unwrap(), BossResult::File { content, .. } if content == "revised")
+        );
+        service
+            .handle(
+                Some(session),
+                BossOperation::WriteFile {
+                    path: "memory/plans/auth.md".into(),
+                    content: "approved".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(fs::read_to_string(&stored).unwrap(), "approved");
+        let context = service.prompt_with_context(session, "resume".into());
+        assert!(context.contains(&stored.display().to_string()));
+        assert!(context.contains("never through project-relative filesystem writes"));
+        service
+            .handle(
+                Some(session),
+                BossOperation::PublishDeliverable {
+                    path: stored.display().to_string(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        service.finalize_plan("plans/auth.md", None, 100).unwrap();
+        assert!(
+            service
+                .handle(
+                    Some(session),
+                    BossOperation::WriteFile {
+                        path: "plans/auth.md".into(),
+                        content: "late".into(),
+                    }
+                )
+                .is_err()
+        );
+
+        // Older runtimes used the private Boss workspace even when a
+        // different project supplied the session context.
+        let plan = test_plan("plans/billing.md");
+        let session = plan.session_id;
+        add_plan(&service, plan);
+        let legacy = service.owned_workspace().unwrap().join("plans/billing.md");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, "workspace draft").unwrap();
+        service.set_project_context(session, project);
+        assert_eq!(
+            fs::read_to_string(service.plan_document_path("billing.md").unwrap()).unwrap(),
+            "workspace draft"
+        );
+        assert!(legacy.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

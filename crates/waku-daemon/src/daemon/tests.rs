@@ -9465,6 +9465,17 @@ fn create_plan_opens_a_seeded_managed_planning_session() {
     let seed = &session.messages[0].content;
     assert!(seed.contains("plan the auth migration"));
     assert!(seed.contains("plans/auth.md"));
+    assert!(
+        seed.contains(
+            &backend
+                .boss
+                .plan_document_path("auth.md")
+                .unwrap()
+                .display()
+                .to_string()
+        )
+    );
+    assert!(seed.contains("never through project-relative filesystem writes"));
     // A second plan on the same document is refused; a different idea
     // runs alongside it, and an explicit model/effort still wins.
     assert!(

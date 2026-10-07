@@ -1,0 +1,1 @@
+- Planning sessions now keep their design documents in Boss files instead of project worktrees, so plans survive worktree cleanup.
