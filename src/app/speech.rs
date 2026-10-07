@@ -242,6 +242,7 @@ enum SpeechEngine {
     },
     Piper {
         voice: String,
+        speaker: u32,
     },
 }
 
@@ -355,7 +356,9 @@ async fn resolve_speech_clips(
                 credential,
                 model_id,
             } => synthesize(http, executor, *provider, credential, model_id, part).await?,
-            SpeechEngine::Piper { voice } => synthesize_piper(http, executor, voice, part).await?,
+            SpeechEngine::Piper { voice, speaker } => {
+                synthesize_piper(http, executor, voice, *speaker, part).await?
+            }
         };
         let id = Uuid::new_v4();
         let clip = SpeechClip {
@@ -677,6 +680,7 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
+        let piper_speaker = self.state.voice_briefing_piper_speaker;
         let piper_voice =
             super::piper::piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
@@ -686,7 +690,10 @@ impl Waku {
             let executor = executor.clone();
             async move {
                 let engine = if tts_model.is_piper() {
-                    SpeechEngine::Piper { voice: piper_voice }
+                    SpeechEngine::Piper {
+                        voice: piper_voice,
+                        speaker: piper_speaker,
+                    }
                 } else {
                     let credential = inference_credential(&client, provider)?;
                     SpeechEngine::Gateway {

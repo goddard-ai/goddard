@@ -2500,6 +2500,9 @@ pub struct Waku {
     /// The Appearance page's two font pickers — one per configurable face.
     ui_font_selector: settings::FontSelector,
     code_font_selector: settings::FontSelector,
+    piper_speaker_list: ListState,
+    piper_speaker_scrollbar: Rc<ScrollbarState>,
+    piper_speaker_highlight: u32,
     daemon_port_input: Entity<TextInput>,
     daemon_origins_input: Entity<TextInput>,
     /// The review-train branch name, edited live on the Daemon settings
@@ -6885,6 +6888,9 @@ impl Waku {
                 sync_branch_fetch_pending: HashSet::new(),
                 ui_font_selector,
                 code_font_selector,
+                piper_speaker_list: ListState::new(0, ListAlignment::Top, px(30.0)),
+                piper_speaker_scrollbar: ScrollbarState::new(),
+                piper_speaker_highlight: 0,
                 daemon_port_input,
                 daemon_origins_input,
                 qa_branch_input,

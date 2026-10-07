@@ -237,9 +237,9 @@ impl Waku {
         let provider = self.state.voice_briefing_provider;
         let tts_model = self.state.voice_briefing_tts_model;
         if tts_model.is_piper() {
-            return format!(
-                "piper:{}",
-                piper_voice_or_default(&self.state.voice_briefing_piper_voice)
+            return super::piper::piper_voice_key(
+                &self.state.voice_briefing_piper_voice,
+                self.state.voice_briefing_piper_speaker,
             );
         }
         let model_id = if tts_model.is_custom() {
@@ -828,8 +828,8 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
-        let piper_voice =
-            piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
+        let piper_speaker = self.state.voice_briefing_piper_speaker;
+        let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
         let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
@@ -851,7 +851,7 @@ impl Waku {
                 // The gateway still wrote the transcript; only the voicing
                 // switches to the local engine when Piper is selected.
                 let audio = if tts_model.is_piper() {
-                    synthesize_piper(&http, &executor, &piper_voice, &transcript)
+                    synthesize_piper(&http, &executor, &piper_voice, piper_speaker, &transcript)
                         .await
                         .context("speech generation")?
                 } else {
@@ -917,8 +917,8 @@ impl Waku {
                 .unwrap_or_default()
                 .to_owned(),
         };
-        let piper_voice =
-            piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
+        let piper_speaker = self.state.voice_briefing_piper_speaker;
+        let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
         let http = cx.http_client();
         let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
@@ -926,7 +926,7 @@ impl Waku {
             let executor = executor.clone();
             async move {
                 let audio = if tts_model.is_piper() {
-                    synthesize_piper(&http, &executor, &piper_voice, &transcript)
+                    synthesize_piper(&http, &executor, &piper_voice, piper_speaker, &transcript)
                         .await
                         .context("speech generation")?
                 } else {

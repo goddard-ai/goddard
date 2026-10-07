@@ -7880,6 +7880,17 @@ impl Waku {
                         .child(tr!("experiments.voice_briefing_piper_caption")),
                 )
             })
+            .when(
+                tts.is_piper()
+                    && super::piper::piper_speaker_count(&self.state.voice_briefing_piper_voice)
+                        > 1,
+                |card| {
+                    card.child(row(
+                        tr!("experiments.voice_briefing_piper_speaker"),
+                        self.piper_speaker_selector(theme, cx),
+                    ))
+                },
+            )
             .child(text_area_row(
                 tr!("experiments.voice_briefing_instructions"),
                 instructions_control.into_any_element(),
@@ -8034,6 +8045,170 @@ impl Waku {
         self.state.voice_briefing_tts_model = model;
         self.save();
         cx.notify();
+    }
+
+    /// LibriTTS has hundreds of speakers: render only the visible rows, using
+    /// the same popover/list conventions as the Appearance font pickers.
+    #[track_caller]
+    fn piper_speaker_selector(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let count = super::piper::piper_speaker_count(&self.state.voice_briefing_piper_voice);
+        let selected = super::piper::piper_speaker_or_default(
+            &self.state.voice_briefing_piper_voice,
+            self.state.voice_briefing_piper_speaker,
+        );
+        let weak = cx.entity().downgrade();
+        let handle = self.menu_handle_with("voice-briefing-piper-speaker", cx, {
+            let weak = weak.clone();
+            move |open, window, cx| {
+                if open {
+                    let focus = weak
+                        .update(cx, |this, cx| {
+                            let selected = super::piper::piper_speaker_or_default(
+                                &this.state.voice_briefing_piper_voice,
+                                this.state.voice_briefing_piper_speaker,
+                            );
+                            let count = super::piper::piper_speaker_count(
+                                &this.state.voice_briefing_piper_voice,
+                            );
+                            this.piper_speaker_highlight = selected;
+                            this.piper_speaker_list
+                                .reset_with_uniform_height(count as usize, px(30.0));
+                            this.piper_speaker_list
+                                .scroll_to_reveal_item(selected as usize);
+                            cx.notify();
+                            this.menu_handle("voice-briefing-piper-speaker", cx)
+                                .focus_handle()
+                                .clone()
+                        })
+                        .ok();
+                    if let Some(focus) = focus {
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                        });
+                    }
+                }
+            }
+        });
+        let focus = handle.focus_handle().clone();
+        let list_state = self.piper_speaker_list.clone();
+        let scrollbar_state = self.piper_speaker_scrollbar.clone();
+        let highlighted = self.piper_speaker_highlight;
+        popover(
+            MenuChip::new("voice-briefing-piper-speaker")
+                .label(tr!(
+                    "experiments.voice_briefing_piper_speaker_number",
+                    number = selected + 1
+                ))
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(280.0))
+                .justify_between(),
+            &handle,
+            MenuAlign::BelowRight,
+            move |popover, _, _| {
+                let key_weak = weak.clone();
+                let key_popover = popover.clone();
+                let row_weak = weak.clone();
+                let row_popover = popover.clone();
+                div()
+                    .track_focus(&focus)
+                    .w(px(280.0))
+                    .h(px(300.0))
+                    .p(px(4.0))
+                    .rounded(px(11.0))
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .relative()
+                    .on_key_down(move |event, window, cx| {
+                        let key = event.keystroke.key.as_str();
+                        if !matches!(
+                            key,
+                            "up" | "down" | "home" | "end" | "enter" | "space" | "escape"
+                        ) {
+                            return;
+                        }
+                        cx.stop_propagation();
+                        if key == "escape" {
+                            key_popover.close(window, cx);
+                            return;
+                        }
+                        let _ = key_weak.update(cx, |this, cx| {
+                            if matches!(key, "enter" | "space") {
+                                this.set_voice_briefing_piper_speaker(
+                                    this.piper_speaker_highlight,
+                                    cx,
+                                );
+                            } else {
+                                this.piper_speaker_highlight = match key {
+                                    "up" => this.piper_speaker_highlight.saturating_sub(1),
+                                    "down" => (this.piper_speaker_highlight + 1).min(count - 1),
+                                    "home" => 0,
+                                    "end" => count - 1,
+                                    _ => unreachable!(),
+                                };
+                                this.piper_speaker_list
+                                    .scroll_to_reveal_item(this.piper_speaker_highlight as usize);
+                                cx.notify();
+                            }
+                        });
+                        if matches!(key, "enter" | "space") {
+                            key_popover.close(window, cx);
+                        }
+                        window.refresh();
+                    })
+                    .child(
+                        list(list_state.clone(), move |index, _, _| {
+                            let weak = row_weak.clone();
+                            let popover = row_popover.clone();
+                            div()
+                                .id(SharedString::from(format!("piper-speaker-{index}")))
+                                .w_full()
+                                .h(px(30.0))
+                                .px(px(8.0))
+                                .rounded(px(8.0))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .when(highlighted as usize == index, |row| {
+                                    row.bg(theme.focus_highlight())
+                                })
+                                .hover(|row| row.bg(theme.overlay))
+                                .child(tr!(
+                                    "experiments.voice_briefing_piper_speaker_number",
+                                    number = index + 1
+                                ))
+                                .when(selected as usize == index, |row| {
+                                    row.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                                })
+                                .on_click(move |_, window, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_voice_briefing_piper_speaker(index as u32, cx);
+                                    });
+                                    popover.close(window, cx);
+                                    window.refresh();
+                                })
+                                .into_any_element()
+                        })
+                        .size_full(),
+                    )
+                    .child(scrollbar::vertical(&list_state, &scrollbar_state))
+                    .into_any_element()
+            },
+        )
+    }
+
+    fn set_voice_briefing_piper_speaker(&mut self, speaker: u32, cx: &mut Context<Self>) {
+        let speaker =
+            super::piper::piper_speaker_or_default(&self.state.voice_briefing_piper_voice, speaker);
+        if self.state.voice_briefing_piper_speaker != speaker {
+            self.state.voice_briefing_piper_speaker = speaker;
+            self.save();
+            cx.notify();
+        }
     }
 
     fn set_voice_briefing_piper_voice(&mut self, voice: &str, cx: &mut Context<Self>) {

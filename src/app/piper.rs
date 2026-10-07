@@ -87,6 +87,34 @@ pub(super) fn piper_voice_label(voice: &str) -> String {
         .unwrap_or_else(|| voice.to_owned())
 }
 
+/// Speaker counts from the same pinned dataset revision as the model URLs.
+/// LibriTTS is the catalog's only multi-speaker model (IDs 0 through 903).
+pub(super) fn piper_speaker_count(voice: &str) -> u32 {
+    match piper_voice_or_default(voice) {
+        "en_US-libritts-high" => 904,
+        _ => 1,
+    }
+}
+
+pub(super) fn piper_speaker_or_default(voice: &str, speaker: u32) -> u32 {
+    if speaker < piper_speaker_count(voice) {
+        speaker
+    } else {
+        0
+    }
+}
+
+/// Preserve existing cache keys for the default speaker and single-speaker models.
+pub(super) fn piper_voice_key(voice: &str, speaker: u32) -> String {
+    let voice = piper_voice_or_default(voice);
+    let speaker = piper_speaker_or_default(voice, speaker);
+    if speaker == 0 {
+        format!("piper:{voice}")
+    } else {
+        format!("piper:{voice}:speaker:{speaker}")
+    }
+}
+
 /// The loaded engine for the current voice, kept between calls so a speak
 /// chain doesn't pay the ONNX load per fragment.
 static PIPER_ENGINE: OnceLock<Mutex<Option<(String, piper_rs::Piper)>>> = OnceLock::new();
@@ -224,9 +252,11 @@ pub(super) async fn synthesize_piper(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
     voice: &str,
+    speaker: u32,
     text: &str,
 ) -> anyhow::Result<Vec<u8>> {
     let voice = piper_voice_or_default(voice);
+    let speaker = piper_speaker_or_default(voice, speaker);
     let (model_path, config_path) = ensure_voice(http, executor, voice).await?;
     ensure_espeak_data();
     let engine = PIPER_ENGINE.get_or_init(|| Mutex::new(None));
@@ -243,7 +273,7 @@ pub(super) async fn synthesize_piper(
     let mut sample_rate = 0;
     for sentence in briefing_sentences(text) {
         let (sentence_samples, rate) = piper
-            .create(sentence, false, None, None, None, None)
+            .create(sentence, false, Some(i64::from(speaker)), None, None, None)
             .map_err(|error| anyhow!("piper synthesis failed: {error}"))?;
         if sentence_samples.is_empty() {
             bail!("piper returned no audio for a sentence");
@@ -435,6 +465,25 @@ mod tests {
             "",
         ] {
             assert_eq!(piper_voice_or_default(stale), DEFAULT_PIPER_VOICE);
+        }
+    }
+
+    #[test]
+    fn speaker_selection_is_bounded_and_changes_the_briefing_cache_key() {
+        let voice = "en_US-libritts-high";
+        assert_eq!(piper_speaker_or_default(voice, 903), 903);
+        assert_eq!(piper_speaker_or_default(voice, 904), 0);
+        assert_eq!(piper_speaker_or_default(voice, u32::MAX), 0);
+        assert_ne!(piper_voice_key(voice, 0), piper_voice_key(voice, 42));
+        assert_eq!(piper_voice_key(voice, 904), piper_voice_key(voice, 0));
+        for voice in [
+            "en_US-lessac-high",
+            "en_US-ljspeech-high",
+            "en_US-ryan-high",
+            "",
+        ] {
+            assert_eq!(piper_speaker_count(voice), 1);
+            assert_eq!(piper_voice_key(voice, 42), piper_voice_key(voice, 0));
         }
     }
 

@@ -1,0 +1,1 @@
+- Choose a speaker for the LibriTTS Piper voice in Settings → Experiments → Voice briefings; new briefings use your saved choice.

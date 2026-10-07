@@ -955,6 +955,10 @@ experiments.voice_briefing_tts:
   en: Voice model
 experiments.voice_briefing_piper_voice:
   en: Piper voice
+experiments.voice_briefing_piper_speaker:
+  en: Speaker
+experiments.voice_briefing_piper_speaker_number:
+  en: "Speaker {number}"
 experiments.voice_briefing_piper_caption:
   en: Piper runs offline — the voice model downloads once on first use, and Boss speech needs no credential at all.
 experiments.voice_briefing_instructions:
