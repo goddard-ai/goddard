@@ -239,14 +239,108 @@ pub(super) async fn synthesize_piper(
         *guard = Some((voice.to_owned(), piper));
     }
     let piper = &mut guard.as_mut().expect("just loaded").1;
-    let (samples, sample_rate) = piper
-        .create(text, false, None, None, None, None)
-        .map_err(|error| anyhow!("piper synthesis failed: {error}"))?;
+    let mut samples = Vec::new();
+    let mut sample_rate = 0;
+    for sentence in briefing_sentences(text) {
+        let (sentence_samples, rate) = piper
+            .create(sentence, false, None, None, None, None)
+            .map_err(|error| anyhow!("piper synthesis failed: {error}"))?;
+        if sentence_samples.is_empty() {
+            bail!("piper returned no audio for a sentence");
+        }
+        if !samples.is_empty() {
+            if rate != sample_rate {
+                bail!("piper changed sample rate between sentences");
+            }
+            // A phrasing pause, only between sentences, in the model's sample rate.
+            let silence_samples = (u64::from(rate) * 180 / 1000) as usize;
+            samples.resize(samples.len() + silence_samples, 0.0);
+        }
+        sample_rate = rate;
+        samples.extend(sentence_samples);
+    }
     drop(guard);
     if samples.is_empty() {
         bail!("piper returned no audio");
     }
     Ok(wav_bytes(&samples, sample_rate))
+}
+
+/// Keep punctuation with its sentence; don't cut decimals, dotted abbreviations,
+/// or common titles. Briefing summaries are plain sentences, not arbitrary prose.
+fn briefing_sentences(text: &str) -> Vec<&str> {
+    let mut sentences = Vec::new();
+    let mut start = 0;
+    for (index, ch) in text.char_indices() {
+        if index < start {
+            continue;
+        }
+        let mut end = index + ch.len_utf8();
+        if ch != '\n' && ch != '\r' {
+            if !matches!(ch, '.' | '!' | '?' | '…') {
+                continue;
+            }
+            // Include repeated punctuation and closing quotes/brackets.
+            for next in text[end..].chars() {
+                if !matches!(
+                    next,
+                    '.' | '!' | '?' | '…' | '"' | '\'' | '”' | '’' | ')' | ']'
+                ) {
+                    break;
+                }
+                end += next.len_utf8();
+            }
+            if text[end..]
+                .chars()
+                .next()
+                .is_some_and(|next| !next.is_whitespace())
+            {
+                continue;
+            }
+            if ch == '.' && end == index + 1 && !text[end..].trim().is_empty() {
+                let word = text[start..end]
+                    .split_whitespace()
+                    .next_back()
+                    .unwrap_or("");
+                let word = word
+                    .trim_start_matches(['"', '\'', '(', '['])
+                    .to_ascii_lowercase();
+                if matches!(
+                    word.as_str(),
+                    "e.g."
+                        | "i.e."
+                        | "mr."
+                        | "mrs."
+                        | "ms."
+                        | "dr."
+                        | "prof."
+                        | "sr."
+                        | "jr."
+                        | "vs."
+                ) || (word.len() == 2 && word.as_bytes()[0].is_ascii_alphabetic())
+                    || (word[..word.len().saturating_sub(1)].contains('.')
+                        && word.trim_end_matches('.').split('.').all(|part| {
+                            part.len() == 1 && part.as_bytes()[0].is_ascii_alphabetic()
+                        }))
+                {
+                    continue;
+                }
+            }
+        }
+        if end <= start {
+            continue;
+        }
+        let sentence = text[start..end].trim();
+        if !sentence.is_empty() {
+            sentences.push(sentence);
+        }
+        start = end;
+    }
+    let tail = text[start..].trim();
+    if !tail.is_empty() {
+        sentences.push(tail);
+    }
+    sentences
 }
 
 /// 16-bit mono PCM WAV — the container AVAudioPlayer decodes on every
@@ -278,6 +372,36 @@ fn wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn briefing_sentences_preserve_words_and_punctuation() {
+        for (text, expected) in [
+            (
+                "First sentence. Second! Third? Last…",
+                vec!["First sentence.", "Second!", "Third?", "Last…"],
+            ),
+            (
+                "Dr. Lee tested v1.2, e.g. the retry. It works.",
+                vec!["Dr. Lee tested v1.2, e.g. the retry.", "It works."],
+            ),
+            (
+                "Use U.S. voices, i.e. English. Done.",
+                vec!["Use U.S. voices, i.e. English.", "Done."],
+            ),
+            ("Updated to v1.2. Done.", vec!["Updated to v1.2.", "Done."]),
+            (
+                "Ready?! \"Done.\" Next... Final",
+                vec!["Ready?!", "\"Done.\"", "Next...", "Final"],
+            ),
+            (
+                "One line\n\nTwo lines\r\nLast.",
+                vec!["One line", "Two lines", "Last."],
+            ),
+            ("  \n ", vec![]),
+        ] {
+            assert_eq!(briefing_sentences(text), expected, "{text:?}");
+        }
+    }
 
     #[test]
     fn voice_dataset_path_derives_the_dataset_layout() {
