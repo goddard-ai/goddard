@@ -8577,6 +8577,7 @@ impl Waku {
         let reader_editor_state = editor_state.clone();
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
+        let menu_composer = self.composer.clone();
         let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
@@ -8586,8 +8587,29 @@ impl Waku {
         .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
         .with_guided_reading(self.guided_reading())
-        .with_standalone_context_menu(self.menu_handle("file-preview-math", cx))
+        // The page and a panel preview can be live together — each needs its
+        // own handle or one surface's right-click items leak into the other's.
+        .with_standalone_context_menu(self.menu_handle(
+            if deliverable_page {
+                "deliverable-page-math"
+            } else {
+                "file-preview-math"
+            },
+            cx,
+        ))
         .with_context_menu_items(Rc::new(move |cx| {
+            // A deliverable's page borrows the chat message's menu — copy,
+            // search, and friends act on the published document's text.
+            if deliverable_page {
+                let content = reader_editor_state.read(cx).content().to_owned();
+                return components::deliverable_menu_items(
+                    &content,
+                    &reader_selection,
+                    &menu_composer,
+                    &reader_waku,
+                    cx,
+                );
+            }
             let source = reader_selection
                 .selection
                 .borrow()

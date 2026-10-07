@@ -2921,7 +2921,7 @@ fn transfer_notice_row(
 /// The message row's context menu. Rebuilt on each open, so availability checks
 /// here always reflect the current session state.
 #[allow(clippy::too_many_arguments)]
-fn message_menu_items(
+pub(super) fn message_menu_items(
     content: &str,
     role: MessageRole,
     user_message_action: Option<UserMessageAction>,
@@ -3095,6 +3095,30 @@ fn message_menu_items(
     }
 
     items
+}
+
+/// A deliverable page's context menu is the message row's: the published
+/// document stands in for the assistant's answer, so selection copy, Search
+/// with Google, speed reader, and Send to Friend all act on its text. The
+/// row-bound actions — edit, revert, fork — have no message to act on.
+pub(super) fn deliverable_menu_items(
+    content: &str,
+    selection: &TranscriptSelection,
+    composer: &Entity<ComposerInput>,
+    waku: &gpui::WeakEntity<Waku>,
+    cx: &mut App,
+) -> Vec<MenuItem> {
+    message_menu_items(
+        content,
+        MessageRole::Assistant,
+        None,
+        None,
+        selection,
+        composer,
+        waku,
+        !content.trim().is_empty(),
+        cx,
+    )
 }
 
 pub(super) fn fenced_code(content: &str) -> Option<String> {
@@ -4206,5 +4230,64 @@ mod message_time_tests {
             false,
         );
         assert_eq!(activity_display_title(&plan), "Updating plan");
+    }
+
+    /// A deliverable page borrows the assistant message's menu: document copy
+    /// and speed reader ride on its content; the message-bound edit, revert,
+    /// and fork actions have no row to act on and stay out.
+    #[gpui::test]
+    fn deliverable_menu_items_mirror_the_assistant_message_menu(cx: &mut gpui::TestAppContext) {
+        struct ComposerHarness {
+            composer: Entity<ComposerInput>,
+        }
+        impl gpui::Render for ComposerHarness {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+        let (harness, cx) = cx.add_window_view(|window, cx| ComposerHarness {
+            composer: cx.new(|cx| ComposerInput::new(window, cx)),
+        });
+        let composer = cx.read_entity(&harness, |harness, _| harness.composer.clone());
+        let selection = TranscriptSelection::default();
+        let waku: gpui::WeakEntity<Waku> = WeakEntity::new_invalid();
+        let menu_labels = |content: &str, cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| deliverable_menu_items(content, &selection, &composer, &waku, cx))
+                .iter()
+                .filter_map(|item| match item {
+                    MenuItem::Entry { label, .. } | MenuItem::Submenu { label, .. } => {
+                        Some(label.to_string())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let labels = menu_labels("# Report\n\n```rust\nfn main() {}\n```", cx);
+        for expected in [
+            tr!("common.copy_message_title"),
+            tr!("common.copy_code"),
+            tr!("speed_reader.go_fast"),
+        ] {
+            assert!(
+                labels.contains(&expected),
+                "missing {expected} in {labels:?}"
+            );
+        }
+        for unexpected in [
+            tr!("common.copy_to_composer"),
+            tr!("session.revert_to_here_title"),
+            tr!("session.fork_task_title"),
+            tr!("friends.send_to_friend"),
+        ] {
+            assert!(
+                !labels.contains(&unexpected),
+                "unexpected {unexpected} in {labels:?}"
+            );
+        }
+
+        // An empty document offers nothing to read aloud.
+        let labels = menu_labels("", cx);
+        assert!(!labels.contains(&tr!("speed_reader.go_fast")));
     }
 }
