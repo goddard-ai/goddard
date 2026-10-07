@@ -1,1 +1,1 @@
-- Open Goals in the Boss chat's right panel to see employee goals: recent finishes first with Show more for older history, then work in progress and queued assignments, each a compact two-line row that opens its task.
+- Open Goals in the Boss chat's right panel to see employee goals: recent finishes first with Show more for older history, then work in progress and queued assignments, each a compact two-line row that opens its task. Finished goals leave the list after 24 hours while their task history stays available; Show more sits directly below the finished rows.

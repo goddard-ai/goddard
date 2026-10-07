@@ -320,6 +320,7 @@ const MAX_SPEECH_PARTS: usize = 8;
 const MAX_SPEECH_PART_CHARS: usize = 160;
 const MAX_SPEECH_TOTAL_CHARS: usize = 480;
 const EMPLOYEE_RETIREMENT_SECONDS: u64 = 60 * 60;
+const GOAL_RETIREMENT_SECONDS: u64 = 24 * 60 * 60;
 /// A finalized planning session stays active this long before the daemon
 /// archives it — the grace window in which the boss can still converse in
 /// the planning context and ask questions about the design it now
@@ -2460,20 +2461,20 @@ impl BossService {
         })
     }
 
-    /// Remove finished employees once their one-hour reuse window has elapsed.
-    /// Their task sessions remain in task storage, including full transcripts.
-    /// Goals are exempt: fire-and-forget work keeps its record for the
-    /// client's Goals page — the roster's retirement exists to clear errand
-    /// noise, and a goal's finish was never noise.
+    /// Remove expired errands after one hour and goals after 24 hours.
+    /// Their task sessions and retired roster records remain available,
+    /// including full transcripts and supervisor-driven resurrection.
     pub fn retire_expired(&self, now: u64) -> anyhow::Result<Vec<BossEmployee>> {
         let _operation = self.operation_lock.lock();
-        let cutoff = now.saturating_sub(EMPLOYEE_RETIREMENT_SECONDS);
         let retires = |employee: &BossEmployee| {
-            employee.work_goal == EmployeeGoal::Errand
-                && employee.expired
+            employee.expired
                 && employee
                     .expired_at
-                    .is_some_and(|expired_at| expired_at <= cutoff)
+                    .and_then(|expired_at| now.checked_sub(expired_at))
+                    .is_some_and(|age| match employee.work_goal {
+                        EmployeeGoal::Errand => age >= EMPLOYEE_RETIREMENT_SECONDS,
+                        EmployeeGoal::Goal => age > GOAL_RETIREMENT_SECONDS,
+                    })
         };
         if !self.state.lock().employees.iter().any(&retires) {
             return Ok(Vec::new());
@@ -4574,10 +4575,10 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// Retirement exists to clear errand noise; a finished goal's record is
-    /// what the client's Goals page lists, so it never ages out.
+    /// Goals stay visible for a day, then retire durably without losing
+    /// the supervisor's ability to resume their task.
     #[test]
-    fn a_finished_goal_stays_on_the_roster_past_retirement() {
+    fn finished_goals_retire_only_after_24_hours() {
         let root = std::env::temp_dir().join(format!("boss-goal-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
@@ -4613,8 +4614,17 @@ mod tests {
             })
             .unwrap();
 
-        assert!(service.retire_expired(u64::MAX / 2).unwrap().is_empty());
+        assert!(service.retire_expired(100 + 23 * 60 * 60).unwrap().is_empty());
         assert!(service.is_employee(session_id));
+        assert!(service.retire_expired(100 + 24 * 60 * 60).unwrap().is_empty());
+        let retired = service.retire_expired(101 + 24 * 60 * 60).unwrap();
+        assert_eq!(retired.len(), 1);
+        assert_eq!(retired[0].session_id, session_id);
+        assert!(!service.is_employee(session_id));
+        let restored = BossService::open(root.clone()).unwrap();
+        assert!(!restored.is_employee(session_id));
+        assert!(restored.resurrect(session_id).unwrap());
+        assert!(restored.is_employee(session_id));
         fs::remove_dir_all(root).unwrap();
     }
 

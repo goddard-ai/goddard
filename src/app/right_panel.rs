@@ -9729,7 +9729,12 @@ impl Waku {
                                 .min_h_0()
                                 .max_h(px(estimate))
                         })
-                        .when(!ongoing_exists, |element| element.flex_1().min_h_0())
+                        .when(!ongoing_exists, |element| {
+                            // Let long history scroll, but keep the toggle
+                            // directly below short lists instead of consuming
+                            // all unused panel space.
+                            element.flex_1().min_h_0().max_h(px(estimate))
+                        })
                         .child(
                             list(list_state.clone(), move |index, _window, cx| {
                                 items.get(index).map_or_else(
