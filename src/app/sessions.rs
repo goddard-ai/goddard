@@ -4323,18 +4323,20 @@ impl Waku {
         {
             return;
         }
-        // The scratchpad claims ⌥M as its pause key while it owns the chat
-        // column — the same toggle the Mute pill fires. The chord sits ahead
-        // of the text filter because it is not typing: a layout that resolves
-        // ⌥M to no key_char must not lose the pause key. A live transcript
-        // caret consumed the keystroke a level deeper; here, the
-        // scratchpad's own composer is the one typing-owned surface that
-        // yields, since the field is the resting focus while dictating. Key
-        // repeat is kept out so holding the chord can't strobe the tap.
+        // The scratchpad claims ⌥M in either posture: the pause key while
+        // the panel owns the chat column — the same toggle the Mute pill
+        // fires — and the VP button's opening act while the pad is closed
+        // or hidden. The chord sits ahead of the text filter because it is
+        // not typing: a layout that resolves ⌥M to no key_char must not
+        // lose the key. A live transcript caret consumed the keystroke a
+        // level deeper; here, the scratchpad's own composer is the one
+        // typing-owned surface that yields, since the field is the resting
+        // focus while dictating. Key repeat is kept out so holding the
+        // chord can't strobe the tap.
         if !event.is_held
             && event.keystroke.modifiers == Modifiers::alt()
             && event.keystroke.key == "m"
-            && self.voice_scratchpad_alt_m_mutes()
+            && self.voice_scratchpad_alt_m_claims()
         {
             let foreign_field = !self.composer.read(cx).focus().is_focused(window)
                 && window.context_stack().iter().any(|context| {
@@ -4343,7 +4345,7 @@ impl Waku {
                         .any(|owned| context.contains(owned))
                 });
             if !foreign_field {
-                self.voice_scratchpad_alt_m_toggle(cx);
+                self.voice_scratchpad_alt_m(window, cx);
                 cx.stop_propagation();
             }
             return;

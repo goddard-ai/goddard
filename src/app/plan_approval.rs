@@ -177,7 +177,9 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        if self.action_suggestion_row_visible() && !self.big_picture.is_open() {
+        if self.voice_scratchpad_visible()
+            || (self.action_suggestion_row_visible() && !self.big_picture.is_open())
+        {
             return None;
         }
         let approval = self.plan_approval_chip(window, theme, cx);

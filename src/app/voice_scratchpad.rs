@@ -17,7 +17,7 @@
 //! Audio is captured through the shared `voice_gate` engine tap in
 //! `platform.rs` — the scratchpad's sink is the one path that forwards mic
 //! samples off the machine, and it exists only while a session owns
-//! capture: mute, cancel, and a chat switch all tear it down.
+//! capture: mute, discard, and a chat switch all tear it down.
 
 use std::io;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -74,9 +74,9 @@ const MAX_DEAD_SESSIONS: u32 = 5;
 /// A session that stayed up this long counts as healthy however it ended —
 /// its death never counts toward the dead-session budget.
 const HEALTHY_SESSION: Duration = Duration::from_secs(30);
-/// Cancel asks first once the transcript is worth keeping.
-const CANCEL_CONFIRM_PARAGRAPHS: usize = 2;
-const CANCEL_CONFIRM_CHARS: usize = 280;
+/// Discard asks first once the transcript is worth keeping.
+const DISCARD_CONFIRM_PARAGRAPHS: usize = 2;
+const DISCARD_CONFIRM_CHARS: usize = 280;
 /// The scratchpad card matches the composer card's width.
 const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
 const CARD_RADIUS: f32 = 24.0;
@@ -267,7 +267,7 @@ pub(super) struct VoiceScratchpad {
     /// The picked mic is unplugged — capture parks until it returns rather
     /// than silently hopping to another device.
     input_unavailable: bool,
-    /// The Cancel affordance armed its confirmation.
+    /// The Discard affordance armed its confirmation.
     confirm_discard: bool,
     /// Bumped on each (re)connect and on pause so a retired worker's
     /// events land nowhere.
@@ -313,9 +313,9 @@ pub(super) struct VoiceScratchpad {
     #[allow(dead_code)]
     hide_focus: FocusHandle,
     #[allow(dead_code)]
-    cancel_focus: FocusHandle,
-    keep_focus: FocusHandle,
     discard_focus: FocusHandle,
+    keep_focus: FocusHandle,
+    discard_confirm_focus: FocusHandle,
 }
 
 impl VoiceScratchpad {
@@ -345,9 +345,9 @@ impl VoiceScratchpad {
             interim_crossfade: None,
             mute_focus: cx.focus_handle(),
             hide_focus: cx.focus_handle(),
-            cancel_focus: cx.focus_handle(),
-            keep_focus: cx.focus_handle(),
             discard_focus: cx.focus_handle(),
+            keep_focus: cx.focus_handle(),
+            discard_confirm_focus: cx.focus_handle(),
         }
     }
 
@@ -2199,7 +2199,7 @@ impl ScratchpadTranscript {
             })
     }
 
-    /// Whether Cancel must ask first: a real second paragraph, or a
+    /// Whether Discard must ask first: a real second paragraph, or a
     /// transcript substantial enough to lose.
     fn substantial(&self) -> bool {
         let written = self
@@ -2207,8 +2207,8 @@ impl ScratchpadTranscript {
             .iter()
             .filter(|paragraph| !paragraph.text.is_empty() || !paragraph.bullets.is_empty())
             .count();
-        written >= CANCEL_CONFIRM_PARAGRAPHS
-            || self.to_message().chars().count() >= CANCEL_CONFIRM_CHARS
+        written >= DISCARD_CONFIRM_PARAGRAPHS
+            || self.to_message().chars().count() >= DISCARD_CONFIRM_CHARS
     }
 }
 
@@ -3035,17 +3035,17 @@ impl Waku {
             )
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
         // The click's outcome decides the tooltip: a scratchpad on screen
-        // cancels, a hidden one resurfaces.
-        let cancels = session_id
+        // discards, a hidden one resurfaces.
+        let discards = session_id
             .and_then(|id| self.voice_scratchpads.get(&id))
             .is_some_and(|scratchpad| {
                 !scratchpad.hidden && self.state.selected_session == session_id
             });
-        let tooltip = match (state, cancels) {
+        let tooltip = match (state, discards) {
             (ScratchpadButtonState::Recording, true) => {
-                tr!("voice_scratchpad.cancel_dictating")
+                tr!("voice_scratchpad.discard_dictating")
             }
-            (ScratchpadButtonState::Muted, true) => tr!("voice_scratchpad.cancel_muted"),
+            (ScratchpadButtonState::Muted, true) => tr!("voice_scratchpad.discard_muted"),
             (ScratchpadButtonState::Recording, false) => tr!("voice_scratchpad.recording"),
             (ScratchpadButtonState::Muted, false) => tr!("voice_scratchpad.muted"),
             (ScratchpadButtonState::Idle, _) => tr!("voice_scratchpad.start"),
@@ -3065,8 +3065,8 @@ impl Waku {
     }
 
     /// The VP button's click: no session starts one on this chat, a hidden
-    /// session resurfaces, and a visible one cancels — the same
-    /// confirm-on-substantial rule the Cancel pill applies. Each chat owns
+    /// session resurfaces, and a visible one discards — the same
+    /// confirm-on-substantial rule the Discard pill applies. Each chat owns
     /// its scratchpad — pressing the button here never touches another
     /// chat's.
     fn toggle_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3082,7 +3082,7 @@ impl Waku {
             scratchpad.follow_tail = true;
             cx.notify();
         } else if self.state.selected_session == Some(this_session) {
-            self.request_cancel_voice_scratchpad(window, cx);
+            self.request_discard_voice_scratchpad(window, cx);
         } else {
             // A scratchpad that cannot be on screen — the composer is
             // answering for another chat — still tucks out of the way.
@@ -3323,15 +3323,57 @@ impl Waku {
         self.set_voice_scratchpad_muted(muted, cx);
     }
 
-    /// Cancel — inline when the transcript is thin, confirmed once it's
+    /// Whether ⌥M belongs to the scratchpad at all. A visible panel owns
+    /// it as the pause key; a closed or hidden one claims it as the VP
+    /// button's opening act whenever the column could show a pad. A pad
+    /// that is live but merely covered — an overlay or an annotation box
+    /// holding the surface — keeps the chord typing.
+    pub(super) fn voice_scratchpad_alt_m_claims(&self) -> bool {
+        if self.voice_scratchpad_alt_m_mutes() {
+            return true;
+        }
+        self.state.voice_scratchpad_enabled
+            && self.state.selected_session.is_some()
+            && self.composer_mounted()
+            && !self.big_picture.is_open()
+            && self
+                .selected_voice_scratchpad()
+                .is_none_or(|scratchpad| scratchpad.hidden)
+    }
+
+    /// ⌥M's effect: the mute toggle while the panel is on screen, and the
+    /// VP button's opening act — start the chat's pad or resurface a
+    /// hidden one — while it is not. The button's remaining act (a
+    /// visible pad discards) stays the pointer's; a live pad the claims
+    /// gate let through without the mute conditions keeps its session
+    /// untouched.
+    pub(super) fn voice_scratchpad_alt_m(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.voice_scratchpad_alt_m_mutes() {
+            self.voice_scratchpad_alt_m_toggle(cx);
+            return;
+        }
+        if self.selected_voice_scratchpad().is_none() {
+            self.start_voice_scratchpad(window, cx);
+            return;
+        }
+        if let Some(scratchpad) = self.selected_voice_scratchpad_mut()
+            && scratchpad.hidden
+        {
+            scratchpad.hidden = false;
+            scratchpad.follow_tail = true;
+            cx.notify();
+        }
+    }
+
+    /// Discard — inline when the transcript is thin, confirmed once it's
     /// substantial.
-    fn request_cancel_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn request_discard_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
         };
         if scratchpad.transcript.substantial() {
             scratchpad.confirm_discard = true;
-            let focus = scratchpad.discard_focus.clone();
+            let focus = scratchpad.discard_confirm_focus.clone();
             window.focus(&focus, cx);
             cx.notify();
         } else {
@@ -3341,7 +3383,9 @@ impl Waku {
 
     /// Escape inside the scratchpad: an armed discard dismisses first, a
     /// text selection or caret peels off next, then an annotation box
-    /// closes, then Esc means Cancel — the same confirm rule as the button.
+    /// closes. With nothing left to peel, Esc hides the panel — the same
+    /// tuck the Hide pill performs, transcript and session kept; Discard
+    /// stays the destructive path.
     pub(super) fn voice_scratchpad_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
             return;
@@ -3369,7 +3413,11 @@ impl Waku {
             cx.notify();
             return;
         }
-        self.request_cancel_voice_scratchpad(window, cx);
+        scratchpad.hidden = true;
+        // Focus goes home to the composer, same as the Hide pill.
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        cx.notify();
     }
 
     /// Keystrokes on the scratchpad's transcript surface — typed text
@@ -4257,7 +4305,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The fixed control row — Mute/Hide/Cancel pills anchored 12px above
+    /// The fixed control row — Mute/Hide/Discard pills anchored 12px above
     /// the composer card's top edge, right-aligned at the frame's 18px
     /// inset. The row is a sibling of the scroll region, so it never
     /// scrolls; the caller paints it last so it reads over the bottom fade.
@@ -4315,20 +4363,20 @@ impl Waku {
                 cx,
             ))
             .child(self.scratchpad_pill(
-                "vs-cancel",
-                &scratchpad.cancel_focus,
-                tr!("voice_scratchpad.cancel"),
+                "vs-discard",
+                &scratchpad.discard_focus,
+                tr!("voice_scratchpad.discard"),
                 None,
                 18.0,
                 false,
                 theme,
-                |this, window, cx| this.request_cancel_voice_scratchpad(window, cx),
+                |this, window, cx| this.request_discard_voice_scratchpad(window, cx),
                 cx,
             ))
     }
 
     /// One control-row pill: Mute wears the solid dark treatment with an
-    /// enabled hairline, Hide and Cancel the card's solid fill, borderless
+    /// enabled hairline, Hide and Discard the card's solid fill, borderless
     /// but lifted by the frame's 1px/4px drop shadow — the frame's fills.
     fn scratchpad_pill(
         &self,
@@ -5191,7 +5239,7 @@ impl Waku {
     }
 
     /// The discard confirmation — the same modal posture the close dialog
-    /// uses, armed by Cancel once the transcript is substantial.
+    /// uses, armed by Discard once the transcript is substantial.
     pub(super) fn render_scratchpad_discard(&mut self, cx: &mut Context<Self>) -> Option<Div> {
         let theme = Theme::current(cx);
         let scratchpad = self.selected_voice_scratchpad()?;
@@ -5199,7 +5247,7 @@ impl Waku {
             return None;
         }
         let keep_focus = scratchpad.keep_focus.clone();
-        let discard_focus = scratchpad.discard_focus.clone();
+        let discard_focus = scratchpad.discard_confirm_focus.clone();
         Some(
             div()
                 .absolute()
@@ -6529,7 +6577,7 @@ mod tests {
         assert!(transcript.substantial());
         // ...or one long paragraph over the character bar.
         let mut transcript = ScratchpadTranscript::default();
-        transcript.append_finalized(&"x".repeat(CANCEL_CONFIRM_CHARS));
+        transcript.append_finalized(&"x".repeat(DISCARD_CONFIRM_CHARS));
         assert!(transcript.substantial());
     }
 

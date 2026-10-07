@@ -1512,6 +1512,11 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
+        // The scratchpad owns the lane's airspace while it is up — its
+        // control row anchors where these chips would float.
+        if self.voice_scratchpad_visible() {
+            return None;
+        }
         let session = self.composer_session()?;
         if !self.has_preemptive_suggestion(session.id)
             && session

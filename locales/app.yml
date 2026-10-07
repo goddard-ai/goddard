@@ -6460,18 +6460,16 @@ voice_scratchpad.recording:
   en: Dictating — click to show the scratchpad
 voice_scratchpad.muted:
   en: Dictation muted — click to show the scratchpad
-voice_scratchpad.cancel_dictating:
-  en: Dictating — click to cancel the scratchpad
-voice_scratchpad.cancel_muted:
-  en: Dictation muted — click to cancel the scratchpad
+voice_scratchpad.discard_dictating:
+  en: Dictating — click to discard the scratchpad
+voice_scratchpad.discard_muted:
+  en: Dictation muted — click to discard the scratchpad
 voice_scratchpad.mute:
   en: Mute
 voice_scratchpad.unmute:
   en: Unmute
 voice_scratchpad.hide:
   en: Hide
-voice_scratchpad.cancel:
-  en: Cancel
 voice_scratchpad.hint_prefix:
   en: "Say “"
 voice_scratchpad.hint_command:
