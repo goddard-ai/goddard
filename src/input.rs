@@ -234,7 +234,13 @@ impl Global for ActiveComposerEnterSwap {}
 /// Enter for its row confirmation. Other multi-line fields keep Enter's
 /// usual meaning — a bare `TextInput`-scope rebind would eat their
 /// newlines.
-const COMPOSER_ENTER_CONTEXT: &str = "Composer > TextInput && !ComposerAutocomplete";
+///
+/// The descendant is parenthesized: `>` binds looser than `&&`, so the
+/// unparenthesized spelling nests `!ComposerAutocomplete` inside the child
+/// operand, where it only inspects contexts *below* `Composer` — the menu's
+/// context sits above it, the negation never sees it, and this binding
+/// shadows the popup's `enter` → `ConfirmEntry`.
+const COMPOSER_ENTER_CONTEXT: &str = "(Composer > TextInput) && !ComposerAutocomplete";
 
 /// Publish the composer Enter mode and rebind the pair. Later registrations
 /// outrank earlier ones in the keymap, so each call appends whichever pair
@@ -4926,6 +4932,82 @@ mod tests {
             events.borrow().iter().any(
                 |event| matches!(event, ComposerEvent::SubmitSteer(text) if text == "steer me")
             )
+        );
+    }
+
+    /// The composer card while the autocomplete popup has rows: the card
+    /// declares `ComposerAutocomplete` above `Composer`, and `enter` must
+    /// resolve to `ConfirmEntry` — the same accept path as `tab`.
+    struct AutocompleteHarness {
+        composer: Entity<ComposerInput>,
+        confirms: Rc<RefCell<usize>>,
+    }
+
+    impl Render for AutocompleteHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let confirms = self.confirms.clone();
+            div()
+                .w(px(300.))
+                .key_context("ComposerAutocomplete")
+                .on_action(cx.listener(move |_, _: &crate::ui::menu::ConfirmEntry, _, _| {
+                    *confirms.borrow_mut() += 1;
+                }))
+                .child(self.composer.clone())
+        }
+    }
+
+    #[gpui::test]
+    fn enter_confirms_the_open_autocomplete(cx: &mut TestAppContext) {
+        cx.update(super::init);
+        cx.update(crate::app::init_composer_autocomplete);
+        cx.update(|cx| super::install_composer_enter_swap(false, cx));
+        let confirms: Rc<RefCell<usize>> = Rc::default();
+        let (harness, cx) = cx.add_window_view({
+            let confirms = confirms.clone();
+            move |window, cx| {
+                let composer = cx.new(|cx| ComposerInput::new(window, cx));
+                AutocompleteHarness { composer, confirms }
+            }
+        });
+        let composer = cx.read_entity(&harness, |harness, _| harness.composer.clone());
+        cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
+        cx.run_until_parked();
+        let events: Rc<RefCell<Vec<ComposerEvent>>> = Rc::default();
+        let sink = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&composer, move |_, event: &ComposerEvent, _| {
+                sink.borrow_mut().push(event.clone());
+            })
+            .detach();
+        });
+        composer.update(cx, |composer, cx| composer.set_content("draft", cx));
+
+        cx.simulate_keystrokes("enter");
+        assert_eq!(*confirms.borrow(), 1, "enter must reach ConfirmEntry");
+        assert!(
+            !events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, ComposerEvent::Submit(_))),
+            "enter must not submit while the menu is open"
+        );
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "draft")
+        });
+
+        cx.simulate_keystrokes("tab");
+        assert_eq!(*confirms.borrow(), 2);
+
+        // The "Enter steers" mode must not steal the keystroke either.
+        cx.update(|_, cx| super::install_composer_enter_swap(true, cx));
+        cx.simulate_keystrokes("enter");
+        assert_eq!(*confirms.borrow(), 3);
+        assert!(
+            !events
+                .borrow()
+                .iter()
+                .any(|event| matches!(event, ComposerEvent::SubmitSteer(_))),
+            "enter must not steer while the menu is open"
         );
     }
 
