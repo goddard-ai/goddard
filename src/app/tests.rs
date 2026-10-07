@@ -3091,14 +3091,34 @@ fn scrolling_back_onto_the_tail_is_told_apart_from_an_unmeasured_tail() {
 }
 
 #[test]
-fn keep_scroll_on_send_holds_only_a_proven_above_tail_position() {
-    // Off, or resting at the bottom: the send jump runs as it always has.
-    assert!(!send_holds_transcript_position(false, Some(false)));
-    assert!(!send_holds_transcript_position(false, Some(true)));
-    assert!(!send_holds_transcript_position(true, Some(true)));
-    // Unmeasured is unknown — hold only a tail the frame proved out of view.
-    assert!(!send_holds_transcript_position(true, None));
-    assert!(send_holds_transcript_position(true, Some(false)));
+fn keep_scroll_on_send_retains_reader_scroll_when_tail_bounds_are_missing() {
+    // A measured bottom wins even if the top-aligned list reports a scroll.
+    for reader_scrolled in [false, true] {
+        assert!(!send_holds_transcript_position(
+            false,
+            Some(false),
+            reader_scrolled
+        ));
+        assert!(!send_holds_transcript_position(
+            false,
+            None,
+            reader_scrolled
+        ));
+        assert!(!send_holds_transcript_position(
+            true,
+            Some(true),
+            reader_scrolled
+        ));
+        assert!(send_holds_transcript_position(
+            true,
+            Some(false),
+            reader_scrolled
+        ));
+    }
+    // An offscreen or remeasuring tail must not undo the reader's scroll.
+    assert!(send_holds_transcript_position(true, None, true));
+    // An untouched, unmeasured transcript still follows the new reply.
+    assert!(!send_holds_transcript_position(true, None, false));
 }
 
 #[test]

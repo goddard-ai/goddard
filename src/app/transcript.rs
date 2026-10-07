@@ -1143,15 +1143,15 @@ pub(super) fn tail_rejoin_follows_anchor(anchored: bool, end_space: Pixels) -> b
 }
 
 /// Whether a send holds the reader's scroll position instead of jumping to
-/// the new message: the keep-scroll preference is on and the tail is
-/// provably out of view. An unmeasured tail answers `None`, and "unknown"
-/// resolves to the normal jump rather than a held position no frame can
-/// confirm exists.
+/// the new message. Measured tail bounds take precedence; when virtualization
+/// or remeasurement leaves the tail unknown, retain a reader's explicit scroll
+/// position instead of treating missing bounds as permission to jump.
 pub(super) fn send_holds_transcript_position(
     keep_scroll_on_send: bool,
     rests_at_tail: Option<bool>,
+    reader_scrolled: bool,
 ) -> bool {
-    keep_scroll_on_send && rests_at_tail == Some(false)
+    keep_scroll_on_send && rests_at_tail.map_or(reader_scrolled, |at_tail| !at_tail)
 }
 
 pub(super) const ACTIVITY_IMAGE_WIDTH: f32 = 300.0;

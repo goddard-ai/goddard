@@ -7191,6 +7191,14 @@ impl Waku {
         let turn_route = (self.runtimes.contains_key(&session_id) && !hidden)
             .then(|| self.route_turn_plan_for_session(session, submission.human_prompt()))
             .flatten();
+        // Decide before synchronizing or changing rows can invalidate the tail's
+        // measured bounds. An explicit reader scroll survives an unmeasured tail.
+        let hold_scroll_position = selected
+            && send_holds_transcript_position(
+                self.state.transcript_keep_scroll_on_send,
+                self.transcript_rests_at_tail_now(),
+                self.transcript_is_scrolled.get() && !self.transcript_anchor_following.get(),
+            );
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
         // connecting provider, whose runtime already has a working Stop path.
@@ -7304,13 +7312,9 @@ impl Waku {
             // keeps its position and the turn streams in below the fold.
             // `transcript_anchor` stays as it was because it picks which list
             // renders — replacing or clearing it would swap scroll state. A
-            // tail the frame cannot prove above the fold — unmeasured, or
-            // already resting at the bottom — takes the normal jump so
-            // readers who never scroll up still follow the reply.
-            if send_holds_transcript_position(
-                self.state.transcript_keep_scroll_on_send,
-                self.transcript_rests_at_tail_now(),
-            ) {
+            // measured tail already at the bottom takes the normal jump;
+            // missing tail bounds retain an explicit reader scroll instead.
+            if hold_scroll_position {
                 self.transcript_anchor_following.set(false);
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             } else {

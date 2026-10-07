@@ -2188,7 +2188,15 @@ impl Waku {
         self.boss_ui.command_memory_correction = None;
         self.unmount_deliverable_page(cx);
         self.note_user_message_target(command.session_id);
-        self.request_session_activation(command.session_id, SessionActivationTransition::Visit, cx);
+        // Re-activating the already-viewed boss chat resets its transcript
+        // before the send path can honor the reader's scroll preference.
+        if self.state.selected_session != Some(command.session_id) {
+            self.request_session_activation(
+                command.session_id,
+                SessionActivationTransition::Visit,
+                cx,
+            );
+        }
         // Activation only syncs the hint when the session actually changed;
         // commanding the already-viewed boss chat leaves it to re-read.
         self.sync_composer_placeholder(cx);

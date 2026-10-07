@@ -1,1 +1,1 @@
-- Added a "Keep scroll position when sending" toggle in Settings > General — when on, sending a prompt leaves a scrolled-up transcript where you left it instead of jumping to the new message.
+- Added a "Keep scroll position when sending" toggle in Settings > General — when on, sending a prompt leaves a scrolled-up transcript where you left it instead of jumping to the new message. Boss chat and other transcripts retain that position even when the last row is offscreen or being remeasured.
