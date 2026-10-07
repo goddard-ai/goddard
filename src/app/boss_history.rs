@@ -136,16 +136,27 @@ impl BossHistorySession {
 /// marker is a predecessor link; the source's outgoing marker must be ignored.
 fn boss_chat_predecessor(session: &AgentSession) -> Option<Uuid> {
     session.messages.iter().find_map(|message| {
-        if message.role != MessageRole::System
-            || !message.content.starts_with("Boss session rotated: ")
-        {
+        if message.role != MessageRole::System {
             return None;
         }
-        let (_, ids) = message.content.split_once(". Old session: ")?;
-        let (old, rest) = ids.split_once(". New session: ")?;
-        let new = rest.split_once('.').map(|(id, _)| id)?;
+        let old = if message.hidden {
+            message
+                .content
+                .strip_prefix("<boss-rotation-link:")?
+                .strip_suffix('>')?
+        } else {
+            // Read existing transcripts written before rotation links became
+            // hidden metadata.
+            let (_, ids) = message.content.split_once(". Old session: ")?;
+            let (old, rest) = ids.split_once(". New session: ")?;
+            let (new, _) = rest.split_once('.')?;
+            if Uuid::parse_str(new).ok()? != session.id {
+                return None;
+            }
+            old
+        };
         let old = Uuid::parse_str(old).ok()?;
-        (Uuid::parse_str(new).ok()? == session.id && old != session.id).then_some(old)
+        (old != session.id).then_some(old)
     })
 }
 
@@ -465,16 +476,19 @@ mod tests {
     }
 
     fn rotate(old: &mut AgentSession, next: &mut AgentSession) {
-        let marker = format!(
-            "Boss session rotated: context threshold exceeded. Old session: {}. New session: {}. The old conversation is archived and remains retrievable.",
-            old.id, next.id
-        );
-        old.push_message(MessageRole::System, &marker);
+        let marker = "Boss session rotated.";
+        old.push_message(MessageRole::System, marker);
+        let mut link = Message::new(MessageRole::System, format!("<boss-rotation-link:{}>", old.id));
+        link.hidden = true;
+        old.messages.push(link);
         old.archived_at = Some(10);
         // The destination marker precedes its first turn in the daemon.
         let mut marker_session = AgentSession::new(next.project_id, next.provider);
         marker_session.push_message(MessageRole::System, marker);
         next.messages.insert(0, marker_session.messages.remove(0));
+        let mut link = Message::new(MessageRole::System, format!("<boss-rotation-link:{}>", old.id));
+        link.hidden = true;
+        next.messages.insert(1, link);
         for block in &mut next.transcript_blocks {
             block.after_message += 1;
         }

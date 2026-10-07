@@ -53,6 +53,15 @@ impl WakuBackend {
             }
             journal.active_session_id = Some(active);
             journal.begin(identity.id, active, Uuid::new_v4(), now)?;
+            eprintln!(
+                "Boss session rotation: boss_id={} old_session_id={} new_session_id={} boss_rotation_context_threshold={} context_tokens={} context_window={}; provider prompt cache cold",
+                identity.id,
+                active,
+                journal.intent.as_ref().expect("begun rotation").new_session_id,
+                policy.context_threshold,
+                usage.tokens,
+                usage.window.unwrap_or_default(),
+            );
             journal.intent.as_mut().expect("begun rotation").reason = Some(format!(
                 "boss_rotation_context_threshold={} exceeded (context_tokens={}, context_window={}); provider prompt cache cold",
                 policy.context_threshold,
@@ -70,15 +79,8 @@ impl WakuBackend {
             active == intent.old_session_id || active == intent.new_session_id,
             "Boss rotation session pointer diverged"
         );
-        let marker = format!(
-            "Boss session rotated: {}. Old session: {}. New session: {}. The old conversation is archived and remains retrievable.",
-            intent
-                .reason
-                .as_deref()
-                .unwrap_or("context threshold exceeded and provider prompt cache cold"),
-            intent.old_session_id,
-            intent.new_session_id,
-        );
+        let marker = "Boss session rotated.";
+        let predecessor = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if active == intent.old_session_id {
             let old = state
                 .session_mut(active)
@@ -111,8 +113,10 @@ impl WakuBackend {
                 next.agent_preset = old.agent_preset.clone();
                 next.agent_rename_allowed = false;
                 next.boss_managed = true;
-                next.pending_provider_context = Some(boss_rotation_handoff(old, &marker));
-                next.push_message(MessageRole::System, &marker);
+                next.pending_provider_context = Some(boss_rotation_handoff(old, marker));
+                next.push_message(MessageRole::System, marker);
+                next.push_message(MessageRole::System, &predecessor);
+                next.messages.last_mut().expect("rotation link was appended").hidden = true;
                 state.push_session(next);
                 // Stage the initialized chat before publishing its id.
                 self.task_store.save(&mut state)?;
@@ -140,7 +144,11 @@ impl WakuBackend {
             .iter()
             .any(|message| message.role == MessageRole::System && message.content == marker)
         {
-            next.push_message(MessageRole::System, &marker);
+            next.push_message(MessageRole::System, marker);
+        }
+        if !next.messages.iter().any(|message| message.content == predecessor) {
+            next.push_message(MessageRole::System, &predecessor);
+            next.messages.last_mut().expect("rotation link was appended").hidden = true;
         }
         let old = state
             .session_mut(intent.old_session_id)
@@ -151,7 +159,12 @@ impl WakuBackend {
             .iter()
             .any(|message| message.role == MessageRole::System && message.content == marker)
         {
-            old.push_message(MessageRole::System, &marker);
+            old.push_message(MessageRole::System, marker);
+        }
+        let old_link = format!("<boss-rotation-link:{}>", intent.old_session_id);
+        if !old.messages.iter().any(|message| message.content == old_link) {
+            old.push_message(MessageRole::System, &old_link);
+            old.messages.last_mut().expect("rotation link was appended").hidden = true;
         }
         old.archived_at.get_or_insert(now);
         old.updated_at = now;

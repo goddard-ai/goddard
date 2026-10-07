@@ -9947,17 +9947,13 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
         let marker = session
             .messages
             .iter()
-            .find(|message| message.content.starts_with("Boss session rotated:"))
+            .find(|message| message.content == "Boss session rotated.")
             .unwrap();
         assert_eq!(marker.role, MessageRole::System);
-        assert!(
-            marker
-                .content
-                .contains("boss_rotation_context_threshold=0.8")
-        );
-        assert!(marker.content.contains("context_tokens=81"));
-        assert!(marker.content.contains(&old.to_string()));
-        assert!(marker.content.contains(&next.to_string()));
+        assert!(!marker.hidden);
+        assert!(!marker.content.contains("context_tokens"));
+        assert!(!marker.content.contains(&old.to_string()));
+        assert!(!marker.content.contains(&next.to_string()));
     }
     let transcript = backend
         .handle_boss_operation(
