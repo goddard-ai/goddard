@@ -1,0 +1,1 @@
+- Fixed the fade at the end of a collapsed long prompt so it appears at the truncation point.
