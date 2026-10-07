@@ -4428,15 +4428,7 @@ impl Waku {
             // repaints: the row's prior text lifts and dissolves while the
             // rewritten span resolves beneath it.
             let ghost = morph.zip(morph_t).map(|(morph, t)| {
-                scratchpad_morph_ghost(
-                    &morph.old,
-                    t,
-                    2.0,
-                    0.0,
-                    if show_dot { 19.0 } else { 0.0 },
-                    theme.text,
-                    &ui_family,
-                )
+                scratchpad_morph_ghost(&morph.old, t, theme.text, &ui_family)
             });
             // A landing's displaced tail dissolves over the row that
             // painted it while the residual resolves beneath — the same
@@ -4456,9 +4448,6 @@ impl Waku {
                             &crossfade.ghost,
                             crossfade.tail_start,
                             1.0 - t,
-                            2.0,
-                            0.0,
-                            if show_dot { 19.0 } else { 0.0 },
                             theme.text,
                             theme.text_tertiary,
                             &ui_family,
@@ -4483,6 +4472,7 @@ impl Waku {
                 .focus_visible(|row| row.bg(theme.focus_highlight()))
                 .child(
                     div()
+                        .relative()
                         .flex()
                         .flex_wrap()
                         .items_start()
@@ -4500,10 +4490,10 @@ impl Waku {
                         })
                         .when(show_dot, |row| {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
-                        }),
+                        })
+                        .when_some(ghost, |row, ghost| row.child(ghost))
+                        .when_some(landing_ghost, |row, ghost| row.child(ghost)),
                 )
-                .when_some(ghost, |row, ghost| row.child(ghost))
-                .when_some(landing_ghost, |row, ghost| row.child(ghost))
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                         && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -4569,15 +4559,7 @@ impl Waku {
                 );
                 let indent = 18.0 + bullet.depth as f32 * BULLET_INDENT;
                 let ghost = morph.zip(morph_t).map(|(morph, t)| {
-                    scratchpad_morph_ghost(
-                        &morph.old,
-                        t,
-                        2.0,
-                        indent + BULLET_INDENT,
-                        0.0,
-                        theme.text_secondary,
-                        &ui_family,
-                    )
+                    scratchpad_morph_ghost(&morph.old, t, theme.text_secondary, &ui_family)
                 });
                 let flat = md::render::FlatText {
                     text: bullet.text.clone().into(),
@@ -4618,14 +4600,20 @@ impl Waku {
                             .rounded_full()
                             .bg(theme.text_tertiary),
                     )
-                    .child(md::render::selectable_flat_text(
-                        &flat,
-                        md::selection::TextKey::new(format!("vs-b-{index}"), bullet_index),
-                        selection.clone(),
-                        theme.code_wash,
-                        theme.selection,
-                        false,
-                    ))
+                    .child(
+                        div()
+                            .flex_initial()
+                            .relative()
+                            .child(md::render::selectable_flat_text(
+                                &flat,
+                                md::selection::TextKey::new(format!("vs-b-{index}"), bullet_index),
+                                selection.clone(),
+                                theme.code_wash,
+                                theme.selection,
+                                false,
+                            ))
+                            .when_some(ghost, |row, ghost| row.child(ghost)),
+                    )
                     .when(
                         transcript.is_cleaning(CleanTarget::Node(ScratchpadNode::Bullet(
                             index,
@@ -4633,7 +4621,6 @@ impl Waku {
                         ))),
                         |row| row.child(scratchpad_cleanup_spinner(14.0, theme)),
                     )
-                    .when_some(ghost, |row, ghost| row.child(ghost))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                             && !scratchpad_click_was_drag(event, &scratchpad.selection)
@@ -4925,9 +4912,6 @@ impl Waku {
             scratchpad_morph_ghost(
                 &morph.old,
                 t,
-                0.0,
-                0.0,
-                0.0,
                 theme.text_secondary,
                 &crate::fonts::current(cx).ui,
             )
@@ -4947,9 +4931,6 @@ impl Waku {
                         &crossfade.ghost,
                         crossfade.tail_start,
                         1.0 - t,
-                        0.0,
-                        0.0,
-                        0.0,
                         theme.text_secondary,
                         theme.text_secondary,
                         &crate::fonts::current(cx).ui,
@@ -5345,22 +5326,16 @@ fn scratchpad_dot(muted: bool, status: ScratchpadStatus, theme: &Theme) -> AnyEl
 
 /// The dissolving half of a cleanup morph: the buffer's prior text
 /// painted at `1 − t` and lifting `3t`px while the rewritten span
-/// resolves beneath. `top`/`left`/`right` pin its wrap column to the
-/// row's text block.
-fn scratchpad_morph_ghost(
-    old: &str,
-    t: f32,
-    top: f32,
-    left: f32,
-    right: f32,
-    color: Hsla,
-    ui_family: &SharedString,
-) -> Div {
+/// resolves beneath. Paint it inside the same relative box the row's
+/// text element lays out in — the overlay then shares the painted
+/// text's origin and wrap column exactly instead of approximating
+/// them with insets.
+fn scratchpad_morph_ghost(old: &str, t: f32, color: Hsla, ui_family: &SharedString) -> Div {
     div()
         .absolute()
-        .top(px(top - 3.0 * t))
-        .left(px(left))
-        .right(px(right))
+        .top(px(-3.0 * t))
+        .left_0()
+        .right_0()
         .child(
             gpui::StyledText::new(old.to_owned()).with_runs(vec![TextRun {
                 len: old.len(),
@@ -5377,15 +5352,13 @@ fn scratchpad_morph_ghost(
 /// before the delivery — the settled head in `ink`, the gray tail from
 /// `tail_start` in `tail` — at `alpha` while the residual resolves
 /// beneath it. Unlike the cleanup morph the overlay holds its place:
-/// the tail dissolves where it sat. `top`/`left`/`right` pin its wrap
-/// column to the row's text block.
+/// the tail dissolves where it sat. Paint it inside the same relative
+/// box the row's text element lays out in — the overlay then shares
+/// the painted text's origin and wrap column exactly.
 fn scratchpad_landing_ghost(
     ghost: &str,
     tail_start: usize,
     alpha: f32,
-    top: f32,
-    left: f32,
-    right: f32,
     ink: Hsla,
     tail: Hsla,
     ui_family: &SharedString,
@@ -5409,9 +5382,9 @@ fn scratchpad_landing_ghost(
     }
     div()
         .absolute()
-        .top(px(top))
-        .left(px(left))
-        .right(px(right))
+        .top_0()
+        .left_0()
+        .right_0()
         .child(gpui::StyledText::new(ghost.to_owned()).with_runs(runs))
 }
 
