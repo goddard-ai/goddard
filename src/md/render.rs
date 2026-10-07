@@ -1251,6 +1251,8 @@ fn fixation_segments(
 /// elements and reuses every settled one.
 pub struct MarkdownView {
     parser: IncrementalParser,
+    /// Cache the prompt transform so repaints do not rescan reference tokens.
+    prompt_references: Option<(String, String)>,
     /// Mended replacement for the final block while streaming.
     tail: Vec<TopBlock>,
     flats: RefCell<HashMap<usize, Rc<FlatText>>>,
@@ -1332,6 +1334,7 @@ impl MarkdownView {
     pub fn new() -> Self {
         Self {
             parser: IncrementalParser::new(),
+            prompt_references: None,
             tail: Vec::new(),
             flats: RefCell::new(HashMap::new()),
             reference_context: RefCell::new(None),
@@ -1376,6 +1379,24 @@ impl MarkdownView {
 
     pub fn set_text(&mut self, text: &str, mend: bool) {
         self.set_text_with_soft_breaks_as_newlines(text, mend, false);
+    }
+
+    /// User prompts may contain provider-facing reference tokens without
+    /// display atoms (for example, restored boss history). Decode only the
+    /// rendered copy; assistant prose and the saved message stay untouched.
+    pub fn set_transcript_text(&mut self, text: &str, mend: bool, user: bool) {
+        if !user {
+            self.prompt_references = None;
+            self.set_text_with_soft_breaks_as_newlines(text, mend, false);
+            return;
+        }
+        let (source, display) = self
+            .prompt_references
+            .take()
+            .filter(|(source, _)| source == text)
+            .unwrap_or_else(|| (text.to_owned(), super::prompt_refs::display(text).into_owned()));
+        self.set_text_with_soft_breaks_as_newlines(&display, mend, true);
+        self.prompt_references = Some((source, display));
     }
 
     /// Point the view at transcript prompt markdown, retaining soft line
@@ -4431,6 +4452,102 @@ mod tests {
             &[],
         );
         assert_eq!(flat.atom_ranges, vec![(0..13, AtomChipTarget::Text)]);
+    }
+
+    #[test]
+    fn transcript_prompt_tokens_render_as_chips_without_changing_the_source() {
+        use waku_protocol::model::AtomRefKind;
+        let id = Uuid::from_u128(42);
+        let references = [
+            (
+                "project",
+                "path",
+                "/Users/alec/dev/games/polly-jigsaw",
+                "polly-jigsaw",
+                AtomChipTarget::Ref(AtomRefKind::Project),
+            ),
+            (
+                "file",
+                "path",
+                "memory/self/profile.md",
+                "profile.md",
+                AtomChipTarget::Ref(AtomRefKind::MemoryFile),
+            ),
+            (
+                "persona",
+                "persona_id",
+                "rhea",
+                "Rhea",
+                AtomChipTarget::Ref(AtomRefKind::Persona),
+            ),
+            (
+                "deliverable",
+                "deliverable_id",
+                "report",
+                "report.md",
+                AtomChipTarget::Ref(AtomRefKind::Deliverable),
+            ),
+            (
+                "bucket",
+                "bucket_id",
+                "self",
+                "Self",
+                AtomChipTarget::Ref(AtomRefKind::MemoryBucket),
+            ),
+            (
+                "automation",
+                "automation_id",
+                "daily",
+                "Daily check",
+                AtomChipTarget::Ref(AtomRefKind::Automation),
+            ),
+            (
+                "session",
+                "task_id",
+                &id.to_string(),
+                "Antonia",
+                AtomChipTarget::Session(id),
+            ),
+        ];
+        for (tag, key, target, label, kind) in references {
+            let source = format!("Use [{tag} \"{label}\" ({key}: {target})] now");
+            let mut view = MarkdownView::new();
+            view.set_transcript_text(&source, false, true);
+            let flat = flatten(
+                &runs_of(view.parser.text()),
+                &palette(),
+                &Fonts::default(),
+                FontWeight::NORMAL,
+                palette().text,
+                &[],
+            );
+            assert_eq!(
+                flat.text.as_ref(),
+                format!("Use {}{label} now", crate::input::ATOM_ICON_SLOT)
+            );
+            assert_eq!(flat.atom_ranges.len(), 1);
+            assert_eq!(flat.atom_ranges[0].1, kind);
+            // The transform is specific to prompts, and never edits the input.
+            view.set_transcript_text(&source, false, false);
+            assert_eq!(view.parser.text(), source);
+            assert!(source.contains(target));
+        }
+        let plain = "[unknown \"x\" (path: /x)] [project \"x\" (id: /x)] [project \"x\" (path: )] [session \"x\" (task_id: invalid)] [project \"x\" (path: /x)";
+        assert_eq!(super::super::prompt_refs::display(plain), plain);
+        let mixed = format!("{plain} [project \"**Goddard**\" (path: /repo)]");
+        let display = super::super::prompt_refs::display(&mixed);
+        assert!(display.starts_with(plain));
+        let flat = flatten(
+            &runs_of(&display),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &[],
+        );
+        assert_eq!(flat.atom_ranges.len(), 1);
+        assert!(flat.text.ends_with("**Goddard**"));
+        assert_eq!(super::super::prompt_refs::display(&display), display);
     }
 
     #[test]
