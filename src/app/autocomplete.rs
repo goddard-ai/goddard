@@ -750,49 +750,14 @@ impl Waku {
         self.boss_key_for_project(project)
     }
 
-    /// Whether `session` is on the live roster of `surface`'s boss — the
-    /// pool's cross-project extension: a mention in a boss chat is how the
-    /// user names who should take work, so employees are offered whatever
-    /// project their task lives in.
-    fn boss_employee_mentionable(&self, boss: Option<DaemonKey>, session: &AgentSession) -> bool {
-        boss.is_some_and(|key| {
-            self.boss_ui
-                .states
-                .get(&key)
-                .is_some_and(|state| {
-                    state
-                        .employees
-                        .iter()
-                        .any(|employee| employee.session_id == session.id)
-                })
-        }) && session.has_started()
-            && session.archived_at.is_none()
-            && !session.is_side_chat()
-    }
-
-    /// The full session pool predicate — project-scoped candidates plus the
-    /// boss-roster extension. `mentionable_sessions_for` and the memo
-    /// fingerprint share it so both watch the same set.
-    fn session_mentionable(
-        &self,
-        session: &AgentSession,
-        project: Option<Uuid>,
-        boss: Option<DaemonKey>,
-    ) -> bool {
-        session_mention_candidate(session, project)
-            || self.boss_employee_mentionable(boss, session)
-    }
-
-    /// Sessions the `@` popup can offer — the same set the sidebar drags:
-    /// started, unarchived, not side chats, in the composer's own project,
-    /// plus a boss surface's live roster — minus the session the composer
+    /// Sessions the `@` popup can offer — started, unarchived, not side chats,
+    /// and in the composer's own project — minus the session the composer
     /// addresses and any already staged. Recent activity first.
     fn mentionable_sessions_for(
         &self,
         surface: &composer::ComposerCard,
     ) -> Vec<ComposerSessionRef> {
         let project = self.surface_project_id(surface);
-        let boss = self.surface_boss_key(surface);
         let project_name = |session: &AgentSession| {
             self.state
                 .projects
@@ -807,7 +772,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                self.session_mentionable(session, project, boss)
+                session_mention_candidate(session, project)
                     && self.surface_session_atom_allowed(surface, session.id)
             })
             .collect();
@@ -1001,7 +966,7 @@ impl Waku {
         }
         let boss = self.surface_boss_key(surface);
         for session in &self.state.sessions {
-            if self.session_mentionable(session, project, boss) {
+            if session_mention_candidate(session, project) {
                 session.id.hash(&mut hasher);
                 session.display_title().hash(&mut hasher);
                 session.is_planning().hash(&mut hasher);
