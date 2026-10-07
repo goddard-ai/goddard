@@ -1,0 +1,1 @@
+- Automatically play the next queued voice briefing after the current one ends, with a short pause between briefings.

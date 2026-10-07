@@ -41,6 +41,7 @@ const FISH_AUDIO_VOICE: &str = "933563129e564b19a115bedd57b7406a";
 /// Ready clips are a small cache, not a library — a ~45s audio clip is a few
 /// MB, so eight covers an unread sweep without holding the heap.
 const BRIEFING_CLIPS_CAP: usize = 8;
+const BRIEFING_QUEUE_GAP: Duration = Duration::from_millis(1500);
 /// Pipelines in flight at once; past this a settle simply misses its
 /// prefetch and generates on arrival instead.
 const BRIEFING_PENDING_CAP: usize = 4;
@@ -127,6 +128,10 @@ impl BriefingQueue {
         } else {
             None
         }
+    }
+
+    fn has_ready(&self, playback_allowed: bool) -> bool {
+        playback_allowed && self.waiting.is_some()
     }
 
     fn accept(&mut self, sequence: u64, message_id: Uuid) -> bool {
@@ -840,6 +845,37 @@ impl Waku {
         }
     }
 
+    /// Leave a short pause only when another automatic briefing is ready.
+    /// The playback generation makes a stale timer harmless if the user
+    /// starts or stops another clip during the gap.
+    fn advance_voice_briefing_queues(&mut self, cx: &mut Context<Self>) {
+        let allowed = self.viewed_briefing_session().is_some()
+            && self.state.voice_briefing_enabled
+            && self.state.voice_briefing_autoplay
+            && !self.voice_briefing_dnd_active();
+        if !self.briefing_queue.has_ready(allowed) {
+            self.pump_briefing_queue(cx);
+            self.pump_speech_queue(cx);
+            return;
+        }
+
+        let generation = self.voice_briefing_playback_generation;
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(BRIEFING_QUEUE_GAP).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.voice_briefing_playback_generation != generation
+                    || this.voice_briefing_playback.is_some()
+                {
+                    return;
+                }
+                this.pump_briefing_queue(cx);
+                this.pump_speech_queue(cx);
+            });
+        })
+        .detach();
+    }
+
     fn play_voice_briefing_clip(
         &mut self,
         message_id: Uuid,
@@ -903,8 +939,7 @@ impl Waku {
                             this.voice_briefing_playback_generation.wrapping_add(1);
                         // A queued `speak` chain hands off here — pumping
                         // starts the next clip and its own tick.
-                        this.pump_briefing_queue(cx);
-                        this.pump_speech_queue(cx);
+                        this.advance_voice_briefing_queues(cx);
                         cx.notify();
                         return false;
                     };
@@ -913,8 +948,7 @@ impl Waku {
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
-                        this.pump_briefing_queue(cx);
-                        this.pump_speech_queue(cx);
+                        this.advance_voice_briefing_queues(cx);
                         cx.notify();
                         return false;
                     }
@@ -1585,5 +1619,14 @@ mod queue_tests {
         assert_eq!(queue.waiting.take(), Some(newest_id));
         assert!(!queue.accept(declined, Uuid::new_v4()));
         assert!(queue.waiting.is_none());
+    }
+
+    #[test]
+    fn queue_gap_is_only_needed_for_an_eligible_waiting_briefing() {
+        let mut queue = BriefingQueue::default();
+        assert!(!queue.has_ready(true));
+        queue.waiting = Some(Uuid::new_v4());
+        assert!(!queue.has_ready(false));
+        assert!(queue.has_ready(true));
     }
 }
