@@ -1,0 +1,1 @@
+- The built-in “Sharpen complex answers” auto-prompt now starts disabled and is disabled on load if its shipped settings are untouched; edited rules are preserved.

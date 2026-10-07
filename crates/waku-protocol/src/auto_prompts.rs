@@ -45,7 +45,7 @@ pub fn default_rules() -> Vec<AutoPromptRule> {
             },
         ],
         threshold: Some(0.85),
-        enabled: true,
+        enabled: false,
     }]
 }
 
@@ -82,9 +82,11 @@ pub fn refresh_untouched_shipped_rules(rules: &mut [AutoPromptRule]) -> bool {
         threshold: Some(0.65),
         enabled: true,
     };
-    let mut previous = default_rules().remove(0);
+    let mut last_shipped = default_rules().remove(0);
+    last_shipped.enabled = true;
+    let mut previous = last_shipped.clone();
     previous.prompt = "Rewrite your answer only if it is materially too long, dense, or broad for the user's request. If it is already concise and sufficient, do not add or send anything.".into();
-    if *rule != original && *rule != previous {
+    if *rule != original && *rule != previous && *rule != last_shipped {
         return false;
     }
     *rule = default_rules().remove(0);
@@ -164,4 +166,64 @@ pub fn turn_state(session: &AgentSession, turn_id: Uuid) -> serde_json::Value {
             .map(|checkpoint| checkpoint.files.iter().take(30).map(|file| &file.path).collect::<Vec<_>>())
             .unwrap_or_default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipped_rule_is_disabled_by_default() {
+        let rules = default_rules();
+        assert!(!rules[0].enabled);
+        assert!(!rules[0].valid_for_dispatch());
+        assert!(rules[0].valid_for_dispatch_without_enabled());
+    }
+
+    #[test]
+    fn refresh_disables_untouched_shipped_rules() {
+        let mut rules = default_rules();
+        rules[0].enabled = true;
+        assert!(refresh_untouched_shipped_rules(&mut rules));
+        assert_eq!(rules, default_rules());
+        assert!(!refresh_untouched_shipped_rules(&mut rules));
+
+        rules[0].enabled = true;
+        rules[0].prompt = "Rewrite your answer only if it is materially too long, dense, or broad for the user's request. If it is already concise and sufficient, do not add or send anything.".into();
+        assert!(refresh_untouched_shipped_rules(&mut rules));
+        assert_eq!(rules, default_rules());
+
+        rules[0].enabled = true;
+        rules[0].prompt =
+            "I need to understand this quickly. Please sharpen your explanation.".into();
+        rules[0].threshold = Some(0.65);
+        rules[0].questions[0].instructions =
+            "Read the user's prompt and the agent's response. Is the \
+            response likely to overwhelm the user — longer, denser, or broader \
+            than what they asked for and can quickly act on?"
+                .into();
+        rules[0].questions.push(AutoPromptQuestion {
+            id: Uuid::from_u128(0x68fc32f8_9c2c_416f_a37f_f94cdd135148),
+            instructions: "Could the response's essential answer be delivered in a \
+                much shorter reply without losing what the user needs?"
+                .into(),
+            weight: Some(0.5),
+        });
+        assert!(refresh_untouched_shipped_rules(&mut rules));
+        assert_eq!(rules, default_rules());
+    }
+
+    #[test]
+    fn refresh_preserves_edited_and_user_created_rules() {
+        let mut edited = default_rules().remove(0);
+        edited.enabled = true;
+        edited.threshold = Some(0.9);
+        let mut custom = default_rules().remove(0);
+        custom.id = Uuid::from_u128(1);
+        custom.enabled = true;
+        let mut rules = vec![edited, custom];
+        let before = rules.clone();
+        assert!(!refresh_untouched_shipped_rules(&mut rules));
+        assert_eq!(rules, before);
+    }
 }
