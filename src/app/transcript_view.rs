@@ -2224,7 +2224,15 @@ impl Waku {
                         .absolute()
                         .left(px(-(NEW_CONTENT_DOT_GAP + 14.0)))
                         .top(px(top_inset + (line_height - 14.0) / 2.0))
-                        .child(icon("icons/headphones.svg", 14.0, theme.text_secondary)),
+                        .child(icon(
+                            if self.briefing_clips.contains_key(&message_id) {
+                                "icons/headphones-generated.svg"
+                            } else {
+                                "icons/headphones.svg"
+                            },
+                            14.0,
+                            theme.text_secondary,
+                        )),
                 )
             });
         let new_content_dot = self

@@ -518,9 +518,13 @@ impl Waku {
         if self.voice_briefing_in_flight(message_id) {
             return Some(VoiceBriefingFooter::Generating);
         }
-        self.state
-            .voice_briefing_enabled
-            .then_some(VoiceBriefingFooter::Generate)
+        self.state.voice_briefing_enabled.then(|| {
+            if self.briefing_clips.contains_key(&message_id) {
+                VoiceBriefingFooter::Generated
+            } else {
+                VoiceBriefingFooter::Generate
+            }
+        })
     }
 
     /// Briefing pipelines — decided or generating — that belong to this

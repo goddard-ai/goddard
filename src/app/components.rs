@@ -204,12 +204,14 @@ impl Waku {
 }
 
 /// The response footer's voice-briefing affordance. `Generate` is the
-/// on-demand headphones button that sits beside copy; `Generating` is the
+/// on-demand headphones button that sits beside copy; `Generated` marks a
+/// cached briefing available for replay; `Generating` is the
 /// spinner + label at the front of the footer that cancels on click.
 /// Both follow the footer's normal visibility rule.
 #[derive(Clone, Copy)]
 pub(super) enum VoiceBriefingFooter {
     Generate,
+    Generated,
     Generating,
 }
 
@@ -360,7 +362,8 @@ pub(super) fn render_message_footer(
         strip = strip.child(timestamp).child(copy_button);
     } else {
         strip = strip.child(copy_button);
-        if let Some(VoiceBriefingFooter::Generate) = voice_briefing {
+        if let Some(VoiceBriefingFooter::Generate | VoiceBriefingFooter::Generated) = voice_briefing
+        {
             let brief_waku = waku.clone();
             strip = strip.child(
                 div()
@@ -377,7 +380,15 @@ pub(super) fn render_message_footer(
                     .cursor_default()
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|element| element.bg(theme.overlay_strong))
-                    .child(icon("icons/headphones.svg", 14.0, footer_color))
+                    .child(icon(
+                        if matches!(voice_briefing, Some(VoiceBriefingFooter::Generated)) {
+                            "icons/headphones-generated.svg"
+                        } else {
+                            "icons/headphones.svg"
+                        },
+                        14.0,
+                        footer_color,
+                    ))
                     .tooltip(Tooltip::text(tr_cow!("session.voice_briefing_generate")))
                     .on_activation_app(move |_, cx| {
                         let _ = brief_waku.update(cx, |this, cx| {
