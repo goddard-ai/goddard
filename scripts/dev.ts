@@ -1914,7 +1914,13 @@ process.on("SIGTERM", () => void cleanup());
 startWatchers();
 if (serveMode) {
   try {
-    serve = await startDevServe({ root, targetDir });
+    // The feed lives under the dev data dir, not target/: target is an mbx
+    // symlink whose destination may not exist yet, and mkdir -p cannot
+    // traverse a dangling symlink.
+    serve = await startDevServe({
+      root,
+      workDir: join(developmentDataDir, "dev-serve"),
+    });
   } catch (error) {
     console.error("[goddard-dev] Could not start the update feed:", error);
     closeWatchers();

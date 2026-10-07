@@ -196,14 +196,13 @@ async function resignBundle(appBundle: string): Promise<void> {
 
 export async function startDevServe(options: {
   root: string;
-  targetDir: string;
+  workDir: string;
 }): Promise<DevServe> {
-  const { root, targetDir } = options;
+  const { root, workDir } = options;
   const log = (line: string) => console.log(`[goddard-dev] ${line}`);
   const hostname = process.env.GODDARD_DEV_HOSTNAME ?? "dev.goddardai.org";
   const tunnelName = process.env.GODDARD_DEV_TUNNEL ?? "goddard-dev";
   const port = Number(process.env.GODDARD_DEV_SERVE_PORT ?? 8976);
-  const workDir = join(targetDir, "dev-serve");
   const updatesDir = join(workDir, "updates");
   let lastBuildTimestamp = 0;
   await mkdir(updatesDir, { recursive: true });
