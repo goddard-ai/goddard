@@ -5889,6 +5889,19 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     // Freeing the pool dispatches the head — here the launch fails on
     // the missing binary and the employee expires with the blocker the
     // finish report carries.
+    let supervisor_capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        boss,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(supervisor_capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
     backend
         .resource_broker()
         .unwrap()
@@ -5902,6 +5915,11 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
             .as_deref()
             .is_some_and(|note| note.contains("Employee launch failed"))
     );
+    let reports = supervisor_capture.prompts.lock();
+    assert_eq!(reports.len(), 1);
+    assert!(reports[0].contains("Employee launch failed"));
+    assert!(!reports[0].contains("has started working"));
+    drop(reports);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -7438,11 +7456,10 @@ fn queued_tickets_survive_restart_with_their_goals() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Dispatch notifications are durable and dedupe: delivery parks the
-/// supervisor-side message once, however many times the outbox is
-/// re-driven.
+/// Old dispatch outbox entries must not become supervisor prompts after
+/// upgrading to silent dispatch.
 #[test]
-fn dispatch_notifications_dedupe_across_deliveries() {
+fn legacy_dispatch_notifications_are_retired_without_delivery() {
     use waku_protocol::boss::EmployeeLifecycle;
     let root = std::env::temp_dir().join(format!("summon-outbox-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
@@ -7521,22 +7538,33 @@ fn dispatch_notifications_dedupe_across_deliveries() {
             cwd: root.to_path_buf(),
         },
     );
-    backend.deliver_dispatch_notifications();
-    assert_eq!(capture.prompts.lock().len(), 1);
+    backend.retire_dispatch_notifications();
     assert!(backend.boss.outbox_pending().is_empty());
-    backend.deliver_dispatch_notifications();
-    assert_eq!(
-        capture.prompts.lock().len(),
-        1,
-        "the note id dedupes a re-driven delivery"
+    backend.retire_dispatch_notifications();
+    assert!(capture.prompts.lock().is_empty());
+    assert!(capture.steers.lock().is_empty());
+    assert!(!backend.agent.has_queued(boss));
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == boss)
+        .unwrap();
+    assert!(session.queued_messages.is_empty());
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|message| message.content.contains("has started working"))
     );
+    drop(state);
     let _ = (held_task, held);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
-fn employee_dispatch_notifies_once_and_batches_queued_resumption() {
+fn employee_dispatch_is_silent_and_batches_queued_resumption() {
     use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl};
     let root = std::env::temp_dir().join(format!("summon-wake-{}", Uuid::new_v4()));
     let (backend, supervisor) = summon_test_backend(&root);
@@ -7581,8 +7609,23 @@ fn employee_dispatch_notifies_once_and_batches_queued_resumption() {
         .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
         .unwrap();
     assert_eq!(initial_capture.prompts.lock().len(), 1);
-    assert_eq!(supervisor_capture.prompts.lock().len(), 1);
-    assert!(supervisor_capture.prompts.lock()[0].contains("has started working"));
+    assert!(supervisor_capture.prompts.lock().is_empty());
+    assert!(supervisor_capture.steers.lock().is_empty());
+    assert!(!backend.agent.has_queued(supervisor));
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == supervisor)
+        .unwrap();
+    assert!(session.queued_messages.is_empty());
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|message| message.content.contains("has started working"))
+    );
+    drop(state);
     backend
         .finish_boss_employee(
             session_id,
@@ -7633,7 +7676,7 @@ fn employee_dispatch_notifies_once_and_batches_queued_resumption() {
     );
     assert!(prompts[0].contains("First queued check\n\nSecond queued check"));
     assert!(!backend.agent.has_queued(session_id));
-    assert_eq!(backend.boss.document().outbox.len(), 1);
+    assert!(backend.boss.document().outbox.is_empty());
     assert_eq!(
         supervisor_capture.prompts.lock().len(),
         notices_after_finish,

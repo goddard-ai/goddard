@@ -162,7 +162,7 @@ impl WakuBackend {
             eprintln!("could not reconcile host resource policy: {error:#}");
         }
         self.deliver_settled_employee_updates();
-        self.deliver_dispatch_notifications();
+        self.retire_dispatch_notifications();
         self.deliver_wave_notifications();
         loop {
             let heads = self.boss.queued_heads();
@@ -387,18 +387,6 @@ impl WakuBackend {
                 // The envelope has been adopted — the transcript owns it
                 // now, and a later requeue must not replay it.
                 let _ = self.boss.clear_employee_prompt_queue(session_id);
-                // Re-admission wakes the existing assignment; only its
-                // first launch owes the supervisor a started notice.
-                if !resumed {
-                    self.boss.outbox_push(
-                        session_id,
-                        ticket.generation,
-                        ticket.provider,
-                        ticket.model.clone(),
-                        ticket.goal_id,
-                    )?;
-                }
-                self.deliver_dispatch_notifications();
                 Ok(true)
             }
             Err(error) => {
@@ -647,78 +635,18 @@ impl WakuBackend {
         })
     }
 
-    /// Deliver durable dispatch notifications to their supervisors.
-    /// `delivered` means durably parked in the supervisor's prompt queue —
-    /// a restart re-drives undelivered entries and both the session's
-    /// parked mirror and its delivered messages dedupe on the derived
-    /// message id, so a lost response can never duplicate the notice.
-    pub(super) fn deliver_dispatch_notifications(&self) {
-        let pending = self.boss.outbox_pending();
-        if pending.is_empty() {
-            return;
-        }
-        let events = self.event_source.lock().clone();
-        for note in pending {
-            let Some(employee) = self.boss.employee(note.session_id) else {
-                let _ = self.boss.outbox_mark_delivered(note.id);
-                continue;
-            };
-            let Some(target) = self.boss.report_target(&employee) else {
-                continue;
-            };
-            let queued_id = Uuid::from_u128(0xD15A7C4D_u128 << 96 | u128::from(note.id));
-            {
-                let mut state = self.task_state.lock();
-                let already = state
-                    .sessions
-                    .iter_mut()
-                    .find(|session| session.id == target)
-                    .and_then(|session| {
-                        self.task_store.hydrate(session).ok()?;
-                        let parked = session
-                            .queued_messages
-                            .iter()
-                            .any(|queued| queued.id == queued_id);
-                        let delivered = session
-                            .messages
-                            .iter()
-                            .any(|message| message.id == queued_id);
-                        Some(parked || delivered)
-                    })
-                    .unwrap_or(false);
-                if already {
-                    let _ = self.boss.outbox_mark_delivered(note.id);
-                    continue;
-                }
-            }
-            let prompt = format!(
-                "Employee {} ({}) has started working on {} / {}.",
-                employee.identity.name,
-                note.session_id,
-                note.provider.display_name(),
-                note.model
-            );
-            if self
-                .queue_agent_prompt_with_id(
-                    target,
-                    prompt,
-                    Some(note.session_id),
-                    true,
-                    Some(queued_id),
-                    None,
-                    &events,
-                )
-                .is_ok()
-            {
-                let _ = self.boss.outbox_mark_delivered(note.id);
-            }
+    /// Retire started notices persisted by older daemons without prompting
+    /// the supervisor. Successful dispatch is silent; failures still report
+    /// through the employee's normal finish path.
+    pub(super) fn retire_dispatch_notifications(&self) {
+        for note in self.boss.outbox_pending() {
+            let _ = self.boss.outbox_mark_delivered(note.id);
         }
     }
 
-    /// Deliver durable wave-resolution notices to their supervisors — the
-    /// same contract the dispatch outbox carries: parked-or-delivered
-    /// dedupes on the derived message id, so a restart re-drives
-    /// undelivered entries without ever repeating one.
+    /// Deliver durable wave-resolution notices to their supervisors. Parked
+    /// and delivered messages dedupe on the derived message id, so a restart
+    /// re-drives undelivered entries without ever repeating one.
     pub(super) fn deliver_wave_notifications(&self) {
         let pending = self.boss.wave_outbox_pending();
         if pending.is_empty() {
