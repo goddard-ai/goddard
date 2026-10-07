@@ -204,11 +204,9 @@ impl Waku {
 }
 
 /// The response footer's voice-briefing affordance. `Generate` is the
-/// on-demand headphones button that sits beside copy while automatic
-/// playback is off; `Generating` is the spinner + label at the front of
-/// the footer — visible without hover — that cancels on click; `Playback`
-/// is the flat pause/resume button — also visible without hover — for the
-/// reply whose clip is currently voicing.
+/// on-demand headphones button that sits beside copy; `Generating` is the
+/// spinner + label at the front of the footer that cancels on click.
+/// Both follow the footer's normal visibility rule.
 #[derive(Clone, Copy)]
 pub(super) enum VoiceBriefingFooter {
     Generate,
@@ -280,9 +278,6 @@ pub(super) fn render_message_footer(
                 this.show_message_copied(message_id, cx);
             });
         });
-    // Briefing actions remain visible and keyboard reachable.
-    let force_visible = force_visible || voice_briefing.is_some();
-
     let mut strip = div()
         .h(px(27.0))
         .min_w_0()
