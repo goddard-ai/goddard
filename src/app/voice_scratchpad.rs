@@ -301,11 +301,9 @@ pub(super) struct VoiceScratchpad {
     text_fades: HashMap<String, TextFade>,
     /// What the append point's row painted last frame — settled text
     /// plus the interim tail. A delivery committing painted gray text
-    /// records an [`InterimCrossfade`] against it.
+    /// is a landing: its divergent bytes become the fade slot's fresh
+    /// span so the matched paint snaps to ink instead of re-fading.
     painted_row: Option<PaintedRow>,
-    /// A partial→final landing mid-crossfade — the displaced tail
-    /// dissolves in place while the divergent residual resolves.
-    interim_crossfade: Option<InterimCrossfade>,
     // The pill handles stay live for the floating controls row — the top
     // bar that hosted it is gone.
     #[allow(dead_code)]
@@ -319,7 +317,7 @@ pub(super) struct VoiceScratchpad {
 }
 
 impl VoiceScratchpad {
-    fn new(cx: &mut Context<Waku>) -> Self {
+    fn new<T: 'static>(cx: &mut Context<T>) -> Self {
         let (audio_tx, audio_rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAP);
         Self {
             transcript: ScratchpadTranscript::default(),
@@ -342,7 +340,6 @@ impl VoiceScratchpad {
             cleanup_morphs: Vec::new(),
             text_fades: HashMap::new(),
             painted_row: None,
-            interim_crossfade: None,
             mute_focus: cx.focus_handle(),
             hide_focus: cx.focus_handle(),
             discard_focus: cx.focus_handle(),
@@ -430,11 +427,9 @@ impl VoiceScratchpad {
         });
     }
 
-    /// Whether any morph, crossfade, or word-fade still needs repaint
-    /// ticks.
+    /// Whether any morph or word-fade still needs repaint ticks.
     fn motion_live(&self) -> bool {
         !self.cleanup_morphs.is_empty()
-            || self.interim_crossfade.is_some()
             || self.text_fades.values().any(|fade| !fade.fresh.is_empty())
     }
 
@@ -491,12 +486,13 @@ impl VoiceScratchpad {
     }
 
     /// Diff the append point's painted row against last frame's record —
-    /// a delivery that grew settled text over painted gray is a landing
-    /// and gets its crossfade. The landing can close the interim's row
-    /// behind it ("okay next" commits the paragraph while the tail moves
-    /// on), so the diff follows the record's own key rather than the
-    /// live append point. The record refreshes every frame either way,
-    /// motion or not, so a stale row can't mint a landing later.
+    /// a delivery that grew settled text over painted gray is a landing,
+    /// and only its divergent bytes earn the word-fade: the matched
+    /// prefix stays put. The landing can close the interim's row behind
+    /// it ("okay next" commits the paragraph while the tail moves on),
+    /// so the diff follows the record's own key rather than the live
+    /// append point. The record refreshes every frame either way, motion
+    /// or not, so a stale row can't mint a landing later.
     fn note_painted_row(&mut self, animate: bool, now: Instant) {
         let painted = self.painted_append_row();
         let same_row = self
@@ -520,13 +516,7 @@ impl VoiceScratchpad {
                 None => return,
             }
         };
-        landing_crossfade(
-            &mut self.text_fades,
-            &mut self.interim_crossfade,
-            prev,
-            current,
-            now,
-        );
+        note_landing(&mut self.text_fades, prev, current, now);
     }
 
     /// Pause the capture side: the worker exits and closes its socket,
@@ -540,6 +530,42 @@ impl VoiceScratchpad {
         while self.audio_rx.try_recv().is_ok() {}
         self.capture_live = false;
     }
+
+    /// Apply the mute posture to the transcript and capture flags —
+    /// what the platform owes afterward comes back as the directive.
+    /// Unmute always resumes rather than trusting `capture_live`: the
+    /// flag covers the tap, not the worker behind it, so a claim that
+    /// outlived its pipeline (a dead worker, a detached sink) tears
+    /// down here and the begin path restarts clean.
+    fn apply_mute(&mut self, muted: bool) -> CaptureDirective {
+        if self.muted == muted && self.capture_live == !muted {
+            return CaptureDirective::Idle;
+        }
+        self.muted = muted;
+        if muted {
+            self.transcript.solidify_interim();
+            let detach_sink = self.capture_live;
+            self.stop_capture();
+            return CaptureDirective::Muted { detach_sink };
+        }
+        let detach_sink = self.capture_live;
+        if detach_sink {
+            self.stop_capture();
+        }
+        CaptureDirective::Resume { detach_sink }
+    }
+}
+
+/// The capture work a mute posture change owes the platform.
+#[derive(Debug, PartialEq, Eq)]
+enum CaptureDirective {
+    /// Already in the requested posture — nothing to change.
+    Idle,
+    /// A mute landed: detach the tap when the session held it.
+    Muted { detach_sink: bool },
+    /// An unmute restarts capture — detaching a stale tap claim first
+    /// when one stood.
+    Resume { detach_sink: bool },
 }
 
 /// A cleanup transition in flight on one buffer: `new` must still match
@@ -591,7 +617,7 @@ fn note_text_fade(
 
 /// A painted append-point row's composition: settled text plus the
 /// stripped interim tail appended the way the row joins it — the shape
-/// a landing's crossfade diffs.
+/// a landing's fade diff works against.
 struct PaintedRow {
     /// The fade key of the row described — "p{n}" or "annotation".
     key: String,
@@ -606,33 +632,17 @@ struct PaintedRow {
     edited: bool,
 }
 
-/// A partial→final landing mid-crossfade: `ghost` (the row's painted
-/// text before the delivery) dissolves in place while the divergent
-/// residual resolves beneath it — matched bytes never left the screen,
-/// so nothing blinks out and back in.
-struct InterimCrossfade {
-    /// The fade key of the row it belongs to.
-    key: String,
-    /// What the row painted before the landing — dissolves as an
-    /// overlay pinned to the row's text block.
-    ghost: String,
-    /// Byte offset in `ghost` where its gray tail began — the settled
-    /// head dissolves in ink, the tail in the interim's gray.
-    tail_start: usize,
-    started: Instant,
-}
-
 /// `current` is the row `prev` recorded, painted now. Settled growth
 /// that kept the settled prefix and had a gray tail to displace is a
-/// landing: the displaced paint dissolves while the divergent residual
-/// resolves. The residual's first byte rewrites the landing's own fresh
-/// spans — appended at `prev.settled` — so matched text resolves
-/// already visible instead of fading in from nothing. Free function so
-/// the prep pass can call it on fields while the transcript stays
-/// borrowed.
-fn landing_crossfade(
+/// landing — it lands inside the row's one text element, so the paint
+/// move is a style change, not a second node: the displaced bytes are
+/// simply gone and the divergent residual materializes in place. The
+/// residual's first byte rewrites the landing's own fresh span —
+/// appended at `prev.settled` — so matched text resolves already
+/// visible instead of fading in from nothing. Free function so the
+/// prep pass can call it on fields while the transcript stays borrowed.
+fn note_landing(
     fades: &mut HashMap<String, TextFade>,
-    crossfade: &mut Option<InterimCrossfade>,
     prev: PaintedRow,
     current: &PaintedRow,
     now: Instant,
@@ -682,12 +692,6 @@ fn landing_crossfade(
     {
         entry.fresh.push((local, now));
     }
-    *crossfade = Some(InterimCrossfade {
-        key: prev.key,
-        ghost: prev.painted,
-        tail_start: prev.tail_start,
-        started: now,
-    });
 }
 
 /// The fade slot a cleanup target maps to — the same key the prep pass
@@ -3203,11 +3207,14 @@ impl Waku {
         if scratchpad.muted {
             return;
         }
-        // Blocks queued for a dead stream drop before the new one opens —
-        // audio buffered under an earlier socket is stale dictation, not a
-        // backlog to replay.
-        while scratchpad.audio_rx.try_recv().is_ok() {}
-        let audio_tx = scratchpad.audio_tx.clone();
+        // A fresh channel per capture session: the retired worker's
+        // receiver disconnects the moment its last sender drops, so a
+        // lingering socket thread can't keep draining audio meant for
+        // its replacement — and a queue buffered for a dead stream dies
+        // with the channel rather than replaying into the new one.
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAP);
+        scratchpad.audio_tx = audio_tx.clone();
+        scratchpad.audio_rx = audio_rx;
         crate::platform::set_voice_audio_sink(Some(Box::new(move |samples, rate| {
             // The audio thread never blocks: a full queue drops the block.
             let _ = audio_tx.try_send(AudioChunk {
@@ -3215,9 +3222,12 @@ impl Waku {
                 rate,
             });
         })));
-        crate::platform::start_voice_listener();
+        // A refused engine start parks the session on the unavailable
+        // row instead of flagging capture live over a dead tap.
+        let engine_started = crate::platform::start_voice_listener();
         scratchpad.capture_live = true;
-        scratchpad.input_unavailable = !crate::platform::voice_input_available();
+        scratchpad.input_unavailable =
+            !engine_started || !crate::platform::voice_input_available();
         self.spawn_transcription_worker(session_id, cx);
     }
 
@@ -3298,7 +3308,10 @@ impl Waku {
     /// already dictated commit first, without fold credit: the dead
     /// stream owes no re-delivery. Unmuting reconnects through the same
     /// resume path a chat switch or the silence auto-stop leaves — the
-    /// transcript and the muted flag survive in between.
+    /// transcript and the muted flag survive in between — and it always
+    /// rebuilds capture rather than trusting the flags it finds: a stale
+    /// `capture_live` or `MicDenied` can't veto the restart, since
+    /// `ensure_voice_capture` re-derives the grant live.
     fn set_voice_scratchpad_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;
@@ -3306,23 +3319,19 @@ impl Waku {
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
-        scratchpad.muted = muted;
-        let (detach_sink, resume) = if muted {
-            scratchpad.transcript.solidify_interim();
-            let detach = scratchpad.capture_live;
-            scratchpad.stop_capture();
-            (detach, false)
-        } else {
-            (
-                false,
-                !scratchpad.capture_live && scratchpad.status != ScratchpadStatus::MicDenied,
-            )
-        };
-        if detach_sink {
-            self.detach_voice_sink();
-        }
-        if resume {
-            self.ensure_voice_capture(session_id, cx);
+        match scratchpad.apply_mute(muted) {
+            CaptureDirective::Idle => return,
+            CaptureDirective::Muted { detach_sink } => {
+                if detach_sink {
+                    self.detach_voice_sink();
+                }
+            }
+            CaptureDirective::Resume { detach_sink } => {
+                if detach_sink {
+                    self.detach_voice_sink();
+                }
+                self.ensure_voice_capture(session_id, cx);
+            }
         }
         // A muted stream goes quiet — spans the solidify just closed
         // can't wait on the next event to reach the model.
@@ -4509,13 +4518,6 @@ impl Waku {
         // settle instantly and no repaint ticks get leased.
         let animate = !cx.reduce_motion();
         scratchpad.prune_cleanup_morphs(now);
-        if scratchpad
-            .interim_crossfade
-            .as_ref()
-            .is_some_and(|crossfade| now.duration_since(crossfade.started) >= WORD_FADE)
-        {
-            scratchpad.interim_crossfade = None;
-        }
         // Every row's focus handle exists before the paint loop — it then
         // works off a shared borrow so the status row and an open
         // annotation box can render through `self` beside it. The same
@@ -4574,9 +4576,9 @@ impl Waku {
             now,
         );
         // A delivery that committed painted gray text: diff the append
-        // point's painted row against last frame's record — a landing
-        // crossfades its displaced tail while the matched prefix skips
-        // the word-fade.
+        // point's painted row against last frame's record — a landing's
+        // divergent bytes fade in while the matched prefix skips the
+        // word-fade.
         scratchpad.note_painted_row(animate, now);
         let motion_live = animate && scratchpad.motion_live();
         let Some(scratchpad) = self.selected_voice_scratchpad() else {
@@ -4692,32 +4694,6 @@ impl Waku {
             let ghost = morph.zip(morph_t).map(|(morph, t)| {
                 scratchpad_morph_ghost(&morph.old, t, theme.text, &ui_family)
             });
-            // A landing's displaced tail dissolves over the row that
-            // painted it while the residual resolves beneath — the same
-            // overlay the cleanup morph rides, held in place.
-            let landing_ghost = if animate {
-                scratchpad
-                    .interim_crossfade
-                    .as_ref()
-                    .filter(|crossfade| crossfade.key == format!("p{index}"))
-                    .map(|crossfade| {
-                        let t = (now
-                            .duration_since(crossfade.started)
-                            .as_secs_f32()
-                            / WORD_FADE.as_secs_f32())
-                        .min(1.0);
-                        scratchpad_landing_ghost(
-                            &crossfade.ghost,
-                            crossfade.tail_start,
-                            1.0 - t,
-                            theme.text,
-                            theme.text_tertiary,
-                            &ui_family,
-                        )
-                    })
-            } else {
-                None
-            };
             let paragraph_focus = row_focuses[index].0.clone();
             let paragraph_div = div()
                 .id(SharedString::from(format!("vs-paragraph-{index}")))
@@ -4753,8 +4729,7 @@ impl Waku {
                         .when(show_dot, |row| {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
                         })
-                        .when_some(ghost, |row, ghost| row.child(ghost))
-                        .when_some(landing_ghost, |row, ghost| row.child(ghost)),
+                        .when_some(ghost, |row, ghost| row.child(ghost)),
                 )
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     // A keyboard click is the focused row's Enter/Space
@@ -4873,8 +4848,14 @@ impl Waku {
                             .bg(theme.text_tertiary),
                     )
                     .child(
+                        // `flex_initial` keeps short bullets shrink-wrapped so
+                        // the spinner and ghost trail the text; `min_w_0` lets
+                        // it shrink below the text's min-content — its whole
+                        // unwrapped width — so a long bullet wraps at the row's
+                        // inner width instead of painting past it.
                         div()
                             .flex_initial()
+                            .min_w_0()
                             .relative()
                             .child(md::render::selectable_flat_text(
                                 &flat,
@@ -5205,29 +5186,6 @@ impl Waku {
                 &crate::fonts::current(cx).ui,
             )
         });
-        let landing_ghost = if !cx.reduce_motion() {
-            scratchpad
-                .interim_crossfade
-                .as_ref()
-                .filter(|crossfade| crossfade.key == "annotation")
-                .map(|crossfade| {
-                    let t = (Instant::now()
-                        .duration_since(crossfade.started)
-                        .as_secs_f32()
-                        / WORD_FADE.as_secs_f32())
-                    .min(1.0);
-                    scratchpad_landing_ghost(
-                        &crossfade.ghost,
-                        crossfade.tail_start,
-                        1.0 - t,
-                        theme.text_secondary,
-                        theme.text_secondary,
-                        &crate::fonts::current(cx).ui,
-                    )
-                })
-        } else {
-            None
-        };
         let muted = scratchpad.muted || scratchpad.input_unavailable;
         let box_content = div()
             .min_w(px(240.0))
@@ -5265,8 +5223,7 @@ impl Waku {
                         scratchpad.transcript.is_cleaning(CleanTarget::Annotation),
                         |row| row.child(scratchpad_cleanup_spinner(13.0, theme)),
                     )
-                    .when_some(ghost, |row, ghost| row.child(ghost))
-                    .when_some(landing_ghost, |row, ghost| row.child(ghost)),
+                    .when_some(ghost, |row, ghost| row.child(ghost)),
             );
         deferred(FloatingSurface::anchored_to_parent(
             box_content.into_any_element(),
@@ -5638,46 +5595,6 @@ fn scratchpad_morph_ghost(old: &str, t: f32, color: Hsla, ui_family: &SharedStri
         )
 }
 
-/// The dissolving half of an interim landing: the row's painted text
-/// before the delivery — the settled head in `ink`, the gray tail from
-/// `tail_start` in `tail` — at `alpha` while the residual resolves
-/// beneath it. Unlike the cleanup morph the overlay holds its place:
-/// the tail dissolves where it sat. Paint it inside the same relative
-/// box the row's text element lays out in — the overlay then shares
-/// the painted text's origin and wrap column exactly.
-fn scratchpad_landing_ghost(
-    ghost: &str,
-    tail_start: usize,
-    alpha: f32,
-    ink: Hsla,
-    tail: Hsla,
-    ui_family: &SharedString,
-) -> Div {
-    let tail_start = tail_start.min(ghost.len());
-    let mut runs = Vec::with_capacity(2);
-    for (start, end, color) in [
-        (0, tail_start, ink),
-        (tail_start, ghost.len(), tail),
-    ] {
-        if end > start {
-            runs.push(TextRun {
-                len: end - start,
-                font: font(ui_family.clone()),
-                color: color.opacity(alpha),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            });
-        }
-    }
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .child(gpui::StyledText::new(ghost.to_owned()).with_runs(runs))
-}
-
 /// The dot's offset centers it on the first text line — GPUI's default phi
 /// line height leaves `(size × φ − 15) / 2` of leading over a 15px dot.
 fn scratchpad_dot_on_line(
@@ -6003,6 +5920,100 @@ mod tests {
         assert_eq!(transcript.to_message(), "the sentence still forming");
         transcript.set_interim("still forming, continued".to_owned());
         assert_eq!(transcript.interim, "still forming, continued");
+    }
+
+    #[gpui::test]
+    fn unmute_resumes_after_teardown(cx: &mut gpui::TestAppContext) {
+        // The auto-pause posture a chat switch leaves: muted, tap claim
+        // cleared, worker's generation retired. Unmuting must resume —
+        // nothing in that state may veto the restart.
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.muted = true;
+            let stop = pad.stop.clone();
+            let generation = pad.generation;
+            assert_eq!(
+                pad.apply_mute(false),
+                CaptureDirective::Resume {
+                    detach_sink: false
+                }
+            );
+            assert!(!pad.muted);
+            // A parked pad owned no worker — nothing to retire.
+            assert_eq!(pad.generation, generation);
+            assert!(!stop.load(Ordering::Relaxed));
+        });
+    }
+
+    #[gpui::test]
+    fn unmute_tears_down_a_stale_live_claim(cx: &mut gpui::TestAppContext) {
+        // `capture_live` covers the tap, not the worker behind it — a
+        // flag that outlived its pipeline can't veto the restart. The
+        // stale claim tears down and the resume still runs.
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.muted = true;
+            pad.capture_live = true;
+            let stop = pad.stop.clone();
+            let generation = pad.generation;
+            assert_eq!(
+                pad.apply_mute(false),
+                CaptureDirective::Resume { detach_sink: true }
+            );
+            assert!(!pad.muted);
+            assert!(!pad.capture_live);
+            assert_eq!(pad.generation, generation + 1);
+            assert!(stop.load(Ordering::Relaxed));
+        });
+    }
+
+    #[gpui::test]
+    fn unmute_is_idempotent_on_a_live_pad(cx: &mut gpui::TestAppContext) {
+        // A stray unmute on a session already unmuted and holding the
+        // tap is a no-op — no needless socket reconnect.
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.capture_live = true;
+            assert_eq!(pad.apply_mute(false), CaptureDirective::Idle);
+            assert!(pad.capture_live);
+        });
+    }
+
+    #[gpui::test]
+    fn unmute_resumes_even_when_muted_past_denial(cx: &mut gpui::TestAppContext) {
+        // A pad that once saw `MicDenied` still resumes — the begin path
+        // re-derives the grant live, so a permission granted in System
+        // Settings after the refusal isn't stranded.
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.muted = true;
+            pad.status = ScratchpadStatus::MicDenied;
+            assert_eq!(
+                pad.apply_mute(false),
+                CaptureDirective::Resume {
+                    detach_sink: false
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn mute_on_a_live_pad_commits_interim_and_detaches(cx: &mut gpui::TestAppContext) {
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.capture_live = true;
+            pad.transcript.set_interim("still forming".to_owned());
+            let stop = pad.stop.clone();
+            assert_eq!(
+                pad.apply_mute(true),
+                CaptureDirective::Muted { detach_sink: true }
+            );
+            assert!(pad.muted);
+            assert!(!pad.capture_live);
+            assert!(pad.transcript.interim.is_empty());
+            assert_eq!(pad.transcript.to_message(), "still forming");
+            assert!(stop.load(Ordering::Relaxed));
+        });
     }
 
     #[test]
@@ -7142,7 +7153,7 @@ mod tests {
     }
 
     #[test]
-    fn landing_crossfades_the_displaced_tail() {
+    fn landing_fades_only_the_divergent_tail() {
         let t0 = Instant::now();
         let mut fades = HashMap::new();
         // Last frame painted "hello" settled plus a gray " wurld"; the
@@ -7152,14 +7163,10 @@ mod tests {
         note_text_fade(&mut fades, "p0".to_owned(), 5, true, t0);
         note_text_fade(&mut fades, "p0".to_owned(), 12, true, t0);
         assert_eq!(fades["p0"].fresh, vec![(5, t0)]);
-        let mut crossfade = None;
-        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
-        let crossfade = crossfade.expect("the landing records");
-        assert_eq!(crossfade.key, "p0");
-        assert_eq!(crossfade.ghost, "hello wurld");
-        assert_eq!(crossfade.tail_start, 6);
+        note_landing(&mut fades, prev, &current, t0);
         // "hello w" was already on screen — the resolve resumes where
-        // the paint first diverges rather than covering the whole span.
+        // the paint first diverges rather than covering the whole span,
+        // and no second layer paints: the landing is a fade boundary.
         assert_eq!(fades["p0"].fresh, vec![(7, t0)]);
     }
 
@@ -7175,9 +7182,7 @@ mod tests {
         note_text_fade(&mut fades, "p0".to_owned(), 11, true, t0);
         note_text_fade(&mut fades, "interim".to_owned(), 5, true, t0);
         note_text_fade(&mut fades, "interim".to_owned(), 4, true, t0);
-        let mut crossfade = None;
-        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
-        assert!(crossfade.is_some());
+        note_landing(&mut fades, prev, &current, t0);
         // The committed span matched the displaced tail whole — nothing
         // in it fades — and the kept tail's divergence resolves through
         // the interim slot.
@@ -7196,9 +7201,7 @@ mod tests {
         note_text_fade(&mut fades, "annotation".to_owned(), 11, true, t0);
         note_text_fade(&mut fades, "annotation".to_owned(), 18, true, t0);
         assert_eq!(fades["annotation"].fresh, vec![(11, t0)]);
-        let mut crossfade = None;
-        landing_crossfade(&mut fades, &mut crossfade, prev, &current, t0);
-        assert!(crossfade.is_some());
+        note_landing(&mut fades, prev, &current, t0);
         assert_eq!(fades["annotation"].fresh, vec![(7, t0)]);
     }
 
@@ -7206,30 +7209,26 @@ mod tests {
     fn landing_needs_a_displaced_tail() {
         let t0 = Instant::now();
         let mut fades = HashMap::new();
-        let mut crossfade = None;
         // Growth with no gray showing is a plain append.
-        landing_crossfade(
+        note_landing(
             &mut fades,
-            &mut crossfade,
             painted("p0", 5, 5, "hello"),
             &painted("p0", 12, 12, "hello world."),
             t0,
         );
-        assert!(crossfade.is_none());
+        assert!(fades.is_empty());
         // A rewrite that changed settled bytes isn't an append — the
         // cleanup morph owns that repaint.
-        landing_crossfade(
+        note_landing(
             &mut fades,
-            &mut crossfade,
             painted("p0", 5, 6, "h3llo wurld"),
             &painted("p0", 12, 13, "hello world. again"),
             t0,
         );
-        assert!(crossfade.is_none());
+        assert!(fades.is_empty());
         // A user-edited buffer lands instantly.
-        landing_crossfade(
+        note_landing(
             &mut fades,
-            &mut crossfade,
             painted("p0", 5, 6, "hello wurld"),
             &PaintedRow {
                 edited: true,
@@ -7237,7 +7236,7 @@ mod tests {
             },
             t0,
         );
-        assert!(crossfade.is_none());
+        assert!(fades.is_empty());
     }
 
     /// Mirrors `render_annotation_box`'s DOM — box card, dot, and the
@@ -7248,7 +7247,6 @@ mod tests {
     struct AnnotationBoxHarness {
         text_layout: Option<gpui::TextLayout>,
         ghost_layout: Option<gpui::TextLayout>,
-        landing_layout: Option<gpui::TextLayout>,
     }
 
     impl Render for AnnotationBoxHarness {
@@ -7274,9 +7272,6 @@ mod tests {
             let ghost_styled =
                 gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
             self.ghost_layout = Some(ghost_styled.layout().clone());
-            let landing_styled =
-                gpui::StyledText::new(long.clone()).with_runs(run(&long, theme.text_secondary));
-            self.landing_layout = Some(landing_styled.layout().clone());
             let box_content = div()
                 .debug_selector(|| "ann-box".into())
                 .min_w(px(240.0))
@@ -7308,14 +7303,6 @@ mod tests {
                                 .left_0()
                                 .right_0()
                                 .child(ghost_styled),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .right_0()
-                                .child(landing_styled),
                         ),
                 );
             div().size_full().child(
@@ -7336,7 +7323,6 @@ mod tests {
         let (view, cx) = cx.add_window_view(|_, _| AnnotationBoxHarness {
             text_layout: None,
             ghost_layout: None,
-            landing_layout: None,
         });
         cx.run_until_parked();
         let inner = cx
@@ -7347,7 +7333,6 @@ mod tests {
             [
                 ("text", harness.text_layout.clone()),
                 ("ghost", harness.ghost_layout.clone()),
-                ("landing", harness.landing_layout.clone()),
             ]
         });
         for (key, layout) in layouts {
@@ -7361,5 +7346,163 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Mirrors a transcript bullet row's DOM — the indented flex row, its
+    /// disc, and the shrink-wrapped text column that carries the cleanup
+    /// ghost — so the test can measure the painted column against the
+    /// row's inner width.
+    struct BulletRowHarness;
+
+    impl Render for BulletRowHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = Theme::current(cx);
+            let ui_family = crate::fonts::current(cx).ui;
+            let long = "a dictated note that runs well past the transcript column's \
+                 four hundred pixels of width so the bullet has to wrap inside the \
+                 row rather than slide off its right edge toward the window"
+                .to_owned();
+            let mut runs = Vec::new();
+            push_fade_runs(
+                &mut runs,
+                0,
+                long.len(),
+                &[],
+                1.0,
+                &font(ui_family),
+                theme.text_secondary,
+            );
+            let flat = md::render::FlatText {
+                text: long.into(),
+                runs,
+                links: Vec::new(),
+                code_ranges: Vec::new(),
+                atom_ranges: Vec::new(),
+                annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
+                file_refs: Vec::new(),
+                math: None,
+                copy: Rc::default(),
+            };
+            div().size_full().child(
+                div()
+                    .debug_selector(|| "bullet-row".into())
+                    .w(px(400.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .relative()
+                            .pl(px(18.0))
+                            .py(px(2.0))
+                            .flex()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(BULLET_SIZE))
+                                    .rounded_full()
+                                    .bg(theme.text_tertiary),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| "bullet-text".into())
+                                    .flex_initial()
+                                    .min_w_0()
+                                    .relative()
+                                    .child(md::render::selectable_flat_text(
+                                        &flat,
+                                        md::selection::TextKey::new("vs-b-0", 0),
+                                        TranscriptSelection::default(),
+                                        theme.code_wash,
+                                        theme.selection,
+                                        false,
+                                    )),
+                            ),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn bullet_text_wraps_inside_the_row(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, _| BulletRowHarness);
+        cx.run_until_parked();
+        let row = cx
+            .debug_bounds("bullet-row")
+            .expect("the bullet row should paint");
+        let text = cx
+            .debug_bounds("bullet-text")
+            .expect("the bullet text should paint");
+        assert!(
+            text.size.width <= row.size.width - px(18.0 + BULLET_SIZE + 8.0) + px(1.0),
+            "bullet text painted {:?} wide inside a {:?} row",
+            text.size.width,
+            row.size.width
+        );
+    }
+
+    /// The real box's common path paints a bare `String` leaf — probe it
+    /// too: a leaf that wraps makes the text column taller than a single
+    /// line, an unwrapped one paints one max-content line.
+    struct AnnotationLeafHarness;
+
+    impl Render for AnnotationLeafHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = Theme::current(cx);
+            let long = "dictated annotation text that runs well past three hundred \
+                 and sixty pixels of box width so every line must wrap inside the box \
+                 rather than slide off its right edge toward the window"
+                .to_owned();
+            let text_element: AnyElement = long.into_any_element();
+            let box_content = div()
+                .debug_selector(|| "ann-box".into())
+                .min_w(px(240.0))
+                .max_w(px(360.0))
+                .p(px(8.0))
+                .border(hairline())
+                .bg(theme.raised)
+                .text_size(sp(13.0))
+                .text_color(theme.text_secondary)
+                .flex()
+                .gap(px(8.0))
+                .items_start()
+                .child(scratchpad_dot_on_line(13.0, false, ScratchpadStatus::Live, &theme))
+                .child(
+                    div()
+                        .debug_selector(|| "ann-inner".into())
+                        .min_w_0()
+                        .flex_1()
+                        .relative()
+                        .flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap(px(4.0))
+                        .child(div().w_full().min_w_0().child(text_element)),
+                );
+            div().size_full().child(
+                div().relative().w(px(600.0)).h(px(20.0)).child(deferred(
+                    FloatingSurface::anchored_to_parent(
+                        box_content.into_any_element(),
+                        MenuAlign::BelowLeft,
+                        px(4.0),
+                        px(8.0),
+                    ),
+                )),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn annotation_leaf_wraps_inside_the_box(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, _| AnnotationLeafHarness);
+        cx.run_until_parked();
+        let inner = cx
+            .debug_bounds("ann-inner")
+            .expect("the annotation text column should paint");
+        assert!(
+            inner.size.height > px(13.0 * 1.618_034 + 1.0),
+            "the bare text leaf painted one line instead of wrapping: {:?}",
+            inner.size
+        );
     }
 }

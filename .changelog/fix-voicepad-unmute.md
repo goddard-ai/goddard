@@ -1,0 +1,1 @@
+- Unmuting the VoicePad scratchpad now reliably restarts the microphone and transcription — including after switching chats, after the pad paused itself, or after mic permission was granted in System Settings since a denial.
