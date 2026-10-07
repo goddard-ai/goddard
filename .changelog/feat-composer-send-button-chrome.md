@@ -1,1 +1,1 @@
-- The chat composer's send button now uses the designed chrome styling; it appears dimmed until the draft can be sent.
+- Composers whose drafts go to the Boss — the Boss chat, its planning sessions, and employee or bundle pages — style the send button with the designed chrome artwork; it appears dimmed until the draft can be sent. Other chats keep the plain filled button.

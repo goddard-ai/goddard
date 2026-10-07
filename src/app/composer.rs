@@ -5855,6 +5855,14 @@ impl Waku {
         // compositing over it.
         let drop_wash = theme.composer.blend(theme.overlay_strong);
         let drop_ring = theme.accent.opacity(0.7);
+        // The chrome artwork marks the sends that land on a boss surface:
+        // the boss chat and planning sessions' own cards, plus the main
+        // card while an armed boss command reroutes its submission to the
+        // boss chat — a viewed employee or an armed deliverable riding
+        // along as context. Every other send keeps the plain filled disc
+        // and tinted arrow.
+        let boss_send = session.is_some_and(|session| self.session_is_boss_owned(session))
+            || (interactive && self.composer_boss_command().is_some());
         let send_route = surface.clone();
         let queue_route = surface.clone();
         let continue_route = surface.clone();
@@ -6184,13 +6192,29 @@ impl Waku {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(
-                                img("images/send-button-chrome.webp")
-                                    .absolute()
-                                    .inset_0()
-                                    .size_full()
-                                    .opacity(if can_send { 1.0 } else { 0.5 }),
-                            )
+                            .when(!boss_send, |element| {
+                                element.bg(if can_send {
+                                    theme.inverse
+                                } else {
+                                    theme.overlay_strong
+                                })
+                            })
+                            // The webp's canvas is 30×31pt — the disc
+                            // floats inside it with drop-shadow bleed —
+                            // so it draws at that designed size and
+                            // overhangs the frame a pixel. Inset into the
+                            // 28pt frame, the visible disc shrank to ~25pt.
+                            .when(boss_send, |element| {
+                                element.child(
+                                    img("images/send-button-chrome.webp")
+                                        .absolute()
+                                        .top(px(-1.0))
+                                        .left(px(-1.0))
+                                        .w(px(30.0))
+                                        .h(px(31.0))
+                                        .opacity(if can_send { 1.0 } else { 0.5 }),
+                                )
+                            })
                             .when(can_send, |element| {
                                 element
                                     .cursor_default()
@@ -6203,20 +6227,34 @@ impl Waku {
                             // Both arrows stay at full opacity — only the
                             // chrome image dims when there is nothing to
                             // send.
-                            .child(
-                                img("icons/send-chrome-underlay.svg")
-                                    .absolute()
-                                    .top(px(6.0))
-                                    .left(px(6.0))
-                                    .size(px(16.0)),
-                            )
-                            .child(
-                                img("icons/send-chrome-arrow.svg")
-                                    .absolute()
-                                    .top(px(6.0))
-                                    .left(px(6.0))
-                                    .size(px(16.0)),
-                            )
+                            .when(boss_send, |element| {
+                                element
+                                    .child(
+                                        img("icons/send-chrome-underlay.svg")
+                                            .absolute()
+                                            .top(px(6.0))
+                                            .left(px(6.0))
+                                            .size(px(16.0)),
+                                    )
+                                    .child(
+                                        img("icons/send-chrome-arrow.svg")
+                                            .absolute()
+                                            .top(px(6.0))
+                                            .left(px(6.0))
+                                            .size(px(16.0)),
+                                    )
+                            })
+                            .when(!boss_send, |element| {
+                                element.child(icon(
+                                    "icons/send.svg",
+                                    16.0,
+                                    if can_send {
+                                        theme.on_inverse
+                                    } else {
+                                        theme.text_ghost
+                                    },
+                                ))
+                            })
                             // Says why the button is dead, for the case
                             // the draft is ready and the machine is not.
                             .when(no_providers, |element| {
