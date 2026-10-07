@@ -5,18 +5,29 @@
 //! the model's sample rate, the same bytes `play_briefing_audio` already
 //! decodes, so clips ride the briefing/speech cache unchanged.
 
+#[cfg(not(target_os = "linux"))]
 use std::io::Write;
+#[cfg(not(target_os = "linux"))]
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
+#[cfg(not(target_os = "linux"))]
+use std::sync::{Mutex, OnceLock};
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::bail;
+#[cfg(not(target_os = "linux"))]
+use anyhow::{Context as _, anyhow};
+#[cfg(not(target_os = "linux"))]
 use futures::FutureExt;
+#[cfg(not(target_os = "linux"))]
 use futures::future::{Either, select};
+#[cfg(not(target_os = "linux"))]
 use futures::io::AsyncReadExt;
 
 /// Voice files resolve out of the pinned piper-voices dataset revision.
+#[cfg(not(target_os = "linux"))]
 const VOICES_BASE_URL: &str = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0";
 /// Voice models run 20–100 MB — far past the gateway request timeout.
+#[cfg(not(target_os = "linux"))]
 const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// One pickable Piper voice. `id` is the dataset's file stem; the label is
@@ -117,11 +128,13 @@ pub(super) fn piper_voice_key(voice: &str, speaker: u32) -> String {
 
 /// The loaded engine for the current voice, kept between calls so a speak
 /// chain doesn't pay the ONNX load per fragment.
+#[cfg(not(target_os = "linux"))]
 static PIPER_ENGINE: OnceLock<Mutex<Option<(String, piper_rs::Piper)>>> = OnceLock::new();
 
 /// The dataset's relative path for a voice id: `en_US-lessac-medium` lives
 /// at `en/en_US/lessac/medium/en_US-lessac-medium`. Voice ids are always
 /// `<locale>-<name>-<quality>` where the name itself may carry underscores.
+#[cfg(not(target_os = "linux"))]
 fn voice_dataset_path(voice: &str) -> anyhow::Result<String> {
     let (locale, rest) = voice
         .split_once('-')
@@ -140,6 +153,7 @@ fn voice_dataset_path(voice: &str) -> anyhow::Result<String> {
 /// The model and config files for `voice`, downloading both from the
 /// dataset on first use. A half-download never leaves a live file — each
 /// side lands through a temp rename.
+#[cfg(not(target_os = "linux"))]
 async fn ensure_voice(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -173,6 +187,7 @@ async fn ensure_voice(
 }
 
 /// GET a URL's bytes with a timeout — the sibling `post` helper is JSON-only.
+#[cfg(not(target_os = "linux"))]
 async fn fetch(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -205,6 +220,7 @@ async fn fetch(
 /// drops them beside the target binary, but other launch shapes — a `cargo
 /// test` binary under `deps/`, a nested lane — still need the env var.
 /// Point it at the first directory near the executable that carries the data.
+#[cfg(not(target_os = "linux"))]
 fn ensure_espeak_data() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -225,6 +241,7 @@ fn ensure_espeak_data() {
 /// The directory containing `espeak-ng-data` nearest the executable: a
 /// sibling for `cargo run`/`cargo test` layouts, `Contents/Resources` for a
 /// packaged macOS app.
+#[cfg(not(target_os = "linux"))]
 fn espeak_data_directory(executable: &std::path::Path) -> Option<PathBuf> {
     let mut dir = executable.parent();
     std::iter::from_fn(|| {
@@ -245,8 +262,22 @@ fn espeak_data_directory(executable: &std::path::Path) -> Option<PathBuf> {
     })
 }
 
+/// piper-rs statically links a prebuilt ONNX Runtime that needs glibc 2.38 —
+/// past the Ubuntu 22.04 support floor — so the engine isn't built for Linux.
+#[cfg(target_os = "linux")]
+pub(super) async fn synthesize_piper(
+    _: &Arc<dyn gpui::http_client::HttpClient>,
+    _: &gpui::BackgroundExecutor,
+    _: &str,
+    _: u32,
+    _: &str,
+) -> anyhow::Result<Vec<u8>> {
+    bail!("the local piper engine is unavailable on Linux")
+}
+
 /// Synthesize `text` with `voice` into WAV bytes. Blocking CPU work — the
 /// caller's pipeline already runs on the background executor.
+#[cfg(not(target_os = "linux"))]
 pub(super) async fn synthesize_piper(
     http: &Arc<dyn gpui::http_client::HttpClient>,
     executor: &gpui::BackgroundExecutor,
@@ -297,6 +328,7 @@ pub(super) async fn synthesize_piper(
 
 /// Keep punctuation with its sentence; don't cut decimals, dotted abbreviations,
 /// or common titles. Briefing summaries are plain sentences, not arbitrary prose.
+#[cfg(not(target_os = "linux"))]
 fn briefing_sentences(text: &str) -> Vec<&str> {
     let mut sentences = Vec::new();
     let mut start = 0;
@@ -374,6 +406,7 @@ fn briefing_sentences(text: &str) -> Vec<&str> {
 
 /// 16-bit mono PCM WAV — the container AVAudioPlayer decodes on every
 /// platform the voice feature runs on.
+#[cfg(not(target_os = "linux"))]
 fn wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
@@ -402,6 +435,7 @@ fn wav_bytes(samples: &[f32], sample_rate: u32) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn briefing_sentences_preserve_words_and_punctuation() {
         for (text, expected) in [
@@ -432,6 +466,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn voice_dataset_path_derives_the_dataset_layout() {
         assert_eq!(
@@ -483,6 +518,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn wav_bytes_writes_a_decodable_header() {
         let wav = wav_bytes(&[0.0, 0.5, -0.5, 1.0, -1.0], 22050);
@@ -492,6 +528,7 @@ mod tests {
         assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22050);
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn espeak_data_directory_follows_each_launch_layout() {
         let root = std::env::temp_dir().join(format!("goddard-espeak-{}", uuid::Uuid::new_v4()));

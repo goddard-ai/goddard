@@ -89,7 +89,6 @@ futures = "0.3"
 md-5 = "0.10"
 nucleo-matcher = "0.3.1"
 tokio = { version = "1", features = ["rt"] }
-piper-rs = "0.2.0"
 
 # `test-support` has to stay test-only. It compiles a loop into gpui's
 # `flush_effects` that draws every dirty window right there, so with the
@@ -219,6 +218,12 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = [
   "objc2-core-graphics",
 ] }
 raw-window-handle = "0.6"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# piper-rs statically links pyke's prebuilt ONNX Runtime, which needs glibc
+# 2.38 — past the Ubuntu 22.04 support floor — and the Linux bundle never
+# shipped espeak-ng-data, so the engine couldn't run there anyway.
+piper-rs = "0.2.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Linux verifies the release archive with the same key as Sparkle and unpacks
