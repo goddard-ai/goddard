@@ -1896,7 +1896,7 @@ impl Backend for WakuBackend {
                         }
                     }
                     if !*hidden && self.boss.is_boss(session_id) {
-                        self.route_boss_prompt(session_id, prompt, submitted_message_id, &events);
+                        self.route_boss_prompt(session_id, prompt);
                     }
                 }
                 let mut command = command;

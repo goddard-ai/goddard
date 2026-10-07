@@ -61,9 +61,6 @@ pub(super) fn record_boss_event(
                 prompt.reference_context = reference_context.clone();
             }
         }
-        DriverEvent::PromptContextMarked { message_id, focus } => {
-            session.mark_prompt_context(*message_id, focus.clone());
-        }
         DriverEvent::TurnStarted => {
             if session.active_turn_id().is_none() {
                 session.begin_provider_turn();

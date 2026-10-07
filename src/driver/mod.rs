@@ -131,6 +131,16 @@ fn connect_remote(
                                 epoch: sequenced.epoch,
                                 sequence: sequenced.sequence,
                             };
+                            if sequenced.event.kind == "promptContextMarked" {
+                                // Retired cosmetic event: acknowledge old replay entries.
+                                if forwarding_events
+                                    .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                                continue;
+                            }
                             let event = match waku_client::event_from_wire(sequenced.event) {
                                 Ok(event) => event,
                                 Err(error) => DriverEvent::Error(format!(
@@ -518,6 +528,16 @@ pub(crate) fn watch_friend_session(
                             epoch: sequenced.epoch,
                             sequence: sequenced.sequence,
                         };
+                        if sequenced.event.kind == "promptContextMarked" {
+                            // Retired cosmetic event: acknowledge old replay entries.
+                            if forwarding
+                                .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
+                                .is_err()
+                            {
+                                return;
+                            }
+                            continue;
+                        }
                         let event = match waku_client::event_from_wire(sequenced.event) {
                             Ok(event) => event,
                             Err(error) => DriverEvent::Error(format!(

@@ -2948,27 +2948,6 @@ impl AgentSession {
         true
     }
 
-    /// Record the boss context router's mark on a submitted prompt. The
-    /// verdict lands after the message does, so this finds the row by id
-    /// rather than position; a missing message changes nothing. Returns
-    /// whether the session changed.
-    pub fn mark_prompt_context(&mut self, message_id: Uuid, focus: Option<String>) -> bool {
-        let Some(message) = self
-            .messages
-            .iter_mut()
-            .find(|message| message.id == message_id)
-        else {
-            return false;
-        };
-        let mark = ContextMark { focus };
-        if message.context_mark.as_ref() == Some(&mark) {
-            return false;
-        }
-        message.context_mark = Some(mark);
-        self.updated_at = unix_time();
-        true
-    }
-
     /// Replace the daemon-owned slice of the follow-up queue with the
     /// daemon's latest snapshot. Composer-queued entries are untouched;
     /// combined order follows `created_at`. Returns whether anything changed.
@@ -3805,17 +3784,6 @@ pub struct MessageAtom {
     pub session_id: Option<Uuid>,
 }
 
-/// What the boss context router applied to a user prompt. The mark exists
-/// only when the attach verdict fired — an unrouted prompt has nothing to
-/// persist, so `None` on the message means "no marker".
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
-pub struct ContextMark {
-    /// The project the router's focus inference held once the verdict
-    /// applied; `None` when attention sat on no particular project.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub focus: Option<String>,
-}
-
 /// The outcome the report behind a supervisor turn carried — an
 /// employee's result or a finalized plan's handoff.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -3958,11 +3926,6 @@ pub struct Message {
     /// client renders the marker so agent-originated prompts stay visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sent_by_task: Option<Uuid>,
-    /// The boss context router steered the work digest into this prompt's
-    /// turn — clients render a small marker on the row so routed prompts
-    /// stay identifiable. `None` for prompts the router did not attach to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_mark: Option<ContextMark>,
     /// Provider-facing text no client renders — the internal nudge a
     /// "continue" sends to an interrupted session. The message stays in the
     /// record so every projection carries the same ids.
@@ -3994,7 +3957,6 @@ impl Message {
             atoms: Vec::new(),
             attachments: Vec::new(),
             sent_by_task: None,
-            context_mark: None,
             hidden: false,
             report_trigger: None,
             reference_context: None,
@@ -4499,15 +4461,6 @@ pub enum DriverEvent {
         hidden: bool,
         /// The employee report this steer delivered into the open turn.
         report_trigger: Option<ReportTrigger>,
-    },
-    /// The boss context router's verdict for a submitted prompt attached the
-    /// work digest — this event exists only when it did. `focus` is the
-    /// project the router's attention inference held once the verdict
-    /// applied. Clients mark the named message so its transcript row can
-    /// note the routing; a message they do not hold is a no-op.
-    PromptContextMarked {
-        message_id: Uuid,
-        focus: Option<String>,
     },
     /// The daemon-owned slice of the session's follow-up queue changed —
     /// an agent prompt was parked, delivered, or cancelled. Carries the
@@ -6391,7 +6344,6 @@ pub fn detail_prefix_signature(messages: &[Message], transcript_blocks: &[Transc
         hash.option_text(message.display_content.as_deref());
         hash.json(&message.attachments);
         hash.json(&message.sent_by_task);
-        hash.json(&message.context_mark);
         hash.json(&message.report_trigger);
         hash.json(&message.reference_context);
         hash.boolean(message.hidden);
@@ -8509,28 +8461,19 @@ mod tests {
     }
 
     #[test]
-    fn marking_prompt_context_sets_the_mark_once() {
-        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        let message_id = Uuid::new_v4();
-        session.adopt_submitted_prompt("route me", Uuid::new_v4(), message_id, None, false, None);
-
-        assert!(session.mark_prompt_context(message_id, Some("app".into())));
-        assert_eq!(
-            session.messages[0].context_mark,
-            Some(ContextMark {
-                focus: Some("app".into())
-            })
+    fn legacy_prompt_context_marks_do_not_prevent_message_deserialization() {
+        let message = Message::new(MessageRole::User, "old boss prompt");
+        let mut stored = serde_json::to_value(&message).unwrap();
+        stored["context_mark"] = serde_json::json!({ "focus": "app" });
+        let restored: Message = serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.id, message.id);
+        assert_eq!(restored.content, message.content);
+        assert!(
+            serde_json::to_value(restored)
+                .unwrap()
+                .get("context_mark")
+                .is_none()
         );
-        assert!(!session.mark_prompt_context(message_id, Some("app".into())));
-        // A focus-less verdict still marks — attach fired, attention sat on
-        // no particular project.
-        assert!(session.mark_prompt_context(message_id, None));
-        assert_eq!(
-            session.messages[0].context_mark,
-            Some(ContextMark { focus: None })
-        );
-        // An id the projection does not hold is a no-op.
-        assert!(!session.mark_prompt_context(Uuid::new_v4(), Some("app".into())));
     }
 
     #[test]

@@ -66,40 +66,25 @@ impl WakuBackend {
         )
     }
 
-    /// Route one user prompt to the boss through Jev: remember it for focus
-    /// continuity, evaluate it against the current focus inference and the
-    /// work snapshot, then apply the verdict off-thread. Jev decides, code
-    /// applies — an unconfigured or failed evaluation withholds the full
-    /// digest and changes nothing, while the compact header the outbound
-    /// wrap already attached keeps the boss oriented. An attaching verdict
-    /// also marks the prompt's message (`PromptContextMarked`) so
-    /// transcripts can note the routing.
-    pub(super) fn route_boss_prompt(
-        &self,
-        session_id: Uuid,
-        prompt: &str,
-        message_id: Uuid,
-        events: &EventSink,
-    ) {
-        let (focus, recent_prompts) = self.boss.router_snapshot(session_id);
+    /// Evaluate whether a user prompt should carry the full work digest.
+    /// Failed or unconfigured evaluations keep only the always-on header.
+    pub(super) fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
+        let recent_prompts = self.boss.router_snapshot(session_id);
         self.boss.router_note_prompt(session_id, prompt);
         let work = self.boss_work_context();
         // No spend without something to attach or a backend to judge it.
         if work.digest.is_empty() || self.resolved_eval().is_none() {
             return;
         }
-        let state =
-            crate::boss_context::router_state(prompt, focus.as_deref(), &recent_prompts, &work);
-        let questions = crate::boss_context::router_questions(&work.projects);
+        let state = crate::boss_context::router_state(prompt, &recent_prompts, &work);
+        let questions = crate::boss_context::router_questions();
         let settings = self.settings.clone();
         let secrets = self.inference_secrets.clone();
         let boss = self.boss.clone();
         let agent = self.agent.clone();
         let sessions = self.sessions.clone();
         let task_state = self.task_state.clone();
-        let task_store = self.task_store.clone();
         let automations = self.automations.clone();
-        let events = events.clone();
         let _ = std::thread::Builder::new()
             .name("boss-context-router".into())
             .spawn(move || {
@@ -114,34 +99,8 @@ impl WakuBackend {
                     return;
                 };
                 let verdict = crate::boss_context::apply_verdict(&evaluation);
-                // The focus the verdict leaves standing: its own transition
-                // when the choice cleared the bar, otherwise the sticky
-                // inference the question was judged against. Computed here
-                // rather than re-read from the router so a later prompt's
-                // verdict cannot rewrite this one's mark.
-                let applied_focus = match &verdict.focus {
-                    Some(next) => next.clone(),
-                    None => focus,
-                };
-                if let Some(next) = verdict.focus {
-                    boss.router_set_focus(session_id, next);
-                }
                 if !verdict.attach {
                     return;
-                }
-                // The verdict alone routes the prompt — a deferred digest
-                // still attached — so the mark publishes before the delivery
-                // details below.
-                let marked = DriverEvent::PromptContextMarked {
-                    message_id,
-                    focus: applied_focus,
-                };
-                if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &marked)
-                {
-                    eprintln!("could not record Boss context mark for {session_id}: {error:#}");
-                }
-                if let Ok(wire) = event_to_wire(marked) {
-                    let _ = events.send(wire);
                 }
                 // Rebuild rather than reuse the evaluated snapshot — work may
                 // have moved during the call, and the attachment should

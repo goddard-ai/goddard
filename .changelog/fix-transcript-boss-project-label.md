@@ -1,0 +1,1 @@
+- Removed the inferred project label from Boss prompt footers, which could imply project context had been attached.

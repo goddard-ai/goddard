@@ -142,8 +142,7 @@ export const messages = sqliteTable(
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
     /** Goddard task that submitted the message through an agent credential. */
     sentByTask: text("sent_by_task"),
-    /** JSON-serialized ContextMark — set when the boss context router attached
-     *  the work digest to this prompt. */
+    /** Retired context marker column; retained for existing databases. */
     contextMark: text("context_mark"),
     /** JSON-serialized ReportTrigger — the employee report this hidden prompt
      *  delivered, so the transcript can mark which report woke the turn. */

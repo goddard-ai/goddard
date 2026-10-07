@@ -330,35 +330,6 @@ pub(super) fn render_message_footer(
     }
 
     if align_right {
-        // The context router's mark lost its row under the prompt; when its
-        // focus inference held a project, that project rides the footer's
-        // hover reveal instead — flat icon + name matching the timestamp.
-        if let Some(focus) = message
-            .context_mark
-            .as_ref()
-            .and_then(|mark| mark.focus.clone())
-        {
-            strip = strip.child(
-                div()
-                    .h(px(27.0))
-                    .max_w(px(280.0))
-                    .min_w_0()
-                    .px(px(4.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .child(icon("icons/folder.svg", 11.0, footer_color))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .line_height(sp(14.0))
-                            .text_color(footer_color)
-                            .child(focus),
-                    ),
-            );
-        }
         strip = strip.child(timestamp).child(copy_button);
     } else {
         strip = strip.child(copy_button);

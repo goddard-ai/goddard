@@ -5,13 +5,8 @@
 //! only withholds bulk detail, and the boss can pull it on demand through
 //! the `context` operation.
 //!
-//! Jev judges two things on one shared `state`: whether the digest is worth
-//! attaching, and which project the user's attention currently centers on —
-//! the focus inference, which this module keeps stateful by feeding the
-//! previous answer back into the next request's `state`. Everything else is
-//! deterministic: thresholds below decide what an answer may apply, and any
-//! missing, malformed, or failed evaluation leaves the defaults standing —
-//! no digest attachment, no focus change.
+//! Jev judges whether the digest is worth attaching. A missing, malformed,
+//! or failed evaluation leaves the default standing: no digest attachment.
 
 use std::collections::BTreeMap;
 
@@ -26,19 +21,10 @@ use waku_protocol::model::{
 /// The decision-log feature tag every router call records under.
 pub const FEATURE: &str = "boss-context-router";
 
-/// The choice option answering "no project in particular".
-const FOCUS_NONE: &str = "none";
-
 /// The attach Noul must reach this probability before the digest steers in.
 /// Misses are recoverable — the boss can call the `context` operation
 /// itself — so the bar sits at the middle of the scale, not below it.
 const ATTACH_THRESHOLD: f64 = 0.5;
-
-/// A focus update needs the suggestion bar: the winning option at least
-/// this probable and this far ahead of the runner-up. Below it the previous
-/// focus stands — focus is sticky state, not a per-prompt re-roll.
-const FOCUS_MIN_PROBABILITY: f64 = 0.5;
-const FOCUS_MIN_MARGIN: f64 = 0.15;
 
 /// Session lines a single project section may carry before folding.
 const SESSIONS_PER_PROJECT: usize = 10;
@@ -48,10 +34,6 @@ const DIGEST_CAP: usize = 12_000;
 /// Header budget — the always-on block stays near 200 tokens. Over-cap
 /// projects fold into a count rather than dropping silently.
 const HEADER_CAP: usize = 1_000;
-/// Focus choices cap: the option list doubles as the digest's project set,
-/// and a Choice distributes probability mass — past this it stops
-/// discriminating.
-const FOCUS_OPTIONS_CAP: usize = 24;
 const TITLE_CAP: usize = 80;
 const PATH_CAP: usize = 120;
 const EMPLOYEES_LISTED: usize = 8;
@@ -59,16 +41,13 @@ const AUTOMATION_PROMPT_CAP: usize = 100;
 /// The user prompt's budget inside eval `state`.
 const PROMPT_CAP: usize = 4_000;
 
-/// The work snapshot: the always-on header, the rendered digest, and the
-/// project names that double as the router's focus options.
+/// The work snapshot: the always-on header and the rendered digest.
 pub struct WorkContext {
     /// Compact per-project live counts — attaches to every boss prompt,
     /// never gated.
     pub header: String,
     /// The full digest Jev gates per prompt.
     pub digest: String,
-    /// User-project names in digest order — the `focus` Choice's option set.
-    pub projects: Vec<String>,
 }
 
 /// Render a cheap employee overview from the persisted boss and task
@@ -277,7 +256,6 @@ pub fn work_context(
     };
     let live_employees = || boss.employees.iter().filter(|entry| !entry.expired);
     let mut digest = String::new();
-    let mut names = Vec::new();
     let mut header_lines = Vec::new();
     let mut mapped_employees = 0usize;
     let mut omitted_projects = 0usize;
@@ -324,7 +302,6 @@ pub fn work_context(
             continue;
         }
         digest.push_str(&section);
-        names.push(project.name.clone());
     }
     if omitted_projects > 0 {
         digest.push_str(&format!("## …{omitted_projects} more projects omitted\n"));
@@ -404,11 +381,7 @@ pub fn work_context(
             digest.push_str(&line);
         }
     }
-    WorkContext {
-        header,
-        digest,
-        projects: names,
-    }
+    WorkContext { header, digest }
 }
 
 /// One header line — `name: N tasks (M active, …), K employees` — names
@@ -543,40 +516,21 @@ fn age_label(updated_at: u64, now: u64) -> String {
 }
 
 /// The eval `state` one prompt routes through: the message itself, the
-/// conversation's recent user prompts, the previously inferred focus, and
-/// the work snapshot the prompt could carry.
-pub fn router_state(
-    prompt: &str,
-    previous_focus: Option<&str>,
-    recent_prompts: &[String],
-    work: &WorkContext,
-) -> Value {
+/// conversation's recent user prompts, and the work snapshot it could carry.
+pub fn router_state(prompt: &str, recent_prompts: &[String], work: &WorkContext) -> Value {
     json!({
         "prompt": truncate_chars(prompt, PROMPT_CAP),
         "recentPrompts": recent_prompts,
-        "previousFocus": previous_focus,
         "work": work.digest,
     })
 }
 
-/// The two questions every routed prompt asks: should the snapshot attach,
-/// and where is the user's attention now. Both judge independently against
-/// the same `state`; [`apply_verdict`] combines them.
-pub fn router_questions(projects: &[String]) -> BTreeMap<String, EvalQuestion> {
-    let mut options: BTreeMap<String, Option<String>> = projects
-        .iter()
-        .take(FOCUS_OPTIONS_CAP)
-        .map(|name| (name.clone(), None))
-        .collect();
-    options.insert(
-        FOCUS_NONE.to_owned(),
-        Some("the user's attention is on no particular project".to_owned()),
-    );
-    BTreeMap::from([
-        (
-            "attach".to_owned(),
-            EvalQuestion::Noul {
-                instructions: "The state's work field is a snapshot of the user's \
+/// Should the work snapshot attach to this prompt?
+pub fn router_questions() -> BTreeMap<String, EvalQuestion> {
+    BTreeMap::from([(
+        "attach".to_owned(),
+        EvalQuestion::Noul {
+            instructions: "The state's work field is a snapshot of the user's \
                     projects, tasks, and automations that the daemon can attach to the \
                     boss's context for this message. Should it? Yes when the message \
                     concerns the user's work — a project, task, employee, automation, \
@@ -584,31 +538,15 @@ pub fn router_questions(projects: &[String]) -> BTreeMap<String, EvalQuestion> {
                     conversation makes shared context about that work likely necessary. \
                     No for greetings, small talk, self-contained questions, and replies \
                     that stay inside what the boss already knows."
-                    .to_owned(),
-                criteria: None,
-            },
-        ),
-        (
-            "focus".to_owned(),
-            EvalQuestion::Choice {
-                instructions: "Which single project is the user's attention centered \
-                    on right now? Judge this message together with recentPrompts and \
-                    previousFocus: a message that plainly continues the prior topic \
-                    keeps that focus even when it names no project. Choose none only \
-                    when the conversation is not about any listed project."
-                    .to_owned(),
-                criteria: options,
-            },
-        ),
-    ])
+                .to_owned(),
+            criteria: None,
+        },
+    )])
 }
 
-/// What one evaluation applies: the attachment decision and, separately, a
-/// focus transition — `Some` replaces the tracked focus (the inner `None`
-/// clears it), while `None` leaves the previous inference standing.
+/// The attachment decision for one evaluation.
 pub struct RouterVerdict {
     pub attach: bool,
-    pub focus: Option<Option<String>>,
 }
 
 /// Threshold an evaluation into the verdict code may apply. Untrusted
@@ -618,27 +556,7 @@ pub fn apply_verdict(evaluation: &Evaluation) -> RouterVerdict {
         evaluation.answers.get("attach"),
         Some(EvalAnswer::Noul { noul }) if *noul >= ATTACH_THRESHOLD
     );
-    let focus = match evaluation.answers.get("focus") {
-        Some(EvalAnswer::Choice {
-            choice,
-            probabilities,
-            ..
-        }) => {
-            let top = probabilities.get(choice).copied().unwrap_or_default();
-            let runner_up = probabilities
-                .iter()
-                .filter(|(option, _)| *option != choice)
-                .map(|(_, probability)| *probability)
-                .fold(0.0, f64::max);
-            if top >= FOCUS_MIN_PROBABILITY && top - runner_up >= FOCUS_MIN_MARGIN {
-                Some((choice != FOCUS_NONE).then(|| choice.clone()))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-    RouterVerdict { attach, focus }
+    RouterVerdict { attach }
 }
 
 #[cfg(test)]
@@ -824,7 +742,6 @@ mod tests {
         assert!(work.digest.contains("\"Ship it\" — waiting for input"));
         assert!(!work.digest.contains("Old task"));
         assert!(!work.digest.contains("\"Boss\""));
-        assert_eq!(work.projects, ["app", "lib"]);
     }
 
     #[test]
@@ -833,7 +750,6 @@ mod tests {
         let work = work_context(&[], &[], &boss, &AutomationsState::default());
         assert!(work.header.is_empty());
         assert!(work.digest.is_empty());
-        assert!(work.projects.is_empty());
     }
 
     #[test]
@@ -965,66 +881,21 @@ mod tests {
     }
 
     #[test]
-    fn verdict_attaches_at_threshold_and_updates_focus_on_margin() {
-        let evaluation = Evaluation {
-            model: "test".into(),
-            answers: BTreeMap::from([
-                ("attach".into(), EvalAnswer::Noul { noul: 0.7 }),
-                (
-                    "focus".into(),
-                    EvalAnswer::Choice {
-                        choice: "app".into(),
-                        confidence: Some(0.8),
-                        probabilities: BTreeMap::from([
-                            ("app".into(), 0.7),
-                            ("lib".into(), 0.2),
-                            ("none".into(), 0.1),
-                        ]),
-                    },
-                ),
-            ]),
-            usage: Default::default(),
-            latency_ms: 1,
-            provider_metadata: None,
-        };
-        let verdict = apply_verdict(&evaluation);
-        assert!(verdict.attach);
-        assert_eq!(verdict.focus, Some(Some("app".to_owned())));
-    }
-
-    #[test]
-    fn verdict_keeps_defaults_on_weak_or_missing_answers() {
-        let mut answers = BTreeMap::from([
-            ("attach".into(), EvalAnswer::Noul { noul: 0.49 }),
-            (
-                "focus".into(),
-                EvalAnswer::Choice {
-                    choice: "app".into(),
-                    confidence: Some(0.4),
-                    probabilities: BTreeMap::from([("app".into(), 0.45), ("lib".into(), 0.4)]),
-                },
-            ),
-        ]);
-        let evaluation = |answers: BTreeMap<String, EvalAnswer>| Evaluation {
+    fn verdict_preserves_the_attachment_threshold_and_defaults() {
+        let evaluation = |answers| Evaluation {
             model: "test".into(),
             answers,
             usage: Default::default(),
             latency_ms: 1,
             provider_metadata: None,
         };
-        let verdict = apply_verdict(&evaluation(answers.clone()));
-        assert!(!verdict.attach);
-        assert_eq!(verdict.focus, None);
-
-        // A decisive "none" clears the tracked focus.
-        answers.insert(
-            "focus".into(),
-            EvalAnswer::Choice {
-                choice: "none".into(),
-                confidence: Some(0.9),
-                probabilities: BTreeMap::from([("none".into(), 0.9), ("app".into(), 0.05)]),
-            },
-        );
-        assert_eq!(apply_verdict(&evaluation(answers)).focus, Some(None));
+        for (probability, expected) in [(0.49, false), (0.5, true), (0.7, true)] {
+            let result = evaluation(BTreeMap::from([(
+                "attach".into(),
+                EvalAnswer::Noul { noul: probability },
+            )]));
+            assert_eq!(apply_verdict(&result).attach, expected);
+        }
+        assert!(!apply_verdict(&evaluation(BTreeMap::new())).attach);
     }
 }

@@ -296,21 +296,18 @@ const MAX_FILE_BYTES: usize = 256 * 1024;
 /// publish with `reference`, keeping a live path instead of a copy.
 const MAX_DELIVERABLE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_DELIVERABLE_ENTRIES: usize = 10_000;
-/// User prompts the router's focus inference sees at once.
+/// Recent user prompts the attachment evaluation sees at once.
 const ROUTER_RECENT_PROMPTS: usize = 6;
 /// A stored prompt's budget inside the router's eval state.
 const ROUTER_PROMPT_CAP: usize = 300;
 
 /// The context router's memory of a boss conversation — session-scoped, so a
 /// reopened or replaced boss chat starts fresh rather than inheriting a
-/// predecessor's inferred focus.
+/// predecessor's context state.
 #[derive(Default)]
 struct BossRouter {
     session: Option<Uuid>,
-    /// The project Jev last inferred the user's attention centers on.
-    focus: Option<String>,
-    /// Recent user prompts, oldest first — the continuity the focus
-    /// question judges each new message against.
+    /// Recent user prompts, oldest first, for attachment continuity.
     recent_prompts: VecDeque<String>,
     /// Jev asked for the work digest on a prompt that could not take it
     /// (no steer support, or the turn already settled); the next outbound
@@ -1412,7 +1409,7 @@ impl BossService {
     }
 
     /// The session-scoped router slot — a different boss session resets it
-    /// so a replaced chat never inherits its predecessor's focus.
+    /// so a replaced chat never inherits its predecessor's context state.
     fn router_entry(&self, session: Uuid) -> parking_lot::MutexGuard<'_, BossRouter> {
         let mut router = self.router.lock();
         if router.session != Some(session) {
@@ -1424,7 +1421,7 @@ impl BossService {
         router
     }
 
-    /// Remember a user prompt for the focus question's continuity.
+    /// Remember a user prompt for the attachment question's continuity.
     pub fn router_note_prompt(&self, session: Uuid, prompt: &str) {
         let mut router = self.router_entry(session);
         router
@@ -1438,20 +1435,13 @@ impl BossService {
         }
     }
 
-    /// The focus inference plus the recent prompts the next evaluation
-    /// judges against.
-    pub fn router_snapshot(&self, session: Uuid) -> (Option<String>, Vec<String>) {
-        let router = self.router_entry(session);
-        (
-            router.focus.clone(),
-            router.recent_prompts.iter().cloned().collect(),
-        )
-    }
-
-    /// Store a focus transition the verdict cleared — `None` means Jev
-    /// decided the user's attention sits on no particular project.
-    pub fn router_set_focus(&self, session: Uuid, focus: Option<String>) {
-        self.router_entry(session).focus = focus;
+    /// Recent prompts the next attachment evaluation judges against.
+    pub fn router_snapshot(&self, session: Uuid) -> Vec<String> {
+        self.router_entry(session)
+            .recent_prompts
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// Defer an attachment the just-prompted turn could not take; the next

@@ -29,7 +29,7 @@ use crate::blob_store::BlobStore;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, ContextMark, FavoriteModel, Message, MessageAtom,
+    AgentSession, Checkpoint, CheckpointStatus, FavoriteModel, Message, MessageAtom,
     MessageAttachment, MessageRole, Project, ProviderKind, ReportTrigger, RuntimeEventCursor,
     RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
@@ -2429,7 +2429,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         sent_by_task,
         hidden,
         notice,
-        context_mark,
+        _legacy_context_mark,
         report_trigger,
         reference_context,
     ) = row;
@@ -2448,7 +2448,6 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         sent_by_task: sent_by_task
             .as_deref()
             .and_then(|id| Uuid::parse_str(id).ok()),
-        context_mark: context_mark.and_then(|json| serde_json::from_str::<ContextMark>(&json).ok()),
         hidden: hidden != 0,
         report_trigger: report_trigger
             .and_then(|json| serde_json::from_str::<ReportTrigger>(&json).ok()),
@@ -2727,8 +2726,8 @@ fn is_terminal_checkpoint(checkpoint: &Checkpoint) -> bool {
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
          attachments, atoms, created_at, streaming, sent_by_task, hidden, notice,
-         context_mark, report_trigger, reference_context
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+         report_trigger, reference_context
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -2743,7 +2742,6 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          sent_by_task = excluded.sent_by_task,
          hidden     = excluded.hidden,
          notice     = excluded.notice,
-         context_mark = excluded.context_mark,
          report_trigger = excluded.report_trigger,
          reference_context = excluded.reference_context";
 
@@ -2793,12 +2791,6 @@ fn write_messages(
             .map(serde_json::to_string)
             .transpose()
             .map_err(to_io_error)?;
-        let context_mark = message
-            .context_mark
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(to_io_error)?;
         let report_trigger = message
             .report_trigger
             .as_ref()
@@ -2836,7 +2828,6 @@ fn write_messages(
                         .map_or(Value::Null, |id| Value::Text(id.to_string())),
                     Value::Integer(i64::from(message.hidden)),
                     notice.map_or(Value::Null, Value::Text),
-                    context_mark.map_or(Value::Null, Value::Text),
                     report_trigger.map_or(Value::Null, Value::Text),
                     reference_context.map_or(Value::Null, Value::Text),
                 ]),
@@ -2914,19 +2905,11 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     } else {
         fold(0);
     }
-    // Notices and context marks are rare enough that serializing one to
+    // Notices are rare enough that serializing one to
     // compare beats hashing every message's empty case differently.
     if let Some(notice) = &message.notice {
         fold(1);
         if let Ok(json) = serde_json::to_string(notice) {
-            fold(fingerprint(&json));
-        }
-    } else {
-        fold(0);
-    }
-    if let Some(mark) = &message.context_mark {
-        fold(1);
-        if let Ok(json) = serde_json::to_string(mark) {
             fold(fingerprint(&json));
         }
     } else {
@@ -4870,9 +4853,6 @@ mod tests {
         state.sessions[0].begin_hidden_turn("Continue the current task if able.");
         state.sessions[0].push_message(MessageRole::Assistant, "kept going");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
-        // A boss context router mark persists beside the row it names.
-        let marked_id = state.sessions[0].messages[1].id;
-        state.sessions[0].mark_prompt_context(marked_id, Some("app".into()));
         state.sessions[0].messages[0].reference_context = Some(crate::model::ReferenceContext {
             project_root: "/employee-project".into(),
             worktree: Some("/employee-worktree".into()),
@@ -4895,6 +4875,14 @@ mod tests {
                 .contains_key("messages"),
             "messages live only in their own table"
         );
+        // Old databases retain the retired cosmetic column. Its value must
+        // not prevent loading the rest of the transcript.
+        connection
+            .execute(
+                "UPDATE messages SET context_mark = ?1 WHERE id = ?2",
+                params![r#"{"focus":"app"}"#, expected[1].id.to_string()],
+            )
+            .unwrap();
         drop(connection);
 
         let restored = load_hydrated(&store_in(&directory));
@@ -4909,7 +4897,6 @@ mod tests {
             assert_eq!(restored.created_at, expected.created_at);
             assert_eq!(restored.streaming, expected.streaming);
             assert_eq!(restored.hidden, expected.hidden);
-            assert_eq!(restored.context_mark, expected.context_mark);
             assert_eq!(restored.reference_context, expected.reference_context);
         }
         assert!(messages[3].hidden, "the continue nudge survives the save");
