@@ -98,17 +98,20 @@ pub(crate) fn submit(
     let dev_worktree = find_branch_worktree(&root, branch)?.ok_or_else(|| {
         anyhow!("no checked-out worktree owns the configured QA branch {branch:?}")
     })?;
-    clean(&dev_worktree)?;
+    // Unrelated untracked files do not prevent a fast-forward. Git itself
+    // rejects any that would be overwritten, preserving the landing checkout.
+    clean_status(&dev_worktree, "no", "QA landing checkout")?;
     no_operation(&dev_worktree)?;
     let actual_branch = git_text(&dev_worktree, &["branch", "--show-current"])?;
     let actual_head = git_text(&dev_worktree, &["rev-parse", "--verify", "HEAD"])?;
     if actual_branch.trim() != branch || actual_head.trim() != target {
         bail!("the QA checkout changed during submission; nothing was landed, retry merge submit");
     }
-    let merge = git_capture(&dev_worktree, &["merge", "--ff-only", &rebased_head])?;
+    let merge = git_status(&dev_worktree, &["merge", "--ff-only", &rebased_head])?;
     if !merge.status.success() {
         bail!(
-            "could not fast-forward the QA worktree: {}",
+            "could not fast-forward the QA landing checkout at {}: {}",
+            dev_worktree.display(),
             command_error(&merge)
         );
     }
@@ -267,9 +270,24 @@ fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<b
 }
 
 fn clean(cwd: &Path) -> anyhow::Result<()> {
-    let status = git_text(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?;
+    clean_status(cwd, "all", "submitting worktree")
+}
+
+fn clean_status(cwd: &Path, untracked_files: &str, checkout: &str) -> anyhow::Result<()> {
+    let status = git_text(
+        cwd,
+        &[
+            "status",
+            "--porcelain=v1",
+            &format!("--untracked-files={untracked_files}"),
+        ],
+    )?;
     if !status.trim().is_empty() {
-        bail!("merge submit requires a clean worktree; commit or clean its changes first");
+        bail!(
+            "merge submit requires a clean {checkout} at {}; commit or clean these changes first:\n{}",
+            cwd.display(),
+            status.trim_end()
+        );
     }
     Ok(())
 }
@@ -283,7 +301,10 @@ fn no_operation(cwd: &Path) -> anyhow::Result<()> {
     ] {
         let path = git_text(cwd, &["rev-parse", "--git-path", marker])?;
         if cwd.join(path.trim()).exists() {
-            bail!("a Git operation is in progress; resolve or abort it before submitting");
+            bail!(
+                "a Git operation is in progress in checkout {} ({marker}); resolve or abort it before submitting",
+                cwd.display()
+            );
         }
     }
     Ok(())
@@ -372,6 +393,129 @@ mod tests {
         git(cwd, &["rev-parse", "HEAD"]).trim().to_owned()
     }
 
+    fn landing_fixture() -> (TempRepo, PathBuf, PathBuf, String) {
+        let root =
+            TempRepo(std::env::temp_dir().join(format!("goddard-merge-{}", uuid::Uuid::new_v4())));
+        let project = root.0.join("project");
+        let employee = root.0.join("employee");
+        std::fs::create_dir_all(&project).unwrap();
+        git(&project, &["init", "--initial-branch=dev"]);
+        git(&project, &["config", "user.name", "Goddard Test"]);
+        git(&project, &["config", "user.email", "test@goddard.local"]);
+        let base = commit(&project, "base.txt", "base\n", "base");
+        git(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                employee.to_str().unwrap(),
+                &base,
+            ],
+        );
+        commit(&employee, "unit.txt", "unit\n", "fix: employee unit");
+        (root, project, employee, base)
+    }
+
+    #[test]
+    fn submission_preserves_unrelated_untracked_landing_files() {
+        let (_root, project, employee, base) = landing_fixture();
+        std::fs::create_dir_all(project.join(".ns-vite-build")).unwrap();
+        std::fs::write(project.join(".ns-vite-build/output.js"), "build\n").unwrap();
+        std::fs::write(project.join("build.aar"), "android\n").unwrap();
+        assert!(git(&employee, &["status", "--porcelain"]).is_empty());
+
+        let landed = submit(&project, &employee, Some(&base), "dev").unwrap();
+
+        assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), landed);
+        assert_eq!(
+            std::fs::read_to_string(project.join("unit.txt")).unwrap(),
+            "unit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.join(".ns-vite-build/output.js")).unwrap(),
+            "build\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.join("build.aar")).unwrap(),
+            "android\n"
+        );
+    }
+
+    #[test]
+    fn submission_rejects_tracked_landing_changes_with_checkout_and_files() {
+        let (_root, project, employee, base) = landing_fixture();
+        std::fs::write(project.join("base.txt"), "local work\n").unwrap();
+        for staged in [false, true] {
+            if staged {
+                git(&project, &["add", "base.txt"]);
+            }
+            let error = submit(&project, &employee, Some(&base), "dev")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("QA landing checkout"), "{error}");
+            assert!(error.contains(project.to_str().unwrap()), "{error}");
+            assert!(error.contains("base.txt"), "{error}");
+            assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
+            assert_eq!(
+                std::fs::read_to_string(project.join("base.txt")).unwrap(),
+                "local work\n"
+            );
+        }
+    }
+
+    #[test]
+    fn submission_still_rejects_untracked_employee_files() {
+        let (_root, project, employee, base) = landing_fixture();
+        std::fs::write(employee.join("unfinished.txt"), "local work\n").unwrap();
+
+        let error = submit(&project, &employee, Some(&base), "dev")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(employee.to_str().unwrap()), "{error}");
+        assert!(error.contains("unfinished.txt"), "{error}");
+        assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
+    }
+
+    #[test]
+    fn submission_names_checkout_with_git_operation_in_progress() {
+        let (_root, project, employee, base) = landing_fixture();
+        for checkout in [&employee, &project] {
+            let marker = git(checkout, &["rev-parse", "--git-path", "MERGE_HEAD"]);
+            let marker = checkout.join(marker.trim());
+            std::fs::write(&marker, format!("{base}\n")).unwrap();
+            assert!(git(checkout, &["status", "--porcelain"]).is_empty());
+
+            let error = submit(&project, &employee, Some(&base), "dev")
+                .unwrap_err()
+                .to_string();
+
+            assert!(error.contains(checkout.to_str().unwrap()), "{error}");
+            assert!(error.contains("MERGE_HEAD"), "{error}");
+            assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
+            std::fs::remove_file(marker).unwrap();
+        }
+    }
+
+    #[test]
+    fn submission_preserves_untracked_files_that_would_be_overwritten() {
+        let (_root, project, employee, base) = landing_fixture();
+        std::fs::write(project.join("unit.txt"), "local work\n").unwrap();
+
+        let error = submit(&project, &employee, Some(&base), "dev")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(project.to_str().unwrap()), "{error}");
+        assert!(error.contains("unit.txt"), "{error}");
+        assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
+        assert_eq!(
+            std::fs::read_to_string(project.join("unit.txt")).unwrap(),
+            "local work\n"
+        );
+    }
+
     #[test]
     fn concurrent_submissions_serialize_deduplicate_and_preserve_trailers() {
         let root =
@@ -427,6 +571,11 @@ mod tests {
         );
         commit(&employee_b, "b.txt", "b\n", "feat: employee B");
 
+        // The primary checkout is not the landing checkout and must be left alone.
+        std::fs::write(project.join("base.txt"), "primary local work\n").unwrap();
+        std::fs::write(project.join("build.aar"), "android\n").unwrap();
+        std::fs::write(project.join(".git/MERGE_HEAD"), format!("{base}\n")).unwrap();
+
         let start = Arc::new(Barrier::new(3));
         let jobs = [employee_a.clone(), employee_b.clone()].map(|source| {
             let start = start.clone();
@@ -444,6 +593,11 @@ mod tests {
 
         assert!(dev.join("a.txt").exists());
         assert!(dev.join("b.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(project.join("base.txt")).unwrap(),
+            "primary local work\n"
+        );
+        assert!(project.join(".git/MERGE_HEAD").exists());
         assert_eq!(
             git(&dev, &["rev-list", "--count", &format!("{base}..HEAD")]).trim(),
             "2"
