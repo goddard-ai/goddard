@@ -1610,15 +1610,32 @@ fn read_settings(client: &DaemonClient, timeout: Duration) -> anyhow::Result<Dae
     }
 }
 
+/// Coalesce ordinary settings without discarding unacknowledged credential
+/// writes. `None` leaves a stored key alone; only an explicit write (including
+/// an empty string to remove it) supersedes an earlier write.
+fn coalesce_settings(mut pending: DaemonSettings, mut newer: DaemonSettings) -> DaemonSettings {
+    for (provider, entry) in pending.inference.iter_mut() {
+        if let Some(key) = entry.api_key.take() {
+            newer
+                .inference
+                .entry(*provider)
+                .or_default()
+                .api_key
+                .get_or_insert(key);
+        }
+    }
+    newer
+}
+
 fn persist_settings(
     weak_inner: std::sync::Weak<SupervisorInner>,
     updates: Receiver<DaemonSettings>,
 ) {
     while let Ok(mut settings) = updates.recv() {
-        while let Ok(newer) = updates.try_recv() {
-            settings = newer;
-        }
         loop {
+            while let Ok(newer) = updates.try_recv() {
+                settings = coalesce_settings(settings, newer);
+            }
             let Some(inner) = weak_inner.upgrade() else {
                 return;
             };
@@ -1627,7 +1644,7 @@ fn persist_settings(
             }
             let desired = inner.settings.lock().clone();
             if desired != settings {
-                settings = desired;
+                settings = coalesce_settings(settings, desired);
             }
             let client = inner.target.lock().client();
             let result = client.request(
@@ -1658,6 +1675,52 @@ fn persist_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_coalescing_preserves_credentials_until_an_explicit_replacement() {
+        use waku_protocol::inference::{InferenceProvider, InferenceProviderSettings};
+
+        let provider = InferenceProvider::OpenRouter;
+        let keyed = |key: &str| {
+            let mut settings = DaemonSettings::default();
+            settings.inference.insert(
+                provider,
+                InferenceProviderSettings {
+                    api_key: Some(key.to_owned()),
+                    ..Default::default()
+                },
+            );
+            settings
+        };
+        // Apply immediately calls the normal app save, which has no key.
+        let mut saved = DaemonSettings::default();
+        saved
+            .inference
+            .entry(provider)
+            .or_default()
+            .config
+            .insert("route".into(), "new".into());
+        let pending = coalesce_settings(keyed("test-key"), saved);
+        assert_eq!(
+            pending.inference[&provider].api_key.as_deref(),
+            Some("test-key")
+        );
+        assert_eq!(pending.inference[&provider].config["route"], "new");
+        // The latest mirror (and retry) must not erase the staged key either.
+        let pending = coalesce_settings(pending, DaemonSettings::default());
+        assert_eq!(
+            pending.inference[&provider].api_key.as_deref(),
+            Some("test-key")
+        );
+        let pending = coalesce_settings(pending, keyed("replacement"));
+        assert_eq!(
+            pending.inference[&provider].api_key.as_deref(),
+            Some("replacement")
+        );
+        let pending = coalesce_settings(pending, keyed(""));
+        let pending = coalesce_settings(pending, DaemonSettings::default());
+        assert_eq!(pending.inference[&provider].api_key.as_deref(), Some(""));
+    }
 
     #[test]
     fn browser_origins_are_exact_and_deduplicated() {

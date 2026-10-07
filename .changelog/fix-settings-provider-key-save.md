@@ -1,0 +1,1 @@
+- Fixed API keys disappearing without configuring the provider when applying them in Settings → Providers.
