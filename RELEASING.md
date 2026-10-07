@@ -132,10 +132,13 @@ GitHub release at the end — that stays a human's click.
    ```
    Give any changelog-worthy commit missing a `.changelog/` fragment one of its
    own, and check every pending fragment's filename: the category prefix
-   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss-related
+   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss- and VoicePad-related
    entries always fold into Experiments, including employee, deliverable,
    persona, and planning-session changes and fixes. Use `exp-` for new Boss
-   fragments. An optional
+   and VoicePad fragments. Descriptions longer than 40 words need a brief bold
+   title with its colon inside the bold span, such as `**Voicepad:** `. The fold
+   adds a missing title from the fragment slug; review these defaults for clarity.
+   An optional
    second segment — `<prefix>-<group>-<slug>.md`, with `group` one of
    `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
    `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,

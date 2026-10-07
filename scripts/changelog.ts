@@ -4,7 +4,7 @@
 // `.changelog/` — so parallel work never conflicts on CHANGELOG.md itself.
 // `bun run changelog` folds every fragment into a `## [<version>]` section
 // for the version in Cargo.toml, grouped by the filename's category prefix.
-// Boss-related fragments always fold into Experiments, regardless of prefix.
+// Boss- and VoicePad-related fragments always fold into Experiments, regardless of prefix.
 // A fragment may tag a topic group as a second filename segment —
 // `feat-git-<slug>.md` — and grouped bullets nest under a `- **Group**`
 // parent inside their `###` section. `bun scripts/changelog.ts check`
@@ -223,7 +223,10 @@ async function buildSection(
       /\b(?:boss(?:es)?|employees?|deliverables?|personas?|planning[- ]sessions?|plan preview)\b/i.test(
         `${rest} ${body}`,
       );
-    const heading = bossRelated ? "Experiments" : category.heading;
+    const voicePadRelated = /\b(?:voice[- ]?pad|voice scratchpad|vp mic)\b/i.test(
+      `${rest} ${body}`,
+    );
+    const heading = bossRelated || voicePadRelated ? "Experiments" : category.heading;
 
     if (heading === "Highlights") {
       const slug = rest;
@@ -246,12 +249,20 @@ async function buildSection(
       mediaMoves.push([join(mediaDir, media), join(projectRoot, releaseMedia)]);
     }
 
-    if (heading === "Experiments") {
-      body = body.replace(
-        /^- (?:\*\*)?\[Experimental\](?:\*\*)?\s*/,
-        "- ",
-      );
-      body = body.replace(/^- /, "- **[Experimental]** ");
+    // Preserve authored titles; long entries without one use their readable slug.
+    const bullet = body.match(
+      /^- (?:\*\*\[Experimental\]\*\*\s*|\[Experimental\]\s*)?(?:(\*\*[^*]+:\*\*)\s+)?(?:\*\*\[Experimental\]\*\*\s*|\[Experimental\]\s*)?([\s\S]*)$/,
+    );
+    if (bullet) {
+      let title = bullet[1];
+      const description = bullet[2]!;
+      if (!title && description.trim().split(/\s+/).length > 40) {
+        const words = (group ? slugRest.join("-") : rest).split("-").slice(0, 5);
+        const label = words.join(" ");
+        title = `**${label.charAt(0).toUpperCase()}${label.slice(1)}:**`;
+      }
+      const marker = heading === "Experiments" ? "**[Experimental]** " : "";
+      body = `- ${title ? `${title} ` : ""}${marker}${description}`;
     }
 
     if (body) {

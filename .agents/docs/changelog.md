@@ -41,12 +41,20 @@ unsupported promises.
   experimental opt-ins (emitted with a bold `[Experimental]` marker —
   experiments are never highlights), `fix-` for bugs that existed in a
   previously released version.
-- Boss-related changes always fold into `### Experiments`, including fixes,
+- Boss- and VoicePad-related changes always fold into `### Experiments`, including fixes,
   with the bold `[Experimental]` marker regardless of filename prefix. Use
   `exp-` for new Boss fragments. The generator recognizes Boss, employees,
   deliverables, personas, and planning sessions in the filename or entry text;
-  name the relevant surface so the classification is explicit. For example,
+  VoicePad, voice scratchpad, and VP mic entries also default to Experiments.
+  Name the relevant surface so the classification is explicit. For example,
   `fix-transcript-boss-project-label.md` still folds into Experiments.
+- Long descriptions (more than 40 whitespace-separated words) start with a
+  short bold title whose colon is also bold: `- **Voicepad:** description`.
+  Name the feature or action briefly rather than repeating the first sentence.
+  The fold preserves authored titles and adds a title from the fragment slug
+  (without its category or recognized group, at most five words) when missing.
+  Review that fallback before release. For experimental entries the title comes
+  first: `- **Voicepad:** **[Experimental]** description`.
 - A second filename segment tags the change's topic group —
   `.changelog/<prefix>-<group>-<slug>.md` — and collect nests grouped
   bullets under a `- **Group**` parent inside their `###` section, in a
