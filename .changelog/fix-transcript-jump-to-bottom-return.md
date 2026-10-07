@@ -1,0 +1,1 @@
+- Returning to a chat you had scrolled up in — while a turn finished in the meantime — now reliably shows the jump-to-bottom button above the composer instead of leaving it hidden.

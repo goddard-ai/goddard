@@ -3012,8 +3012,17 @@ fn scroll_to_bottom_only_appears_while_the_tail_is_below_the_viewport() {
     let viewport_bottom = px(700.0);
 
     assert_eq!(
-        should_show_scroll_to_bottom(false, false, true, viewport_bottom, None, Pixels::ZERO),
-        Some(false)
+        should_show_scroll_to_bottom(
+            false,
+            false,
+            true,
+            viewport_bottom,
+            None,
+            Pixels::ZERO,
+            Pixels::ZERO,
+            Pixels::ZERO,
+        ),
+        false
     );
     assert_eq!(
         should_show_scroll_to_bottom(
@@ -3023,15 +3032,26 @@ fn scroll_to_bottom_only_appears_while_the_tail_is_below_the_viewport() {
             viewport_bottom,
             Some(px(900.0)),
             Pixels::ZERO,
+            Pixels::ZERO,
+            px(900.0),
         ),
-        Some(false)
+        false
     );
     // Disclosure pinning keeps `is_scrolled` true and a splice can leave the
     // tail temporarily unmeasured, but a collapsed transcript that fits the
     // viewport has nowhere to scroll back to.
     assert_eq!(
-        should_show_scroll_to_bottom(true, false, false, viewport_bottom, None, Pixels::ZERO),
-        Some(false)
+        should_show_scroll_to_bottom(
+            true,
+            false,
+            false,
+            viewport_bottom,
+            None,
+            Pixels::ZERO,
+            Pixels::ZERO,
+            Pixels::ZERO,
+        ),
+        false
     );
     assert_eq!(
         should_show_scroll_to_bottom(
@@ -3041,8 +3061,10 @@ fn scroll_to_bottom_only_appears_while_the_tail_is_below_the_viewport() {
             viewport_bottom,
             Some(px(701.0)),
             Pixels::ZERO,
+            px(500.0),
+            px(900.0),
         ),
-        Some(true)
+        true
     );
     assert_eq!(
         should_show_scroll_to_bottom(
@@ -3052,15 +3074,48 @@ fn scroll_to_bottom_only_appears_while_the_tail_is_below_the_viewport() {
             viewport_bottom,
             Some(px(500.0)),
             px(200.0),
+            px(900.0),
+            px(900.0),
         ),
-        Some(false)
+        false
     );
-    // A stream commit remeasures the tail rows, so the frame after each one has
-    // no bounds to read. Answering "show" there strobes the button against the
-    // measured frames between commits; the caller holds its last answer instead.
+}
+
+#[test]
+fn scroll_to_bottom_reads_the_scroll_range_while_the_tail_is_unmeasured() {
+    let viewport_bottom = px(700.0);
+
+    // A stream commit remeasures the tail rows, so the frame after each one
+    // has no bounds to read. The remeasured row keeps its height as a hint,
+    // so a reader resting on the tail still measures no content below.
     assert_eq!(
-        should_show_scroll_to_bottom(true, false, true, viewport_bottom, None, Pixels::ZERO),
-        None
+        should_show_scroll_to_bottom(
+            true,
+            false,
+            true,
+            viewport_bottom,
+            None,
+            Pixels::ZERO,
+            px(4000.0),
+            px(4000.0),
+        ),
+        false
+    );
+    // A session landing parks the reader mid-history with the tail row past
+    // the painted range, so its bounds stay missing for good — the measured
+    // scroll range still proves content sits below the fold.
+    assert_eq!(
+        should_show_scroll_to_bottom(
+            true,
+            false,
+            true,
+            viewport_bottom,
+            None,
+            Pixels::ZERO,
+            px(2000.0),
+            px(4000.0),
+        ),
+        true
     );
 }
 

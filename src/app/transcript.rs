@@ -1062,18 +1062,19 @@ pub(super) fn transcript_anchor_end_space(
 }
 
 /// Whether the transcript needs an explicit affordance for returning to its
-/// tail, or `None` when the tail's position is unknowable this frame. A
-/// measured scroll range is required because disclosure pinning can leave
-/// `is_scrolled` set after a collapse removes all overflow. The final row's
-/// bounds then distinguish the tail position for both list alignments:
+/// tail. A measured scroll range is required because disclosure pinning can
+/// leave `is_scrolled` set after a collapse removes all overflow. The final
+/// row's bounds then distinguish the tail position for both list alignments:
 /// `ListScrollEvent::is_scrolled` alone stays true at the bottom of the
 /// top-aligned list used while a turn is anchored.
 ///
-/// The caller holds the previous answer through `None` rather than resolving
-/// it. Every stream commit remeasures the tail rows, so the frame after each
-/// one has no bounds to read, and answering "show" into that silence blinks the
-/// button against the measured frames in between — at commit cadence, for as
-/// long as the reader sits at the tail without following it.
+/// The tail's bounds go missing for a frame whenever a stream commit
+/// remeasures it — and stay missing while the reader sits far enough up the
+/// transcript that the tail never paints, which is where a session landing on
+/// a saved mid-history position leaves it. The measured scroll range answers
+/// either way: a remeasured row keeps its height as a hint, so a reader
+/// resting on the tail still sits at `scroll_max`, while a parked position
+/// leaves measured content below the viewport.
 pub(super) fn should_show_scroll_to_bottom(
     is_scrolled: bool,
     anchor_following: bool,
@@ -1081,16 +1082,15 @@ pub(super) fn should_show_scroll_to_bottom(
     viewport_bottom: Pixels,
     tail_bottom: Option<Pixels>,
     end_space: Pixels,
-) -> Option<bool> {
+    scroll_top: Pixels,
+    scroll_max: Pixels,
+) -> bool {
     if !is_scrolled || anchor_following || !transcript_scrollable {
-        return Some(false);
+        return false;
     }
 
-    Some(!transcript_rests_at_tail(
-        viewport_bottom,
-        tail_bottom,
-        end_space,
-    )?)
+    !transcript_rests_at_tail(viewport_bottom, tail_bottom, end_space)
+        .unwrap_or_else(|| scroll_max - scroll_top <= px(0.5))
 }
 
 /// Whether the transcript currently sits at the end of its content, or `None`

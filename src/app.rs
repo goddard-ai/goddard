@@ -4060,11 +4060,6 @@ pub struct Waku {
     transcript_landing: Option<(Uuid, TranscriptLanding)>,
     /// The sidebar scroll offset waiting for the list's first rows.
     pending_sidebar_scroll: Cell<Option<ListOffset>>,
-    /// Last decided visibility of the scroll-to-tail affordance. The tail's
-    /// position is unknowable on the frames a stream commit remeasures it, and
-    /// those arrive at commit cadence — deciding "show" from that silence
-    /// strobes the button against the frames in between.
-    transcript_scroll_to_bottom_visible: Cell<bool>,
     /// Last decided visibility of the floating status-marker pill, keyed by
     /// the turn it was decided for — a new turn never inherits the previous
     /// turn's float. The footer's on-screen position is unknowable on frames
@@ -7551,7 +7546,6 @@ impl Waku {
                 transcript_scroll_positions: HashMap::new(),
                 transcript_landing: None,
                 pending_sidebar_scroll: Cell::new(None),
-                transcript_scroll_to_bottom_visible: Cell::new(false),
                 transcript_status_markers_floating: Cell::new(None),
                 transcript_scrollbar_dragging: Cell::new(false),
                 transcript_new_content_dot: None,
