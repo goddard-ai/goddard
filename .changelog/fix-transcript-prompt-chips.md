@@ -1,1 +1,1 @@
-- Reference chips in a sent prompt no longer clip their left edge when a chip opens the message, and icon chips now space their label the same as employee chips.
+- Transcript reference chips have equal padding on both edges and a slightly wider gap between their icon or employee avatar and label, including chips that open a sent prompt.

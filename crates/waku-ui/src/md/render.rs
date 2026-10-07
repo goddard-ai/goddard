@@ -50,7 +50,7 @@ use super::selection::{
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
-use crate::input::{ATOM_CHIP_INSET_Y, ATOM_CHIP_PADDING_X, ATOM_CHIP_RADIUS};
+use crate::input::{ATOM_CHIP_EDGE, ATOM_CHIP_INSET_Y, ATOM_CHIP_RADIUS};
 use crate::theme::{Theme, hairline};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::tooltip::Tooltip;
@@ -422,7 +422,10 @@ pub fn flatten(
         Text,
         Id(Vec<u8>),
         Ref,
-        Label { start: usize, target: AtomChipTarget },
+        Label {
+            start: usize,
+            target: AtomChipTarget,
+        },
     }
     let mut scan = Scan::Text;
     let mut atom_font = font(families.ui.clone());
@@ -489,7 +492,7 @@ pub fn flatten(
                         );
                         let start = flat.text.len();
                         flat.emit(
-                            crate::input::ATOM_ICON_SLOT,
+                            crate::input::atom_slot(true),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -504,12 +507,20 @@ pub fn flatten(
                             palette,
                             true,
                         );
+                        flat.emit(
+                            ATOM_CHIP_EDGE,
+                            &run.style,
+                            &slot_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
                         let range = start..flat.text.len();
                         flat.fragments.push((
                             range.clone(),
                             Rc::from(
-                                &flat.text
-                                    [start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
+                                &flat.text[start + crate::input::ATOM_ICON_SLOT.len()
+                                    ..flat.text.len() - ATOM_CHIP_EDGE.len()],
                             ),
                         ));
                         flat.atom_ranges
@@ -566,7 +577,7 @@ pub fn flatten(
                         // icon into. Its own face: the label's font may
                         // not carry the em/en spaces at all.
                         flat.emit(
-                            crate::input::ATOM_ICON_SLOT,
+                            crate::input::atom_slot(matches!(target, AtomChipTarget::Session(_))),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -600,7 +611,7 @@ pub fn flatten(
                             .map_or(AtomChipTarget::Text, AtomChipTarget::Ref);
                         let start = flat.text.len();
                         flat.emit(
-                            crate::input::ATOM_ICON_SLOT,
+                            crate::input::atom_slot(matches!(target, AtomChipTarget::Session(_))),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -621,14 +632,22 @@ pub fn flatten(
                             palette,
                             true,
                         );
+                        flat.emit(
+                            ATOM_CHIP_EDGE,
+                            &run.style,
+                            &slot_font,
+                            base_color,
+                            palette,
+                            true,
+                        );
                         let range = *start..flat.text.len();
                         // Copy keeps the label, not the icon slot the chip
                         // paints its glyph into.
                         flat.fragments.push((
                             range.clone(),
                             Rc::from(
-                                &flat.text
-                                    [*start + crate::input::ATOM_ICON_SLOT.len()..flat.text.len()],
+                                &flat.text[*start + crate::input::ATOM_ICON_SLOT.len()
+                                    ..flat.text.len() - ATOM_CHIP_EDGE.len()],
                             ),
                         ));
                         flat.atom_ranges.push((range.clone(), *target));
@@ -2092,12 +2111,7 @@ fn text_element_with_selection(
             // The composer's chip chrome — the same inset wash and leading
             // icon a live atom paints in the field.
             for (range, target, icon, color) in &atom_chips {
-                let rects = range_rects(
-                    &layout,
-                    range,
-                    ATOM_CHIP_PADDING_X.into(),
-                    ATOM_CHIP_INSET_Y.into(),
-                );
+                let rects = range_rects(&layout, range, 0.0, ATOM_CHIP_INSET_Y.into());
                 for rect in &rects {
                     window.paint_quad(quad(
                         *rect,
@@ -2113,8 +2127,16 @@ fn text_element_with_selection(
                         AtomChipTarget::Session(id) => mention_avatars.get(id),
                         _ => None,
                     };
+                    let avatar_slot = matches!(target, AtomChipTarget::Session(_));
+                    let slot_range =
+                        range.start..range.start + crate::input::atom_slot(avatar_slot).len();
+                    let slots = range_rects(&layout, &slot_range, 0.0, ATOM_CHIP_INSET_Y.into());
+                    let Some(slot) = slots.first() else { continue };
+                    let edge_range = range.end - ATOM_CHIP_EDGE.len()..range.end;
+                    let edges = range_rects(&layout, &edge_range, 0.0, ATOM_CHIP_INSET_Y.into());
+                    let Some(edge) = edges.last() else { continue };
+                    let bounds = crate::input::atom_glyph_bounds(*chip, *slot, edge.size.width);
                     if let Some(avatar) = avatar {
-                        let bounds = crate::input::atom_avatar_bounds(*chip);
                         let _ = window.paint_image(
                             bounds,
                             bounds,
@@ -2124,7 +2146,6 @@ fn text_element_with_selection(
                             false,
                         );
                     } else {
-                        let bounds = crate::input::atom_icon_bounds(*chip);
                         let _ = window.paint_svg(
                             bounds,
                             (*icon).into(),
@@ -4369,24 +4390,34 @@ mod tests {
         assert_eq!(
             flat.text.as_ref(),
             format!(
-                "fix {SLOT}Big refactor and {SLOT}Pasted text (2 lines) now",
+                "fix {AVATAR}Big refactor{EDGE} and {SLOT}Pasted text (2 lines){EDGE} now",
+                AVATAR = crate::input::ATOM_AVATAR_SLOT,
+                EDGE = ATOM_CHIP_EDGE,
                 SLOT = crate::input::ATOM_ICON_SLOT,
             )
         );
         assert_eq!(
             flat.atom_ranges,
             vec![
-                (4..22, AtomChipTarget::Session(session_id)),
-                (27..54, AtomChipTarget::Text)
+                (4..31, AtomChipTarget::Session(session_id)),
+                (36..72, AtomChipTarget::Text)
             ]
         );
         // Only the session chip carries a link — the routed task URL.
         assert_eq!(
             flat.links,
             vec![(
-                4..22,
+                4..31,
                 format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX)
             )]
+        );
+        assert_eq!(
+            flat.copy
+                .fragments
+                .iter()
+                .map(|(_, label)| label.as_ref())
+                .collect::<Vec<_>>(),
+            ["Big refactor", "Pasted text (2 lines)"]
         );
         // Atom text is chrome: labels can't light up commit or mention
         // affordances.
@@ -4411,7 +4442,7 @@ mod tests {
             Some(crate::fonts::DEFAULT_UI_FAMILY),
             "icon slot must not inherit the label font"
         );
-        assert_eq!(family_at(10), Some("Test Sans"));
+        assert_eq!(family_at(16), Some("Test Sans"));
     }
 
     #[test]
@@ -4438,11 +4469,14 @@ mod tests {
         );
         assert_eq!(
             flat.text.as_ref(),
-            format!("ship {SLOT}Goddard now", SLOT = crate::input::ATOM_ICON_SLOT)
+            format!(
+                "ship {SLOT}Goddard{ATOM_CHIP_EDGE} now",
+                SLOT = crate::input::ATOM_ICON_SLOT
+            )
         );
         assert_eq!(
             flat.atom_ranges,
-            vec![(5..18, AtomChipTarget::Ref(AtomRefKind::Project))]
+            vec![(5..27, AtomChipTarget::Ref(AtomRefKind::Project))]
         );
         assert!(flat.links.is_empty());
         // A kind nibble this build does not know still opens a chip —
@@ -4461,7 +4495,7 @@ mod tests {
             palette().text,
             &[],
         );
-        assert_eq!(flat.atom_ranges, vec![(0..13, AtomChipTarget::Text)]);
+        assert_eq!(flat.atom_ranges, vec![(0..22, AtomChipTarget::Text)]);
     }
 
     #[test]
@@ -4533,7 +4567,10 @@ mod tests {
             );
             assert_eq!(
                 flat.text.as_ref(),
-                format!("Use {}{label} now", crate::input::ATOM_ICON_SLOT)
+                format!(
+                    "Use {}{label}{ATOM_CHIP_EDGE} now",
+                    crate::input::atom_slot(matches!(kind, AtomChipTarget::Session(_)))
+                )
             );
             assert_eq!(flat.atom_ranges.len(), 1);
             assert_eq!(flat.atom_ranges[0].1, kind);
@@ -4556,7 +4593,7 @@ mod tests {
             &[],
         );
         assert_eq!(flat.atom_ranges.len(), 1);
-        assert!(flat.text.ends_with("**Goddard**"));
+        assert!(flat.text.ends_with(&format!("**Goddard**{ATOM_CHIP_EDGE}")));
         assert_eq!(super::super::prompt_refs::display(&display), display);
     }
 
@@ -4587,14 +4624,11 @@ mod tests {
         assert_eq!(
             flat.text.as_ref(),
             format!(
-                "a {SLOT}Pasted text b  c",
+                "a {SLOT}Pasted text{ATOM_CHIP_EDGE} b  c",
                 SLOT = crate::input::ATOM_ICON_SLOT
             )
         );
-        assert_eq!(
-            flat.atom_ranges,
-            vec![(2..19, AtomChipTarget::Text)]
-        );
+        assert_eq!(flat.atom_ranges, vec![(2..28, AtomChipTarget::Text)]);
     }
 
     #[test]
@@ -4615,10 +4649,12 @@ mod tests {
             &mentions,
         );
         assert_runs_tile(&flat);
-        let slot = crate::input::ATOM_ICON_SLOT;
+        let slot = crate::input::ATOM_AVATAR_SLOT;
         assert_eq!(
             flat.text.as_ref(),
-            format!("ask {slot}Rhea, {slot}Rhea Rhea Rhea and Rheana too")
+            format!(
+                "ask {slot}Rhea{ATOM_CHIP_EDGE}, {slot}Rhea{ATOM_CHIP_EDGE} Rhea Rhea and Rheana too"
+            )
         );
         assert_eq!(flat.atom_ranges.len(), 2);
         assert!(
@@ -5125,6 +5161,55 @@ mod tests {
                 .all(|rect| rect.left() >= bounds.left() && rect.right() <= bounds.right()),
             "a padded wash must not paint past the text's own box: {rects:?}"
         );
+    }
+
+    /// Edge chips reserve their padding inside the layout, for both glyph widths.
+    #[gpui::test]
+    fn chip_spacing_is_symmetric_at_both_text_edges(cx: &mut TestAppContext) {
+        struct TestWindow;
+        impl gpui::Render for TestWindow {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+        let (_, cx) = cx.add_window_view(|_, _| TestWindow);
+        for avatar in [false, true] {
+            let slot = crate::input::atom_slot(avatar);
+            let text: SharedString = format!("{slot}Label{ATOM_CHIP_EDGE}").into();
+            let styled = StyledText::new(text.clone()).with_runs(vec![TextRun {
+                len: text.len(),
+                font: crate::input::atom_slot_font(FontWeight::NORMAL),
+                color: palette().text,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }]);
+            let layout = styled.layout().clone();
+            cx.draw(Point::default(), size(px(200.0), px(100.0)), move |_, _| {
+                div()
+                    .text_size(px(14.0))
+                    .line_height(px(20.0))
+                    .child(styled)
+            });
+            let chip = range_rects(&layout, &(0..text.len()), 0.0, 2.0)[0];
+            let slot = range_rects(&layout, &(0..slot.len()), 0.0, 2.0)[0];
+            let edge = range_rects(
+                &layout,
+                &(text.len() - ATOM_CHIP_EDGE.len()..text.len()),
+                0.0,
+                2.0,
+            )[0];
+            let glyph = crate::input::atom_glyph_bounds(chip, slot, edge.size.width);
+            let left_padding = glyph.left() - chip.left();
+            let right_padding = edge.size.width;
+            assert!(
+                (left_padding - right_padding).abs() < px(0.1),
+                "left={left_padding:?}, right={right_padding:?}"
+            );
+            assert!(slot.right() - glyph.right() > right_padding);
+            assert!(chip.left() >= layout.bounds().left());
+            assert!(chip.right() <= layout.bounds().right());
+        }
     }
 
     /// Highlighting must never change the shaped length of a code block, or a

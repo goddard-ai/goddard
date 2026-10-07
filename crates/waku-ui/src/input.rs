@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -656,11 +655,22 @@ pub struct ContentSplice {
 /// [`TextInput::display_index`]/[`TextInput::content_index`].
 pub const INLINE_ATOM_MARKER: char = '\u{FFF9}';
 
-/// The whitespace an atom chip's painted label opens with — the width the
-/// chip reserves for its leading icon. The em space carries the icon; the
-/// en space keeps it off the label text. A thin space leaves almost no gap
-/// once the height-scaled icon and its inset occupy the leading em.
-pub(crate) const ATOM_ICON_SLOT: &str = "\u{2003}\u{2002}";
+/// Chip spacing lives inside the shaped range, so an edge chip needs no
+/// background overhang. Six-per-em edges and a quarter-em glyph-to-label
+/// gap share the UI face; icon slots reserve 3/4 em, avatar slots one em.
+pub(crate) const ATOM_CHIP_EDGE: &str = "\u{2006}";
+pub(crate) const ATOM_ICON_SLOT: &str = "\u{2006}\u{2002}\u{2005}\u{2005}";
+pub(crate) const ATOM_AVATAR_SLOT: &str = "\u{2006}\u{2002}\u{2002}\u{2005}";
+pub(crate) const ATOM_CHIP_PADDING_EM: f32 = 1.0 / 6.0;
+pub(crate) const ATOM_CHIP_GAP_EM: f32 = 1.0 / 4.0;
+
+pub(crate) fn atom_slot(avatar: bool) -> &'static str {
+    if avatar {
+        ATOM_AVATAR_SLOT
+    } else {
+        ATOM_ICON_SLOT
+    }
+}
 
 /// A session reference's chip icon — the same chat glyph the sidebar and
 /// the session attachment chip carry.
@@ -719,25 +729,25 @@ impl InlineAtom {
             .or_else(|| self.icon.map(AtomGlyph::Icon))
     }
 
-    /// The painted substitution — [`ATOM_ICON_SLOT`] ahead of the label
-    /// when the chip leads with a glyph.
-    fn display_label(&self) -> Cow<'_, str> {
+    fn has_avatar_slot(&self) -> bool {
+        self.avatar.is_some() || matches!(self.icon, Some(ATOM_SESSION_ICON | ATOM_PLANNING_ICON))
+    }
+
+    fn slot(&self) -> &'static str {
         if self.icon.is_some() || self.avatar.is_some() {
-            Cow::Owned(format!("{ATOM_ICON_SLOT}{}", self.label))
+            atom_slot(self.has_avatar_slot())
         } else {
-            Cow::Borrowed(self.label.as_ref())
+            ATOM_CHIP_EDGE
         }
     }
 
-    /// `display_label`'s byte length without building it — the delta every
-    /// display↔content index translation needs.
+    /// Only display text carries spacing; copying and editing keep the atom.
+    fn display_label(&self) -> String {
+        format!("{}{}{ATOM_CHIP_EDGE}", self.slot(), self.label)
+    }
+
     fn display_len(&self) -> usize {
-        self.label.len()
-            + if self.icon.is_some() || self.avatar.is_some() {
-                ATOM_ICON_SLOT.len()
-            } else {
-                0
-            }
+        self.slot().len() + self.label.len() + ATOM_CHIP_EDGE.len()
     }
 }
 
@@ -3181,19 +3191,10 @@ fn visual_row_count(layout: &TextLayout) -> usize {
         .sum()
 }
 
-/// The chip chrome an atom's label paints: the wash extends this far past
-/// the text horizontally and insets this far vertically, so it reads as a
-/// chip rather than a full-height highlight. The transcript paints a sent
-/// atom's label with the same chrome — see `md::render`'s atom ranges.
-pub(crate) const ATOM_CHIP_PADDING_X: Pixels = px(2.0);
+/// Composer and transcript share inset, rounded chip chrome. Horizontal
+/// padding is reserved in the shaped text rather than added to the wash.
 pub(crate) const ATOM_CHIP_INSET_Y: Pixels = px(2.0);
 pub(crate) const ATOM_CHIP_RADIUS: Pixels = px(4.0);
-
-/// A chip's leading icon scales with the chip's height — 0.62 lands ~11px
-/// at the composer's default line height, matching the sibling chips'
-/// 11px glyphs — and sits this far in from the chip's edge.
-pub(crate) const ATOM_ICON_SCALE: f32 = 0.62;
-pub(crate) const ATOM_ICON_INSET_X: Pixels = px(1.0);
 
 /// The face [`ATOM_ICON_SLOT`] shapes in: the platform's UI font, whose
 /// em/en spaces carry their nominal advances on every supported system.
@@ -3206,39 +3207,24 @@ pub(crate) fn atom_slot_font(weight: FontWeight) -> Font {
     slot
 }
 
-/// The painted bounds a chip's leading icon takes inside [`ATOM_ICON_SLOT`]'s
-/// reserved width: vertically centered, with its trailing edge anchored where
-/// [`atom_avatar_bounds`]'s lands, so the slot's gap before the label is the
-/// same whichever glyph fills it.
-pub(crate) fn atom_icon_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
-    let icon = chip.size.height * ATOM_ICON_SCALE;
-    let trailing = chip.origin.x
-        + ATOM_CHIP_PADDING_X
-        + ATOM_ICON_INSET_X
-        + chip.size.height * ATOM_AVATAR_SCALE;
-    Bounds::new(point(trailing - icon, chip.center().y - icon / 2.0), size(icon, icon))
-}
-
-/// A mention chip's avatar fills more of the icon slot than a stroked glyph
-/// does: a square face reads small at [`ATOM_ICON_SCALE`], and the extra
-/// width comes out of the slot's trailing en space, tightening the gap
-/// before the label so the chip reads as one unit.
-pub const ATOM_AVATAR_SCALE: f32 = 0.9;
-
-/// The painted bounds a session mention's avatar takes inside
-/// [`ATOM_ICON_SLOT`]'s reserved width — a step in from the chip's edge with
-/// the larger [`ATOM_AVATAR_SCALE`] box. Its trailing edge is the anchor
-/// [`atom_icon_bounds`] aligns to.
-pub(crate) fn atom_avatar_bounds(chip: Bounds<Pixels>) -> Bounds<Pixels> {
-    let avatar = chip.size.height * ATOM_AVATAR_SCALE;
+/// Paint a glyph in its reserved slot, leaving the same edge padding and
+/// label gap for both widths. Measure the trailing edge space in the same
+/// UI face as the slot, so font advance rounding cannot unbalance the edges.
+pub(crate) fn atom_glyph_bounds(
+    chip: Bounds<Pixels>,
+    slot: Bounds<Pixels>,
+    padding: Pixels,
+) -> Bounds<Pixels> {
+    let gap = padding * (ATOM_CHIP_GAP_EM / ATOM_CHIP_PADDING_EM);
+    let glyph = (slot.size.width - padding - gap).max(Pixels::ZERO);
     Bounds::new(
-        point(
-            chip.origin.x + ATOM_CHIP_PADDING_X + ATOM_ICON_INSET_X,
-            chip.center().y - avatar / 2.0,
-        ),
-        size(avatar, avatar),
+        point(slot.left() + padding, chip.center().y - glyph / 2.0),
+        size(glyph, glyph),
     )
 }
+
+/// A mention avatar is approximately 90% of a body-text chip's height.
+pub const ATOM_AVATAR_SCALE: f32 = 0.9;
 
 /// The chip rect a display-coordinate `range` paints behind an atom's
 /// label — one per visual row the label spans — in the window coordinates
@@ -3278,11 +3264,11 @@ fn atom_chip_bounds(layout: &TextLayout, range: &Range<usize>) -> Vec<Bounds<Pix
                         .map_or(x_start, |p| p.x);
                     chips.push(Bounds::new(
                         point(
-                            line_origin.x + x_start - ATOM_CHIP_PADDING_X,
+                            line_origin.x + x_start,
                             line_origin.y + line_height * row_index as f32 + ATOM_CHIP_INSET_Y,
                         ),
                         size(
-                            (x_end - x_start).max(Pixels::ZERO) + ATOM_CHIP_PADDING_X * 2.0,
+                            (x_end - x_start).max(Pixels::ZERO),
                             line_height - ATOM_CHIP_INSET_Y * 2.0,
                         ),
                     ));
@@ -3841,20 +3827,16 @@ impl Element for InputElement {
         let atom_icons: Vec<Option<AtomGlyph>> = atom_ranges
             .iter()
             .enumerate()
-            .map(|(index, _)| {
-                input
-                    .inline_atoms
-                    .get(index)
-                    .and_then(|atom| atom.glyph())
-            })
+            .map(|(index, _)| input.inline_atoms.get(index).and_then(|atom| atom.glyph()))
             .collect();
         let atom_slots: Vec<Range<usize>> = atom_ranges
             .iter()
-            .zip(&atom_icons)
-            .filter_map(|(range, glyph)| {
-                glyph
-                    .as_ref()
-                    .map(|_| range.start..range.start + ATOM_ICON_SLOT.len())
+            .zip(&input.inline_atoms)
+            .flat_map(|(range, atom)| {
+                [
+                    range.start..range.start + atom.slot().len(),
+                    range.end - ATOM_CHIP_EDGE.len()..range.end,
+                ]
             })
             .collect();
         let atoms = if has_atoms {
@@ -3925,10 +3907,19 @@ impl Element for InputElement {
             if let Some(glyph) = layout_state.atom_icons.get(index).cloned().flatten()
                 && let Some(chip) = bounds.first()
             {
-                let glyph_bounds = match glyph {
-                    AtomGlyph::Icon(_) => atom_icon_bounds(*chip),
-                    AtomGlyph::Avatar(_) => atom_avatar_bounds(*chip),
+                let avatar = matches!(
+                    glyph,
+                    AtomGlyph::Avatar(_) | AtomGlyph::Icon(ATOM_SESSION_ICON | ATOM_PLANNING_ICON)
+                );
+                let slot = range.start..range.start + atom_slot(avatar).len();
+                let slot_bounds = atom_chip_bounds(&layout, &slot);
+                let Some(slot) = slot_bounds.first() else {
+                    continue;
                 };
+                let edge_range = range.end - ATOM_CHIP_EDGE.len()..range.end;
+                let edges = atom_chip_bounds(&layout, &edge_range);
+                let Some(edge) = edges.last() else { continue };
+                let glyph_bounds = atom_glyph_bounds(*chip, *slot, edge.size.width);
                 atom_icons.push((glyph, glyph_bounds));
             }
             atom_chips.extend(bounds.into_iter().map(|bounds| {
@@ -4714,7 +4705,7 @@ mod tests {
 
     #[gpui::test]
     fn inline_atoms_translate_layout_indices(cx: &mut TestAppContext) {
-        use super::{ATOM_ICON_SLOT, ATOM_SESSION_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
+        use super::{ATOM_SESSION_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
         let (harness, cx) = cx.add_window_view(|window, cx| {
             // "see {A} now" — one atom mid-text.
@@ -4743,7 +4734,7 @@ mod tests {
             let marker_len = A.len_utf8();
             // The painted substitution carries the icon slot ahead of the
             // label.
-            let label_len = ATOM_ICON_SLOT.len() + "Big refactor".len();
+            let label_len = input.inline_atoms[0].display_len();
             // Before the marker: identity. Past it: shifted by the delta.
             assert_eq!(input.display_index(marker), marker);
             assert_eq!(input.display_index(marker + marker_len), marker + label_len);
@@ -4806,7 +4797,13 @@ mod tests {
             })
             .detach();
         });
-        cx.simulate_click(chip.center(), Modifiers::none());
+        // A wrapped chip's union can include empty space between its rows;
+        // click a painted fragment rather than the union's center.
+        let position = input.read_with(cx, |input, _| {
+            let range = &input.atom_display_ranges()[0];
+            super::atom_chip_bounds(input.last_layout.as_ref().unwrap(), range)[0].center()
+        });
+        cx.simulate_click(position, Modifiers::none());
         assert!(
             events
                 .borrow()
@@ -6410,9 +6407,9 @@ mod tests {
         let ranges = [slot.clone()];
         let slots = [slot];
         let runs = input_text_runs(
-            16,
+            22,
             TextRun {
-                len: 16,
+                len: 22,
                 font: font("Test Sans"),
                 color: plain,
                 background_color: None,
@@ -6436,23 +6433,11 @@ mod tests {
 
         assert_eq!(
             runs.iter().map(|run| run.len).collect::<Vec<_>>(),
-            [4, 6, 6]
+            [4, 12, 6]
         );
         assert_eq!(runs[1].font.family.as_ref(), "Slot Face");
         assert_eq!(runs[1].color, accent);
         assert_eq!(runs[2].font.family.as_ref(), "Test Sans");
-    }
-
-    /// Icon and avatar chips share the slot's trailing edge, so the label
-    /// keeps one gap whichever glyph the chip paints.
-    #[test]
-    fn icon_and_avatar_chips_leave_the_same_gap_before_the_label() {
-        use gpui::{Bounds, size};
-        let chip = Bounds::new(point(px(10.0), px(20.0)), size(px(60.0), px(17.0)));
-        assert_eq!(
-            super::atom_icon_bounds(chip).right(),
-            super::atom_avatar_bounds(chip).right()
-        );
     }
 
     /// The single-line scroll follows the caret with an em of lookahead and
