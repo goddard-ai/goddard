@@ -27,8 +27,8 @@ const MIN_RESPONSE_CHARS: usize = 300;
 /// asks live at the end, and the cap keeps the request inside a small
 /// model's latency budget.
 const RESPONSE_INPUT_CHARS: usize = 24_000;
-/// Roughly 45 seconds of speech at a normal pace; the prompt asks for this
-/// and the result is trimmed to it as a backstop.
+/// Roughly 45 seconds of speech at a normal pace; caps transcripts even
+/// when custom instructions ask for a longer briefing.
 const TRANSCRIPT_WORD_CAP: usize = 110;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const CHAT_COMPLETIONS_URL: &str = "https://ai-gateway.vercel.sh/v1/chat/completions";
@@ -63,12 +63,10 @@ pub(super) struct BriefingClip {
 }
 
 pub(super) fn default_voice_briefing_summary_instructions() -> String {
-    format!(
-        "You write a short spoken briefing for a user returning to an agent coding session. \
-         Given the agent's latest reply, say what it did and how it ended, then state plainly \
-         any decision or action the user needs to take. Plain spoken sentences only — no \
-         markdown, lists, or code. At most {TRANSCRIPT_WORD_CAP} words. Output only the transcript."
-    )
+    "Summarize the agent's latest turn into a single, plain-spoken sentence under 20 words that states only the current status. \
+     Do not include questions, details, next steps, suggestions, or greetings. \
+     Write exclusively in plain text suitable for TTS, with no punctuation except a final period. Output only the sentence."
+        .to_owned()
 }
 
 pub(super) fn effective_voice_briefing_summary_instructions(
@@ -1265,6 +1263,30 @@ pub(super) async fn post_json(
 ) -> anyhow::Result<Value> {
     let bytes = post(http, executor, url, key, provider, model_header, body).await?;
     serde_json::from_slice(&bytes).context("the gateway returned invalid JSON")
+}
+
+#[cfg(test)]
+mod instructions_tests {
+    use super::*;
+
+    #[test]
+    fn default_fallback_preserves_saved_custom_instructions() {
+        let default = default_voice_briefing_summary_instructions();
+        assert_eq!(
+            effective_voice_briefing_summary_instructions("", false),
+            default
+        );
+
+        let custom = "Read the complete reply exactly as written.";
+        assert_eq!(
+            effective_voice_briefing_summary_instructions(custom, true),
+            custom
+        );
+        assert_eq!(
+            effective_voice_briefing_summary_instructions(custom, false),
+            format!("{default}\n\n{custom}")
+        );
+    }
 }
 
 #[cfg(test)]
