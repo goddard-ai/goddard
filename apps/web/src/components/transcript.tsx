@@ -120,8 +120,8 @@ export function Transcript({
   rewindingTurnCount?: number
 }) {
   const { locale, t } = useI18n()
-  const { renameRequests, respond } = useRuntime()
-  const renameRequest = renameRequests[session.id]
+  const { daemonRequests, respond } = useRuntime()
+  const daemonRequest = daemonRequests[session.id]
   const root = useRef<HTMLDivElement>(null)
   const transcript = useRef<VirtuosoHandle>(null)
   const transcriptScroller = useRef<HTMLElement | null>(null)
@@ -218,26 +218,26 @@ export function Transcript({
   return (
     <TranscriptLinkContext.Provider value={onOpenLink ?? (() => false)}>
       <div className="relative min-h-0 flex-1" ref={root}>
-      {/* A daemon-owned rename request pins to the top of the transcript —
+      {/* A daemon-owned request pins to the top of the transcript —
           not a row, so scrolling and turn folds can never hide it — until
           the user answers or the daemon settles it. */}
-      {renameRequest && (
+      {daemonRequest && (
         <div className="absolute inset-x-0 top-2 z-20 px-3 sm:px-5">
           <section className="mx-auto w-full max-w-[720px] rounded-xl border border-[color:var(--warning)]/30 bg-card p-3 shadow-lg">
-            <div className="text-[13px] font-medium">{renameRequest.title}</div>
-            {renameRequest.detail && (
+            <div className="text-[13px] font-medium">{daemonRequest.title}</div>
+            {daemonRequest.detail && (
               <p className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-xs leading-5 text-[var(--text-tertiary)]">
-                {renameRequest.detail}
+                {daemonRequest.detail}
               </p>
             )}
             <div className="mt-3 flex flex-wrap justify-end gap-2">
-              {renameRequest.options.map((option) => (
+              {daemonRequest.options.map((option) => (
                 <Button
                   key={option.id}
                   size="sm"
                   variant={option.allow ? 'default' : 'outline'}
                   onClick={() => {
-                    void respond(session.id, renameRequest.requestId, option.id).catch((error) =>
+                    void respond(session.id, daemonRequest.requestId, option.id).catch((error) =>
                       toast.error(error instanceof Error ? error.message : String(error)),
                     )
                   }}

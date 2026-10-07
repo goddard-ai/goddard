@@ -121,7 +121,7 @@ interface RuntimeContextValue {
   /** Daemon-owned `agentRenameSelf` requests: they outlive the turn that
    * raised them, so they ride their own map — turn settles never clear
    * them, `requestSettled` events and answers do. */
-  renameRequests: Record<string, PendingPermission | undefined>
+  daemonRequests: Record<string, PendingPermission | undefined>
   userInputs: Record<string, PendingUserInput | undefined>
   backgroundWork: Record<string, BackgroundWorkItem[]>
   responseForks: Record<string, number | undefined>
@@ -197,7 +197,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<
     Record<string, PendingPermission | undefined>
   >({})
-  const [renameRequests, setRenameRequests] = useState<
+  const [daemonRequests, setDaemonRequests] = useState<
     Record<string, PendingPermission | undefined>
   >({})
   const [userInputs, setUserInputs] = useState<
@@ -563,10 +563,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             [session.id]: result.permission ?? undefined,
           }))
         }
-        if (result.renameRequest !== undefined) {
-          setRenameRequests((previous) => ({
+        if (result.daemonRequest !== undefined) {
+          setDaemonRequests((previous) => ({
             ...previous,
-            [session.id]: result.renameRequest ?? undefined,
+            [session.id]: result.daemonRequest ?? undefined,
           }))
         }
         if (result.settledRequestId !== undefined) {
@@ -578,7 +578,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               ? { ...map, [session.id]: undefined }
               : map
           setPermissions(drop)
-          setRenameRequests(drop)
+          setDaemonRequests(drop)
           setUserInputs(drop)
         }
         if (result.userInput !== undefined) {
@@ -1242,7 +1242,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       saveGenerations.current.delete(sessionId)
       pendingSteers.current.delete(sessionId)
       setPermissions((current) => removeRecordKey(current, sessionId))
-      setRenameRequests((current) => removeRecordKey(current, sessionId))
+      setDaemonRequests((current) => removeRecordKey(current, sessionId))
       setUserInputs((current) => removeRecordKey(current, sessionId))
       setBackgroundWork((current) => removeRecordKey(current, sessionId))
     },
@@ -1260,7 +1260,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         runtime.runtimeId,
       )
       setPermissions((current) => ({ ...current, [sessionId]: undefined }))
-      setRenameRequests((current) => ({ ...current, [sessionId]: undefined }))
+      setDaemonRequests((current) => ({ ...current, [sessionId]: undefined }))
       const key = config && daemonKeys.session(config.address, sessionId)
       if (key) {
         const session = queryClient.getQueryData<AgentSession>(key)
@@ -1461,7 +1461,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     messageRewindsInFlight.current.clear()
     setRuntimes({})
     setPermissions({})
-    setRenameRequests({})
+    setDaemonRequests({})
     setUserInputs({})
     setBackgroundWork({})
     setResponseForks({})
@@ -1479,7 +1479,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const value: RuntimeContextValue = {
     runtimes,
     permissions,
-    renameRequests,
+    daemonRequests,
     userInputs,
     backgroundWork,
     responseForks,

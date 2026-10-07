@@ -626,6 +626,7 @@ export function createProject(path: string): Project {
     created_at: unixTime(),
     temporary: false,
     starred: false,
+    submissions_enabled: false,
   }
 }
 

@@ -70,6 +70,7 @@ describe('desktop sidebar presentation', () => {
       created_at: 1,
       temporary: false,
       starred: false,
+      submissions_enabled: false,
     }
     const groups = groupSessions(
       [project],

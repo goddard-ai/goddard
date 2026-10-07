@@ -8,7 +8,9 @@ import type {
 export function composerDraftId(target: ComposerDraftTarget): string {
   return target.type === 'newSession'
     ? `new:${target.projectId}`
-    : `session:${target.sessionId}`
+    : target.type === 'deliverable'
+      ? `deliverable:${target.deliverableId}`
+      : `session:${target.sessionId}`
 }
 
 export function composerDraftFor(
@@ -17,7 +19,9 @@ export function composerDraftFor(
 ): ComposerDraft {
   const draft = target.type === 'newSession'
     ? drafts.new_sessions?.[target.projectId]
-    : drafts.sessions?.[target.sessionId]
+    : target.type === 'deliverable'
+      ? drafts.deliverables?.[target.deliverableId]
+      : drafts.sessions?.[target.sessionId]
   return {
     text: draft?.text ?? '',
     attachments: draft?.attachments ?? [],
@@ -35,8 +39,14 @@ export function setComposerDraft(
   if (draftsEqual(current, normalized)) return null
   const entries = target.type === 'newSession'
     ? (drafts.new_sessions ??= {})
-    : (drafts.sessions ??= {})
-  const id = target.type === 'newSession' ? target.projectId : target.sessionId
+    : target.type === 'deliverable'
+      ? (drafts.deliverables ??= {})
+      : (drafts.sessions ??= {})
+  const id = target.type === 'newSession'
+    ? target.projectId
+    : target.type === 'deliverable'
+      ? target.deliverableId
+      : target.sessionId
   if (draftEmpty(normalized)) delete entries[id]
   else entries[id] = normalized
   return { target, draft: draftEmpty(normalized) ? null : normalized }
