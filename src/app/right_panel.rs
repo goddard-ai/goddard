@@ -8652,6 +8652,19 @@ impl Waku {
             .child(
                 div()
                     .track_focus(&preview_focus)
+                    .on_action(cx.listener({
+                        let selection = preview_selection.clone();
+                        move |_, _: &CopySelection, _, cx| {
+                            // This document has its own registry; the workspace
+                            // copy handler otherwise reads the hidden transcript.
+                            match selection.selection.borrow().clipboard_text() {
+                                Some(text) => {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                }
+                                None => cx.propagate(),
+                            }
+                        }
+                    }))
                     // The focus claim lives on the document container, not
                     // the pane: a click in the find bar must not pull the
                     // caret back out of its query field.
