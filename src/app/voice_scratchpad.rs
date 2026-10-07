@@ -1021,12 +1021,21 @@ impl ScratchpadTranscript {
     }
 
     /// Whether the append point's paragraph has nothing painted — no
-    /// text, no bullets, or none exists at all. It owns no row: the live
-    /// row carries the record dot at the slot its first words land.
+    /// text, no bullets, or none exists at all. It still takes its
+    /// pending row: the record dot sits on the blank line its first
+    /// words land in.
     fn append_point_unwritten(&self) -> bool {
         self.paragraphs.last().is_none_or(|paragraph| {
             paragraph.text.is_empty() && paragraph.bullets.is_empty()
         })
+    }
+
+    /// Whether the append point's paragraph paints a row this frame —
+    /// pending paragraphs paint theirs (divider and the dot's blank
+    /// line included); the armed row only stands down while an open
+    /// annotation box owns the record dot.
+    fn append_point_row_paints(&self) -> bool {
+        !self.append_point_unwritten() || self.annotation_target.is_none()
     }
 
     /// Remove the append point's trailing word — a command's first half
@@ -1730,20 +1739,16 @@ impl ScratchpadTranscript {
         }
     }
 
-    /// The selection key `node` paints under — `vs-p-{i}` for a paragraph,
-    /// `vs-b-{i}` at index j for a bullet, `vs-p-live` for the live row:
-    /// the empty session's row, or the append point's while its paragraph
-    /// is still unwritten and owns no row of its own.
+    /// The selection key `node` paints under — `vs-p-{i}` for a paragraph
+    /// (its pending row included), `vs-b-{i}` at index j for a bullet,
+    /// `vs-p-live` for the empty session's live row.
     fn node_key(&self, node: ScratchpadNode) -> md::selection::TextKey {
         match node {
             ScratchpadNode::Paragraph(index) => {
-                let live = index >= self.paragraphs.len()
-                    || (index + 1 == self.paragraphs.len()
-                        && self.append_point_unwritten());
-                if live {
-                    md::selection::TextKey::new("vs-p-live", 0)
-                } else {
+                if index < self.paragraphs.len() {
                     md::selection::TextKey::new(format!("vs-p-{index}"), 0)
+                } else {
+                    md::selection::TextKey::new("vs-p-live", 0)
                 }
             }
             ScratchpadNode::Bullet(paragraph, bullet) => {
@@ -4640,10 +4645,12 @@ impl Waku {
                 annotation_target,
                 Some(AnnotationTarget::Paragraph(target)) if target == index
             );
-            // An armed paragraph with nothing written paints no row — the
-            // live row carries the record dot at the slot its first words
-            // land, so the dot never sits under an empty line.
-            if is_current && transcript.append_point_unwritten() {
+            // An armed paragraph with nothing written still paints its
+            // pending row — the divider shows the split the moment the
+            // append point advances, and the record dot sits on the
+            // blank line its first words take. An open annotation box
+            // owns the dot: the row stands down while one is open.
+            if is_current && !transcript.append_point_row_paints() {
                 continue;
             }
             if !first_drawn {
@@ -4727,7 +4734,13 @@ impl Waku {
                             row.child(scratchpad_cleanup_spinner(14.0, theme))
                         })
                         .when(show_dot, |row| {
-                            row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
+                            row.child(scratchpad_append_dot(
+                                flat.text.is_empty(),
+                                14.0,
+                                muted,
+                                status,
+                                theme,
+                            ))
                         })
                         .when_some(ghost, |row, ghost| row.child(ghost)),
                 )
@@ -4907,13 +4920,11 @@ impl Waku {
                 }));
             }
         }
-        // The live row holds the append point's slot while nothing is
-        // written there — a fresh session's empty transcript, or the
-        // armed paragraph an advance left unwritten. Interim speech
-        // paints beside the dot until the first finalized chunk gives it
-        // a paragraph to land in; an open annotation box owns the dot
-        // instead.
-        if transcript.append_point_unwritten() && annotation_target.is_none() {
+        // A fresh session's empty scratchpad still shows its live row —
+        // interim speech paints beside the dot until the first finalized
+        // chunk gives it a paragraph to land in. Once a paragraph exists
+        // its own row holds the slot instead, pending or written.
+        if transcript.paragraphs.is_empty() {
             let flat = scratchpad_paragraph_text(
                 "",
                 &transcript.interim,
@@ -4931,6 +4942,7 @@ impl Waku {
                     .cursor_default()
                     .child(
                         div()
+                            .relative()
                             .flex()
                             .flex_wrap()
                             .items_start()
@@ -4943,7 +4955,13 @@ impl Waku {
                                 theme.selection,
                                 false,
                             ))
-                            .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
+                            .child(scratchpad_append_dot(
+                                flat.text.is_empty(),
+                                14.0,
+                                muted,
+                                status,
+                                theme,
+                            )),
                     )
                     // Nothing is written here yet — the live row is the
                     // insertion point, so the click lands the caret and
@@ -5609,6 +5627,27 @@ fn scratchpad_dot_on_line(
         .child(scratchpad_dot(muted, status, theme))
 }
 
+/// The record dot at the append point's slot. In flow it trails the
+/// row's text; while the row's first line is still blank it paints on
+/// that line — the empty text element takes the whole wrap column, so
+/// an in-flow dot would wrap under it instead of marking the slot the
+/// first words take.
+fn scratchpad_append_dot(
+    text_blank: bool,
+    text_size: f32,
+    muted: bool,
+    status: ScratchpadStatus,
+    theme: &Theme,
+) -> Div {
+    let dot = scratchpad_dot_on_line(text_size, muted, status, theme)
+        .debug_selector(|| "vs-append-dot".into());
+    if text_blank {
+        div().absolute().top_0().left_0().child(dot)
+    } else {
+        dot
+    }
+}
+
 /// The cleanup spinner at a cleaning node's tail — the same shared-clock
 /// loader every spinner rides, offset to sit on the first text line the
 /// way the record dot does.
@@ -6153,38 +6192,46 @@ mod tests {
     }
 
     #[test]
-    fn an_unwritten_append_point_paints_on_the_live_row() {
-        // An armed-but-empty paragraph owns no row — its node keys out
-        // to the live row's slot so the record dot, a caret, or a grab
-        // there find the painted element. It takes its own row once text
-        // lands.
+    fn an_unwritten_append_point_keeps_its_pending_row() {
+        // An armed-but-empty paragraph still paints its pending row —
+        // divider and the dot's blank line included — under its own
+        // key, so a caret or grab there resolves the same as on a
+        // written row.
         let mut transcript = ScratchpadTranscript::default();
         assert!(transcript.append_point_unwritten());
         transcript.append_finalized("the plan");
         assert!(!transcript.append_point_unwritten());
-        // Clicking out of a note box arms a fresh paragraph at the end.
+        // Clicking out of a note box arms a fresh paragraph at the end —
+        // two painted rows now, so the divider between them shows.
         transcript.annotate(0);
         transcript.append_finalized("a note");
         transcript.commit_annotation();
         assert_eq!(transcript.paragraphs.len(), 2);
         assert!(transcript.paragraphs[1].text.is_empty());
         assert!(transcript.append_point_unwritten());
+        assert!(transcript.append_point_row_paints());
         assert_eq!(
             transcript.node_key(ScratchpadNode::Paragraph(1)),
-            md::selection::TextKey::new("vs-p-live", 0)
+            md::selection::TextKey::new("vs-p-1", 0)
         );
         assert_eq!(
-            transcript.node_for_key(&md::selection::TextKey::new("vs-p-live", 0)),
+            transcript.node_for_key(&md::selection::TextKey::new("vs-p-1", 0)),
             Some(ScratchpadNode::Paragraph(1))
         );
+        // An open box owns the record dot — the armed row stands down
+        // until the box goes away.
+        transcript.annotate(0);
+        assert!(!transcript.append_point_row_paints());
+        transcript.exit_annotation();
+        assert!(transcript.append_point_row_paints());
         transcript.append_finalized("moving on");
         assert!(!transcript.append_point_unwritten());
         assert_eq!(
             transcript.node_key(ScratchpadNode::Paragraph(1)),
             md::selection::TextKey::new("vs-p-1", 0)
         );
-        // Unwritten means nothing painted at all — an emptied paragraph
-        // that still holds bullets keeps its own row and key.
+        // An emptied paragraph that still holds bullets keeps its row
+        // and key.
         transcript.paragraphs[1].text.clear();
         transcript.paragraphs[1].bullets.push(ScratchpadBullet {
             text: "a kept note".to_owned(),
@@ -6195,6 +6242,25 @@ mod tests {
             transcript.node_key(ScratchpadNode::Paragraph(1)),
             md::selection::TextKey::new("vs-p-1", 0)
         );
+    }
+
+    #[test]
+    fn an_advance_paints_the_pending_row_immediately() {
+        // "okay next" leaves the new paragraph armed and empty — its
+        // pending row (and the divider above it) paints before any of
+        // its words land.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan okay next");
+        assert_eq!(transcript.paragraphs.len(), 2);
+        assert!(transcript.paragraphs[1].text.is_empty());
+        assert!(transcript.append_point_row_paints());
+        // The empty session fronts the live row instead — no paragraph
+        // exists to hold the slot.
+        let mut transcript = ScratchpadTranscript::default();
+        assert!(transcript.paragraphs.is_empty());
+        assert!(transcript.append_point_row_paints());
+        transcript.append_finalized("first words");
+        assert!(!transcript.paragraphs.is_empty());
     }
 
     #[test]
@@ -7503,6 +7569,111 @@ mod tests {
             inner.size.height > px(13.0 * 1.618_034 + 1.0),
             "the bare text leaf painted one line instead of wrapping: {:?}",
             inner.size
+        );
+    }
+
+    /// Mirrors a paragraph row's DOM — the wrap line holding the text
+    /// element and the record dot — so the test can measure the dot
+    /// against the row's first line in both fill states. Keep it in
+    /// step with `render_scratchpad_rows`: the wiring it guards lives
+    /// there, in `scratchpad_append_dot`'s caller.
+    struct PendingRowHarness {
+        text: &'static str,
+    }
+
+    impl Render for PendingRowHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = Theme::current(cx);
+            let ui_family = crate::fonts::current(cx).ui;
+            let flat = scratchpad_paragraph_text(
+                self.text,
+                "",
+                &[],
+                &[],
+                1.0,
+                &ui_family,
+                &theme,
+            );
+            div().size_full().child(
+                div().w(px(400.0)).child(
+                    div()
+                        .debug_selector(|| "pending-row".into())
+                        .w_full()
+                        .relative()
+                        .rounded(px(4.0))
+                        .py(px(2.0))
+                        .child(
+                            div()
+                                .relative()
+                                .flex()
+                                .flex_wrap()
+                                .items_start()
+                                .gap(px(4.0))
+                                .child(md::render::selectable_flat_text(
+                                    &flat,
+                                    md::selection::TextKey::new("vs-p-1", 0),
+                                    TranscriptSelection::default(),
+                                    theme.code_wash,
+                                    theme.selection,
+                                    false,
+                                ))
+                                .child(scratchpad_append_dot(
+                                    flat.text.is_empty(),
+                                    14.0,
+                                    false,
+                                    ScratchpadStatus::Live,
+                                    &theme,
+                                )),
+                        ),
+                ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn pending_row_dot_sits_on_the_blank_line(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, _| PendingRowHarness { text: "" });
+        cx.run_until_parked();
+        let row = cx
+            .debug_bounds("pending-row")
+            .expect("the pending row should paint");
+        let dot = cx
+            .debug_bounds("vs-append-dot")
+            .expect("the record dot should paint");
+        // The dot marks the slot the first words take — on the blank
+        // first line, not wrapped under it.
+        let line = px(14.0 * 1.618_034);
+        assert!(
+            dot.origin.y - row.origin.y < line,
+            "the dot painted {:?} below the row top — under the blank line",
+            dot.origin.y - row.origin.y
+        );
+        assert!(
+            dot.origin.x <= row.origin.x + px(1.0),
+            "the dot painted off the line's start: {:?} against {:?}",
+            dot.origin,
+            row.origin
+        );
+    }
+
+    #[gpui::test]
+    fn written_row_dot_trails_under_the_text(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) =
+            cx.add_window_view(|_, _| PendingRowHarness { text: "first words land" });
+        cx.run_until_parked();
+        let row = cx
+            .debug_bounds("pending-row")
+            .expect("the row should paint");
+        let dot = cx
+            .debug_bounds("vs-append-dot")
+            .expect("the record dot should paint");
+        // With ink on the row the dot keeps its trailing slot — under
+        // the painted text, where the next words land.
+        assert!(
+            dot.origin.y - row.origin.y >= px(14.0 * 1.618_034),
+            "the dot didn't drop under the text: {:?} against {:?}",
+            dot.origin,
+            row.origin
         );
     }
 }

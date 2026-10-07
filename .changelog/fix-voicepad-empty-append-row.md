@@ -1,1 +1,1 @@
-- The VoicePad scratchpad no longer holds a blank line open where the next dictated paragraph will land — the red record dot sits at that spot, and the line appears when text arrives.
+- In the VoicePad scratchpad, the divider for the next paragraph and the red record dot appear the moment dictation moves on ("okay next" or clicking out of a note box) — the dot sits on the blank line where the next words land, and the line fills in as they arrive.
