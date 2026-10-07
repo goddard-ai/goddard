@@ -1,0 +1,1 @@
+- Employee instructions now reserve supervisor interruptions for blockers that require supervisor or human action, and direct recoverable failures and non-blocking findings to normal work and finish reports.

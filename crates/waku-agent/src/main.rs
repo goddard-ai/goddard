@@ -467,9 +467,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss speak --file briefing.md".to_owned(),
         ),
         "boss report-blocker" => (
-            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 blocker message"},"role":"employee only"}),
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 blocker message"},"role":"employee only","description":"Report only when you cannot proceed without supervisor or human action: permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions. Fix recoverable check failures yourself (wrong flags, missing dependencies, flaky retries); resolve style and approach choices from existing code and docs. Put useful non-blocking findings in your finish report. This interrupts your supervisor."}),
             json!({"json":{"type":"saved"}}),
-            "goddard-agent boss report-blocker --text 'Blocked on a missing API decision.'".to_owned(),
+            "goddard-agent boss report-blocker --text 'Blocked: permission denied; supervisor approval required.'".to_owned(),
         ),
         "boss open" => (
             json!({"--provider":{"required":true,"enum":providers},"--model":{"optional":true,"type":"provider model ID"},"--mode":{"enum":["ask","autoAcceptEdits","auto","fullAccess"],"default":"autoAcceptEdits"},"role":"human only"}),
@@ -598,7 +598,12 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         _ => unreachable!("missing input schema for executable leaf `{path}`"),
     };
-    json!({"command":path,"help":format!("{}; output defaults to text on a terminal and JSON when piped.",example),"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]})
+    let mut help = format!("{example}; output defaults to text on a terminal and JSON when piped.");
+    if let Some(description) = inputs.get("description").and_then(serde_json::Value::as_str) {
+        help.push(' ');
+        help.push_str(description);
+    }
+    json!({"command":path,"help":help,"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]})
 }
 
 #[allow(dead_code)]
@@ -3019,6 +3024,10 @@ mod tests {
         }
         assert!(USAGE.contains("goddard-agent map"));
         assert!(schema.contains("\"--anchors\""));
+        let blocker = leaf_schema("boss report-blocker");
+        let description = blocker["inputs"]["description"].as_str().unwrap();
+        assert!(!description.is_empty());
+        assert!(blocker["help"].as_str().unwrap().contains(description));
         // The schema stays machine-readable.
         let _: serde_json::Value = serde_json::from_str(&schema).unwrap();
     }
