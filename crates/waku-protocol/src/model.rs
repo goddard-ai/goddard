@@ -2254,7 +2254,25 @@ impl AgentSession {
                     continue;
                 }
                 for activity in &block.activities {
-                    if let Some(text) = activity.condensed_text(AGENT_TRANSCRIPT_ACTIVITY_CAP) {
+                    if activity.reasoning.is_some() {
+                        continue;
+                    }
+                    let mut text =
+                        activity.condensed_text_with_output(AGENT_TRANSCRIPT_ACTIVITY_CAP, false);
+                    if let Some(output) = activity
+                        .output
+                        .as_deref()
+                        .filter(|output| !output.trim().is_empty())
+                    {
+                        // Build the header without output: its cap must never
+                        // consume the evidence a supervisor came here to read.
+                        text = Some(format!(
+                            "{}\n    {}",
+                            text.unwrap_or_default(),
+                            truncate_chars(output.trim(), AGENT_TRANSCRIPT_OUTPUT_CAP)
+                        ));
+                    }
+                    if let Some(text) = text {
                         items.push(AgentTranscriptItem {
                             turn: turn_of(block.turn_id),
                             kind: AgentTranscriptItemKind::Activity,
@@ -4011,6 +4029,7 @@ impl Message {
 /// blow past what a scoped caller can usefully ingest.
 const AGENT_TRANSCRIPT_MESSAGE_CAP: usize = 8 * 1024;
 const AGENT_TRANSCRIPT_ACTIVITY_CAP: usize = 4 * 1024;
+const AGENT_TRANSCRIPT_OUTPUT_CAP: usize = 8 * 1024;
 const AGENT_TRANSCRIPT_TOTAL_CAP: usize = 128 * 1024;
 
 /// Bounds for [`AgentSession::transcript_index`]: the index is a map of
@@ -5200,6 +5219,10 @@ impl ActivityItem {
     /// bounded detail fields, capped at `cap` characters. Reasoning entries
     /// stay private to the provider that produced them and return `None`.
     pub fn condensed_text(&self, cap: usize) -> Option<String> {
+        self.condensed_text_with_output(cap, true)
+    }
+
+    fn condensed_text_with_output(&self, cap: usize, include_output: bool) -> Option<String> {
         if self.reasoning.is_some() {
             return None;
         }
@@ -5207,7 +5230,7 @@ impl ActivityItem {
         for field in [
             self.detail.as_deref(),
             self.arguments.as_deref(),
-            self.output.as_deref(),
+            self.output.as_deref().filter(|_| include_output),
         ]
         .into_iter()
         .flatten()

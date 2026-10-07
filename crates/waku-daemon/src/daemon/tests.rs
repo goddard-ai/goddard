@@ -10085,3 +10085,137 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
+    let root = std::env::temp_dir().join(format!("employee-retention-{}", Uuid::new_v4()));
+    let (backend, supervisor) = surface_test_backend(&root);
+    backend.boss.set_session_id(supervisor).unwrap();
+    let persona = backend.boss.document().personas[1].id;
+    let employee = backend
+        .boss
+        .prepare_employee(
+            supervisor,
+            persona,
+            "Evidence".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    let now = crate::model::unix_time();
+    {
+        let mut state = backend.task_state.lock();
+        let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+        child.id = id;
+        let turn = child.begin_turn("Run checks and read a file");
+        child.finish_active_turn(crate::model::TurnStatus::Completed);
+        child.archived_at = Some(now - ARCHIVED_SESSION_RETENTION_SECONDS - 1);
+        child.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: Some(turn),
+            activities: vec![
+                ActivityItem::new(
+                    None,
+                    crate::model::ActivityKind::Command,
+                    "exec",
+                    None,
+                    true,
+                )
+                .with_arguments(Some("x".repeat(10_000)))
+                .with_output(Some("checks passed: command evidence".into())),
+                ActivityItem::new(
+                    None,
+                    crate::model::ActivityKind::Tool,
+                    "Read file",
+                    None,
+                    true,
+                )
+                .with_output(Some("file evidence".into())),
+            ],
+        });
+        state.push_session(child);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .boss
+        .set_employee_expired_at(id, now - 24 * 60 * 60)
+        .unwrap();
+    assert_eq!(backend.boss.retire_expired(now).unwrap().len(), 1);
+    // Even an archive already older than the outer purge survives next day.
+    backend.purge_expired_archived_sessions();
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == id)
+    );
+    let document = backend.boss.document();
+    for age in [24 * 60 * 60, EMPLOYEE_TRANSCRIPT_RETENTION_SECONDS] {
+        let expired_at = document
+            .retired_employees
+            .iter()
+            .find(|employee| employee.session_id == id)
+            .unwrap()
+            .expired_at
+            .unwrap();
+        let protected = protected_employee_transcripts(&document, expired_at + age);
+        assert!(protected.contains(&id));
+        assert_eq!(
+            backend
+                .task_store
+                .prune_archived_session_details(now, 8, document.identity.id, &protected)
+                .unwrap(),
+            0
+        );
+        // Reopen storage, not a resident copy, and read through the boss's
+        // actual transcript projection. Large exec arguments cannot hide output.
+        let reopened = StateStore::daemon(root.join("app.db"));
+        let mut restored = reopened.load().unwrap();
+        let session = restored
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .unwrap();
+        reopened.hydrate(session).unwrap();
+        for turn in [None, Some(1)] {
+            let transcript = session.agent_transcript(turn);
+            assert!(
+                transcript
+                    .items
+                    .iter()
+                    .any(|item| item.content.contains("command evidence"))
+            );
+            assert!(
+                transcript
+                    .items
+                    .iter()
+                    .any(|item| item.content.contains("file evidence"))
+            );
+        }
+    }
+    let expired_at = document
+        .retired_employees
+        .iter()
+        .find(|employee| employee.session_id == id)
+        .unwrap()
+        .expired_at
+        .unwrap();
+    let protected = protected_employee_transcripts(
+        &document,
+        expired_at + EMPLOYEE_TRANSCRIPT_RETENTION_SECONDS + 1,
+    );
+    assert!(!protected.contains(&id));
+    assert_eq!(
+        backend
+            .task_store
+            .prune_archived_session_details(now, 8, document.identity.id, &protected)
+            .unwrap(),
+        1
+    );
+    std::fs::remove_dir_all(root).ok();
+}

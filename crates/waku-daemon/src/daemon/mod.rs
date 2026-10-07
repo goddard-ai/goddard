@@ -202,6 +202,27 @@ const ARCHIVED_SESSION_RETENTION_SECONDS: u64 = 30 * 24 * 60 * 60;
 /// Boss project keeps its payloads until the outer purge removes it.
 const ARCHIVED_DETAIL_RETENTION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
+/// Employee evidence survives expiry (including roster retirement) for at
+/// least 48 hours, independently of when the task was archived.
+const EMPLOYEE_TRANSCRIPT_RETENTION_SECONDS: u64 = 48 * 60 * 60;
+
+fn protected_employee_transcripts(
+    boss: &waku_protocol::boss::BossState,
+    now: u64,
+) -> HashSet<Uuid> {
+    boss.employees
+        .iter()
+        .chain(&boss.retired_employees)
+        .filter(|employee| {
+            !employee.expired
+                || employee.expired_at.is_none_or(|at| {
+                    now.saturating_sub(at) <= EMPLOYEE_TRANSCRIPT_RETENTION_SECONDS
+                })
+        })
+        .map(|employee| employee.session_id)
+        .collect()
+}
+
 /// Detail rows rewritten per prune batch. Bound so a batch transaction
 /// holds the shared storage lock for tens of milliseconds, not seconds —
 /// the sweep drains its backlog over repeated batches instead.

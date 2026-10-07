@@ -956,7 +956,9 @@ impl WakuBackend {
     /// refs are deleted. A projectless workspace does leave with its last
     /// task — `remove_session` drops the live directory and any archive zip.
     pub(super) fn purge_expired_archived_sessions(&self) {
-        let cutoff = crate::model::unix_time().saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
+        let now = crate::model::unix_time();
+        let cutoff = now.saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
+        let protected = protected_employee_transcripts(&self.boss.document(), now);
         let expired = {
             let state = self.task_state.lock();
             let mut expired = Vec::new();
@@ -968,6 +970,9 @@ impl WakuBackend {
                     continue;
                 }
                 let session_id = state.sessions[index].id;
+                if protected.contains(&session_id) {
+                    continue;
+                }
                 // Checkpoint refs live in the repository's shared
                 // namespace, so delete them from the project checkout —
                 // the task's worktree may already be gone, and a missing
@@ -1021,11 +1026,15 @@ impl WakuBackend {
                     // Read per batch: the Boss document only exists once the
                     // experiment activates, and an identity read before then
                     // would prune chats the exemption covers.
-                    let boss_project = boss.document().identity.id;
+                    let document = boss.document();
+                    let boss_project = document.identity.id;
+                    let protected =
+                        protected_employee_transcripts(&document, crate::model::unix_time());
                     match store.prune_archived_session_details(
                         cutoff,
                         ARCHIVE_PRUNE_BATCH,
                         boss_project,
+                        &protected,
                     ) {
                         Ok(0) => break,
                         Ok(_) => std::thread::yield_now(),

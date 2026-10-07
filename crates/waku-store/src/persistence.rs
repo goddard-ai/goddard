@@ -1813,6 +1813,9 @@ impl StateStore {
     /// chat — rotation archives it while the user still reads its command
     /// output, so it keeps full detail for the archive's life. Employee and
     /// planning sessions prune like any task; `Uuid::nil` exempts nothing.
+    /// `protected_sessions` excludes live and recently expired employees
+    /// before the batch limit, so protected rows cannot starve the sweep.
+    /// There is no size cap that overrides this retention exemption.
     ///
     /// Runs under the storage lock like a save rather than on a private
     /// connection, so the batch transaction never races the writer
@@ -1829,6 +1832,7 @@ impl StateStore {
         archived_before: u64,
         limit: usize,
         boss_project: Uuid,
+        protected_sessions: &HashSet<Uuid>,
     ) -> io::Result<usize> {
         let mut guard = self.storage.lock();
         if guard.is_none() {
@@ -1847,12 +1851,14 @@ impl StateStore {
             .connection
             .unchecked_transaction()
             .map_err(to_io_error)?;
+        let protected_sessions = serde_json::to_string(protected_sessions).map_err(to_io_error)?;
         let rows: Vec<(String, String)> = transaction
             .prepare(
                 "SELECT detail.session_id, detail.data FROM session_details AS detail
                  INNER JOIN sessions ON sessions.id = detail.session_id
                  WHERE sessions.archived_at IS NOT NULL
                    AND sessions.archived_at < ?1
+                   AND sessions.id NOT IN (SELECT value FROM json_each(?4))
                    AND instr(detail.data, '\"details_pruned\"') = 0
                    AND (sessions.project_id <> ?2 OR sessions.planning IS NOT NULL)
                  ORDER BY sessions.archived_at
@@ -1864,7 +1870,8 @@ impl StateStore {
                         params![
                             archived_before as i64,
                             boss_project.to_string(),
-                            limit as i64
+                            limit as i64,
+                            protected_sessions
                         ],
                         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     )?
@@ -5480,14 +5487,14 @@ mod tests {
         let cutoff = crate::model::unix_time() - 7 * 24 * 60 * 60;
         assert_eq!(
             store
-                .prune_archived_session_details(cutoff, 8, Uuid::nil())
+                .prune_archived_session_details(cutoff, 8, Uuid::nil(), &HashSet::new())
                 .unwrap(),
             1
         );
         // A second sweep finds nothing eligible.
         assert_eq!(
             store
-                .prune_archived_session_details(cutoff, 8, Uuid::nil())
+                .prune_archived_session_details(cutoff, 8, Uuid::nil(), &HashSet::new())
                 .unwrap(),
             0
         );
@@ -5596,7 +5603,7 @@ mod tests {
         let cutoff = crate::model::unix_time() - 7 * 24 * 60 * 60;
         assert_eq!(
             store
-                .prune_archived_session_details(cutoff, 8, boss_project)
+                .prune_archived_session_details(cutoff, 8, boss_project, &HashSet::new())
                 .unwrap(),
             2,
             "the planning and employee sessions prune; the boss chat does not"
