@@ -1,0 +1,1 @@
+- Employees on a large roster now keep their generated avatars instead of settling on letter placeholders once the roster outgrew the avatar cache.

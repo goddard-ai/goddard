@@ -16,6 +16,12 @@ const MENTION_AVATAR_SIZE: f32 = 18.0;
 /// Initial render plus two retries, shared by every surface requesting a key.
 const AVATAR_MAX_ATTEMPTS: u8 = 3;
 
+/// The raster budget across every seed and bucket. Requests come only from
+/// surfaces bounded by what is on screen — sidebar and roster rows, goal
+/// rows, summon cards, composer atoms — so the working set stays well under
+/// this even on a large roster.
+const AVATAR_CACHE_LIMIT: usize = 512;
+
 /// Rasters are cached per display-size bucket because GPUI samples sprites
 /// with a bilinear filter and no mipmaps: one shared 256px raster upscaled
 /// into a 54px header loses its edges, and downscaled six-fold into a
@@ -305,8 +311,9 @@ pub(super) struct BossUi {
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
     avatar_queue: RefCell<VecDeque<(String, u32, u8)>>,
-    // Keep keys marked across bounded retries and eviction so repainting
-    // cannot restart exhausted renders or churn the raster cache.
+    // Marks keys queued or in flight so a render pass cannot enqueue
+    // duplicates; exhausted failures stay marked to bound retry churn.
+    // Eviction clears the mark — a face on screen may be asked for again.
     avatar_requested: RefCell<HashSet<(String, u32)>>,
     avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
@@ -415,7 +422,7 @@ impl BossUi {
         image: Arc<gpui::RenderImage>,
     ) -> Option<Arc<gpui::RenderImage>> {
         let cached: usize = self.avatars.values().map(|buckets| buckets.len()).sum();
-        let evicted = if cached >= 256 {
+        let evicted = if cached >= AVATAR_CACHE_LIMIT {
             let key = self.avatars.iter().find_map(|(seed, buckets)| {
                 buckets.keys().next().map(|bucket| (seed.clone(), *bucket))
             });
@@ -425,9 +432,13 @@ impl BossUi {
                 if buckets.is_empty() {
                     self.avatars.remove(&old_seed);
                 }
-                // Keep avatar_requested intact. Mention preparation visits every
-                // identity, so retrying an evicted raster would churn the cache
-                // indefinitely once the collection exceeds its capacity.
+                // Release the evicted key's dedup mark so the next request
+                // requeues it. Only on-screen surfaces enqueue renders, so
+                // the churn the mark used to prevent — mention preparation
+                // requeueing the whole roster — cannot recur.
+                self.avatar_requested
+                    .borrow_mut()
+                    .remove(&(old_seed, old_bucket));
                 image
             })
         } else {
@@ -2294,7 +2305,7 @@ impl Waku {
                 continue;
             };
             if let Some(image) =
-                self.boss_avatar_image(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+                self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
             {
                 avatars.insert(*id, image);
             }
@@ -2326,6 +2337,27 @@ impl Waku {
             chats
                 .chain(employees)
                 .filter_map(|(id, identity)| {
+                    self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+                        .map(|image| (id, image))
+                })
+                .collect(),
+        )
+    }
+
+    /// The avatar map a composer's session atoms paint from. Unlike the
+    /// mention pools this sweeps only the sessions the atoms name — a
+    /// handful per field — so a miss may queue a render the way a visible
+    /// surface's does.
+    pub(super) fn session_atom_avatars(
+        &self,
+        atoms: &[composer::ComposerInlineAtom],
+    ) -> Rc<HashMap<Uuid, Arc<gpui::RenderImage>>> {
+        Rc::new(
+            atoms
+                .iter()
+                .filter_map(composer::ComposerInlineAtom::session_id)
+                .filter_map(|id| {
+                    let identity = self.boss_session_identity(id)?;
                     self.boss_avatar_image(&identity.avatar_seed, MENTION_AVATAR_SIZE)
                         .map(|image| (id, image))
                 })
@@ -2795,24 +2827,38 @@ impl Waku {
         );
     }
 
+    /// The raster cached for `(seed, size bucket)` — a lookup with no side
+    /// effects. Callers that sweep every managed identity (mention pools,
+    /// transcript chips) read through here: queueing on their path would
+    /// enqueue renders the cache cannot hold and evict the faces on-screen
+    /// surfaces asked for.
+    pub(super) fn boss_avatar_cached(
+        &self,
+        seed: &str,
+        size: f32,
+    ) -> Option<Arc<gpui::RenderImage>> {
+        self.boss_ui
+            .avatars
+            .get(seed)
+            .and_then(|buckets| buckets.get(&avatar_bucket(size)))
+            .cloned()
+    }
+
     /// The raster cached for `(seed, size bucket)`, queueing a render when
     /// it is missing. Returns `None` while the raster is in flight so
-    /// callers can draw their placeholder. Failures retry up to twice; exhausted
-    /// or evicted rasters keep the placeholder until a new seed or size is requested.
+    /// callers can draw their placeholder. Failures retry up to twice and
+    /// exhausted renders keep the placeholder; evicted rasters requeue on
+    /// the next miss. Only surfaces bounded by what is on screen call this —
+    /// all-identity sweeps go through [`Self::boss_avatar_cached`].
     pub(super) fn boss_avatar_image(
         &self,
         seed: &str,
         size: f32,
     ) -> Option<Arc<gpui::RenderImage>> {
-        let bucket = avatar_bucket(size);
-        if let Some(image) = self
-            .boss_ui
-            .avatars
-            .get(seed)
-            .and_then(|buckets| buckets.get(&bucket))
-        {
-            return Some(image.clone());
+        if let Some(image) = self.boss_avatar_cached(seed, size) {
+            return Some(image);
         }
+        let bucket = avatar_bucket(size);
         if self
             .boss_ui
             .avatar_requested
@@ -7680,28 +7726,34 @@ mod tests {
     }
 
     #[gpui::test]
-    fn evicted_avatars_keep_their_fallback_without_requeueing(cx: &mut gpui::TestAppContext) {
+    fn evicted_avatars_requeue_instead_of_keeping_their_fallback(
+        cx: &mut gpui::TestAppContext,
+    ) {
         let renderer = cx.update(|cx| cx.svg_renderer());
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#ffffff"/></svg>"##;
         let image = renderer.render_single_frame(svg.as_bytes(), 1.0).unwrap();
         let mut ui = BossUi::default();
-        // More identities than the raster budget reproduces the mention pool's
-        // pressure without relying on which HashMap entry gets evicted.
-        for id in 0..300 {
+        // More identities than the raster budget exercises the eviction
+        // path without relying on which HashMap entry gets evicted.
+        for id in 0..(AVATAR_CACHE_LIMIT + 64) {
             let seed = id.to_string();
             ui.avatar_requested.borrow_mut().insert((seed.clone(), 24));
             let _ = ui.cache_avatar(seed, 24, image.clone());
         }
-        assert_eq!(ui.avatars.values().map(HashMap::len).sum::<usize>(), 256);
-        assert!((0..300).any(|id| !ui.avatars.contains_key(&id.to_string())));
-        for _ in 0..3 {
-            for id in 0..300 {
-                let seed = id.to_string();
-                if let Some(cached) = ui.avatars.get(&seed).and_then(|buckets| buckets.get(&24)) {
-                    assert!(Arc::ptr_eq(cached, &image));
-                } else {
-                    assert!(!ui.avatar_requested.borrow_mut().insert((seed, 24)));
-                }
+        assert_eq!(
+            ui.avatars.values().map(HashMap::len).sum::<usize>(),
+            AVATAR_CACHE_LIMIT
+        );
+        assert!((0..(AVATAR_CACHE_LIMIT + 64)).any(|id| !ui.avatars.contains_key(&id.to_string())));
+        // Cached keys keep their dedup mark — a hit never reaches it — while
+        // evicted keys lose theirs so the next request requeues the render.
+        for id in 0..(AVATAR_CACHE_LIMIT + 64) {
+            let seed = id.to_string();
+            if let Some(cached) = ui.avatars.get(&seed).and_then(|buckets| buckets.get(&24)) {
+                assert!(Arc::ptr_eq(cached, &image));
+                assert!(!ui.avatar_requested.borrow_mut().insert((seed, 24)));
+            } else {
+                assert!(ui.avatar_requested.borrow_mut().insert((seed, 24)));
             }
         }
         assert!(

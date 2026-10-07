@@ -3008,10 +3008,11 @@ impl Waku {
     /// Push the atoms into the field, in marker order — the painted text
     /// substitutes each [`INLINE_ATOM_MARKER`] for its atom's chip.
     pub(super) fn sync_inline_atoms(&mut self, cx: &mut Context<Self>) {
+        let avatars = self.session_atom_avatars(&self.composer_inline_atoms);
         let atoms = inline_atom_paints(
             &self.composer_inline_atoms,
             &planning_session_ids(&self.state.sessions),
-            &self.all_mention_avatars(),
+            &avatars,
         );
         self.composer
             .update(cx, |composer, cx| composer.set_inline_atoms(atoms, cx));
@@ -3020,7 +3021,11 @@ impl Waku {
     /// The lane's version of [`Self::sync_inline_atoms`].
     pub(super) fn sync_side_chat_atoms(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let planning = planning_session_ids(&self.state.sessions);
-        let avatars = self.all_mention_avatars();
+        let avatars = self
+            .side_chat_composers
+            .get(&session_id)
+            .map(|chat| self.session_atom_avatars(&chat.atoms))
+            .unwrap_or_default();
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
@@ -3085,7 +3090,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let planning = planning_session_ids(&self.state.sessions);
-        let avatars = self.all_mention_avatars();
+        let avatars = self
+            .side_chat_composers
+            .get(&session_id)
+            .map(|chat| self.session_atom_avatars(&chat.atoms))
+            .unwrap_or_default();
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
@@ -3570,7 +3579,7 @@ impl Waku {
         });
         let composer = self.composer.clone();
         let planning = planning_session_ids(&self.state.sessions);
-        let avatars = self.all_mention_avatars();
+        let avatars = self.session_atom_avatars(&self.composer_inline_atoms);
         let seats = remap_atoms_for_splice(
             &composer,
             &mut self.composer_inline_atoms,
