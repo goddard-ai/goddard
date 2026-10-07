@@ -54,6 +54,10 @@ const GATE_FEATURE: &str = "voice-briefing-gate";
 const GATE_QUESTION: &str = "brief";
 const GATE_THRESHOLD: f64 = 0.5;
 
+fn autoplay_focus_allowed(allow_unfocused: bool, has_active_window: bool) -> bool {
+    allow_unfocused || has_active_window
+}
+
 /// A rendered briefing clip: the transcript the summary model wrote and
 /// the audio `voice` gave it. `voice` keys the clip to the engine and
 /// voice that rendered it, so a settings change marks the clip stale
@@ -202,7 +206,12 @@ impl Waku {
     /// play the clip if it is ready, ride a prefetch already in flight,
     /// revoice a stale clip in place, or build it.
     pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if !self.state.voice_briefing_autoplay || self.viewed_briefing_session() != Some(session_id)
+        if !self.state.voice_briefing_autoplay
+            || !autoplay_focus_allowed(
+                self.state.voice_briefing_autoplay_unfocused,
+                cx.active_window().is_some(),
+            )
+            || self.viewed_briefing_session() != Some(session_id)
         {
             return;
         }
@@ -834,7 +843,16 @@ impl Waku {
         }
         let allowed = self.state.voice_briefing_enabled
             && self.state.voice_briefing_autoplay
+            && autoplay_focus_allowed(
+                self.state.voice_briefing_autoplay_unfocused,
+                cx.active_window().is_some(),
+            )
             && !self.voice_briefing_dnd_active();
+        if !self.state.voice_briefing_autoplay_unfocused && cx.active_window().is_none() {
+            // Do not retain an automatic clip for later playback: its cached
+            // audio remains available through the manual replay control.
+            self.briefing_queue.waiting = None;
+        }
         if !allowed && self.briefing_queue.waiting.is_some() && self.voice_briefing_dnd_active() {
             self.schedule_voice_briefing_dnd_wake(cx);
         }
@@ -852,6 +870,10 @@ impl Waku {
         let allowed = self.viewed_briefing_session().is_some()
             && self.state.voice_briefing_enabled
             && self.state.voice_briefing_autoplay
+            && autoplay_focus_allowed(
+                self.state.voice_briefing_autoplay_unfocused,
+                cx.active_window().is_some(),
+            )
             && !self.voice_briefing_dnd_active();
         if !self.briefing_queue.has_ready(allowed) {
             self.pump_briefing_queue(cx);
@@ -923,6 +945,18 @@ impl Waku {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let updated = weak.update(cx, |this, cx| {
                     if this.voice_briefing_playback_generation != generation {
+                        return false;
+                    }
+                    if this.voice_briefing_playback.is_some_and(|p| p.automatic)
+                        && !this.state.voice_briefing_autoplay_unfocused
+                        && cx.active_window().is_none()
+                    {
+                        crate::platform::stop_briefing_audio();
+                        this.voice_briefing_playback = None;
+                        this.voice_briefing_playback_generation =
+                            this.voice_briefing_playback_generation.wrapping_add(1);
+                        this.briefing_queue.waiting = None;
+                        cx.notify();
                         return false;
                     }
                     if this.voice_briefing_playback.is_some_and(|p| p.automatic)
@@ -1537,6 +1571,13 @@ mod instructions_tests {
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    #[test]
+    fn unfocused_autoplay_requires_the_opt_in() {
+        assert!(!autoplay_focus_allowed(false, false));
+        assert!(autoplay_focus_allowed(false, true));
+        assert!(autoplay_focus_allowed(true, false));
+    }
 
     #[test]
     fn stale_result_preserves_the_replacement_request_for_manual_replay() {

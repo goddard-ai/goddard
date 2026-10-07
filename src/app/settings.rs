@@ -7957,6 +7957,23 @@ impl Waku {
                 .into_any_element(),
             ))
             .when(self.state.voice_briefing_autoplay, |card| {
+                let card = card.child(row(
+                    tr!("experiments.voice_briefing_autoplay_unfocused"),
+                    toggle_switch(
+                        "voice-briefing-autoplay-unfocused",
+                        self.state.voice_briefing_autoplay_unfocused,
+                        false,
+                        theme,
+                        cx,
+                        |this, _, cx| {
+                            this.set_voice_briefing_autoplay_unfocused(
+                                !this.state.voice_briefing_autoplay_unfocused,
+                                cx,
+                            )
+                        },
+                    )
+                    .into_any_element(),
+                ));
                 let enabled = self.state.voice_briefing_sleep_window.is_some();
                 card.child(row(
                     tr!("experiments.voice_briefing_dnd"),
@@ -8105,6 +8122,12 @@ impl Waku {
             self.voice_briefing_sleep_slider.cancel();
         }
         self.refresh_voice_briefing_dnd(cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_autoplay_unfocused(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.voice_briefing_autoplay_unfocused = enabled;
         self.save();
         cx.notify();
     }

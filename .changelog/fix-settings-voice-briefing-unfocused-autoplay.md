@@ -1,0 +1,1 @@
+- Voice briefings no longer auto-play while Goddard is unfocused by default. Enable “Auto-play while unfocused” in Settings → Voice briefings to restore background playback; you can still replay generated clips manually.

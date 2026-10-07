@@ -969,6 +969,8 @@ experiments.voice_briefing_reset_instructions:
   en: Reset to default
 experiments.voice_briefing_autoplay:
   en: Automatic playback
+experiments.voice_briefing_autoplay_unfocused:
+  en: Auto-play while unfocused
 experiments.voice_briefing_volume:
   en: Volume
 experiments.voice_briefing_dnd:
