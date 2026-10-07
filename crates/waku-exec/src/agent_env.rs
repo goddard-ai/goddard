@@ -36,6 +36,10 @@ pub struct AgentLaunchEnv {
     /// Whether this credential belongs to the Boss — its `search` scans
     /// every project's tasks rather than only its own project's.
     pub boss: bool,
+    /// Whether `goddard-agent memory` will answer on this credential — the
+    /// session is not a Boss principal and its task has a real project to
+    /// scope a shared bucket to.
+    pub memory: bool,
     /// The resource reservation the daemon already holds for this session —
     /// a summon admission ticket's granted id, exported as
     /// `GODDARD_RESOURCE_RESERVATION` so the agent's `resource` calls
@@ -52,6 +56,7 @@ impl AgentLaunchEnv {
             settings_writes: self.settings_writes,
             parent_task_id: self.parent_task_id,
             boss: self.boss,
+            memory: self.memory,
         }
     }
 }
@@ -67,4 +72,7 @@ pub struct AgentSurfaceScope {
     /// Boss credentials search every project the daemon knows; ordinary
     /// credentials search only their own project.
     pub boss: bool,
+    /// The session's project memory surface: `goddard-agent memory` against
+    /// the session project's shared bucket.
+    pub memory: bool,
 }

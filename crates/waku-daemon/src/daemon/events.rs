@@ -323,9 +323,10 @@ pub(super) fn forward_driver_events(
                 // delivered it; a rejection leaves it pending to retry.
                 if steer.as_ref().is_some_and(|steer| steer.context.is_some()) {
                     agent.mark_surface_announced(session_id);
-                    // A pending parent-index carry settles with the steer
-                    // that shipped it.
+                    // A pending parent-index or project-memory carry
+                    // settles with the steer that shipped it.
                     agent.mark_parent_index_delivered(session_id);
+                    agent.mark_memory_delivered(session_id);
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried

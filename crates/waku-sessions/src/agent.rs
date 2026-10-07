@@ -123,6 +123,12 @@ pub struct AgentState {
     /// shipped — the index is a once-per-runtime snapshot, cleared when the
     /// runtime's credentials are revoked.
     parent_indexes: Mutex<HashSet<Uuid>>,
+    /// Sessions whose in-flight context steer carries the project-memory
+    /// block — an accept marks it delivered, a rejection retries.
+    memory_steers: Mutex<HashSet<Uuid>>,
+    /// Sessions whose project-memory block already shipped — once per
+    /// runtime, cleared when its credentials are revoked.
+    memory_delivered: Mutex<HashSet<Uuid>>,
     turns: Mutex<HashMap<Uuid, AgentTurn>>,
     /// Daemon-owned `agentAsk` requests parked on a session, by request id.
     /// The provider never sees these — the response commands the client
@@ -190,6 +196,8 @@ impl AgentState {
         // restarted process gets the parent index again.
         self.index_steers.lock().remove(&session_id);
         self.parent_indexes.lock().remove(&session_id);
+        self.memory_steers.lock().remove(&session_id);
+        self.memory_delivered.lock().remove(&session_id);
         self.drain_asks(session_id);
         self.drain_permissions(session_id);
     }
@@ -216,6 +224,40 @@ impl AgentState {
     /// The non-steer path's mark — the index rode the prompt itself.
     pub fn mark_parent_index_prepended(&self, session_id: Uuid) {
         self.parent_indexes.lock().insert(session_id);
+    }
+
+    /// Whether the session's project-memory block is still undelivered.
+    pub fn memory_owed(&self, session_id: Uuid) -> bool {
+        !self.memory_delivered.lock().contains(&session_id)
+    }
+
+    /// The composed context steer carries the session's memory block — an
+    /// accept settles it through [`Self::mark_memory_delivered`].
+    pub fn note_memory_steer(&self, session_id: Uuid) {
+        self.memory_steers.lock().insert(session_id);
+    }
+
+    /// An accepted context steer settles a pending memory carry; a prepend
+    /// path marks delivery directly since its prompt already shipped.
+    pub fn mark_memory_delivered(&self, session_id: Uuid) {
+        if self.memory_steers.lock().remove(&session_id) {
+            self.memory_delivered.lock().insert(session_id);
+        }
+    }
+
+    /// The non-steer path's mark — the memory block rode the prompt itself.
+    pub fn mark_memory_prepended(&self, session_id: Uuid) {
+        self.memory_delivered.lock().insert(session_id);
+    }
+
+    /// Whether this session's launch carried the project-memory surface —
+    /// its credential answers `memory` operations, so its first-prompt
+    /// context is owed the block.
+    pub fn memory_surface(&self, session_id: Uuid) -> bool {
+        self.surfaces
+            .lock()
+            .get(&session_id)
+            .is_some_and(|surface| surface.scope.memory)
     }
 
     /// Record the scopes a launch carried so first-prompt context can
@@ -277,6 +319,8 @@ impl AgentState {
         self.pending_steers.lock().clear();
         self.index_steers.lock().clear();
         self.parent_indexes.lock().clear();
+        self.memory_steers.lock().clear();
+        self.memory_delivered.lock().clear();
         self.turns.lock().clear();
         for (_, asks) in std::mem::take(&mut *self.pending_asks.lock()) {
             for (_, ask) in asks {
@@ -322,6 +366,7 @@ impl AgentState {
                 // restarted runtime does not attribute an unrelated echo.
                 self.pending_steers.lock().remove(&session_id);
                 self.index_steers.lock().remove(&session_id);
+                self.memory_steers.lock().remove(&session_id);
                 self.drain_asks(session_id);
                 // The CLI call waiting on a permission answer died with the
                 // process — the card is gone with it.
@@ -329,8 +374,10 @@ impl AgentState {
             }
             DriverEvent::SteerRejected { message, .. } => {
                 // A refused steer settles without delivering: the parent
-                // index flag drops so the next prompt retries the carry.
+                // index and memory flags drop so the next prompt retries
+                // the carry.
                 self.index_steers.lock().remove(&session_id);
+                self.memory_steers.lock().remove(&session_id);
                 // A queue-drained prompt whose steer was refused goes back to
                 // the head of the queue — its mirrored chip never left the
                 // session, so the wait stays visible and ordered. A direct
@@ -813,6 +860,14 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
          results can favor new context. Results are bounded leads; read \
          the source before editing and narrow with `path` when truncated.",
     );
+    if scope.memory {
+        instruction.push_str(&format!(
+            "\n- `memory` — the project's shared memory bucket, recorded \
+             notes that outlive this session: `{command} memory overview` \
+             shows the compacted overview, `scan`/`zoom`/`record`/`summary`/`buckets` \
+             read and write it"
+        ));
+    }
     if scope.settings_writes {
         instruction.push_str(
             "\n- `command` — manage the user's custom commands; may be used \
@@ -1361,6 +1416,7 @@ mod tests {
             task_tools: true,
             settings_writes: true,
             boss: false,
+            memory: true,
             resource_reservation: None,
         }
     }
@@ -1423,6 +1479,16 @@ mod tests {
         assert!(instruction.contains("create, start, or spawn"));
         assert!(instruction.contains("`command`"));
 
+        // The launch fixture carries the memory surface — the instruction
+        // names `memory overview`; a launch without it drops the bullet.
+        assert!(instruction.contains("memory overview"));
+        let env = AgentLaunchEnv {
+            memory: false,
+            ..launch_env(&directory)
+        };
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
+        assert!(!instruction.contains("memory overview"));
+
         // Each scope drops its own half of the contract when disabled.
         let env = AgentLaunchEnv {
             task_tools: false,
@@ -1467,6 +1533,7 @@ mod tests {
             settings_writes: false,
             parent_task_id: None,
             boss: false,
+            memory: false,
         };
         assert!(state.surface_block(session).is_none());
 

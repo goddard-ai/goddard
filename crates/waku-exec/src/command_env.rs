@@ -1578,6 +1578,7 @@ mod tests {
             task_tools: true,
             settings_writes: true,
             boss: false,
+            memory: true,
             resource_reservation: None,
         }
     }

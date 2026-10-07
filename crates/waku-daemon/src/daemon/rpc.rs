@@ -1922,6 +1922,11 @@ impl Backend for WakuBackend {
                     // a user message.
                     *prompt =
                         self.prepend_agent_surface(session_id, &driver, std::mem::take(prompt));
+                    if let Some(memory) = self.session_memory_block(session_id, &driver) {
+                        *prompt = format!("{memory}\n\n{}", std::mem::take(prompt));
+                        // The prompt carries it — delivered once sent.
+                        self.agent.mark_memory_prepended(session_id);
+                    }
                     if let Some(index) = self.side_chat_parent_block(session_id) {
                         *prompt = format!("{index}\n\n{}", std::mem::take(prompt));
                         // The prompt carries it — delivered once sent, no

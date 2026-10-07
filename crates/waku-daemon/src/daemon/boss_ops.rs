@@ -1006,6 +1006,25 @@ impl WakuBackend {
                     self.handle_boss_operation(caller, operation, events)
                 })
             }
+            BossOperation::Memory { operation } => {
+                // Ordinary task agents — callers outside the roster — reach
+                // the project bucket of the task they serve. Roster members
+                // keep the service's own employee/boss resolution, and a
+                // task still stamped boss-managed after the roster dropped
+                // it gets neither.
+                let caller_project = caller
+                    .filter(|id| !self.boss.is_managed(*id))
+                    .filter(|id| {
+                        !self
+                            .task_state
+                            .lock()
+                            .sessions
+                            .iter()
+                            .any(|session| session.id == *id && session.boss_managed)
+                    })
+                    .and_then(|id| self.session_memory_project(id));
+                self.boss.memory(caller, caller_project, operation)
+            }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
                 let employee_rename = match &operation {

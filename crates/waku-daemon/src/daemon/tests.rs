@@ -1560,20 +1560,20 @@ impl crate::driver::DriverControl for CaptureDriver {
     fn cancel(&self) {}
 }
 
+/// A task agent's first context steer carries the `<project-memory>` block
+/// — the `goddard-agent memory` instructions plus the project bucket's
+/// compacted overview — once per runtime, and only for sessions whose
+/// launch recorded the memory surface. Legacy `.goddard/memory` files are
+/// never the source: their raw text must not leak into the block.
 #[test]
-fn the_first_prompt_does_not_auto_load_project_memory() {
+fn the_first_prompt_carries_bounded_project_memory() {
     let root = std::env::temp_dir().join(format!("waku-context-steer-{}", Uuid::new_v4()));
     let repo = root.join("repo");
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::write(repo.join("src/lib.rs"), "pub fn entry() {}\n").unwrap();
     let memory_store = repo.join(".goddard/memory");
     std::fs::create_dir_all(&memory_store).unwrap();
-    std::fs::write(
-        memory_store.join("MEMORY.md"),
-        "The release freeze lands on Fridays.\n",
-    )
-    .unwrap();
-    std::fs::write(memory_store.join("LOG.txt"), "one durable note\n").unwrap();
+    std::fs::write(memory_store.join("MEMORY.md"), "raw legacy note\n").unwrap();
 
     let store = StateStore::daemon(root.join("app.db"));
     let mut state = PersistedState::fresh(repo.clone());
@@ -1586,24 +1586,178 @@ fn the_first_prompt_does_not_auto_load_project_memory() {
         store,
     )
     .unwrap();
-    // What spawn_runtime records for a fresh session.
-    {
-        let mut maps = backend.repo_maps.0.lock();
-        maps.sessions.insert(session_id, repo.clone());
-    }
+    backend.agent.note_surface(
+        session_id,
+        crate::agent::AgentSurfaceScope {
+            task_tools: true,
+            settings_writes: true,
+            parent_task_id: None,
+            boss: false,
+            memory: true,
+        },
+    );
+
+    // Seed the project bucket the way the session's own
+    // `goddard-agent memory record` lands it.
+    backend
+        .handle_boss_operation(
+            Some(session_id),
+            waku_protocol::boss::BossOperation::Memory {
+                operation: waku_protocol::boss::MemoryOperation::Record {
+                    bucket: None,
+                    project: None,
+                    kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                    text: "the release freeze lands on Fridays".into(),
+                    retry_key: "freeze-1".into(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
 
     let capture = Arc::new(CaptureDriver::default());
     let driver = crate::driver::DriverHandle::from_control(capture.clone());
     backend.steer_first_prompt_context(session_id, "fix the bug", &driver, &EventSink::detached());
 
-    // Project memory is available only through explicit bucket
-    // operations; no contents are injected into a task prompt.
-    assert!(capture.prompts.lock().is_empty());
     let steers = capture.steers.lock().clone();
+    assert_eq!(steers.len(), 1);
+    let steer = &steers[0];
+    assert!(steer.contains("<project-memory>"));
+    assert!(steer.contains("`goddard-agent memory`"));
+    assert!(steer.contains("the release freeze lands on Fridays"));
+    assert!(!steer.contains("raw legacy note"));
+
+    // The accepted carry settles it — the next prompt steers nothing.
+    backend.agent.take_pending_steer(session_id, steer).unwrap();
+    backend.agent.mark_surface_announced(session_id);
+    backend.agent.mark_memory_delivered(session_id);
+    backend.steer_first_prompt_context(session_id, "follow up", &driver, &EventSink::detached());
+    assert_eq!(
+        capture.steers.lock().len(),
+        1,
+        "project memory does not re-steer"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The same operation surface gates by session: an ordinary task agent
+/// reaches only its own project's shared bucket, while a session stamped
+/// boss-managed or launched without a project resolves no default.
+#[test]
+fn task_agent_memory_ops_scope_to_the_task_project() {
+    let root = std::env::temp_dir().join(format!("waku-memory-scope-{}", Uuid::new_v4()));
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let store = StateStore::daemon(root.join("app.db"));
+    let mut state = PersistedState::fresh(repo.clone());
+    state.sessions[0].begin_turn("seed");
+    state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+    let session_id = state.sessions[0].id;
+    store.save(&mut state).unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        store,
+    )
+    .unwrap();
+
+    // The boss holds a named bucket the task agent must never see.
+    let boss_id = Uuid::new_v4();
+    backend.boss.set_session_id(boss_id).unwrap();
+    let waku_protocol::boss::BossResult::Memory { buckets, .. } = backend
+        .handle_boss_operation(
+            Some(boss_id),
+            waku_protocol::boss::BossOperation::Memory {
+                operation: waku_protocol::boss::MemoryOperation::CreateBucket {
+                    name: "Private".into(),
+                    purpose: String::new(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("create returns the minted bucket")
+    };
+    let private_id = buckets[0]["id"].as_str().unwrap().to_owned();
+
+    let memory = |operation| {
+        backend.handle_boss_operation(
+            Some(session_id),
+            waku_protocol::boss::BossOperation::Memory { operation },
+            &EventSink::detached(),
+        )
+    };
+    use waku_protocol::boss::{BossResult, MemoryNoteKind, MemoryOperation};
+
+    // Unqualified operations land on the task's project bucket.
+    let BossResult::Memory {
+        bucket: Some(echoed),
+        recorded: Some(_),
+        ..
+    } = memory(MemoryOperation::Record {
+        bucket: None,
+        project: None,
+        kind: MemoryNoteKind::Fact,
+        text: "the formatter runs through `just fmt`".into(),
+        retry_key: "task-note".into(),
+    })
+    .unwrap()
+    else {
+        panic!("the task agent writes to its project's shared bucket")
+    };
+    assert!(echoed.starts_with("project-"));
+
+    // `buckets` and `overview` stay inside the grant.
+    let BossResult::Memory { buckets, .. } = memory(MemoryOperation::ListBuckets).unwrap() else {
+        panic!("buckets returns the visible set")
+    };
+    assert_eq!(buckets.len(), 1);
+    assert_eq!(buckets[0]["id"], echoed);
+    assert!(memory(MemoryOperation::Overview {
+        bucket: None,
+        project: None,
+    })
+    .is_ok());
+
+    // Named buckets stay boss-owned; `create` stays a boss operation.
     assert!(
-        steers
-            .iter()
-            .all(|steer| !steer.contains("The release freeze lands on Fridays."))
+        memory(MemoryOperation::Overview {
+            bucket: Some(private_id),
+            project: None,
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("access denied")
+    );
+    assert!(
+        memory(MemoryOperation::CreateBucket {
+            name: "Nope".into(),
+            purpose: String::new(),
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("only the Boss")
+    );
+
+    // An incognito session resolves no project — no default bucket at all.
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        session.incognito = true;
+    }
+    assert!(
+        memory(MemoryOperation::Overview {
+            bucket: None,
+            project: None,
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("needs a bucket or a project")
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -2579,6 +2733,7 @@ fn surface_test_backend(root: &Path) -> (WakuBackend, Uuid) {
             settings_writes: true,
             parent_task_id: None,
             boss: false,
+            memory: true,
         },
     );
     (backend, session_id)
@@ -2603,6 +2758,7 @@ fn the_agent_surface_instruction_rides_the_context_steer_once() {
     assert!(steers[0].contains("`goddard-agent`"));
     assert!(steers[0].contains("create, start, or spawn"));
     assert!(steers[0].contains("`map` — request Jev-ranked source context"));
+    assert!(steers[0].contains("<project-memory>"));
 
     // The accepted echo marks the surface delivered; the next prompt
     // owes no block, so nothing steers at all.
@@ -2613,6 +2769,7 @@ fn the_agent_surface_instruction_rides_the_context_steer_once() {
             .is_some()
     );
     backend.agent.mark_surface_announced(session_id);
+    backend.agent.mark_memory_delivered(session_id);
     backend.steer_first_prompt_context(session_id, "follow up", &driver, &EventSink::detached());
     assert_eq!(capture.steers.lock().len(), 1, "nothing re-injects");
 
@@ -2632,6 +2789,7 @@ fn a_side_chats_parent_index_rides_the_context_steer_once() {
             settings_writes: false,
             parent_task_id: Some(session_id),
             boss: false,
+            memory: true,
         },
     );
     let capture = Arc::new(CaptureDriver::default());
@@ -2654,6 +2812,7 @@ fn a_side_chats_parent_index_rides_the_context_steer_once() {
     // nothing once every other block has also delivered.
     backend.agent.take_pending_steer(side_id, steer).unwrap();
     backend.agent.mark_parent_index_delivered(side_id);
+    backend.agent.mark_memory_delivered(side_id);
     backend.agent.mark_surface_announced(side_id);
     backend.steer_first_prompt_context(side_id, "follow up", &driver, &EventSink::detached());
     assert_eq!(
@@ -2699,9 +2858,12 @@ fn a_natively_announced_surface_stays_out_of_the_context_steer() {
         &EventSink::detached(),
     );
 
-    // The driver already told the session — no other block is owed, so
-    // no steer goes out at all.
-    assert!(capture.steers.lock().is_empty());
+    // The driver already told the session — the surface instruction is
+    // absent; only the still-owed project-memory block steers.
+    let steers = capture.steers.lock().clone();
+    assert_eq!(steers.len(), 1);
+    assert!(steers[0].contains("<project-memory>"));
+    assert!(!steers[0].contains("create, start, or spawn"));
 
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -1,0 +1,1 @@
+- Employees and ordinary task agents can now use `goddard-agent memory` — `overview`, `scan`, `zoom`, `record`, `summary`, and `buckets` — against their session's shared project memory, and new sessions receive a bounded overview of it with their startup context. Boss-only `create` and `migrate` stay under `goddard-agent boss memory`.

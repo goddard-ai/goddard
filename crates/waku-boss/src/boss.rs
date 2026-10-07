@@ -324,6 +324,10 @@ struct BossRouter {
 const MAX_SPEECH_PARTS: usize = 8;
 const MAX_SPEECH_PART_CHARS: usize = 160;
 const MAX_SPEECH_TOTAL_CHARS: usize = 480;
+/// Session-start project-memory injection budget: one rendered line per
+/// overview item, bounded overall like the boss work digest.
+const MEMORY_DIGEST_ITEM_CAP: usize = 480;
+const MEMORY_DIGEST_CAP: usize = 6_000;
 const EMPLOYEE_RETIREMENT_SECONDS: u64 = 60 * 60;
 const GOAL_RETIREMENT_SECONDS: u64 = 24 * 60 * 60;
 /// A finalized planning session stays active this long before the daemon
@@ -1468,7 +1472,7 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Resolve style and approach choices from existing code and docs. Put useful non-blocking findings and routine completions in your finish report; do not report them as blockers. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH` — the daemon stores a copy, so the entry survives your workspace's cleanup.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Resolve style and approach choices from existing code and docs. Put useful non-blocking findings and routine completions in your finish report; do not report them as blockers. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH` — the daemon stores a copy, so the entry survives your workspace's cleanup.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -2756,287 +2760,7 @@ impl BossService {
                     state: self.document(),
                 })
             }
-            BossOperation::Memory { operation } => {
-                use waku_protocol::boss::MemoryOperation;
-
-                let state = self.document();
-                let boss_principal = caller.is_none_or(|id| self.is_boss_principal(id));
-                let principal = if boss_principal {
-                    "boss".to_owned()
-                } else {
-                    caller.context("missing Boss caller")?.to_string()
-                };
-                let buckets = waku_memory_engine::buckets::BucketStore::open(
-                    self.root.join("files/memory-engine"),
-                )?;
-                let mut known_buckets = buckets.list_buckets()?;
-                let active_employee = caller.filter(|caller| {
-                    state
-                        .employees
-                        .iter()
-                        .any(|employee| employee.session_id == *caller && !employee.expired)
-                });
-                let own_project_path =
-                    active_employee.and_then(|session| self.projects.lock().get(&session).cloned());
-                let own_bucket_id = own_project_path.as_deref().map(project_bucket_id);
-                // `project` references resolve through the registered-project
-                // catalog; an absent target defaults to the caller's project.
-                let (resolved_bucket, resolved_project) = match memory_bucket_ref(&operation) {
-                    Some((bucket, project)) => {
-                        let catalog = self
-                            .project_catalog
-                            .lock()
-                            .as_ref()
-                            .map(|get| get())
-                            .unwrap_or_default();
-                        let (id, path) = resolve_memory_bucket(
-                            bucket,
-                            project,
-                            own_project_path.as_deref(),
-                            &catalog,
-                        )?;
-                        (Some(id), path)
-                    }
-                    None => (None, None),
-                };
-                // Project buckets materialize on first touch: the caller's own
-                // always, an explicitly named one only for the boss — an
-                // employee naming a foreign project must not mint it.
-                for path in [
-                    own_project_path,
-                    resolved_project.filter(|_| boss_principal),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    let bucket_id = project_bucket_id(&path);
-                    if known_buckets.iter().any(|bucket| bucket.id == bucket_id) {
-                        continue;
-                    }
-                    let name = path
-                        .file_name()
-                        .and_then(|part| part.to_str())
-                        .unwrap_or("Project")
-                        .to_owned();
-                    let bucket = waku_memory_engine::buckets::Bucket {
-                        id: bucket_id.clone(),
-                        name,
-                        purpose: "Shared project memory".into(),
-                        project_id: Some(bucket_id),
-                    };
-                    buckets.create_bucket(&bucket)?;
-                    known_buckets.push(bucket);
-                }
-                let granted_bucket_ids = if boss_principal {
-                    Vec::new()
-                } else {
-                    state
-                        .employees
-                        .iter()
-                        .find(|employee| Some(employee.session_id) == caller && !employee.expired)
-                        .map(|employee| employee.permissions.bucket_ids.clone())
-                        .unwrap_or_default()
-                };
-                let visible_buckets = known_buckets
-                    .iter()
-                    .filter(|bucket| {
-                        boss_principal
-                            || Some(bucket.id.as_str()) == own_bucket_id.as_deref()
-                            || granted_bucket_ids.contains(&bucket.id)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let bucket_access = waku_memory_engine::buckets::BucketAccess {
-                    buckets: known_buckets.clone(),
-                    grants: visible_buckets
-                        .iter()
-                        .map(|bucket| waku_memory_engine::buckets::BucketGrant {
-                            bucket_id: bucket.id.clone(),
-                            principal_id: principal.clone(),
-                            read: true,
-                            insert: true,
-                        })
-                        .collect(),
-                    boss: boss_principal,
-                };
-                let mut bucket_list = Vec::new();
-                let mut overview = None;
-                let mut notes = Vec::new();
-                let mut compression = None;
-                let mut bucket = None;
-                let mut recorded = None;
-                let mut migration = None;
-                match operation {
-                    MemoryOperation::ListBuckets => {
-                        bucket_list = visible_buckets
-                            .iter()
-                            .map(serde_json::to_value)
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                    }
-                    MemoryOperation::CreateBucket { name, purpose } => {
-                        anyhow::ensure!(boss_principal, "only the Boss can create memory buckets");
-                        let name = name.trim();
-                        anyhow::ensure!(!name.is_empty(), "bucket name cannot be empty");
-                        let slug = name
-                            .to_ascii_lowercase()
-                            .chars()
-                            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-                            .collect::<String>();
-                        let id = format!("{}-{}", slug.trim_matches('-'), Uuid::new_v4());
-                        let created = waku_memory_engine::buckets::Bucket {
-                            id: id.clone(),
-                            name: name.to_owned(),
-                            purpose,
-                            project_id: None,
-                        };
-                        buckets.create_bucket(&created)?;
-                        bucket_list.push(serde_json::to_value(created)?);
-                    }
-                    MemoryOperation::Overview { .. } => {
-                        let bucket_id = resolved_bucket
-                            .clone()
-                            .expect("bucket-addressed ops resolve a target");
-                        bucket = Some(bucket_id.clone());
-                        let result = buckets.overview(&bucket_access, &principal, &bucket_id)?;
-                        compression = result
-                            .compression
-                            .as_ref()
-                            .map(serde_json::to_value)
-                            .transpose()?;
-                        overview = Some(serde_json::to_value(result)?);
-                    }
-                    MemoryOperation::Record {
-                        kind,
-                        text,
-                        retry_key,
-                        ..
-                    } => {
-                        let bucket_id = resolved_bucket
-                            .clone()
-                            .expect("bucket-addressed ops resolve a target");
-                        bucket = Some(bucket_id.clone());
-                        let kind = match kind {
-                            waku_protocol::boss::MemoryNoteKind::Fact => {
-                                waku_memory_engine::buckets::NoteKind::Fact
-                            }
-                            waku_protocol::boss::MemoryNoteKind::Observation => {
-                                waku_memory_engine::buckets::NoteKind::Observation
-                            }
-                            waku_protocol::boss::MemoryNoteKind::Question => {
-                                waku_memory_engine::buckets::NoteKind::Question
-                            }
-                        };
-                        let result = buckets.insert(
-                            &bucket_access,
-                            &principal,
-                            &bucket_id,
-                            kind,
-                            &text,
-                            &retry_key,
-                        )?;
-                        recorded = Some(serde_json::to_value(result.note)?);
-                        compression = result.compression.map(serde_json::to_value).transpose()?;
-                    }
-                    MemoryOperation::SubmitSummary {
-                        start, end, text, ..
-                    } => {
-                        let bucket_id = resolved_bucket
-                            .clone()
-                            .expect("bucket-addressed ops resolve a target");
-                        bucket = Some(bucket_id.clone());
-                        compression = buckets
-                            .submit_summary(
-                                &bucket_access,
-                                &principal,
-                                &bucket_id,
-                                start,
-                                end,
-                                &text,
-                            )?
-                            .map(serde_json::to_value)
-                            .transpose()?;
-                    }
-                    MemoryOperation::Scan { query, .. } => {
-                        let bucket_id = resolved_bucket
-                            .clone()
-                            .expect("bucket-addressed ops resolve a target");
-                        bucket = Some(bucket_id.clone());
-                        notes = buckets
-                            .search(&bucket_access, &principal, &bucket_id, &query)?
-                            .into_iter()
-                            .map(serde_json::to_value)
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                    }
-                    MemoryOperation::ZoomBucket { start, end, .. } => {
-                        let bucket_id = resolved_bucket
-                            .clone()
-                            .expect("bucket-addressed ops resolve a target");
-                        bucket = Some(bucket_id.clone());
-                        notes = buckets
-                            .zoom(&bucket_access, &principal, &bucket_id, start, end)?
-                            .into_iter()
-                            .map(serde_json::to_value)
-                            .collect::<std::result::Result<Vec<_>, _>>()?;
-                    }
-                    MemoryOperation::MigrateLegacy {
-                        bucket: bucket_id,
-                        source,
-                        dry_run,
-                    } => {
-                        anyhow::ensure!(boss_principal, "legacy memory migration is Boss-only");
-                        anyhow::ensure!(
-                            known_buckets.iter().any(|known| known.id == bucket_id),
-                            "unknown memory bucket {bucket_id}"
-                        );
-                        let candidates = legacy_memory_candidates(&self.root, &source)?;
-                        if !dry_run {
-                            for candidate in &candidates {
-                                let text = format!(
-                                    "Imported from {}\n\n{}",
-                                    candidate.source, candidate.text
-                                );
-                                let retry_key = format!(
-                                    "legacy-{}",
-                                    Sha256::digest(
-                                        format!("{}\0{}", candidate.source, candidate.text)
-                                            .as_bytes()
-                                    )
-                                    .iter()
-                                    .map(|byte| format!("{byte:02x}"))
-                                    .collect::<String>()
-                                );
-                                let result = buckets.insert(
-                                    &bucket_access,
-                                    &principal,
-                                    &bucket_id,
-                                    waku_memory_engine::buckets::NoteKind::Observation,
-                                    &text,
-                                    &retry_key,
-                                )?;
-                                compression =
-                                    result.compression.map(serde_json::to_value).transpose()?;
-                            }
-                        }
-                        bucket = Some(bucket_id.clone());
-                        migration = Some(MemoryMigrationReport {
-                            bucket: bucket_id,
-                            source,
-                            dry_run,
-                            imported: if dry_run { 0 } else { candidates.len() },
-                            candidates,
-                        });
-                    }
-                }
-                Ok(BossResult::Memory {
-                    buckets: bucket_list,
-                    overview,
-                    notes,
-                    compression,
-                    recorded,
-                    bucket,
-                    migration,
-                })
-            }
+            BossOperation::Memory { operation } => self.memory(caller, None, operation),
             BossOperation::RenameEmployee { session_id, name } => {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
@@ -3391,6 +3115,384 @@ impl BossService {
                 Ok(BossResult::Saved)
             }
         }
+    }
+
+    /// The bucket-memory surface behind `BossOperation::Memory`. The boss
+    /// sees and mints every bucket; an employee reaches its granted buckets
+    /// plus its assigned project's shared one. Any other session — an
+    /// ordinary task agent — reaches only `caller_project`'s bucket,
+    /// resolved by the daemon from the task's registered project, with
+    /// the same read+insert grant an employee's own project gets.
+    /// Named-personal buckets stay boss-owned: nothing grants them to a
+    /// non-employee caller.
+    pub fn memory(
+        &self,
+        caller: Option<Uuid>,
+        caller_project: Option<PathBuf>,
+        operation: waku_protocol::boss::MemoryOperation,
+    ) -> anyhow::Result<BossResult> {
+        use waku_protocol::boss::MemoryOperation;
+
+        let state = self.document();
+        let boss_principal = caller.is_none_or(|id| self.is_boss_principal(id));
+        let principal = if boss_principal {
+            "boss".to_owned()
+        } else {
+            caller.context("missing Boss caller")?.to_string()
+        };
+        let buckets = waku_memory_engine::buckets::BucketStore::open(
+            self.root.join("files/memory-engine"),
+        )?;
+        let mut known_buckets = buckets.list_buckets()?;
+        let active_employee = caller.filter(|caller| {
+            state
+                .employees
+                .iter()
+                .any(|employee| employee.session_id == *caller && !employee.expired)
+        });
+        let own_project_path = active_employee
+            .and_then(|session| self.projects.lock().get(&session).cloned())
+            .or_else(|| {
+                // A caller outside the roster — an ordinary task agent —
+                // falls back to the project the daemon resolved for its
+                // session. Boss principals never need the fallback (they
+                // see every bucket) and roster members keep their recorded
+                // run directory.
+                caller
+                    .filter(|id| !boss_principal && !self.is_employee(*id))
+                    .and(caller_project.clone())
+            });
+        let own_bucket_id = own_project_path.as_deref().map(project_bucket_id);
+        // `project` references resolve through the registered-project
+        // catalog; an absent target defaults to the caller's project.
+        let (resolved_bucket, resolved_project) = match memory_bucket_ref(&operation) {
+            Some((bucket, project)) => {
+                let catalog = self
+                    .project_catalog
+                    .lock()
+                    .as_ref()
+                    .map(|get| get())
+                    .unwrap_or_default();
+                let (id, path) = resolve_memory_bucket(
+                    bucket,
+                    project,
+                    own_project_path.as_deref(),
+                    &catalog,
+                )?;
+                (Some(id), path)
+            }
+            None => (None, None),
+        };
+        // Project buckets materialize on first touch: the caller's own
+        // always, an explicitly named one only for the boss — an
+        // employee naming a foreign project must not mint it.
+        for path in [
+            own_project_path,
+            resolved_project.filter(|_| boss_principal),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let bucket_id = project_bucket_id(&path);
+            if known_buckets.iter().any(|bucket| bucket.id == bucket_id) {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|part| part.to_str())
+                .unwrap_or("Project")
+                .to_owned();
+            let bucket = waku_memory_engine::buckets::Bucket {
+                id: bucket_id.clone(),
+                name,
+                purpose: "Shared project memory".into(),
+                project_id: Some(bucket_id),
+            };
+            buckets.create_bucket(&bucket)?;
+            known_buckets.push(bucket);
+        }
+        let granted_bucket_ids = if boss_principal {
+            Vec::new()
+        } else {
+            state
+                .employees
+                .iter()
+                .find(|employee| Some(employee.session_id) == caller && !employee.expired)
+                .map(|employee| employee.permissions.bucket_ids.clone())
+                .unwrap_or_default()
+        };
+        let visible_buckets = known_buckets
+            .iter()
+            .filter(|bucket| {
+                boss_principal
+                    || Some(bucket.id.as_str()) == own_bucket_id.as_deref()
+                    || granted_bucket_ids.contains(&bucket.id)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let bucket_access = waku_memory_engine::buckets::BucketAccess {
+            buckets: known_buckets.clone(),
+            grants: visible_buckets
+                .iter()
+                .map(|bucket| waku_memory_engine::buckets::BucketGrant {
+                    bucket_id: bucket.id.clone(),
+                    principal_id: principal.clone(),
+                    read: true,
+                    insert: true,
+                })
+                .collect(),
+            boss: boss_principal,
+        };
+        let mut bucket_list = Vec::new();
+        let mut overview = None;
+        let mut notes = Vec::new();
+        let mut compression = None;
+        let mut bucket = None;
+        let mut recorded = None;
+        let mut migration = None;
+        match operation {
+            MemoryOperation::ListBuckets => {
+                bucket_list = visible_buckets
+                    .iter()
+                    .map(serde_json::to_value)
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+            }
+            MemoryOperation::CreateBucket { name, purpose } => {
+                anyhow::ensure!(boss_principal, "only the Boss can create memory buckets");
+                let name = name.trim();
+                anyhow::ensure!(!name.is_empty(), "bucket name cannot be empty");
+                let slug = name
+                    .to_ascii_lowercase()
+                    .chars()
+                    .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+                    .collect::<String>();
+                let id = format!("{}-{}", slug.trim_matches('-'), Uuid::new_v4());
+                let created = waku_memory_engine::buckets::Bucket {
+                    id: id.clone(),
+                    name: name.to_owned(),
+                    purpose,
+                    project_id: None,
+                };
+                buckets.create_bucket(&created)?;
+                bucket_list.push(serde_json::to_value(created)?);
+            }
+            MemoryOperation::Overview { .. } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                let result = buckets.overview(&bucket_access, &principal, &bucket_id)?;
+                compression = result
+                    .compression
+                    .as_ref()
+                    .map(serde_json::to_value)
+                    .transpose()?;
+                overview = Some(serde_json::to_value(result)?);
+            }
+            MemoryOperation::Record {
+                kind,
+                text,
+                retry_key,
+                ..
+            } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                let kind = match kind {
+                    waku_protocol::boss::MemoryNoteKind::Fact => {
+                        waku_memory_engine::buckets::NoteKind::Fact
+                    }
+                    waku_protocol::boss::MemoryNoteKind::Observation => {
+                        waku_memory_engine::buckets::NoteKind::Observation
+                    }
+                    waku_protocol::boss::MemoryNoteKind::Question => {
+                        waku_memory_engine::buckets::NoteKind::Question
+                    }
+                };
+                let result = buckets.insert(
+                    &bucket_access,
+                    &principal,
+                    &bucket_id,
+                    kind,
+                    &text,
+                    &retry_key,
+                )?;
+                recorded = Some(serde_json::to_value(result.note)?);
+                compression = result.compression.map(serde_json::to_value).transpose()?;
+            }
+            MemoryOperation::SubmitSummary {
+                start, end, text, ..
+            } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                compression = buckets
+                    .submit_summary(
+                        &bucket_access,
+                        &principal,
+                        &bucket_id,
+                        start,
+                        end,
+                        &text,
+                    )?
+                    .map(serde_json::to_value)
+                    .transpose()?;
+            }
+            MemoryOperation::Scan { query, .. } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                notes = buckets
+                    .search(&bucket_access, &principal, &bucket_id, &query)?
+                    .into_iter()
+                    .map(serde_json::to_value)
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+            }
+            MemoryOperation::ZoomBucket { start, end, .. } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                notes = buckets
+                    .zoom(&bucket_access, &principal, &bucket_id, start, end)?
+                    .into_iter()
+                    .map(serde_json::to_value)
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+            }
+            MemoryOperation::MigrateLegacy {
+                bucket: bucket_id,
+                source,
+                dry_run,
+            } => {
+                anyhow::ensure!(boss_principal, "legacy memory migration is Boss-only");
+                anyhow::ensure!(
+                    known_buckets.iter().any(|known| known.id == bucket_id),
+                    "unknown memory bucket {bucket_id}"
+                );
+                let candidates = legacy_memory_candidates(&self.root, &source)?;
+                if !dry_run {
+                    for candidate in &candidates {
+                        let text = format!(
+                            "Imported from {}\n\n{}",
+                            candidate.source, candidate.text
+                        );
+                        let retry_key = format!(
+                            "legacy-{}",
+                            Sha256::digest(
+                                format!("{}\0{}", candidate.source, candidate.text)
+                                    .as_bytes()
+                            )
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>()
+                        );
+                        let result = buckets.insert(
+                            &bucket_access,
+                            &principal,
+                            &bucket_id,
+                            waku_memory_engine::buckets::NoteKind::Observation,
+                            &text,
+                            &retry_key,
+                        )?;
+                        compression =
+                            result.compression.map(serde_json::to_value).transpose()?;
+                    }
+                }
+                bucket = Some(bucket_id.clone());
+                migration = Some(MemoryMigrationReport {
+                    bucket: bucket_id,
+                    source,
+                    dry_run,
+                    imported: if dry_run { 0 } else { candidates.len() },
+                    candidates,
+                });
+            }
+        }
+        Ok(BossResult::Memory {
+            buckets: bucket_list,
+            overview,
+            notes,
+            compression,
+            recorded,
+            bucket,
+            migration,
+        })
+    }
+
+    /// A session-start render of one project bucket's compacted overview for
+    /// the daemon's context injection — `None` when the engine store, the
+    /// bucket, or its notes do not exist. Read-only by contract: content
+    /// operations materialize project buckets on first touch; this never
+    /// does.
+    pub fn project_memory_digest(&self, project: &Path) -> Option<String> {
+        let engine = self.root.join("files/memory-engine");
+        if !engine.join("buckets").is_dir() {
+            return None;
+        }
+        let store = waku_memory_engine::buckets::BucketStore::open(engine).ok()?;
+        let bucket_id = project_bucket_id(project);
+        let known = store.list_buckets().ok()?;
+        if !known.iter().any(|bucket| bucket.id == bucket_id) {
+            return None;
+        }
+        let access = waku_memory_engine::buckets::BucketAccess {
+            buckets: known,
+            grants: Vec::new(),
+            boss: true,
+        };
+        let overview = store.overview(&access, "daemon", &bucket_id).ok()?;
+        if overview.items.is_empty() {
+            return None;
+        }
+        use waku_memory_engine::buckets::{NoteKind, OverviewItem};
+        let oneline = |text: &str| {
+            waku_protocol::model::truncate_chars(
+                &text.lines().collect::<Vec<_>>().join(" "),
+                MEMORY_DIGEST_ITEM_CAP,
+            )
+        };
+        let mut body = String::new();
+        let mut shown = 0;
+        for item in &overview.items {
+            let line = match item {
+                OverviewItem::Note { note } => format!(
+                    "- note {} ({}): {}",
+                    note.sequence,
+                    match note.kind {
+                        NoteKind::Fact => "fact",
+                        NoteKind::Observation => "observation",
+                        NoteKind::Question => "question",
+                    },
+                    oneline(&note.text)
+                ),
+                OverviewItem::Summary { summary } => format!(
+                    "- notes {}–{} (summary): {}",
+                    summary.start,
+                    summary.end,
+                    oneline(&summary.text)
+                ),
+            };
+            if shown > 0 && body.len() + line.len() + 1 > MEMORY_DIGEST_CAP {
+                break;
+            }
+            body.push_str(&line);
+            body.push('\n');
+            shown += 1;
+        }
+        let omitted = overview.items.len() - shown;
+        if omitted > 0 {
+            body.push_str(&format!("- …{omitted} more entries omitted\n"));
+        }
+        if let Some(request) = &overview.compression {
+            body.push_str(&format!(
+                "- a summary for notes {}–{} is owed; `memory summary` submits one\n",
+                request.start, request.end
+            ));
+        }
+        Some(body.trim_end().to_owned())
     }
 
     fn update(
@@ -6794,6 +6896,182 @@ mod memory_op_tests {
                 .to_string()
                 .contains("needs a bucket or a project")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An ordinary task agent — a caller outside the roster — reaches the
+    /// project bucket the daemon resolved for its session, and nothing
+    /// else: named buckets stay boss-owned, bucket creation stays a boss
+    /// operation, and a session with no resolved project has no default.
+    #[test]
+    fn task_agent_memory_scopes_to_its_own_project() {
+        let root = std::env::temp_dir().join(format!("boss-task-memory-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let BossResult::Memory { buckets, .. } = service
+            .handle(
+                Some(boss),
+                BossOperation::Memory {
+                    operation: MemoryOperation::CreateBucket {
+                        name: "Private".into(),
+                        purpose: String::new(),
+                    },
+                },
+            )
+            .unwrap()
+        else {
+            panic!("create bucket returns metadata")
+        };
+        let private = buckets[0]["id"].as_str().unwrap().to_owned();
+
+        let own = root.join("own-repo");
+        fs::create_dir_all(&own).unwrap();
+        let agent = Uuid::new_v4();
+
+        // No selector lands on the session's project bucket — the
+        // daemon-resolved path stands in for `set_project_context`.
+        let BossResult::Memory {
+            bucket: Some(echoed),
+            recorded: Some(note),
+            ..
+        } = service
+            .memory(
+                Some(agent),
+                Some(own.clone()),
+                MemoryOperation::Record {
+                    bucket: None,
+                    project: None,
+                    kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                    text: "the formatter runs through `just fmt`".into(),
+                    retry_key: "task-note".into(),
+                },
+            )
+            .unwrap()
+        else {
+            panic!("a task agent writes to its session's project bucket")
+        };
+        assert_eq!(echoed, project_bucket_id(&own));
+        assert_eq!(note["text"], "the formatter runs through `just fmt`");
+
+        // `buckets` lists only what the grant reaches.
+        let BossResult::Memory { buckets, .. } = service
+            .memory(Some(agent), Some(own.clone()), MemoryOperation::ListBuckets)
+            .unwrap()
+        else {
+            panic!("list returns the visible buckets")
+        };
+        assert!(buckets.iter().any(|bucket| bucket["id"] == echoed));
+        assert!(!buckets.iter().any(|bucket| bucket["id"] == private));
+
+        // The same ACL gate applies to explicitly named buckets.
+        assert!(
+            service
+                .memory(
+                    Some(agent),
+                    Some(own.clone()),
+                    MemoryOperation::Overview {
+                        bucket: Some(private),
+                        project: None,
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("access denied")
+        );
+        assert!(
+            service
+                .memory(
+                    Some(agent),
+                    Some(own.clone()),
+                    MemoryOperation::CreateBucket {
+                        name: "Nope".into(),
+                        purpose: String::new(),
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("only the Boss")
+        );
+
+        // A session without a resolved project has no default bucket.
+        assert!(
+            service
+                .memory(
+                    Some(Uuid::new_v4()),
+                    None,
+                    MemoryOperation::Overview {
+                        bucket: None,
+                        project: None,
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("needs a bucket or a project")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The session-start digest renders the project bucket's compacted
+    /// overview — never a raw log — and renders nothing while the store,
+    /// the bucket, or its notes are absent.
+    #[test]
+    fn project_memory_digest_renders_the_bounded_overview() {
+        let root = std::env::temp_dir().join(format!("boss-memory-digest-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        let project = root.join("repo");
+        fs::create_dir_all(&project).unwrap();
+        let foreign = root.join("foreign");
+        fs::create_dir_all(&foreign).unwrap();
+
+        // No store, no bucket, no notes — nothing renders, and nothing is
+        // materialized as a side effect.
+        assert!(service.project_memory_digest(&project).is_none());
+        assert!(!root.join("files/memory-engine").exists());
+
+        for (index, text) in [
+            "the formatter runs through `just fmt`",
+            "the API key lives in ~/.config/octane",
+        ]
+        .iter()
+        .enumerate()
+        {
+            service
+                .handle(
+                    Some(boss),
+                    BossOperation::Memory {
+                        operation: MemoryOperation::Record {
+                            bucket: None,
+                            project: Some(project.to_string_lossy().into_owned()),
+                            kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                            text: (*text).to_owned(),
+                            retry_key: format!("seed-{index}"),
+                        },
+                    },
+                )
+                .unwrap();
+        }
+
+        let digest = service.project_memory_digest(&project).unwrap();
+        assert!(digest.contains("the formatter runs through `just fmt`"));
+        assert!(digest.contains("the API key lives in ~/.config/octane"));
+        // Two unsummarized notes owe a compression — the digest names it.
+        assert!(digest.contains("summary for notes 1–2 is owed"));
+
+        // A foreign project never materialized a bucket — nothing renders.
+        assert!(service.project_memory_digest(&foreign).is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

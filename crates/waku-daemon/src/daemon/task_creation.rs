@@ -220,6 +220,13 @@ impl WakuBackend {
             self.steer_first_prompt_context(session_id, &prompt, &driver, &sink);
         } else {
             let prompt = self.prepend_agent_surface(session_id, &driver, prompt);
+            let prompt = match self.session_memory_block(session_id, &driver) {
+                Some(memory) => {
+                    self.agent.mark_memory_prepended(session_id);
+                    format!("{memory}\n\n{prompt}")
+                }
+                None => prompt,
+            };
             let prompt = if self.boss.is_managed(session_id) {
                 self.boss_outbound_prompt(session_id, prompt)
             } else {
@@ -400,6 +407,50 @@ impl WakuBackend {
         })
     }
 
+    /// The session's own project root for memory scoping — `None` for
+    /// incognito sessions (they get no project context at all) and for
+    /// projectless tasks (there is no shared bucket to point at).
+    pub(super) fn session_memory_project(&self, session_id: Uuid) -> Option<PathBuf> {
+        let state = self.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        if session.incognito {
+            return None;
+        }
+        let path = &state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)?
+            .path;
+        (!crate::projectless::is_projectless_path(path)).then(|| path.clone())
+    }
+
+    /// The once-per-runtime `<project-memory>` block a task agent or
+    /// employee is owed: how its `goddard-agent memory` surface works, then
+    /// the project bucket's compacted overview when it has one. Sessions
+    /// whose launch never carried the memory surface — Boss principals,
+    /// incognito, projectless, experiment-off — owe nothing, and sessions
+    /// whose provider never put the CLI within reach get neither the
+    /// instructions nor the content.
+    pub(super) fn session_memory_block(
+        &self,
+        session_id: Uuid,
+        driver: &DriverHandle,
+    ) -> Option<String> {
+        if !self.agent.memory_owed(session_id)
+            || !self.agent.memory_surface(session_id)
+            || driver.agent_surface_delivery() == crate::driver::AgentSurfaceDelivery::Absent
+        {
+            return None;
+        }
+        let project = self.session_memory_project(session_id)?;
+        Some(project_memory_block(
+            self.boss.project_memory_digest(&project).as_deref(),
+        ))
+    }
+
     /// The session's first prompt already went out clean; its context
     /// blocks — the project map, project memory, and enabled tool guidance —
     /// follow as a hidden steer so provider title generation never sees them.
@@ -418,6 +469,7 @@ impl WakuBackend {
             return;
         }
         let parent_index = self.side_chat_parent_block(session_id);
+        let memory = self.session_memory_block(session_id, driver);
         let computer_use_available = self
             .sessions
             .lock()
@@ -432,6 +484,7 @@ impl WakuBackend {
             .flatten();
         let block = [
             parent_index.clone(),
+            memory.clone(),
             computer_use,
             self.agent_surface_block(session_id, driver),
         ]
@@ -447,6 +500,10 @@ impl WakuBackend {
         if parent_index.is_some() {
             self.agent.note_index_steer(session_id);
         }
+        // Same for the project-memory block.
+        if memory.is_some() {
+            self.agent.note_memory_steer(session_id);
+        }
         // The steer lands as a user message mid-turn — frame the blocks as
         // context so the provider does not read them as a new instruction.
         let steer = format!(
@@ -460,7 +517,11 @@ impl WakuBackend {
                 transport: None,
                 sender: None,
                 queued_id: None,
-                context: Some(crate::agent::ContextSteer::Blocks),
+                context: Some(if memory.is_some() {
+                    crate::agent::ContextSteer::Memory
+                } else {
+                    crate::agent::ContextSteer::Blocks
+                }),
                 hidden: false,
                 report_trigger: None,
             },
@@ -555,4 +616,30 @@ impl WakuBackend {
         self.agent.mark_surface_announced(session_id);
         format!("{surface}\n\n{prompt}")
     }
+}
+
+/// The `<project-memory>` block: what the bucket is for and how the
+/// session's `goddard-agent memory` surface reaches it, then the bucket's
+/// compacted overview — never a raw note dump — when notes exist.
+fn project_memory_block(digest: Option<&str>) -> String {
+    let mut block = String::from(
+        "<project-memory>\nThis project has a shared memory bucket — durable \
+         notes recorded by the boss, employees, and tasks working here \
+         survive across sessions. Reach it through `goddard-agent memory`: \
+         `overview` returns this compacted view, `scan QUERY` matches note \
+         text, `zoom START END` expands a note range, `record \
+         --json|--json-file` appends a note, `summary` answers a pending \
+         compression request, and `buckets` lists every bucket you can see. \
+         Record durable facts, decisions, and gotchas a future session would \
+         need — not progress on the current task.",
+    );
+    match digest {
+        Some(digest) => {
+            block.push_str("\n\nOverview so far:\n");
+            block.push_str(digest);
+        }
+        None => block.push_str("\n\nNo notes are recorded yet."),
+    }
+    block.push_str("\n</project-memory>");
+    block
 }

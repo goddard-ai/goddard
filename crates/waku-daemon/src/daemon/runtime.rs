@@ -349,6 +349,12 @@ impl WakuBackend {
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
             boss: self.boss.is_boss_principal(session_id),
+            // `memory` rides the bucket store the Boss experiment owns, and
+            // only a session with a real registered project has a shared
+            // bucket to reach — Boss principals keep their own channel.
+            memory: settings.boss_experiment_enabled
+                && !self.boss.is_boss_principal(session_id)
+                && self.session_memory_project(session_id).is_some(),
             resource_reservation: self
                 .boss
                 .employee(session_id)

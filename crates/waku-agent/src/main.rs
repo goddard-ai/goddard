@@ -51,6 +51,8 @@ USAGE
     goddard-agent search --text QUERY         Search task transcripts — this project's, or every project's for the boss
     goddard-agent map --text QUESTION         Find relevant code in this workspace
     goddard-agent merge submit               Rebase, verify, and land this employee worktree
+    goddard-agent memory overview|scan|zoom|record|summary|buckets
+        This session's shared project memory — omit the bucket to use it
     goddard-agent ask '<json>'               Ask the user a structured question
     goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
     goddard-agent computer js --stdin        Read that JSON payload from stdin
@@ -106,6 +108,13 @@ USAGE CONTRACT
     names, and use `known_paths` when you have already inspected files; then
     read the returned source locations before drawing conclusions. Narrow with
     `path` when you know the relevant directory.
+    `memory` reads and records durable notes in this session's shared project
+    bucket — `overview` is the compacted entry point, `scan` and `zoom` drill
+    into notes, `record` appends one, `summary` answers a pending compression
+    request, `buckets` lists every bucket the session can see. Omit the bucket
+    to use the project bucket; `--project` addresses another registered
+    project when its bucket is granted. Bucket `create` and `migrate` are
+    Boss-only and stay under `boss memory`.
     `rename` changes only this task's title. Before deciding, read this task's
     transcript with `goddard-agent read '{}'` to see its current title. Keep
     that title unless the task has substantially changed or pivoted. If
@@ -434,6 +443,36 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false appends candidates; source files are never modified"}}),
             json!({"json":{"type":"memory","migration":{"dryRun":"candidate list when true; imported count when false","candidates":"inspectable source paths and original note text"}}}),
             "goddard-agent boss memory migrate project-abc boss".to_owned(),
+        ),
+        "memory buckets" => (
+            json!({}),
+            json!({"json":{"type":"memory","buckets":"bucket names and purposes visible to this caller; contents are not loaded"}}),
+            "goddard-agent memory buckets".to_owned(),
+        ),
+        "memory overview" => (
+            json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use this session's project bucket","type":"named bucket ID"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
+            json!({"json":{"type":"memory","overview":"bounded summaries and recent original notes","compression":"optional agent-written summary request"}}),
+            "goddard-agent memory overview".to_owned(),
+        ),
+        "memory record" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
+            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent memory record --json-file note.json".to_owned(),
+        ),
+        "memory summary" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
+            json!({"json":{"type":"memory","compression":"next summary request, if one is ready"}}),
+            "goddard-agent memory summary --json-file summary.json".to_owned(),
+        ),
+        "memory scan" => (
+            json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use this session's project bucket","type":"named bucket ID"},"QUERY":{"positional":true,"required":true,"type":"literal search in original notes"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
+            json!({"json":{"type":"memory","notes":"matching original notes"}}),
+            "goddard-agent memory scan authentication".to_owned(),
+        ),
+        "memory zoom" => (
+            json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use this session's project bucket","type":"named bucket ID"},"START":{"positional":true,"required":true,"type":"first note index"},"END":{"positional":true,"required":true,"type":"last note index"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
+            json!({"json":{"type":"memory","notes":"two child summaries or the original note"}}),
+            "goddard-agent memory zoom 1 8".to_owned(),
         ),
         "boss plan create" => (
             json!({"--title":{"required":true,"type":"plan display title"},"--plan-file":{"required":true,"type":"relative path under plans/"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 planning brief"},"--provider":{"enum":providers,"optional":true,"default":"codex"},"--model":{"type":"provider model ID","optional":true,"default":"gpt-6.1-sol on codex"},"--effort":{"type":"provider effort ID","optional":true,"default":"medium"}}),
@@ -813,6 +852,12 @@ fn schema() -> serde_json::Value {
         "boss memory scan",
         "boss memory zoom",
         "boss memory migrate",
+        "memory buckets",
+        "memory overview",
+        "memory record",
+        "memory summary",
+        "memory scan",
+        "memory zoom",
         "boss plan create",
         "boss plan finalize",
         "boss plan items",
@@ -1177,6 +1222,7 @@ fn run() -> anyhow::Result<()> {
                 other => bail!("daemon returned an unexpected response: {other:?}"),
             }
         }
+        "memory" => task_memory(arguments.collect()),
         "computer" => computer(arguments.collect()),
         "merge" => {
             if arguments.next().as_deref() != Some("submit") || arguments.next().is_some() {
@@ -1565,72 +1611,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             })?)
         }
         ("memory", "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom") => {
-            let kind = match operation.as_str() {
-                "buckets" => "listBuckets",
-                "create" => "createBucket",
-                "record" => "record",
-                "summary" => "submitSummary",
-                "scan" => "scan",
-                "zoom" => "zoomBucket",
-                other => other,
-            };
-            let memory = if matches!(operation.as_str(), "create" | "record" | "summary") {
-                let (_, opts) = flags(args, &["json", "json-file", "project"], false)?;
-                let mut value: serde_json::Value =
-                    serde_json::from_str(&json_input(&opts)?).context("invalid memory input")?;
-                let object = value
-                    .as_object_mut()
-                    .ok_or_else(|| anyhow!("memory input must be a JSON object"))?;
-                object.insert("type".into(), json!(kind));
-                if let Some(project) = opts.get("project") {
-                    if operation.as_str() == "create" {
-                        bail!("--project is not valid for memory create");
-                    }
-                    if object.contains_key("project") {
-                        bail!("--project duplicates the payload's project field");
-                    }
-                    object.insert("project".into(), json!(project));
-                }
-                serde_json::from_value(value)?
-            } else {
-                let (pos, opts) = flags(args, &["project"], true)?;
-                let project = opts.get("project");
-                let value = match operation.as_str() {
-                    "buckets" if pos.is_empty() && project.is_none() => json!({"type":kind}),
-                    "overview" => match (pos.len(), project) {
-                        (0, Some(project)) => json!({"type":kind,"project":project}),
-                        (0, None) => json!({"type":kind}),
-                        (1, None) => json!({"type":kind,"bucket":pos[0]}),
-                        _ => bail!("usage: boss memory overview [BUCKET|--project PROJECT]"),
-                    },
-                    "scan" => match (pos.len(), project) {
-                        (1, Some(project)) => {
-                            json!({"type":kind,"project":project,"query":pos[0]})
-                        }
-                        (1, None) => json!({"type":kind,"query":pos[0]}),
-                        (2, None) => json!({"type":kind,"bucket":pos[0],"query":pos[1]}),
-                        _ => bail!("usage: boss memory scan [BUCKET|--project PROJECT] QUERY"),
-                    },
-                    "zoom" => match (pos.len(), project) {
-                        (2, Some(project)) => {
-                            json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
-                        }
-                        (2, None) => {
-                            json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?})
-                        }
-                        (3, None) => {
-                            json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?})
-                        }
-                        _ => {
-                            bail!("usage: boss memory zoom [BUCKET|--project PROJECT] START END")
-                        }
-                    },
-                    _ => bail!(
-                        "usage: boss memory {operation} [BUCKET|--project PROJECT] [QUERY|START END]"
-                    ),
-                };
-                serde_json::from_value(value)?
-            };
+            let memory = memory_leaf("boss memory", &operation, args)?;
             print_boss(boss_request(Op::Memory { operation: memory })?)
         }
         ("memory", "migrate") => {
@@ -1878,6 +1859,73 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             boss_admin_leaf(&leaf)
         }
     }
+}
+
+/// Parse one `memory` operation's flags into its wire shape. `command` is
+/// the usage-string label — `boss memory` for the boss surface, `memory`
+/// for the session-scoped top-level command.
+fn memory_leaf(
+    command: &str,
+    operation: &str,
+    args: Vec<String>,
+) -> anyhow::Result<waku_protocol::boss::MemoryOperation> {
+    let kind = match operation {
+        "buckets" => "listBuckets",
+        "create" => "createBucket",
+        "record" => "record",
+        "summary" => "submitSummary",
+        "scan" => "scan",
+        "zoom" => "zoomBucket",
+        other => other,
+    };
+    let memory = if matches!(operation, "create" | "record" | "summary") {
+        let (_, opts) = flags(args, &["json", "json-file", "project"], false)?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&json_input(&opts)?).context("invalid memory input")?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("memory input must be a JSON object"))?;
+        object.insert("type".into(), json!(kind));
+        if let Some(project) = opts.get("project") {
+            if operation == "create" {
+                bail!("--project is not valid for {command} create");
+            }
+            if object.contains_key("project") {
+                bail!("--project duplicates the payload's project field");
+            }
+            object.insert("project".into(), json!(project));
+        }
+        serde_json::from_value(value)?
+    } else {
+        let (pos, opts) = flags(args, &["project"], true)?;
+        let project = opts.get("project");
+        let value = match operation {
+            "buckets" if pos.is_empty() && project.is_none() => json!({"type":kind}),
+            "overview" => match (pos.len(), project) {
+                (0, Some(project)) => json!({"type":kind,"project":project}),
+                (0, None) => json!({"type":kind}),
+                (1, None) => json!({"type":kind,"bucket":pos[0]}),
+                _ => bail!("usage: {command} overview [BUCKET|--project PROJECT]"),
+            },
+            "scan" => match (pos.len(), project) {
+                (1, Some(project)) => {
+                    json!({"type":kind,"project":project,"query":pos[0]})
+                }
+                (1, None) => json!({"type":kind,"query":pos[0]}),
+                (2, None) => json!({"type":kind,"bucket":pos[0],"query":pos[1]}),
+                _ => bail!("usage: {command} scan [BUCKET|--project PROJECT] QUERY"),
+            },
+            "zoom" => match (pos.len(), project) {
+                (2, Some(project)) => json!({"type":kind,"project":project,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
+                (2, None) => json!({"type":kind,"start":pos[0].parse::<u64>().context("invalid start note index")?,"end":pos[1].parse::<u64>().context("invalid end note index")?}),
+                (3, None) => json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?}),
+                _ => bail!("usage: {command} zoom [BUCKET|--project PROJECT] START END"),
+            },
+            _ => bail!("usage: {command} {operation} [BUCKET|--project PROJECT] [QUERY|START END]"),
+        };
+        serde_json::from_value(value)?
+    };
+    Ok(memory)
 }
 
 fn boss_admin_leaf(args: &[String]) -> anyhow::Result<()> {
@@ -2300,6 +2348,26 @@ fn task_search(args: Vec<String>) -> anyhow::Result<()> {
             Ok(())
         }
         other => bail!("unexpected response: {other:?}"),
+    }
+}
+
+/// `goddard-agent memory` — the session-scoped bucket surface for ordinary
+/// task agents and employees. Unqualified operations land on the session's
+/// own project bucket; `--project`/`BUCKET` address registered projects or
+/// granted buckets. Bucket creation and legacy migration stay Boss-only and
+/// are reached through `boss memory`.
+fn task_memory(args: Vec<String>) -> anyhow::Result<()> {
+    use waku_protocol::boss::BossOperation;
+    let operation = args.first().cloned().unwrap_or_default();
+    match operation.as_str() {
+        "buckets" | "overview" | "record" | "summary" | "scan" | "zoom" => {
+            let memory = memory_leaf("memory", &operation, args[1..].to_vec())?;
+            print_boss(boss_request(BossOperation::Memory { operation: memory })?)
+        }
+        "create" | "migrate" => bail!("`memory {operation}` is a Boss-only operation"),
+        _ => bail!(
+            "usage: goddard-agent memory buckets|overview|record|summary|scan|zoom; each leaf documents its flags under --help"
+        ),
     }
 }
 
