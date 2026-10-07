@@ -4728,14 +4728,18 @@ impl Waku {
                             theme.selection,
                             false,
                         ))
-                        .when(show_dot, |row| {
-                            row.child(scratchpad_dictation_caret(14.0, muted, status, theme))
-                        })
                         .when(cleaning, |row| {
                             row.child(scratchpad_cleanup_spinner(14.0, theme))
                         })
                         .when(show_dot, |row| {
                             row.child(scratchpad_dot_on_line(14.0, muted, status, theme))
+                        })
+                        // The caret trails the dot at the row's trailing
+                        // edge — where the next dictated word lands —
+                        // matching the annotation box's dot-then-caret
+                        // order.
+                        .when(show_dot, |row| {
+                            row.child(scratchpad_dictation_caret(14.0, muted, status, theme))
                         })
                         .when_some(ghost, |row, ghost| row.child(ghost))
                         .when_some(landing_ghost, |row, ghost| row.child(ghost)),
@@ -4945,8 +4949,8 @@ impl Waku {
                                 theme.selection,
                                 false,
                             ))
-                            .child(scratchpad_dictation_caret(14.0, muted, status, theme))
-                            .child(scratchpad_dot_on_line(14.0, muted, status, theme)),
+                            .child(scratchpad_dot_on_line(14.0, muted, status, theme))
+                            .child(scratchpad_dictation_caret(14.0, muted, status, theme)),
                     )
                     // Nothing is written here yet — the live row is the
                     // insertion point, so the click lands the caret and
