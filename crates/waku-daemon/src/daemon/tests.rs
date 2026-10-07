@@ -5735,7 +5735,10 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         .find(|session| session.id != boss)
         .expect("the employee task persisted before the failed launch")
         .clone();
-    assert_eq!(session.reasoning_effort.as_deref(), Some(valid_effort.as_str()));
+    assert_eq!(
+        session.reasoning_effort.as_deref(),
+        Some(valid_effort.as_str())
+    );
 
     drop(backend);
     let _ = std::fs::remove_dir_all(root);

@@ -599,7 +599,10 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         _ => unreachable!("missing input schema for executable leaf `{path}`"),
     };
     let mut help = format!("{example}; output defaults to text on a terminal and JSON when piped.");
-    if let Some(description) = inputs.get("description").and_then(serde_json::Value::as_str) {
+    if let Some(description) = inputs
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+    {
         help.push(' ');
         help.push_str(description);
     }
