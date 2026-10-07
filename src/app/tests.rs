@@ -1500,6 +1500,7 @@ fn boss_deliverable(
         id,
         name: "report.md".into(),
         path: "/tmp/report.md".into(),
+        source_path: None,
         directory: false,
         created_at: updated_at,
         updated_at,

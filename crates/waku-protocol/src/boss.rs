@@ -763,14 +763,22 @@ impl BossEmployee {
 }
 
 /// A file or folder of employee output the boss published to the user's
-/// sidebar. `path` is absolute on the daemon's host — employees run in their
-/// assigned project directory, so deliverables point outside the Boss files root.
+/// sidebar. `path` is absolute on the daemon's host and points at readable
+/// bytes — publish copies the source into the daemon's deliverable store,
+/// so the record survives the workspace it was made in. A `reference`
+/// publish skips the copy and `path` names the live source instead.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossDeliverable {
     pub id: Uuid,
     pub name: String,
     pub path: String,
+    /// Where a copied deliverable was published from — the re-publish key
+    /// and the provenance the sidebar shows. `None` marks a live-path
+    /// reference, where `path` is itself the source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_path: Option<String>,
     /// Recorded at publish time so renderers never stat the filesystem.
     pub directory: bool,
     pub created_at: u64,
@@ -1510,11 +1518,17 @@ pub enum BossOperation {
         parts: Vec<String>,
     },
     /// Publish a file or folder to the user's sidebar. `path` is absolute on
-    /// this daemon's host; `name` defaults to the path's file name.
+    /// this daemon's host; `name` defaults to the path's file name. The
+    /// daemon copies the target into its deliverable store so the sidebar
+    /// entry survives the workspace it came from — `reference: true` opts
+    /// out and keeps a live filesystem path, for artifacts too large to copy
+    /// or meant to stay current.
     PublishDeliverable {
         path: String,
         #[serde(default)]
         name: Option<String>,
+        #[serde(default)]
+        reference: bool,
     },
     DismissDeliverable {
         id: Uuid,

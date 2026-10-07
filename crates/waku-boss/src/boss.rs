@@ -291,6 +291,12 @@ fn push_legacy_candidate(
 }
 
 const MAX_FILE_BYTES: usize = 256 * 1024;
+/// A published deliverable is a snapshot the daemon stores on the
+/// publisher's behalf — bounded so publishing a build tree or dataset by
+/// mistake cannot fill the Boss data directory. Larger or living artifacts
+/// publish with `reference`, keeping a live path instead of a copy.
+const MAX_DELIVERABLE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_DELIVERABLE_ENTRIES: usize = 10_000;
 /// User prompts the router's focus inference sees at once.
 const ROUTER_RECENT_PROMPTS: usize = 6;
 /// A stored prompt's budget inside the router's eval state.
@@ -420,6 +426,7 @@ impl BossService {
             .map(|entry| entry.session_id)
             .collect();
         self.migrate_plan_documents();
+        self.sweep_deliverable_store(&self.state.lock());
         self.save(&self.state.lock())?;
         self.active.store(true, Ordering::Release);
         Ok(())
@@ -508,6 +515,7 @@ impl BossService {
             persona_writes: Mutex::new(std::collections::HashMap::new()),
         };
         service.migrate_plan_documents();
+        service.sweep_deliverable_store(&service.state.lock());
         service.save(&service.state.lock())?;
         Ok(service)
     }
@@ -1456,7 +1464,7 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH`.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent boss memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} When something genuinely needs your supervisor's attention — you are blocked, a decision is required, or the job failed — flag it with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Do not flag routine completions. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH` — the daemon stores a copy, so the entry survives your workspace's cleanup.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -3159,7 +3167,11 @@ impl BossService {
                 self.update(|_| Ok(()))?;
                 Ok(BossResult::Saved)
             }
-            BossOperation::PublishDeliverable { path, name } => {
+            BossOperation::PublishDeliverable {
+                path,
+                name,
+                reference,
+            } => {
                 let target = PathBuf::from(&path);
                 if !target.is_absolute() {
                     bail!("deliverable paths must be absolute");
@@ -3179,23 +3191,53 @@ impl BossService {
                         .unwrap_or(&path)
                         .to_owned(),
                 };
+                // Re-publishing a source refreshes the deliverable in place —
+                // it jumps back into the sidebar's recency window under the
+                // same row. The publish key is the source path; for a copied
+                // deliverable `path` has already moved into the store.
+                let id = self
+                    .state
+                    .lock()
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| {
+                        deliverable
+                            .source_path
+                            .as_deref()
+                            .unwrap_or(&deliverable.path)
+                            == path
+                    })
+                    .map(|deliverable| deliverable.id)
+                    .unwrap_or_else(Uuid::new_v4);
+                // A copied deliverable's bytes live under the Boss data
+                // directory, so the sidebar entry survives the workspace it
+                // was published from — an employee's worktree is cleaned up
+                // with its chat. A `reference` publish keeps the live path,
+                // and switching modes drops the snapshot a copy left behind.
+                let stored = if reference {
+                    let _ = fs::remove_dir_all(self.deliverable_dir(id));
+                    None
+                } else {
+                    Some(self.store_deliverable(id, &target)?)
+                };
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
-                    // Re-publishing a path refreshes the deliverable in place —
-                    // it jumps back into the sidebar's recency window.
                     if let Some(deliverable) = state
                         .deliverables
                         .iter_mut()
-                        .find(|deliverable| deliverable.path == path)
+                        .find(|deliverable| deliverable.id == id)
                     {
                         deliverable.name = name;
                         deliverable.directory = directory;
                         deliverable.updated_at = now;
+                        deliverable.path = stored.clone().unwrap_or_else(|| path.clone());
+                        deliverable.source_path = (!reference).then(|| path.clone());
                     } else {
                         state.deliverables.push(BossDeliverable {
-                            id: Uuid::new_v4(),
+                            id,
                             name,
-                            path,
+                            path: stored.clone().unwrap_or_else(|| path.clone()),
+                            source_path: (!reference).then(|| path.clone()),
                             directory,
                             created_at: now,
                             updated_at: now,
@@ -3221,6 +3263,9 @@ impl BossService {
                     }
                     Ok(())
                 })?;
+                // A dismissed deliverable's snapshot leaves with its record —
+                // best-effort, since a leftover store dir is only disk.
+                let _ = fs::remove_dir_all(self.deliverable_dir(id));
                 Ok(BossResult::Saved)
             }
             BossOperation::PinDeliverable { id, pinned } => {
@@ -3401,6 +3446,105 @@ impl BossService {
         }
         Ok(result)
     }
+
+    /// The daemon's deliverable store: `deliverables/<id>/<name>` beside the
+    /// files root. Copies live there rather than under `files/` so Boss file
+    /// operations cannot rename or overwrite a snapshot behind its record.
+    fn deliverables_root(&self) -> PathBuf {
+        self.root.join("deliverables")
+    }
+
+    fn deliverable_dir(&self, id: Uuid) -> PathBuf {
+        self.deliverables_root().join(id.to_string())
+    }
+
+    /// Snapshot `source` under `deliverables/<id>/`, returning the stored
+    /// absolute path. The copy lands by renaming a staging sibling so a
+    /// reader never sees a half-written tree; a failed copy removes the
+    /// staging directory and leaves any previous snapshot in place.
+    fn store_deliverable(&self, id: Uuid, source: &Path) -> anyhow::Result<String> {
+        let base = source
+            .file_name()
+            .ok_or_else(|| anyhow!("deliverable path must name a file or folder"))?;
+        let stage = self.deliverables_root().join(format!(".stage-{id}"));
+        let target = self.deliverable_dir(id);
+        let _ = fs::remove_dir_all(&stage);
+        fs::create_dir_all(&stage)?;
+        let mut budget = DeliverableBudget::default();
+        if let Err(error) = copy_deliverable(source, &stage.join(base), &mut budget) {
+            let _ = fs::remove_dir_all(&stage);
+            return Err(error);
+        }
+        let _ = fs::remove_dir_all(&target);
+        fs::rename(&stage, &target)?;
+        Ok(target.join(base).to_string_lossy().into_owned())
+    }
+
+    /// Drop copied snapshots no live record points at — a crash between the
+    /// copy landing and the state save leaves the store dir behind.
+    fn sweep_deliverable_store(&self, state: &BossState) {
+        let live: std::collections::HashSet<String> = state
+            .deliverables
+            .iter()
+            .filter(|deliverable| deliverable.source_path.is_some())
+            .map(|deliverable| deliverable.id.to_string())
+            .collect();
+        let Ok(entries) = fs::read_dir(self.deliverables_root()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_str().is_some_and(|name| live.contains(name)) {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
+/// Copy `source` — file or directory — to `dest`, tracking the running
+/// total in `budget`. Symlinks are refused rather than followed so a copied
+/// tree cannot pull bytes from outside the publisher's workspace.
+fn copy_deliverable(
+    source: &Path,
+    dest: &Path,
+    budget: &mut DeliverableBudget,
+) -> anyhow::Result<()> {
+    let mut pending = vec![(source.to_path_buf(), dest.to_path_buf())];
+    while let Some((source, dest)) = pending.pop() {
+        let metadata = fs::symlink_metadata(&source)?;
+        if metadata.file_type().is_symlink() {
+            bail!("deliverables cannot contain symlinks: {}", source.display());
+        }
+        budget.entries += 1;
+        if budget.entries > MAX_DELIVERABLE_ENTRIES {
+            bail!("deliverable exceeds {MAX_DELIVERABLE_ENTRIES} entries");
+        }
+        if metadata.is_dir() {
+            fs::create_dir_all(&dest)?;
+            for entry in fs::read_dir(&source)? {
+                let entry = entry?;
+                pending.push((entry.path(), dest.join(entry.file_name())));
+            }
+        } else {
+            budget.bytes += metadata.len();
+            if budget.bytes > MAX_DELIVERABLE_BYTES {
+                bail!(
+                    "deliverable exceeds {} MiB",
+                    MAX_DELIVERABLE_BYTES / (1024 * 1024)
+                );
+            }
+            fs::copy(&source, &dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Running totals a deliverable copy is allowed to spend — see
+/// `MAX_DELIVERABLE_ENTRIES`/`MAX_DELIVERABLE_BYTES`.
+#[derive(Default)]
+struct DeliverableBudget {
+    entries: usize,
+    bytes: u64,
 }
 
 /// Return pinned document paths for the files-root `readFile` operation.
@@ -5587,6 +5731,7 @@ mod tests {
             BossOperation::PublishDeliverable {
                 path: file_path.clone(),
                 name: None,
+                reference: false,
             },
             BossOperation::DismissDeliverable { id: Uuid::nil() },
             BossOperation::PinDeliverable {
@@ -5619,6 +5764,7 @@ mod tests {
                     BossOperation::PublishDeliverable {
                         path: foreign.to_string_lossy().into_owned(),
                         name: None,
+                        reference: false,
                     },
                 )
                 .is_err()
@@ -5629,6 +5775,7 @@ mod tests {
                 BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: Some("Employee Report".into()),
+                    reference: false,
                 },
             )
             .unwrap();
@@ -5654,6 +5801,7 @@ mod tests {
                     BossOperation::PublishDeliverable {
                         path: "outputs/report.md".into(),
                         name: None,
+                        reference: false,
                     },
                 )
                 .is_err()
@@ -5665,6 +5813,7 @@ mod tests {
                     BossOperation::PublishDeliverable {
                         path: "/definitely/missing".into(),
                         name: None,
+                        reference: false,
                     },
                 )
                 .is_err()
@@ -5676,6 +5825,7 @@ mod tests {
                 BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: None,
+                    reference: false,
                 },
             )
             .unwrap();
@@ -5685,6 +5835,7 @@ mod tests {
                 BossOperation::PublishDeliverable {
                     path: dir_path.clone(),
                     name: Some("Deliverables".into()),
+                    reference: false,
                 },
             )
             .unwrap();
@@ -5693,14 +5844,14 @@ mod tests {
         let file_deliverable = state
             .deliverables
             .iter()
-            .find(|deliverable| deliverable.path == file_path)
+            .find(|deliverable| deliverable.source_path.as_deref() == Some(file_path.as_str()))
             .unwrap();
         assert_eq!(file_deliverable.name, "report.md");
         assert!(!file_deliverable.directory);
         let dir_deliverable = state
             .deliverables
             .iter()
-            .find(|deliverable| deliverable.path == dir_path)
+            .find(|deliverable| deliverable.source_path.as_deref() == Some(dir_path.as_str()))
             .unwrap();
         assert_eq!(dir_deliverable.name, "Deliverables");
         assert!(dir_deliverable.directory);
@@ -5714,6 +5865,7 @@ mod tests {
                 BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: Some("Report".into()),
+                    reference: false,
                 },
             )
             .unwrap();
@@ -5722,7 +5874,7 @@ mod tests {
         let republished = state
             .deliverables
             .iter()
-            .find(|deliverable| deliverable.path == file_path)
+            .find(|deliverable| deliverable.source_path.as_deref() == Some(file_path.as_str()))
             .unwrap();
         assert_eq!(republished.id, file_id);
         assert_eq!(republished.name, "Report");
@@ -5821,6 +5973,7 @@ mod tests {
                 BossOperation::PublishDeliverable {
                     path: file_path.clone(),
                     name: None,
+                    reference: false,
                 },
             )
             .unwrap();
@@ -5847,6 +6000,165 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(output).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn published_deliverables_survive_their_source_workspace() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        // A worktree-like source: a directory employee cleanup deletes with
+        // the chat that produced it.
+        let worktree = std::env::temp_dir().join(format!("boss-worktree-{}", Uuid::new_v4()));
+        fs::create_dir_all(&worktree).unwrap();
+        let report_path = worktree.join("report.md");
+        fs::write(&report_path, "first draft").unwrap();
+        let report = report_path.to_string_lossy().into_owned();
+        let service = BossService::open(root.clone()).unwrap();
+
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: report.clone(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        let deliverable = state
+            .deliverables
+            .iter()
+            .find(|deliverable| deliverable.source_path.as_deref() == Some(report.as_str()))
+            .unwrap();
+        // The record points at the daemon's copy, not the workspace file —
+        // and remembers the source for provenance and re-publish.
+        let stored_path = PathBuf::from(&deliverable.path);
+        assert!(stored_path.starts_with(root.join("deliverables")));
+        assert_eq!(deliverable.source_path.as_deref(), Some(report.as_str()));
+        assert_eq!(fs::read_to_string(&stored_path).unwrap(), "first draft");
+
+        // Re-publishing the same source refreshes the snapshot in place.
+        fs::write(&report_path, "final draft").unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: report.clone(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        assert_eq!(state.deliverables.len(), 1);
+        assert_eq!(state.deliverables[0].id, deliverable.id);
+        assert_eq!(fs::read_to_string(&stored_path).unwrap(), "final draft");
+
+        // Archiving the employee's chat removes its worktree — the
+        // deliverable still reads, across a daemon restart too.
+        fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(fs::read_to_string(&stored_path).unwrap(), "final draft");
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        assert_eq!(fs::read_to_string(&stored_path).unwrap(), "final draft");
+        assert_eq!(
+            restored.document().deliverables[0].path,
+            stored_path.to_string_lossy()
+        );
+
+        // Dismissing the record removes its snapshot with it.
+        restored
+            .handle(
+                None,
+                BossOperation::DismissDeliverable { id: deliverable.id },
+            )
+            .unwrap();
+        assert!(!stored_path.exists());
+        drop(restored);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deliverable_copies_directories_while_reference_keeps_a_live_path() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let source = std::env::temp_dir().join(format!("boss-tree-{}", Uuid::new_v4()));
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("nested/out.txt"), "nested output").unwrap();
+        let dir = source.to_string_lossy().into_owned();
+        let service = BossService::open(root.clone()).unwrap();
+
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: dir.clone(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        let deliverable = service.document().deliverables[0].clone();
+        assert!(deliverable.directory);
+        let stored_dir = PathBuf::from(&deliverable.path);
+        assert!(stored_dir.starts_with(root.join("deliverables")));
+        fs::remove_dir_all(&source).unwrap();
+        assert_eq!(
+            fs::read_to_string(stored_dir.join("nested/out.txt")).unwrap(),
+            "nested output"
+        );
+
+        // A symlinked tree is refused rather than followed out of the
+        // publisher's workspace.
+        #[cfg(unix)]
+        {
+            let linked = std::env::temp_dir().join(format!("boss-linked-{}", Uuid::new_v4()));
+            fs::create_dir_all(&linked).unwrap();
+            std::os::unix::fs::symlink(&stored_dir, linked.join("link")).unwrap();
+            assert!(
+                service
+                    .handle(
+                        None,
+                        BossOperation::PublishDeliverable {
+                            path: linked.to_string_lossy().into_owned(),
+                            name: None,
+                            reference: false,
+                        },
+                    )
+                    .is_err()
+            );
+            fs::remove_dir_all(&linked).unwrap();
+        }
+
+        // `reference` is the explicit opt-out: the record keeps the live
+        // path and the daemon stores nothing.
+        let live_dir = std::env::temp_dir().join(format!("boss-live-{}", Uuid::new_v4()));
+        fs::create_dir_all(&live_dir).unwrap();
+        let live_file = live_dir.join("live.md");
+        fs::write(&live_file, "live").unwrap();
+        let live = live_file.to_string_lossy().into_owned();
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: live.clone(),
+                    name: None,
+                    reference: true,
+                },
+            )
+            .unwrap();
+        let referenced = service
+            .document()
+            .deliverables
+            .iter()
+            .find(|deliverable| deliverable.path == live)
+            .unwrap()
+            .clone();
+        assert_eq!(referenced.source_path, None);
+        assert!(!service.deliverable_dir(referenced.id).exists());
+
+        drop(service);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(live_dir).unwrap();
     }
 
     #[test]

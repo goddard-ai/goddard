@@ -3503,7 +3503,12 @@ impl Waku {
             .when(armed, |element| element.bg(theme.sidebar_item_background))
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
-            .tooltip(Tooltip::text(deliverable.path.clone()))
+            .tooltip(Tooltip::text(
+                deliverable
+                    .source_path
+                    .clone()
+                    .unwrap_or_else(|| deliverable.path.clone()),
+            ))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 this.open_deliverable_task(key, deliverable_id, cx);
             }))
@@ -5986,7 +5991,12 @@ impl Waku {
             .cursor_pointer()
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .tooltip(Tooltip::text(deliverable.path.clone()))
+            .tooltip(Tooltip::text(
+                deliverable
+                    .source_path
+                    .clone()
+                    .unwrap_or_else(|| deliverable.path.clone()),
+            ))
             .on_activation(cx, move |this, _, cx| {
                 this.open_deliverable_task(key, deliverable_id, cx)
             })

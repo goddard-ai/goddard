@@ -2,10 +2,18 @@
 
 /**
  * A file or folder of employee output the boss published to the user's
- * sidebar. `path` is absolute on the daemon's host — employees run in their
- * assigned project directory, so deliverables point outside the Boss files root.
+ * sidebar. `path` is absolute on the daemon's host and points at readable
+ * bytes — publish copies the source into the daemon's deliverable store,
+ * so the record survives the workspace it was made in. A `reference`
+ * publish skips the copy and `path` names the live source instead.
  */
 export type BossDeliverable = { id: string, name: string, path: string,
+/**
+ * Where a copied deliverable was published from — the re-publish key
+ * and the provenance the sidebar shows. `None` marks a live-path
+ * reference, where `path` is itself the source.
+ */
+sourcePath?: string,
 /**
  * Recorded at publish time so renderers never stat the filesystem.
  */
