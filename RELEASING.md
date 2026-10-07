@@ -132,15 +132,17 @@ GitHub release at the end — that stays a human's click.
    ```
    Give any changelog-worthy commit missing a `.changelog/` fragment one of its
    own, and check every pending fragment's filename: the category prefix
-   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss- and VoicePad-related
-   entries always fold into Experiments, including employee, deliverable,
+   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss, VoicePad, voice briefing,
+   and Git panel entries always fold into Experiments, including employee, deliverable,
    persona, and planning-session changes and fixes. Use `exp-` for new Boss
-   and VoicePad fragments. Descriptions longer than 40 words need a brief bold
+   and other experimental fragments. Boss entries nest under a permanent
+   `- **Boss**` subgroup, even with one entry. Omit per-bullet `[Experimental]`
+   tags: the Experiments heading identifies them. Descriptions longer than 40 words need a brief bold
    title with its colon inside the bold span, such as `**Voicepad:** `. The fold
    adds a missing title from the fragment slug; review these defaults for clarity.
    An optional
    second segment — `<prefix>-<group>-<slug>.md`, with `group` one of
-   `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
+   `boss`, `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
    `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,
    `permissions`, `settings`, `friends`, `ssh`, `platform` — files it under a
    `- **Group**` subsection. A fragment that only concerns the mobile app

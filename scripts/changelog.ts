@@ -4,7 +4,7 @@
 // `.changelog/` — so parallel work never conflicts on CHANGELOG.md itself.
 // `bun run changelog` folds every fragment into a `## [<version>]` section
 // for the version in Cargo.toml, grouped by the filename's category prefix.
-// Boss- and VoicePad-related fragments always fold into Experiments, regardless of prefix.
+// Boss, VoicePad, voice briefing, and Git panel fragments always fold into Experiments.
 // A fragment may tag a topic group as a second filename segment —
 // `feat-git-<slug>.md` — and grouped bullets nest under a `- **Group**`
 // parent inside their `###` section. `bun scripts/changelog.ts check`
@@ -92,8 +92,9 @@ const CATEGORIES = [
  *  `<prefix>-<group>-<slug>.md`, in the order their `- **Group**`
  *  subsections are emitted: product surface first, infrastructure last.
  *  A group with fewer than MIN_GROUP_SIZE entries in a release folds
- *  back into the section's flat tail. */
+ *  back into the section's flat tail, except the permanent Boss subgroup. */
 const GROUPS = [
+  { id: "boss", label: "Boss" },
   { id: "sessions", label: "Sessions" },
   { id: "sidebar", label: "Sidebar" },
   { id: "composer", label: "Composer" },
@@ -126,7 +127,7 @@ interface Fragment {
 
 /** Render one `###` section's fragments: grouped fragments nest under a
  *  `- **Group**` parent in GROUPS order, then ungrouped fragments and
- *  demoted singleton groups trail as flat bullets. */
+ *  demoted singleton groups trail as flat bullets; Boss always stays grouped. */
 function renderItems(items: Fragment[]): string {
   const grouped = new Map<string, Fragment[]>();
   const flat: Fragment[] = [];
@@ -150,7 +151,7 @@ function renderItems(items: Fragment[]): string {
   for (const { id, label } of GROUPS) {
     const members = grouped.get(id);
     if (!members) continue;
-    if (members.length < MIN_GROUP_SIZE) {
+    if (id !== "boss" && members.length < MIN_GROUP_SIZE) {
       flat.push(...members);
       continue;
     }
@@ -226,7 +227,12 @@ async function buildSection(
     const voicePadRelated = /\b(?:voice[- ]?pad|voice scratchpad|vp mic)\b/i.test(
       `${rest} ${body}`,
     );
-    const heading = bossRelated || voicePadRelated ? "Experiments" : category.heading;
+    const otherExperiment = /\b(?:voice[- ]briefings?|briefings?|piper|git[- ]panel)\b/i.test(
+      `${rest} ${body}`,
+    );
+    const heading = bossRelated || voicePadRelated || otherExperiment
+      ? "Experiments"
+      : category.heading;
 
     if (heading === "Highlights") {
       const slug = rest;
@@ -261,12 +267,11 @@ async function buildSection(
         const label = words.join(" ");
         title = `**${label.charAt(0).toUpperCase()}${label.slice(1)}:**`;
       }
-      const marker = heading === "Experiments" ? "**[Experimental]** " : "";
-      body = `- ${title ? `${title} ` : ""}${marker}${description}`;
+      body = `- ${title ? `${title} ` : ""}${description}`;
     }
 
     if (body) {
-      groups.get(heading)!.push({ name, heading, group, body });
+      groups.get(heading)!.push({ name, heading, group: bossRelated ? "boss" : group, body });
     }
   }
 

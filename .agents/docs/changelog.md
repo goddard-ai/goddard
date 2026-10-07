@@ -38,27 +38,29 @@ unsupported promises.
   touched code — a daemon fix only mobile clients hit belongs to mobile.
 - The filename prefix is required and picks the section: `highlight-` for
   headline features, `feat-` for other user-facing features, `exp-` for
-  experimental opt-ins (emitted with a bold `[Experimental]` marker —
-  experiments are never highlights), `fix-` for bugs that existed in a
+  experimental opt-ins (experiments are never highlights), `fix-` for bugs that existed in a
   previously released version.
-- Boss- and VoicePad-related changes always fold into `### Experiments`, including fixes,
-  with the bold `[Experimental]` marker regardless of filename prefix. Use
-  `exp-` for new Boss fragments. The generator recognizes Boss, employees,
-  deliverables, personas, and planning sessions in the filename or entry text;
-  VoicePad, voice scratchpad, and VP mic entries also default to Experiments.
-  Name the relevant surface so the classification is explicit. For example,
-  `fix-transcript-boss-project-label.md` still folds into Experiments.
+- Boss, VoicePad, voice briefings, and the Git panel always fold into
+  `### Experiments`, including fixes, regardless of filename prefix. Use
+  `exp-` for new fragments about these experiments. Classification recognizes
+  the surface in filenames or entry text: Boss, employees, deliverables,
+  personas, planning sessions, VoicePad, voice scratchpad, VP mic, briefings,
+  Piper, and Git panel. Name the relevant surface explicitly.
+- Experiments have no per-bullet `[Experimental]` tags: the section heading
+  identifies them. The fold strips legacy tags while preserving bold titles.
+- Boss-related entries automatically nest under `- **Boss**` inside Experiments,
+  overriding other topic groups. `boss` is a permanent filename group, for
+  example `exp-boss-employee-queue.md`; its subgroup stays even with one entry.
 - Long descriptions (more than 40 whitespace-separated words) start with a
   short bold title whose colon is also bold: `- **Voicepad:** description`.
   Name the feature or action briefly rather than repeating the first sentence.
   The fold preserves authored titles and adds a title from the fragment slug
   (without its category or recognized group, at most five words) when missing.
-  Review that fallback before release. For experimental entries the title comes
-  first: `- **Voicepad:** **[Experimental]** description`.
+  Review that fallback before release. Experiments use the same title format.
 - A second filename segment tags the change's topic group —
   `.changelog/<prefix>-<group>-<slug>.md` — and collect nests grouped
   bullets under a `- **Group**` parent inside their `###` section, in a
-  fixed product-surface-first order. The vocabulary: `sessions`,
+  fixed product-surface-first order. The vocabulary: `boss`, `sessions`,
   `sidebar`, `composer`, `providers`, `git`, `transcript`, `panels`,
   `terminals`, `keyboard`, `navigation`, `appearance`, `permissions`,
   `settings`, `friends`, `ssh`, `platform`. Pick the group the change is
@@ -66,7 +68,7 @@ unsupported promises.
   model picker, `ssh` covers remote daemon pairing); when none fits, omit
   the segment rather than stretching one. A group tagged by only one
   fragment in a release folds back into the flat tail, so tagging is
-  always safe. `highlight-` fragments are never grouped — everything
+  always safe; Boss is the singleton exception. `highlight-` fragments are never grouped — everything
   after the prefix is their media slug.
 - Preview how fragments will group with `bun ./scripts/changelog.ts check`
   before folding; an unrecognized group token lands the bullet in the
