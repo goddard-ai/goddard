@@ -1974,7 +1974,9 @@ impl Waku {
                 theme,
                 search,
             ),
-            if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            if self.state.composer_dictation_experiment_enabled
+                && cfg!(all(target_os = "macos", target_arch = "aarch64"))
+            {
                 setting_card(
                     "icons/mic.svg",
                     tr!("settings.composer_dictation"),
@@ -5430,6 +5432,17 @@ impl Waku {
                 description_key: "experiments.wireframes_description",
                 enabled: self.state.wireframes_experiment_enabled,
                 set: Self::set_wireframes_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "composer-dictation-experiment-toggle",
+                icon: "icons/mic.svg",
+                title_key: "settings.composer_dictation",
+                description_key: "settings.composer_dictation_description",
+                enabled: self.state.composer_dictation_experiment_enabled,
+                set: Self::set_composer_dictation_experiment_enabled,
                 eval_backed: false,
                 tuning: None,
             },
@@ -11588,6 +11601,12 @@ impl Waku {
             return;
         }
         self.state.transcript_keep_scroll_on_send = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_composer_dictation_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.composer_dictation_experiment_enabled = enabled;
         self.save();
         cx.notify();
     }

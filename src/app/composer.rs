@@ -6004,6 +6004,7 @@ impl Waku {
                         interactive
                             && matches!(surface, ComposerCard::Main)
                             && cfg!(all(target_os = "macos", target_arch = "aarch64"))
+                            && self.state.composer_dictation_experiment_enabled
                             && self.state.composer_dictation_enabled,
                         |row| {
                             let (label, tooltip, recording) = match &self.dictation_state {

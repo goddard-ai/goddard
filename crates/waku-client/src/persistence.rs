@@ -1291,6 +1291,9 @@ pub struct AppSettings {
     /// Show the desktop composer's local Whistle dictation control.
     #[serde(default = "default_dictation_enabled")]
     pub composer_dictation_enabled: bool,
+    /// Opt in to local composer dictation from Settings → Experiments.
+    #[serde(default)]
+    pub composer_dictation_experiment_enabled: bool,
     /// The color the sidebar's draft preview line wears.
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
     /// Days without a reply before a session groups as dormant; `None`
@@ -1512,6 +1515,7 @@ impl Default for AppSettings {
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
             composer_dictation_enabled: default_dictation_enabled(),
+            composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -1999,6 +2003,9 @@ pub struct PersistedState {
     /// Whether the desktop composer shows its local Whistle dictation control.
     #[serde(default = "default_dictation_enabled")]
     pub composer_dictation_enabled: bool,
+    /// Opt in to local composer dictation from Settings → Experiments.
+    #[serde(default)]
+    pub composer_dictation_experiment_enabled: bool,
     /// The color the sidebar's draft preview line wears.
     #[serde(default)]
     pub sidebar_draft_preview_color: SidebarDraftPreviewColor,
@@ -2494,6 +2501,7 @@ impl PersistedState {
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
             composer_dictation_enabled: default_dictation_enabled(),
+            composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
             terminal_open_links_in_mouse_mode: true,
@@ -2935,6 +2943,7 @@ impl PersistedState {
             composer_enter_steers: self.composer_enter_steers,
             transcript_keep_scroll_on_send: self.transcript_keep_scroll_on_send,
             composer_dictation_enabled: self.composer_dictation_enabled,
+            composer_dictation_experiment_enabled: self.composer_dictation_experiment_enabled,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
@@ -3090,6 +3099,7 @@ impl PersistedState {
         self.composer_enter_steers = settings.composer_enter_steers;
         self.transcript_keep_scroll_on_send = settings.transcript_keep_scroll_on_send;
         self.composer_dictation_enabled = settings.composer_dictation_enabled;
+        self.composer_dictation_experiment_enabled = settings.composer_dictation_experiment_enabled;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
@@ -4791,6 +4801,32 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.composer_dictation_enabled);
+    }
+
+    #[test]
+    fn composer_dictation_experiment_defaults_off_even_with_a_legacy_enabled_preference() {
+        let defaults: AppSettings =
+            serde_json::from_str(r#"{"composer_dictation_enabled":true}"#).unwrap();
+        assert!(defaults.composer_dictation_enabled);
+        assert!(!defaults.composer_dictation_experiment_enabled);
+        let mut state = PersistedState::empty();
+        assert!(!state.composer_dictation_experiment_enabled);
+        state.composer_dictation_experiment_enabled = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["composer_dictation_experiment_enabled"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("composer_dictation_experiment_enabled")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.composer_dictation_experiment_enabled);
+        restored.composer_dictation_experiment_enabled = false;
+        let settings = restored.app_settings();
+        state.apply_app_settings(settings);
+        assert!(!state.composer_dictation_experiment_enabled);
     }
 
     #[test]
