@@ -467,6 +467,37 @@ impl VoiceBriefingTtsModel {
     }
 }
 
+/// A daily quiet interval in local wall-clock minutes. Equal endpoints disable
+/// the interval; start > end wraps across midnight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoiceBriefingSleepWindow {
+    pub start_minute: u16,
+    pub end_minute: u16,
+}
+
+impl Default for VoiceBriefingSleepWindow {
+    fn default() -> Self {
+        Self {
+            start_minute: 22 * 60,
+            end_minute: 7 * 60,
+        }
+    }
+}
+
+impl VoiceBriefingSleepWindow {
+    pub fn contains(self, minute: u16) -> bool {
+        let start = self.start_minute.min(1440);
+        let end = self.end_minute.min(1440);
+        if start < end {
+            (start..end).contains(&minute)
+        } else if start > end {
+            minute >= start || minute < end
+        } else {
+            false
+        }
+    }
+}
+
 fn default_notification_enabled() -> bool {
     true
 }
@@ -1469,6 +1500,11 @@ pub struct AppSettings {
     /// prefetches.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_autoplay: bool,
+    /// Relative briefing playback volume, from silence (0) to full volume (1).
+    #[serde(default = "default_completion_sound_volume")]
+    pub voice_briefing_volume: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_briefing_sleep_window: Option<VoiceBriefingSleepWindow>,
     /// Let Jev decide whether an automatic briefing is worth generating.
     /// Eval failures fail open — the briefing still runs.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
@@ -1569,6 +1605,8 @@ impl Default for AppSettings {
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
+            voice_briefing_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
+            voice_briefing_sleep_window: None,
             voice_briefing_gate_enabled: false,
             voice_briefing_gate_instructions: String::new(),
             remote_hosts: Vec::new(),
@@ -2155,6 +2193,11 @@ pub struct PersistedState {
     pub voice_briefing_summary_instructions_full_prompt: bool,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_autoplay: bool,
+    /// Relative briefing playback volume, from silence (0) to full volume (1).
+    #[serde(default = "default_completion_sound_volume")]
+    pub voice_briefing_volume: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_briefing_sleep_window: Option<VoiceBriefingSleepWindow>,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_gate_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -2559,6 +2602,8 @@ impl PersistedState {
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
+            voice_briefing_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
+            voice_briefing_sleep_window: None,
             voice_briefing_gate_enabled: false,
             voice_briefing_gate_instructions: String::new(),
             experiments_warning_acknowledged: false,
@@ -3005,6 +3050,8 @@ impl PersistedState {
             voice_briefing_summary_instructions_full_prompt: self
                 .voice_briefing_summary_instructions_full_prompt,
             voice_briefing_autoplay: self.voice_briefing_autoplay,
+            voice_briefing_volume: self.voice_briefing_volume,
+            voice_briefing_sleep_window: self.voice_briefing_sleep_window,
             voice_briefing_gate_enabled: self.voice_briefing_gate_enabled,
             voice_briefing_gate_instructions: self.voice_briefing_gate_instructions.clone(),
             remote_hosts: self.remote_hosts.clone(),
@@ -3168,6 +3215,15 @@ impl PersistedState {
         self.voice_briefing_summary_instructions_full_prompt =
             settings.voice_briefing_summary_instructions_full_prompt;
         self.voice_briefing_autoplay = settings.voice_briefing_autoplay;
+        self.voice_briefing_volume =
+            sanitized_completion_sound_volume(settings.voice_briefing_volume).min(1.0);
+        self.voice_briefing_sleep_window =
+            settings
+                .voice_briefing_sleep_window
+                .map(|window| VoiceBriefingSleepWindow {
+                    start_minute: window.start_minute.min(1440),
+                    end_minute: window.end_minute.min(1440),
+                });
         self.voice_briefing_gate_enabled = settings.voice_briefing_gate_enabled;
         self.voice_briefing_gate_instructions = settings.voice_briefing_gate_instructions;
         self.remote_hosts = settings.remote_hosts;
@@ -5012,6 +5068,56 @@ mod tests {
         );
         assert!(legacy.voice_briefing_tts_custom_model.is_empty());
         assert_eq!(legacy.voice_briefing_piper_speaker, 0);
+    }
+
+    #[test]
+    fn briefing_sleep_window_wraps_and_playback_settings_persist() {
+        let overnight = VoiceBriefingSleepWindow::default();
+        for minute in [22 * 60, 23 * 60 + 59, 0, 7 * 60 - 1] {
+            assert!(overnight.contains(minute));
+        }
+        for minute in [7 * 60, 12 * 60, 22 * 60 - 1] {
+            assert!(!overnight.contains(minute));
+        }
+        let midnight_end = VoiceBriefingSleepWindow {
+            start_minute: 22 * 60,
+            end_minute: 1440,
+        };
+        assert!(midnight_end.contains(23 * 60));
+        assert!(!midnight_end.contains(0));
+        let midnight_start = VoiceBriefingSleepWindow {
+            start_minute: 1440,
+            end_minute: 7 * 60,
+        };
+        assert!(midnight_start.contains(0));
+        assert!(!midnight_start.contains(7 * 60));
+        let daytime = VoiceBriefingSleepWindow {
+            start_minute: 9 * 60,
+            end_minute: 17 * 60,
+        };
+        assert!(daytime.contains(9 * 60));
+        assert!(!daytime.contains(17 * 60));
+        assert!(
+            !VoiceBriefingSleepWindow {
+                start_minute: 0,
+                end_minute: 0
+            }
+            .contains(0)
+        );
+        let mut state = PersistedState::empty();
+        state.voice_briefing_volume = 0.25;
+        state.voice_briefing_sleep_window = Some(overnight);
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.voice_briefing_volume, 0.25);
+        assert_eq!(restored.voice_briefing_sleep_window, Some(overnight));
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            legacy.voice_briefing_volume,
+            DEFAULT_COMPLETION_SOUND_VOLUME
+        );
+        assert!(legacy.voice_briefing_sleep_window.is_none());
     }
 
     #[test]

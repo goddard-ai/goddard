@@ -207,9 +207,268 @@ where
         }))
 }
 
+/// Two independently focusable endpoints on a daily/cyclic range. Crossing
+/// endpoints wraps the highlighted interval rather than swapping their roles.
+pub struct RangeSliderState {
+    drag: Cell<Option<(usize, f32)>>,
+    focus: [gpui::FocusHandle; 2],
+}
+
+impl RangeSliderState {
+    pub fn new(cx: &mut App) -> Rc<Self> {
+        Rc::new(Self {
+            drag: Cell::new(None),
+            focus: [cx.focus_handle(), cx.focus_handle()],
+        })
+    }
+
+    pub fn shown(&self, mut values: [f32; 2]) -> [f32; 2] {
+        if let Some((index, value)) = self.drag.get() {
+            values[index] = value;
+        }
+        values
+    }
+
+    pub fn cancel(&self) {
+        self.drag.set(None);
+    }
+}
+
+/// A two-thumb range slider. Each thumb is a Tab stop; arrows move by `step`,
+/// Home/End reach the boundaries, and pointer changes commit on release.
+#[track_caller]
+pub fn range_slider<E: 'static>(
+    id: impl Into<ElementId>,
+    state: &Rc<RangeSliderState>,
+    max: f32,
+    step: f32,
+    values: [f32; 2],
+    cx: &mut Context<E>,
+    commit: impl Fn(&mut E, usize, f32, &mut Window, &mut Context<E>) + 'static,
+) -> Stateful<Div> {
+    let values = values.map(|value| value.clamp(0.0, max));
+    let shown = state.shown(values).map(|value| value.clamp(0.0, max));
+    let weak = cx.entity().downgrade();
+    let commit = Rc::new(commit);
+    let theme = Theme::current(cx);
+    let mut control = div().id(id).relative().h(px(24.0)).cursor_default().child(
+        canvas(|_, _, _| (), {
+            let state = state.clone();
+            let commit = commit.clone();
+            move |bounds, _, window: &mut Window, cx: &mut App| {
+                let theme = Theme::current(cx);
+                let shown = state.shown(values).map(|value| value.clamp(0.0, max) / max);
+                let travel = (bounds.size.width - px(THUMB_SIZE)).max(Pixels::ZERO);
+                let centers =
+                    shown.map(|value| bounds.left() + px(THUMB_SIZE / 2.0) + travel * value);
+                let mut segment = |left: Pixels, right: Pixels, color| {
+                    window.paint_quad(quad(
+                        Bounds::new(
+                            point(left, bounds.center().y - px(TRACK_HEIGHT / 2.0)),
+                            size((right - left).max(Pixels::ZERO), px(TRACK_HEIGHT)),
+                        ),
+                        px(TRACK_HEIGHT / 2.0),
+                        color,
+                        px(0.0),
+                        gpui::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                };
+                segment(bounds.left(), bounds.right(), theme.inset);
+                if shown[0] < shown[1] {
+                    segment(centers[0], centers[1], theme.accent);
+                } else if shown[0] > shown[1] {
+                    segment(bounds.left(), centers[1], theme.accent);
+                    segment(centers[0], bounds.right(), theme.accent);
+                }
+                for center in centers {
+                    window.paint_quad(quad(
+                        Bounds::new(
+                            point(
+                                center - px(THUMB_SIZE / 2.0),
+                                bounds.center().y - px(THUMB_SIZE / 2.0),
+                            ),
+                            size(px(THUMB_SIZE), px(THUMB_SIZE)),
+                        ),
+                        px(THUMB_SIZE / 2.0),
+                        theme.inverse,
+                        px(0.0),
+                        gpui::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                }
+                window.on_mouse_event({
+                    let state = state.clone();
+                    move |event: &MouseDownEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Bubble
+                            || event.button != MouseButton::Left
+                            || !bounds.contains(&event.position)
+                        {
+                            return;
+                        }
+                        let index = usize::from(
+                            (event.position.x - centers[1]).abs()
+                                < (event.position.x - centers[0]).abs(),
+                        );
+                        window.focus(&state.focus[index], cx);
+                        state
+                            .drag
+                            .set(Some((index, value_at(bounds, event.position.x, max))));
+                        window.refresh();
+                    }
+                });
+                window.on_mouse_event({
+                    let state = state.clone();
+                    move |event: &MouseMoveEvent, phase, window, _| {
+                        if phase != DispatchPhase::Bubble {
+                            return;
+                        }
+                        if let Some((index, _)) = state.drag.get() {
+                            state
+                                .drag
+                                .set(Some((index, value_at(bounds, event.position.x, max))));
+                            window.refresh();
+                        }
+                    }
+                });
+                window.on_mouse_event({
+                    let state = state.clone();
+                    let weak = weak.clone();
+                    let commit = commit.clone();
+                    move |event: &MouseUpEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                            return;
+                        }
+                        if let Some((index, value)) = state.drag.take() {
+                            let _ =
+                                weak.update(cx, |this, cx| commit(this, index, value, window, cx));
+                            window.refresh();
+                        }
+                    }
+                });
+            }
+        })
+        .size_full(),
+    );
+    for index in 0..2 {
+        let commit = commit.clone();
+        control = control.child(
+            div()
+                .id(("range-thumb", index))
+                .absolute()
+                .left(gpui::relative(shown[index] / max))
+                .ml(px(-THUMB_SIZE * shown[index] / max))
+                .w(px(THUMB_SIZE))
+                .h_full()
+                .rounded(px(4.0))
+                .track_focus(&state.focus[index])
+                .tab_index(0)
+                .focus_visible(|style| {
+                    style
+                        .bg(theme.focus_highlight())
+                        .border_1()
+                        .border_color(theme.accent)
+                })
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers.modified() {
+                        return;
+                    }
+                    let next = match event.keystroke.key.as_str() {
+                        "left" | "down" => values[index] - step,
+                        "right" | "up" => values[index] + step,
+                        "home" => 0.0,
+                        "end" => max,
+                        _ => return,
+                    };
+                    commit(this, index, next.clamp(0.0, max), window, cx);
+                    cx.stop_propagation();
+                })),
+        );
+    }
+    control
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RangeHarness {
+        state: Rc<RangeSliderState>,
+        values: Rc<Cell<[f32; 2]>>,
+    }
+
+    impl gpui::Render for RangeHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            range_slider(
+                "sleep-range",
+                &self.state,
+                1440.0,
+                15.0,
+                self.values.get(),
+                cx,
+                |this, endpoint, value, _, cx| {
+                    let mut values = this.values.get();
+                    values[endpoint] = value;
+                    this.values.set(values);
+                    cx.notify();
+                },
+            )
+            .w(px(280.0))
+        }
+    }
+
+    #[gpui::test]
+    fn range_endpoints_are_independently_keyboard_operable(cx: &mut gpui::TestAppContext) {
+        let state = cx.update(RangeSliderState::new);
+        let values = Rc::new(Cell::new([1320.0, 420.0]));
+        let (_, cx) = cx.add_window_view(|_, _| RangeHarness {
+            state: state.clone(),
+            values: values.clone(),
+        });
+        cx.update(|window, cx| window.focus(&state.focus[0], cx));
+        cx.simulate_keystrokes("right");
+        assert_eq!(values.get(), [1335.0, 420.0]);
+        cx.update(|window, cx| window.focus(&state.focus[1], cx));
+        cx.simulate_keystrokes("left");
+        assert_eq!(values.get(), [1335.0, 405.0]);
+        cx.simulate_keystrokes("home");
+        assert_eq!(values.get(), [1335.0, 0.0]);
+        cx.simulate_keystrokes("end");
+        assert_eq!(values.get(), [1335.0, 1440.0]);
+    }
+
+    #[gpui::test]
+    fn range_drag_commits_only_the_dragged_endpoint_on_release(cx: &mut gpui::TestAppContext) {
+        let state = cx.update(RangeSliderState::new);
+        let values = Rc::new(Cell::new([1320.0, 420.0]));
+        let (_, cx) = cx.add_window_view(|_, _| RangeHarness {
+            state: state.clone(),
+            values: values.clone(),
+        });
+        // A 280px track has 267px of thumb travel; this is the start thumb.
+        cx.simulate_mouse_down(
+            point(px(251.25), px(12.0)),
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        cx.simulate_mouse_move(
+            point(px(140.0), px(12.0)),
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        assert_eq!(
+            values.get(),
+            [1320.0, 420.0],
+            "dragging must not persist intermediate values"
+        );
+        assert_eq!(state.shown(values.get()), [720.0, 420.0]);
+        cx.simulate_mouse_up(
+            point(px(140.0), px(12.0)),
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        assert_eq!(values.get(), [720.0, 420.0]);
+    }
 
     fn track() -> Bounds<Pixels> {
         Bounds::new(point(px(10.0), px(0.0)), size(px(113.0), px(20.0)))

@@ -7732,6 +7732,34 @@ impl Waku {
             },
         );
 
+        let volume =
+            crate::persistence::sanitized_completion_sound_volume(self.state.voice_briefing_volume)
+                .min(1.0);
+        let volume_shown = self.voice_briefing_volume_slider.shown(volume);
+        let volume_control = div()
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                slider::slider(
+                    "voice-briefing-volume",
+                    &self.voice_briefing_volume_slider,
+                    1.0,
+                    volume,
+                    cx,
+                    |this, value, _, cx| this.set_voice_briefing_volume(value, cx),
+                )
+                .w(px(220.0))
+                .flex_none(),
+            )
+            .child(
+                div()
+                    .w(px(40.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(format!("{}%", (volume_shown * 100.0).round() as u32)),
+            );
+
         let default_instructions =
             super::voice_briefing::default_voice_briefing_summary_instructions();
         let instructions_customized = self
@@ -7891,6 +7919,10 @@ impl Waku {
                     ))
                 },
             )
+            .child(row(
+                tr!("experiments.voice_briefing_volume"),
+                volume_control.into_any_element(),
+            ))
             .child(text_area_row(
                 tr!("experiments.voice_briefing_instructions"),
                 instructions_control.into_any_element(),
@@ -7909,6 +7941,75 @@ impl Waku {
                 )
                 .into_any_element(),
             ))
+            .when(self.state.voice_briefing_autoplay, |card| {
+                let enabled = self.state.voice_briefing_sleep_window.is_some();
+                card.child(row(
+                    tr!("experiments.voice_briefing_dnd"),
+                    toggle_switch(
+                        "voice-briefing-dnd",
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        |this, _, cx| {
+                            this.set_voice_briefing_dnd_enabled(
+                                this.state.voice_briefing_sleep_window.is_none(),
+                                cx,
+                            )
+                        },
+                    )
+                    .into_any_element(),
+                ))
+                .when_some(
+                    self.state.voice_briefing_sleep_window,
+                    |card, window| {
+                        let values = [f32::from(window.start_minute), f32::from(window.end_minute)];
+                        let shown = self.voice_briefing_sleep_slider.shown(values);
+                        let time = |value: f32| {
+                            let minutes = (value / 15.0).round() as u16 * 15;
+                            format!("{:02}:{:02}", minutes / 60, minutes % 60)
+                        };
+                        let control = div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                slider::range_slider(
+                                    "voice-briefing-sleep-window",
+                                    &self.voice_briefing_sleep_slider,
+                                    1440.0,
+                                    15.0,
+                                    values,
+                                    cx,
+                                    |this, endpoint, value, _, cx| {
+                                        this.set_voice_briefing_sleep_endpoint(endpoint, value, cx)
+                                    },
+                                )
+                                .w(px(280.0)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!(
+                                        "experiments.voice_briefing_sleep_range",
+                                        start = time(shown[0]),
+                                        end = time(shown[1])
+                                    )),
+                            );
+                        card.child(row(
+                            tr!("experiments.voice_briefing_sleep_window"),
+                            control.into_any_element(),
+                        ))
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("experiments.voice_briefing_dnd_caption")),
+                        )
+                    },
+                )
+            })
             .child(row(
                 tr!("experiments.voice_briefing_gate"),
                 toggle_switch(
@@ -7962,6 +8063,11 @@ impl Waku {
 
     fn set_voice_briefing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_enabled = enabled;
+        if !enabled {
+            self.voice_briefing_volume_slider.cancel();
+            self.voice_briefing_sleep_slider.cancel();
+        }
+        self.refresh_voice_briefing_dnd(cx);
         self.save();
         cx.notify();
     }
@@ -7980,6 +8086,51 @@ impl Waku {
 
     fn set_voice_briefing_autoplay(&mut self, autoplay: bool, cx: &mut Context<Self>) {
         self.state.voice_briefing_autoplay = autoplay;
+        if !autoplay {
+            self.voice_briefing_sleep_slider.cancel();
+        }
+        self.refresh_voice_briefing_dnd(cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        self.state.voice_briefing_volume =
+            crate::persistence::sanitized_completion_sound_volume(volume).min(1.0);
+        if self
+            .voice_briefing_playback
+            .is_some_and(|p| p.message_id.is_some())
+        {
+            crate::platform::set_briefing_audio_volume(self.state.voice_briefing_volume);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_dnd_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.voice_briefing_sleep_slider.cancel();
+        self.state.voice_briefing_sleep_window = enabled.then(Default::default);
+        self.refresh_voice_briefing_dnd(cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_briefing_sleep_endpoint(
+        &mut self,
+        endpoint: usize,
+        value: f32,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(window) = &mut self.state.voice_briefing_sleep_window else {
+            return;
+        };
+        let minute = ((value.clamp(0.0, 1440.0) / 15.0).round() as u16) * 15;
+        if endpoint == 0 {
+            window.start_minute = minute;
+        } else {
+            window.end_minute = minute;
+        }
+        self.refresh_voice_briefing_dnd(cx);
         self.save();
         cx.notify();
     }

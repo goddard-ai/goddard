@@ -969,6 +969,16 @@ experiments.voice_briefing_reset_instructions:
   en: Reset to default
 experiments.voice_briefing_autoplay:
   en: Automatic playback
+experiments.voice_briefing_volume:
+  en: Volume
+experiments.voice_briefing_dnd:
+  en: Do not disturb
+experiments.voice_briefing_sleep_window:
+  en: Sleep window
+experiments.voice_briefing_sleep_range:
+  en: "Start {start} · End {end}"
+experiments.voice_briefing_dnd_caption:
+  en: Local time, in 15-minute steps. Automatic briefings wait until the window ends; manual playback is available. Equal endpoints disable the window.
 experiments.voice_briefing_gate:
   en: Jev gate
 experiments.voice_briefing_gate_instructions:

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow, bail};
+use chrono::Timelike;
 use futures::future::{Either, select};
 use futures::io::AsyncReadExt;
 use futures::{FutureExt, pin_mut};
@@ -118,6 +119,14 @@ impl BriefingQueue {
     fn issue(&mut self) -> u64 {
         self.sequence += 1;
         self.sequence
+    }
+
+    fn take_ready(&mut self, playback_allowed: bool) -> Option<Uuid> {
+        if playback_allowed {
+            self.waiting.take()
+        } else {
+            None
+        }
     }
 
     fn accept(&mut self, sequence: u64, message_id: Uuid) -> bool {
@@ -452,7 +461,7 @@ impl Waku {
             return;
         }
         if self.briefing_clips.contains_key(&message_id) {
-            if !self.play_voice_briefing_clip(message_id, cx) {
+            if !self.play_voice_briefing_clip(message_id, false, cx) {
                 self.show_toast(tr!("errors.voice_briefing_playback"));
             }
             return;
@@ -574,6 +583,7 @@ impl Waku {
         let playing = !playback.playing;
         self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
             playing,
+            automatic: false, // Explicit pause/resume is a manual override of DND.
             remaining,
             message_id: playback.message_id,
         });
@@ -635,7 +645,9 @@ impl Waku {
                             if let Some(remaining) = crate::platform::restart_briefing_audio() {
                                 let message_id =
                                     this.voice_briefing_playback.and_then(|p| p.message_id);
-                                this.track_voice_briefing_playback(remaining, message_id, cx);
+                                this.track_voice_briefing_playback(
+                                    remaining, message_id, false, cx,
+                                );
                             }
                         })
                     }),
@@ -682,6 +694,14 @@ impl Waku {
     }
 
     fn skip_voice_briefing(&mut self, cx: &mut Context<Self>) {
+        // DND can leave only a waiting clip. Skip explicitly dismisses it;
+        // the quiet-hours gate itself never consumes that slot.
+        if self.voice_briefing_playback.is_none()
+            && self.voice_briefing_dnd_active()
+            && let Some(message_id) = self.briefing_queue.waiting.take()
+        {
+            self.mark_briefed(message_id);
+        }
         crate::platform::stop_briefing_audio();
         self.voice_briefing_playback = None;
         self.voice_briefing_playback_generation =
@@ -691,20 +711,125 @@ impl Waku {
         cx.notify();
     }
 
+    fn voice_briefing_dnd_active(&self) -> bool {
+        let now = chrono::Local::now();
+        self.state.voice_briefing_autoplay
+            && self
+                .state
+                .voice_briefing_sleep_window
+                .is_some_and(|window| window.contains((now.hour() * 60 + now.minute()) as u16))
+    }
+
+    /// Settings edits and minute-boundary wakes re-evaluate the same waiting
+    /// slot. Automatic playback pauses during DND; explicit playback bypasses it.
+    pub(super) fn refresh_voice_briefing_dnd(&mut self, cx: &mut Context<Self>) {
+        let quiet = self.voice_briefing_dnd_active();
+        if let Some(playback) = self.voice_briefing_playback.filter(|p| p.automatic) {
+            if quiet && playback.playing {
+                if let Some(remaining) = crate::platform::pause_briefing_audio() {
+                    self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
+                        playing: false,
+                        remaining,
+                        ..playback
+                    });
+                    self.voice_briefing_playback_generation =
+                        self.voice_briefing_playback_generation.wrapping_add(1);
+                    cx.notify();
+                } else {
+                    self.voice_briefing_playback = None;
+                    self.voice_briefing_playback_generation =
+                        self.voice_briefing_playback_generation.wrapping_add(1);
+                    cx.notify();
+                }
+            } else if !quiet
+                && !playback.playing
+                && self.state.voice_briefing_autoplay
+                && self.state.voice_briefing_enabled
+            {
+                if let Some(remaining) = crate::platform::resume_briefing_audio() {
+                    self.track_voice_briefing_playback(remaining, playback.message_id, true, cx);
+                } else {
+                    self.voice_briefing_playback = None;
+                    self.voice_briefing_playback_generation =
+                        self.voice_briefing_playback_generation.wrapping_add(1);
+                    cx.notify();
+                }
+            }
+        }
+        if quiet
+            && (self.briefing_queue.waiting.is_some()
+                || self.voice_briefing_playback.is_some_and(|p| p.automatic))
+        {
+            self.schedule_voice_briefing_dnd_wake(cx);
+        } else {
+            self.pump_briefing_queue(cx);
+        }
+    }
+
+    /// Only one sleeper per app. Checking at local minute boundaries also
+    /// handles wall-clock/time-zone changes and sleep/wake without a stale deadline.
+    fn schedule_voice_briefing_dnd_wake(&mut self, cx: &mut Context<Self>) {
+        if self.briefing_dnd_wake_pending
+            || !self.state.voice_briefing_autoplay
+            || !self.state.voice_briefing_enabled
+        {
+            return;
+        }
+        self.briefing_dnd_wake_pending = true;
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            loop {
+                let seconds = 60 - chrono::Local::now().second();
+                cx.background_executor()
+                    .timer(Duration::from_secs(u64::from(seconds)))
+                    .await;
+                let keep_waiting = weak
+                    .update(cx, |this, cx| {
+                        this.refresh_voice_briefing_dnd(cx);
+                        let keep_waiting = this.state.voice_briefing_autoplay
+                            && this.state.voice_briefing_enabled
+                            && this.voice_briefing_dnd_active()
+                            && (this.briefing_queue.waiting.is_some()
+                                || this.voice_briefing_playback.is_some_and(|p| p.automatic));
+                        if !keep_waiting {
+                            this.briefing_dnd_wake_pending = false;
+                        }
+                        keep_waiting
+                    })
+                    .unwrap_or(false);
+                if !keep_waiting {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     fn pump_briefing_queue(&mut self, cx: &mut Context<Self>) {
         if self.voice_briefing_playback.is_some() || self.viewed_briefing_session().is_none() {
             return;
         }
-        if let Some(message_id) = self.briefing_queue.waiting.take() {
-            if !self.play_voice_briefing_clip(message_id, cx) {
+        let allowed = self.state.voice_briefing_enabled
+            && self.state.voice_briefing_autoplay
+            && !self.voice_briefing_dnd_active();
+        if !allowed && self.briefing_queue.waiting.is_some() && self.voice_briefing_dnd_active() {
+            self.schedule_voice_briefing_dnd_wake(cx);
+        }
+        if let Some(message_id) = self.briefing_queue.take_ready(allowed) {
+            if !self.play_voice_briefing_clip(message_id, true, cx) {
                 self.show_toast(tr!("errors.voice_briefing_playback"));
             }
         }
     }
 
-    fn play_voice_briefing_clip(&mut self, message_id: Uuid, cx: &mut Context<Self>) -> bool {
+    fn play_voice_briefing_clip(
+        &mut self,
+        message_id: Uuid,
+        automatic: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(duration) = self.briefing_clips.get(&message_id).and_then(|clip| {
-            crate::platform::play_briefing_audio(&clip.audio, self.state.completion_sound_volume)
+            crate::platform::play_briefing_audio(&clip.audio, self.state.voice_briefing_volume)
         }) else {
             return false;
         };
@@ -713,7 +838,7 @@ impl Waku {
             self.briefing_queue.waiting = None;
         }
         self.mark_briefed(message_id);
-        self.track_voice_briefing_playback(duration, Some(message_id), cx);
+        self.track_voice_briefing_playback(duration, Some(message_id), automatic, cx);
         true
     }
 
@@ -721,12 +846,14 @@ impl Waku {
         &mut self,
         remaining: Duration,
         message_id: Option<Uuid>,
+        automatic: bool,
         cx: &mut Context<Self>,
     ) {
         self.voice_briefing_playback_generation =
             self.voice_briefing_playback_generation.wrapping_add(1);
         self.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
             playing: true,
+            automatic,
             remaining,
             message_id,
         });
@@ -742,6 +869,12 @@ impl Waku {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let updated = weak.update(cx, |this, cx| {
                     if this.voice_briefing_playback_generation != generation {
+                        return false;
+                    }
+                    if this.voice_briefing_playback.is_some_and(|p| p.automatic)
+                        && this.voice_briefing_dnd_active()
+                    {
+                        this.refresh_voice_briefing_dnd(cx);
                         return false;
                     }
                     let Some((playing, remaining)) = crate::platform::briefing_audio_status()
@@ -772,6 +905,7 @@ impl Waku {
                         .and_then(|playback| playback.message_id);
                     this.voice_briefing_playback = Some(super::VoiceBriefingPlayback {
                         playing,
+                        automatic: this.voice_briefing_playback.is_some_and(|p| p.automatic),
                         remaining,
                         message_id,
                     });
@@ -901,7 +1035,7 @@ impl Waku {
             PendingBriefing {
                 generation: request_id,
                 play: true,
-                manual: true,
+                manual: false,
             },
         );
         cx.notify();
@@ -946,7 +1080,7 @@ impl Waku {
                     request_id,
                     voice_key,
                     result,
-                    None,
+                    Some(request_id),
                     viewed_session,
                     cx,
                 );
@@ -1020,7 +1154,7 @@ impl Waku {
                         if self.briefing_queue.accept(sequence, message_id) {
                             self.pump_briefing_queue(cx);
                         }
-                    } else if !self.play_voice_briefing_clip(message_id, cx) {
+                    } else if !self.play_voice_briefing_clip(message_id, false, cx) {
                         self.show_toast(tr!("errors.voice_briefing_playback"));
                     }
                 }
@@ -1342,6 +1476,21 @@ mod queue_tests {
         ] {
             assert!(!automatic_briefing_allowed(Some(chat), chat, status));
         }
+    }
+
+    #[test]
+    fn dnd_holds_the_latest_automatic_clip_until_playback_is_allowed() {
+        let mut queue = BriefingQueue::default();
+        let first = queue.issue();
+        assert!(queue.accept(first, Uuid::new_v4()));
+        assert!(queue.take_ready(false).is_none());
+        assert!(queue.waiting.is_some());
+        let newest = queue.issue();
+        let id = Uuid::new_v4();
+        assert!(queue.accept(newest, id));
+        assert!(queue.take_ready(false).is_none());
+        assert_eq!(queue.take_ready(true), Some(id));
+        assert!(queue.waiting.is_none());
     }
 
     #[test]

@@ -2353,6 +2353,7 @@ impl Default for ActivityScrollViewport {
 #[derive(Clone, Copy)]
 pub(super) struct VoiceBriefingPlayback {
     pub(super) playing: bool,
+    pub(super) automatic: bool,
     pub(super) remaining: std::time::Duration,
     /// The transcript reply the clip speaks for — queued boss speech clips
     /// carry `None`, so their pause control never lands on a message footer.
@@ -2594,6 +2595,7 @@ pub struct Waku {
     voice_scratchpad_events: Receiver<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
     briefing_viewed_session: Option<Uuid>,
     briefing_queue: voice_briefing::BriefingQueue,
+    briefing_dnd_wake_pending: bool,
     /// Pipelines in flight per reply, with request identity and playback intent.
     briefing_pending: HashMap<Uuid, voice_briefing::PendingBriefing>,
     /// Replies whose Jev gate eval is still deciding — same play flag.
@@ -3806,6 +3808,8 @@ pub struct Waku {
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
+    voice_briefing_volume_slider: Rc<SliderState>,
+    voice_briefing_sleep_slider: Rc<slider::RangeSliderState>,
     /// The sidebar-transparency slider's in-flight drag, same reason.
     sidebar_transparency_slider: Rc<SliderState>,
     /// The border-intensity slider's in-flight drag, same reason.
@@ -6917,6 +6921,7 @@ impl Waku {
                 voice_briefing_playback_generation: 0,
                 briefing_viewed_session: None,
                 briefing_queue: voice_briefing::BriefingQueue::default(),
+                briefing_dnd_wake_pending: false,
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
                 speech_clip_queue: VecDeque::new(),
@@ -7424,6 +7429,8 @@ impl Waku {
                 diagnostics_scrollbar: ScrollbarState::new(),
                 background_executor: cx.background_executor().clone(),
                 completion_volume_slider: SliderState::new(),
+                voice_briefing_volume_slider: SliderState::new(),
+                voice_briefing_sleep_slider: slider::RangeSliderState::new(cx),
                 sidebar_transparency_slider: SliderState::new(),
                 border_intensity_slider: SliderState::new(),
                 guided_reading_fixation_slider: SliderState::new(),

@@ -1434,6 +1434,23 @@ pub fn play_briefing_audio(_: &[u8], _: f32) -> Option<std::time::Duration> {
     None
 }
 
+/// Apply a changed briefing volume to the currently loaded player.
+#[cfg(target_os = "macos")]
+pub fn set_briefing_audio_volume(volume: f32) {
+    PLAYING_BRIEFING.with_borrow(|slot| {
+        if let Some(player) = slot.as_ref() {
+            unsafe {
+                player.setVolume(waku_client::persistence::sanitized_completion_sound_volume(
+                    volume,
+                ))
+            };
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_briefing_audio_volume(_: f32) {}
+
 #[cfg(target_os = "macos")]
 pub fn pause_briefing_audio() -> Option<std::time::Duration> {
     PLAYING_BRIEFING.with_borrow(|slot| {
