@@ -3019,3 +3019,243 @@ deliverable.dismiss: "从边栏移除"
 
 boss.greeting: 今天我们做些什么？
 boss.new_face: 新面孔
+
+command_palette.no_sync_projects_hint: 打开一个项目以同步分支
+command_palette.sync_branch_project_placeholder: 选择要同步分支的项目…
+project_switcher.terminal_placeholder: 搜索要在其中打开终端的项目…
+experiments.boss_title: 老板与员工
+experiments.boss_description: 启用老板助手、员工任务、角色设定和计划。
+experiments.voice_briefing_piper_voice: Piper 声音
+experiments.voice_briefing_piper_speaker: 说话人
+experiments.voice_briefing_piper_speaker_number: "说话人 {number}"
+experiments.voice_briefing_piper_caption: Piper 离线运行——语音模型仅在首次使用时下载一次，老板语音无需任何凭证。
+experiments.voice_briefing_volume: 音量
+experiments.voice_briefing_dnd: 免打扰
+experiments.voice_briefing_sleep_window: 睡眠时段
+experiments.voice_briefing_sleep_range: "开始 {start} · 结束 {end}"
+experiments.voice_briefing_dnd_caption: 本地时间，以 15 分钟为步长。自动简报会等待时段结束；手动播放不受影响。起止时间相同则停用该时段。
+experiments.voice_scratchpad_title: VoicePad
+experiments.voice_scratchpad_description: 发送按钮旁的 VP 按钮会打开听写草稿板，把麦克风内容转写成消息——回车发送，Esc 丢弃。使用“推理服务”下的 Vercel AI Gateway 凭证。
+experiments.wireframes_title: 线框图
+experiments.wireframes_description: 允许规划会话在计划文档旁输出低保真界面线框图——文件查看器会将其渲染为带主题的元素，如同真实 UI。关闭后会隐藏这些入口，但不会删除已生成的文件。
+daemon.restart: 重启守护进程
+daemon.restart_pending: 正在重启…
+daemon.degraded_banner: 守护进程仍在运行但没有响应——Goddard 会继续尝试连接，运行中的任务不受影响。
+daemon.restart_confirm_title: 重启守护进程？
+daemon.restart_confirm_body: 重启会停止这台机器上所有正在运行的任务和终端。可恢复的回合会在守护进程恢复后继续。
+daemon.restart_confirm_action: 重启守护进程
+daemon.phase_degraded: 无响应
+settings.composer_enter_steers: 回车操控当前回合
+settings.composer_enter_steers_description: "在编辑器中，回车将草稿注入正在运行的回合，%{modifier}Enter 则将其排队。Shift+Enter 仍然插入换行"
+settings.transcript_keep_scroll_on_send: 发送时保持滚动位置
+settings.transcript_keep_scroll_on_send_description: 发送提示词后，对话记录保持在你滚动到的位置，不再跳转到新消息；回到底部即可继续跟随回复
+session.archived_chip: 已归档
+terminal.boss_directory_fallback: "终端目录 %{requested} 不可用；改用 %{fallback}。"
+terminal.boss_directory_unavailable: 所请求的目录、项目根目录和主目录均不可用。
+terminal.boss_create_failed: 无法创建所请求的终端。
+right_panel.goals: 目标
+right_panel.goals_description: 跟踪进行中与已完成的员工工作
+files.preview_wireframe: 预览线框图
+files.wireframe_empty: 此线框图没有任何界面
+transcript.interrupted_after: "%{duration}后中断"
+boss.brain_label: 记忆
+boss.local_host: 本机
+boss.remote_host: 远程主机
+boss.identity: 身份
+boss.deliverables: 交付物
+boss.phase_later: 将在后续阶段推出。
+boss.retry: 重试
+boss.memory_documents: 文档
+boss.memory_records: 记录
+boss.search_file_names: 搜索文件名
+boss.search_no_matches: 没有匹配的文件
+boss.ask_correct: 请老板纠正
+boss.correction_request_hint: "请在聊天中让老板纠正 %{path}。"
+boss.memory_empty: 老板维护着自己的记忆。
+boss.ask_remember: 让老板记住一些内容
+boss.memory_select: 选择要阅读的记忆文件
+boss.memory_unavailable: "无法加载 %{path}。"
+boss.bucket_select: 选择存储桶
+boss.bucket_unavailable: "无法加载 %{bucket}。"
+boss.records_empty: 此存储桶还没有记录。
+boss.record_fact: 事实
+boss.record_observation: 观察
+boss.record_question: 问题
+boss.record_summary: 摘要
+boss.goals_in_progress: 进行中
+boss.goals_completed: 已完成
+boss.goals_empty: 暂无目标
+boss.goals_status_active: 进行中
+boss.goals_status_starting: 启动中
+boss.goals_status_working: 工作中
+boss.goals_status_waiting: 等待中
+boss.goals_status_paused: 已暂停
+boss.goals_status_blocked: 需要关注
+boss.goals_status_usage_limited: 用量受限
+boss.goals_status_budget_limited: 已达预算上限
+boss.goals_status_complete: 已完成
+boss.goals_status_failed: 失败
+boss.goals_status_queued: 排队中
+boss.goals_status_background: 后台工作
+boss.goals_status_needs_input: 需要输入
+boss.goals_status_attention: 请求关注
+boss.goals_status_finishing: 收尾中
+boss.goals_status_unavailable: 状态不可用
+boss.goals_status_finished: 已结束
+boss.goals_section_finished: 已结束
+boss.goals_section_pending: 待处理
+boss.goals_show_older: "显示更多（还有 %{count} 条）"
+boss.goals_show_less: 收起
+boss.goals_needs_attention: "%{count} 项需要关注"
+boss.goals_updated_ago: "%{ago}前"
+boss.goals_empty_title: 暂无目标
+boss.goals_empty_body: 请让老板分配一个目标。目标完成后仍会保留在这里。
+boss.goals_loading: 正在加载目标…
+boss.goals_loading_body: 正在等待老板的快照送达。
+boss.goals_unavailable: 目标不可用
+boss.goals_unavailable_body: 老板的快照不可用——请检查与主机的连接。
+boss.goals_offline: 离线 · 最近一次已知状态
+boss.goals_untitled: 未命名目标
+boss.goals_task_unavailable: 任务不可用
+boss.goals_project_unavailable: 项目不可用
+boss.goals_queue_admission: 等待准入
+boss.goals_queue_earlier: 等待更早的工作
+boss.goals_queue_model: "等待 %{model} · %{used}/%{limit} 个槽位"
+boss.goals_worktree: 工作树
+boss.goals_open_task: "打开任务：%{title}，%{employee}，%{status}"
+boss.trigger_interrupted: "%{name} 被中断"
+boss.trigger_plan: 计划
+boss.trigger_plan_finalized: "%{name} 已将设计定稿"
+boss.trigger_plans_finalized: "%{count} 个计划已定稿"
+boss.trigger_plan_unavailable: 规划会话不可用
+boss.command_placeholder: 向老板下达指令…
+boss.command_placeholder_employee: 通过老板控制这位员工…
+boss.command_placeholder_deliverable: 通过老板编辑此交付物…
+boss.command_placeholder_memory: 请老板纠正这条记忆…
+boss.command_hint: "消息将发送给 %{name}"
+boss.history_loading: 正在加载更早的对话…
+boss.history_load: 加载更早的对话
+boss.history_retry: 重试加载更早的对话
+boss.planning_label: 规划中
+boss.plan_seed_opener: "这个规划会话属于你，用于处理上面的请求；你的角色是产品设计师——从用户的角度思考这个功能。先解释你对需求的理解，然后用 `writeFile` 在 %{path} 起草并修改设计文档。文档涵盖用户体验、流程、状态、边界情况、权衡、待决问题以及带理由的决策——文件路径、代码结构、迁移步骤等实现细节不在范围内，由负责实现的员工决定技术方案。起草期间你可以召唤员工做设计调研和审查，但绝不能让他们构建。当设计可以提交用户批准时，调用 `finalizePlan`——批准会冻结文档并把设计报告到老板聊天，由老板在那里协调实现。批准之后你的工作就结束了。"
+boss.plan_finalize_title: 定稿计划？
+boss.plan_finalize_detail: "将 %{file}（“%{idea}”）冻结为已批准的设计？文档将变为只读，老板接手实现；规划会话会短暂保留以回答问题，然后归档。"
+boss.plan_finalize: 定稿计划
+boss.plan_finalized: 计划已定稿
+boss.plan_finalized_ago: "%{ago}前定稿"
+boss.plan_approve_prompt: 设计已获批准——定稿并把实现交给老板。
+boss.plan_approve_hint: 批准设计——会话将定稿，老板随即开始工作
+boss.plan_sent_for_execution: 正在把设计交给老板
+boss.plan_sent_hint: 此会话不再接收提示词。
+boss.plan_sealed_hint: 设计文档已冻结——老板负责实现；此会话只回答问题。
+boss.plan_unavailable: 无法加载设计文档。
+boss.plan_select: 选择一个计划以阅读。
+boss.plans: 计划
+boss.plans_hint: 定稿的设计文档在规划会话归档后仍可在此阅读。
+boss.status_idle: 空闲
+boss.status_cancelled: 已取消
+boss.status_expired: 已过期
+boss.employees_active: 进行中
+boss.employees_history: 历史
+boss.employees_empty_active: 没有活跃的员工
+boss.employees_empty_active_hint: 老板正在运行和排队的工作显示在这里。
+boss.employees_empty_history: 没有已结束的员工
+boss.employees_empty_history_hint: 已完成、失败和被取消的工作结束后会移到这里。
+boss.capacity: 容量
+boss.capacity_models: 模型容量
+boss.capacity_none: 未设置模型上限
+boss.capacity_line: "%{model} — 已用 %{used}/%{limit} 个槽位"
+boss.capacity_line_queued: "%{model} — 已用 %{used}/%{limit} · %{queued} 个排队中"
+boss.capacity_paused: "%{model} — 队列已暂停"
+boss.capacity_host: 主机资源
+boss.capacity_host_line: "常驻设备 %{devices} · 原生构建 %{builds} · 桌面输入 %{desktop}"
+boss.dispatching_detail: 槽位已预留——Provider 正在启动。
+boss.assignment: 分配信息
+boss.assignment_brief: 任务说明
+boss.assignment_persona: 角色设定
+boss.assignment_model: 模型
+boss.assignment_workspace: 工作区
+boss.assignment_workspace_local: 项目检出
+boss.assignment_workspace_new: 新工作树
+boss.assignment_access: 访问权限
+boss.assignment_access_none: 仅任务默认权限
+boss.assignment_buckets: "记忆存储桶：%{count}"
+boss.assignment_integrations: "集成：%{count}"
+boss.assignment_resources: 资源
+boss.assignment_resources_none: 仅模型槽位
+boss.assignment_resources_requested: "已请求：%{detail}"
+boss.assignment_resources_reserved: "已预留：%{detail}"
+boss.resource_exclusive: "独占：%{count}"
+boss.resource_devices: "设备：%{count}"
+boss.resource_builds: "构建：%{count}"
+boss.resource_desktop: 桌面输入
+boss.edit: 编辑
+boss.instructions: 指令
+boss.detail_none: 无
+boss.detail_yes: 是
+boss.detail_no: 否
+boss.detail_buckets: 记忆存储桶
+boss.detail_pinned: 固定的文档
+boss.detail_integrations: 集成
+boss.detail_summon: 召唤员工
+boss.detail_computer: 计算机操作
+boss.role_boss: 老板角色设定
+boss.role_employee: 员工角色
+boss.section_boss: 老板
+boss.section_roles: 角色
+boss.roles_empty: 还没有员工角色。
+boss.roles_no_match: 没有匹配的角色设定。
+boss.persona_select: 选择一个角色设定以查看其指令。
+boss.persona_search: 搜索角色设定
+boss.persona_buckets: 授予的记忆存储桶 ID
+boss.persona_icon_hint: 角色设定图标（员工默认继承，除非被覆盖）
+boss.persona_scope_hint: 更改对之后召唤的员工生效。现有员工保留原有授权——请让老板更新。
+boss.personas_empty: 没有角色设定
+boss.personas_empty_hint: 角色设定是老板分配给员工的可复用角色。
+boss.plans_active: 进行中
+boss.plans_approved: 已批准
+boss.plans_archived: 已归档
+boss.plan_in_discussion: 讨论中
+boss.plan_archived: 已归档
+boss.plan_open_discussion: 打开讨论
+boss.plan_view_discussion: 查看讨论
+boss.plans_empty_active: 没有讨论中的计划。
+boss.plans_empty_approved: 还没有已批准的计划。
+boss.plans_empty_archived: 没有已归档的计划。
+boss.deliverables_all: 全部
+boss.deliverables_pinned: 已置顶
+boss.deliverables_dormant: 休眠
+boss.deliverables_archived: 已归档
+boss.deliverables_empty_all: 还没有交付物
+boss.deliverables_empty_pinned: 没有已置顶的交付物
+boss.deliverables_empty_dormant: 没有休眠的交付物
+boss.deliverables_empty_archived: 没有已归档的交付物
+boss.deliverables_empty_hint: 老板会把成果发布到这里。
+boss.deliverable_dormant: 休眠
+boss.deliverable_archived_tag: 已归档
+voice_scratchpad.title: VoicePad
+voice_scratchpad.short_title: VP
+voice_scratchpad.start: 开始语音听写
+voice_scratchpad.recording: 正在听写——点击显示草稿板
+voice_scratchpad.muted: 听写已静音——点击显示草稿板
+voice_scratchpad.discard_dictating: 正在听写——点击丢弃草稿板
+voice_scratchpad.discard_muted: 听写已静音——点击丢弃草稿板
+voice_scratchpad.mute: 静音
+voice_scratchpad.unmute: 取消静音
+voice_scratchpad.hide: 隐藏
+voice_scratchpad.hint_prefix: 说「
+voice_scratchpad.hint_command: okay next
+voice_scratchpad.hint_middle: "」开始下一段 • 按"
+voice_scratchpad.hint_enter: 回车
+voice_scratchpad.hint_suffix: 发送
+voice_scratchpad.annotation_hint: 正在听写批注…
+voice_scratchpad.discard_title: 丢弃转写稿？
+voice_scratchpad.discard_keep: 保留
+voice_scratchpad.discard: 丢弃
+voice_scratchpad.mic_denied: VoicePad 需要麦克风权限
+voice_scratchpad.mic_unavailable: 麦克风不可用——正在等待所选设备恢复
+voice_scratchpad.retry: 重试
+voice_scratchpad.open_settings: 打开设置
+voice_scratchpad.connecting: 正在连接…
+voice_scratchpad.connection_lost: 连接已断开——转写暂停
+voice_scratchpad.paused: 服务已暂停转写——仍在监听

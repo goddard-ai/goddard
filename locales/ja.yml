@@ -3067,3 +3067,244 @@ deliverable.dismiss: "サイドバーから削除"
 
 boss.greeting: 今日は何をしましょうか？
 boss.new_face: 新しい顔
+
+errors.agent_surface_unavailable: "goddard-agent のコマンドサーフェスを起動できませんでした。セッションはそれなしで続行します。詳細: %{error}"
+command_palette.no_sync_projects_hint: ブランチを同期するにはプロジェクトを開いてください
+command_palette.sync_branch_project_placeholder: ブランチを同期するプロジェクトを選択…
+project_switcher.terminal_placeholder: ターミナルを開くプロジェクトを検索…
+experiments.boss_title: ボスと従業員
+experiments.boss_description: ボスアシスタント、従業員タスク、ペルソナ、計画を有効にします。
+experiments.voice_briefing_piper_voice: Piper の声
+experiments.voice_briefing_piper_speaker: 話者
+experiments.voice_briefing_piper_speaker_number: "話者 {number}"
+experiments.voice_briefing_piper_caption: Piper はオフラインで動作します——音声モデルは初回のみダウンロードされ、ボスの音声には認証情報は不要です。
+experiments.voice_briefing_volume: 音量
+experiments.voice_briefing_dnd: おやすみモード
+experiments.voice_briefing_sleep_window: 停止時間帯
+experiments.voice_briefing_sleep_range: "開始 {start} · 終了 {end}"
+experiments.voice_briefing_dnd_caption: 現地時刻で15分刻み。自動ブリーフィングは時間帯が終わるまで待機し、手動再生は可能です。開始と終了が同じ場合は無効になります。
+experiments.voice_scratchpad_title: VoicePad
+experiments.voice_scratchpad_description: 送信ボタンの横にある VP ボタンで音声メモ帳を開き、マイクの音声をメッセージに文字起こしします——Enter で送信、Esc で破棄します。「推論プロバイダー」にある Vercel AI Gateway の認証情報を使用します。
+experiments.wireframes_title: ワイヤーフレーム
+experiments.wireframes_description: 計画セッションが計画ドキュメントの横に低忠実度の画面ワイヤーフレームを出力できるようにします——ファイルビューアーでは実際の UI のようにテーマ付き要素としてプレビューされます。オフにするとこれらの機能は非表示になりますが、出力済みのファイルは削除されません。
+daemon.restart: デーモンを再起動
+daemon.restart_pending: 再起動中…
+daemon.degraded_banner: デーモンは稼働していますが応答していません——Goddard は接続を試行し続けるため、実行中のタスクはそのまま保持されます。
+daemon.restart_confirm_title: デーモンを再起動しますか？
+daemon.restart_confirm_body: 再起動すると、このマシンで実行中のすべてのタスクとターミナルが停止します。再開可能なターンはデーモンの復帰後に続行されます。
+daemon.restart_confirm_action: デーモンを再起動
+daemon.phase_degraded: 応答なし
+settings.composer_enter_steers: Enter で実行中のターンに送信
+settings.composer_enter_steers_description: "コンポーザーで Enter を押すと下書きが実行中のターンに送られ、%{modifier}Enter でキューに追加されます。Shift+Enter は従来どおり改行を挿入します"
+settings.transcript_keep_scroll_on_send: 送信時にスクロール位置を保持
+settings.transcript_keep_scroll_on_send_description: プロンプトを送信しても、スクロールした位置が維持され、新しいメッセージへジャンプしません。一番下まで戻ると返信を追従します
+session.archived_chip: アーカイブ済み
+terminal.boss_directory_fallback: "ターミナルのディレクトリ %{requested} は利用できません。代わりに %{fallback} を使用します。"
+terminal.boss_directory_unavailable: 要求されたディレクトリ、プロジェクトルート、ホームディレクトリはいずれも利用できません。
+terminal.boss_create_failed: 要求されたターミナルを作成できませんでした。
+right_panel.goals: ゴール
+right_panel.goals_description: 進行中および完了した従業員の作業を追跡
+files.preview_wireframe: ワイヤーフレームをプレビュー
+files.wireframe_empty: このワイヤーフレームには画面がありません
+transcript.interrupted_after: "%{duration}後に中断"
+boss.brain_label: ブレイン
+boss.local_host: ローカルホスト
+boss.remote_host: リモートホスト
+boss.identity: アイデンティティ
+boss.deliverables: 成果物
+boss.phase_later: 今後のフェーズで提供予定です。
+boss.retry: 再試行
+boss.memory_documents: ドキュメント
+boss.memory_records: 記録
+boss.search_file_names: ファイル名を検索
+boss.search_no_matches: 一致するファイルがありません
+boss.ask_correct: ボスに修正を依頼
+boss.correction_request_hint: "チャットでボスに %{path} の修正を依頼します。"
+boss.memory_empty: メモリはボスが管理しています。
+boss.ask_remember: ボスに覚えてもらう
+boss.memory_select: 読み込むメモリファイルを選択してください
+boss.memory_unavailable: "%{path} を読み込めませんでした。"
+boss.bucket_select: バケットを選択
+boss.bucket_unavailable: "%{bucket} を読み込めませんでした。"
+boss.records_empty: このバケットにはまだ記録がありません。
+boss.record_fact: 事実
+boss.record_observation: 観察
+boss.record_question: 質問
+boss.record_summary: 要約
+boss.goals_in_progress: 進行中
+boss.goals_completed: 完了
+boss.goals_empty: ゴールはまだありません
+boss.goals_status_active: 進行中
+boss.goals_status_starting: 開始中
+boss.goals_status_working: 作業中
+boss.goals_status_waiting: 待機中
+boss.goals_status_paused: 一時停止中
+boss.goals_status_blocked: 対応が必要
+boss.goals_status_usage_limited: 利用量制限
+boss.goals_status_budget_limited: 予算上限に到達
+boss.goals_status_complete: 完了
+boss.goals_status_failed: 失敗
+boss.goals_status_queued: キュー待ち
+boss.goals_status_background: バックグラウンド作業
+boss.goals_status_needs_input: 入力が必要
+boss.goals_status_attention: 確認を求めています
+boss.goals_status_finishing: 終了処理中
+boss.goals_status_unavailable: 状態を取得できません
+boss.goals_status_finished: 終了
+boss.goals_section_finished: 終了
+boss.goals_section_pending: 保留中
+boss.goals_show_older: "さらに表示（あと %{count} 件）"
+boss.goals_show_less: 表示を減らす
+boss.goals_needs_attention: "%{count} 件が対応待ち"
+boss.goals_updated_ago: "%{ago}前"
+boss.goals_empty_title: ゴールはまだありません
+boss.goals_empty_body: ボスにゴールの割り当てを依頼してください。完了したゴールもここに残ります。
+boss.goals_loading: ゴールを読み込み中…
+boss.goals_loading_body: ボスのスナップショットを待っています。
+boss.goals_unavailable: ゴールを取得できません
+boss.goals_unavailable_body: ボスのスナップショットを取得できません——ホストへの接続を確認してください。
+boss.goals_offline: オフライン · 最後の既知の状態
+boss.goals_untitled: 無題のゴール
+boss.goals_task_unavailable: タスクを利用できません
+boss.goals_project_unavailable: プロジェクトを利用できません
+boss.goals_queue_admission: 割り当て待ち
+boss.goals_queue_earlier: 前の作業を待機中
+boss.goals_queue_model: "%{model} を待機中 · %{used}/%{limit} スロット"
+boss.goals_worktree: ワークツリー
+boss.goals_open_task: "タスクを開く: %{title}、%{employee}、%{status}"
+boss.trigger_interrupted: "%{name} は中断されました"
+boss.trigger_plan: 計画
+boss.trigger_plan_finalized: "%{name} が設計を確定しました"
+boss.trigger_plans_finalized: "%{count} 件の計画が確定しました"
+boss.trigger_plan_unavailable: 計画セッションを利用できません
+boss.command_placeholder: ボスに指示…
+boss.command_placeholder_employee: ボス経由でこの従業員を操作…
+boss.command_placeholder_deliverable: ボス経由でこの成果物を編集…
+boss.command_placeholder_memory: ボスにこのメモリの修正を依頼…
+boss.command_hint: "メッセージは %{name} に送信されます"
+boss.history_loading: 以前の会話を読み込み中…
+boss.history_load: 以前の会話を読み込む
+boss.history_retry: 以前の会話の読み込みを再試行
+boss.planning_label: 計画中
+boss.plan_seed_opener: "この計画セッションは上記のリクエストのためのあなたのものです。あなたの役割はプロダクトデザイナーです——ユーザーの視点から機能を検討してください。リクエストへの理解を説明し、`writeFile` で %{path} の設計ドキュメントを作成・修正します。ドキュメントにはユーザー体験、フロー、状態、エッジケース、トレードオフ、未解決の疑問、根拠のある決定を含めます——ファイルパスやコード構造、移行手順などの実装詳細は範囲外であり、実装する従業員が技術面を決定します。作成中に設計調査や監査のために従業員を呼び出すことはできますが、構築させてはいけません。設計がユーザーの承認準備に達したら `finalizePlan` を呼び出します——承認されるとドキュメントは固定され、設計がボスのチャットに報告され、ボスが実装を統括します。承認があなたの仕事の終わりです。"
+boss.plan_finalize_title: 計画を確定しますか？
+boss.plan_finalize_detail: "%{file}（「%{idea}」）を承認済み設計として確定しますか？ドキュメントは読み取り専用になり、実装はボスが引き継ぎます。計画セッションは質問のため短時間開いたままになり、その後アーカイブされます。"
+boss.plan_finalize: 計画を確定
+boss.plan_finalized: 計画が確定しました
+boss.plan_finalized_ago: "%{ago}前に確定"
+boss.plan_approve_prompt: 設計は承認されました——確定して実装をボスに引き継ぎます。
+boss.plan_approve_hint: 設計を承認——セッションが確定し、ボスが作業を開始します
+boss.plan_sent_for_execution: 設計をボスに引き継いでいます
+boss.plan_sent_hint: このセッションはプロンプトを受け付けなくなりました。
+boss.plan_sealed_hint: 設計ドキュメントは確定済みです——実装はボスが行い、このセッションは質問への回答のみを行います。
+boss.plan_unavailable: 設計ドキュメントを読み込めませんでした。
+boss.plan_select: 計画を選択して閲覧してください。
+boss.plans: 計画
+boss.plans_hint: 確定済みの設計ドキュメントは、計画セッションがアーカイブされた後もここで閲覧できます。
+boss.status_idle: アイドル
+boss.status_cancelled: キャンセル済み
+boss.status_expired: 期限切れ
+boss.employees_active: 実行中
+boss.employees_history: 履歴
+boss.employees_empty_active: 実行中の従業員はいません
+boss.employees_empty_active_hint: ボスが実行中・キュー待ちの作業がここに表示されます。
+boss.employees_empty_history: 終了した従業員はいません
+boss.employees_empty_history_hint: 完了・失敗・キャンセルされた作業は終了時にここへ移動します。
+boss.capacity: 容量
+boss.capacity_models: モデル容量
+boss.capacity_none: モデル上限は設定されていません
+boss.capacity_line: "%{model} — %{used}/%{limit} スロット使用中"
+boss.capacity_line_queued: "%{model} — %{used}/%{limit} 使用中 · %{queued} 件待ち"
+boss.capacity_paused: "%{model} — キュー一時停止中"
+boss.capacity_host: ホストリソース
+boss.capacity_host_line: "常駐デバイス %{devices} · ネイティブビルド %{builds} · デスクトップ入力 %{desktop}"
+boss.dispatching_detail: スロット確保済み——プロバイダーを起動しています。
+boss.assignment: 割り当て
+boss.assignment_brief: 概要
+boss.assignment_persona: ペルソナ
+boss.assignment_model: モデル
+boss.assignment_workspace: ワークスペース
+boss.assignment_workspace_local: プロジェクトのチェックアウト
+boss.assignment_workspace_new: 新規ワークツリー
+boss.assignment_access: アクセス
+boss.assignment_access_none: タスクのデフォルトのみ
+boss.assignment_buckets: "メモリバケット: %{count}"
+boss.assignment_integrations: "連携: %{count}"
+boss.assignment_resources: リソース
+boss.assignment_resources_none: モデルスロットのみ
+boss.assignment_resources_requested: "要求済み: %{detail}"
+boss.assignment_resources_reserved: "確保済み: %{detail}"
+boss.resource_exclusive: "排他: %{count}"
+boss.resource_devices: "デバイス: %{count}"
+boss.resource_builds: "ビルド: %{count}"
+boss.resource_desktop: デスクトップ入力
+boss.edit: 編集
+boss.instructions: 指示
+boss.detail_none: なし
+boss.detail_yes: はい
+boss.detail_no: いいえ
+boss.detail_buckets: メモリバケット
+boss.detail_pinned: ピン留めドキュメント
+boss.detail_integrations: 連携
+boss.detail_summon: 従業員の呼び出し
+boss.detail_computer: コンピューター操作
+boss.role_boss: ボスのペルソナ
+boss.role_employee: 従業員の役割
+boss.section_boss: ボス
+boss.section_roles: 役割
+boss.roles_empty: 従業員の役割はまだありません。
+boss.roles_no_match: 一致するペルソナがありません。
+boss.persona_select: ペルソナを選択して指示を確認してください。
+boss.persona_search: ペルソナを検索
+boss.persona_buckets: 付与されたメモリバケット ID
+boss.persona_icon_hint: ペルソナアイコン（上書きされない限り従業員が継承）
+boss.persona_scope_hint: 変更は後で呼び出される従業員に適用されます。既存の従業員は現在の権限を維持します——更新はボスに依頼してください。
+boss.personas_empty: ペルソナがありません
+boss.personas_empty_hint: ペルソナはボスが従業員に割り当てる再利用可能な役割です。
+boss.plans_active: 進行中
+boss.plans_approved: 承認済み
+boss.plans_archived: アーカイブ済み
+boss.plan_in_discussion: 検討中
+boss.plan_archived: アーカイブ済み
+boss.plan_open_discussion: 議論を開く
+boss.plan_view_discussion: 議論を表示
+boss.plans_empty_active: 検討中の計画はありません。
+boss.plans_empty_approved: 承認済みの計画はまだありません。
+boss.plans_empty_archived: アーカイブ済みの計画はありません。
+boss.deliverables_all: すべて
+boss.deliverables_pinned: ピン留め
+boss.deliverables_dormant: 休眠
+boss.deliverables_archived: アーカイブ済み
+boss.deliverables_empty_all: 成果物はまだありません
+boss.deliverables_empty_pinned: ピン留めされた成果物はありません
+boss.deliverables_empty_dormant: 休眠中の成果物はありません
+boss.deliverables_empty_archived: アーカイブ済みの成果物はありません
+boss.deliverables_empty_hint: ボスが結果をここに公開します。
+boss.deliverable_dormant: 休眠
+boss.deliverable_archived_tag: アーカイブ済み
+voice_scratchpad.title: VoicePad
+voice_scratchpad.short_title: VP
+voice_scratchpad.start: 音声入力を開始
+voice_scratchpad.recording: 入力中——クリックでメモ帳を表示
+voice_scratchpad.muted: 入力をミュート中——クリックでメモ帳を表示
+voice_scratchpad.discard_dictating: 入力中——クリックでメモ帳を破棄
+voice_scratchpad.discard_muted: ミュート中——クリックでメモ帳を破棄
+voice_scratchpad.mute: ミュート
+voice_scratchpad.unmute: ミュート解除
+voice_scratchpad.hide: 非表示
+voice_scratchpad.hint_prefix: 「
+voice_scratchpad.hint_command: okay next
+voice_scratchpad.hint_middle: "」と言うと次の段落へ • "
+voice_scratchpad.hint_enter: enter
+voice_scratchpad.hint_suffix: " で送信"
+voice_scratchpad.annotation_hint: 注釈を入力中…
+voice_scratchpad.discard_title: 文字起こしを破棄しますか？
+voice_scratchpad.discard_keep: 保持
+voice_scratchpad.discard: 破棄
+voice_scratchpad.mic_denied: VoicePad にはマイクへのアクセスが必要です
+voice_scratchpad.mic_unavailable: マイクを利用できません——選択したデバイスが戻るのを待機しています
+voice_scratchpad.retry: 再試行
+voice_scratchpad.open_settings: 設定を開く
+voice_scratchpad.connecting: 接続中…
+voice_scratchpad.connection_lost: 接続が切れました——文字起こしを一時停止中
+voice_scratchpad.paused: サービスが文字起こしを一時停止しました——待機中です
