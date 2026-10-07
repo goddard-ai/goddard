@@ -4,6 +4,7 @@
 // `.changelog/` — so parallel work never conflicts on CHANGELOG.md itself.
 // `bun run changelog` folds every fragment into a `## [<version>]` section
 // for the version in Cargo.toml, grouped by the filename's category prefix.
+// Boss-related fragments always fold into Experiments, regardless of prefix.
 // A fragment may tag a topic group as a second filename segment —
 // `feat-git-<slug>.md` — and grouped bullets nest under a `- **Group**`
 // parent inside their `###` section. `bun scripts/changelog.ts check`
@@ -217,8 +218,14 @@ async function buildSection(
         ? token
         : null;
     let body = (await Bun.file(join(dir, name)).text()).trim();
+    // Boss is an opt-in experiment, including its employee and planning surfaces.
+    const bossRelated =
+      /\b(?:boss(?:es)?|employees?|deliverables?|personas?|planning[- ]sessions?|plan preview)\b/i.test(
+        `${rest} ${body}`,
+      );
+    const heading = bossRelated ? "Experiments" : category.heading;
 
-    if (category.heading === "Highlights") {
+    if (heading === "Highlights") {
       const slug = rest;
       const media = MEDIA_EXTS.map((ext) => `${slug}.${ext}`).find((file) =>
         existsSync(join(mediaDir, file)),
@@ -239,7 +246,7 @@ async function buildSection(
       mediaMoves.push([join(mediaDir, media), join(projectRoot, releaseMedia)]);
     }
 
-    if (category.heading === "Experiments") {
+    if (heading === "Experiments") {
       body = body.replace(
         /^- (?:\*\*)?\[Experimental\](?:\*\*)?\s*/,
         "- ",
@@ -248,7 +255,7 @@ async function buildSection(
     }
 
     if (body) {
-      groups.get(category.heading)!.push({ name, heading: category.heading, group, body });
+      groups.get(heading)!.push({ name, heading, group, body });
     }
   }
 

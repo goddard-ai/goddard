@@ -41,6 +41,12 @@ unsupported promises.
   experimental opt-ins (emitted with a bold `[Experimental]` marker —
   experiments are never highlights), `fix-` for bugs that existed in a
   previously released version.
+- Boss-related changes always fold into `### Experiments`, including fixes,
+  with the bold `[Experimental]` marker regardless of filename prefix. Use
+  `exp-` for new Boss fragments. The generator recognizes Boss, employees,
+  deliverables, personas, and planning sessions in the filename or entry text;
+  name the relevant surface so the classification is explicit. For example,
+  `fix-transcript-boss-project-label.md` still folds into Experiments.
 - A second filename segment tags the change's topic group —
   `.changelog/<prefix>-<group>-<slug>.md` — and collect nests grouped
   bullets under a `- **Group**` parent inside their `###` section, in a

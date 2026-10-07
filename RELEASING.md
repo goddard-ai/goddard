@@ -132,7 +132,10 @@ GitHub release at the end — that stays a human's click.
    ```
    Give any changelog-worthy commit missing a `.changelog/` fragment one of its
    own, and check every pending fragment's filename: the category prefix
-   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section, and an optional
+   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss-related
+   entries always fold into Experiments, including employee, deliverable,
+   persona, and planning-session changes and fixes. Use `exp-` for new Boss
+   fragments. An optional
    second segment — `<prefix>-<group>-<slug>.md`, with `group` one of
    `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
    `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,
