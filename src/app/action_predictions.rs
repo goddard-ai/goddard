@@ -142,7 +142,7 @@ pub(super) fn visible_suggestion_label(label: &str) -> String {
     }
 }
 
-pub(super) fn valid_suggested_prompt(action: &str, prompt: &str) -> bool {
+pub(super) fn valid_suggested_prompt(_action: &str, prompt: &str) -> bool {
     let trimmed = prompt.trim();
     !trimmed.is_empty() && trimmed.chars().count() <= 2_000
 }

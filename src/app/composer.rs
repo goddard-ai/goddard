@@ -6493,8 +6493,6 @@ impl Waku {
         let picks_base = worktrees::workspace_picks_base(&workspace, session);
         let snapshot = self.branch_snapshot_for_workspace(&workspace_path, cx)?;
         let selected_branch = workspace_selected_branch(&snapshot, &workspace, picks_base);
-        let branch_label = format_workspace_branch_label(&snapshot, &workspace, picks_base);
-
         // A detached HEAD reads as a bare SHA; name the base it sits on.
         let branch_label = if snapshot.current.is_none() {
             let base = match &workspace {
