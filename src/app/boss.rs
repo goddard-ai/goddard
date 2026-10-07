@@ -13,6 +13,9 @@ use waku_protocol::custom_commands::CustomCommandIcon;
 /// transcript — `ATOM_AVATAR_SCALE` of a body-text chip's height.
 const MENTION_AVATAR_SIZE: f32 = 18.0;
 
+/// Initial render plus two retries, shared by every surface requesting a key.
+const AVATAR_MAX_ATTEMPTS: u8 = 3;
+
 /// Rasters are cached per display-size bucket because GPUI samples sprites
 /// with a bilinear filter and no mipmaps: one shared 256px raster upscaled
 /// into a 54px header loses its edges, and downscaled six-fold into a
@@ -301,9 +304,9 @@ pub(super) struct BossUi {
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
-    avatar_queue: RefCell<VecDeque<(String, u32)>>,
-    // Attempted keys include failed and evicted rasters: both keep their
-    // fallback instead of restarting the render/evict cycle on every frame.
+    avatar_queue: RefCell<VecDeque<(String, u32, u8)>>,
+    // Keep keys marked across bounded retries and eviction so repainting
+    // cannot restart exhausted renders or churn the raster cache.
     avatar_requested: RefCell<HashSet<(String, u32)>>,
     avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
@@ -397,6 +400,14 @@ impl Default for BossUi {
 }
 
 impl BossUi {
+    fn retry_avatar(&self, seed: String, bucket: u32, attempt: u8) {
+        if attempt < AVATAR_MAX_ATTEMPTS {
+            self.avatar_queue
+                .borrow_mut()
+                .push_back((seed, bucket, attempt + 1));
+        }
+    }
+
     fn cache_avatar(
         &mut self,
         seed: String,
@@ -2766,8 +2777,8 @@ impl Waku {
 
     /// The raster cached for `(seed, size bucket)`, queueing a render when
     /// it is missing. Returns `None` while the raster is in flight so
-    /// callers can draw their placeholder. Failed or evicted rasters keep
-    /// that placeholder until a new seed or size is requested.
+    /// callers can draw their placeholder. Failures retry up to twice; exhausted
+    /// or evicted rasters keep the placeholder until a new seed or size is requested.
     pub(super) fn boss_avatar_image(
         &self,
         seed: &str,
@@ -2791,7 +2802,7 @@ impl Waku {
             self.boss_ui
                 .avatar_queue
                 .borrow_mut()
-                .push_back((seed.to_string(), bucket));
+                .push_back((seed.to_string(), bucket, 1));
             signal_event_pump(&self.event_wake_tx);
         }
         None
@@ -2817,7 +2828,8 @@ impl Waku {
 
     fn pump_boss_avatars(&mut self, cx: &mut Context<Self>) {
         while self.boss_ui.avatar_active < 4 {
-            let Some((seed, bucket)) = self.boss_ui.avatar_queue.borrow_mut().pop_front() else {
+            let Some((seed, bucket, attempt)) = self.boss_ui.avatar_queue.borrow_mut().pop_front()
+            else {
                 break;
             };
             self.boss_ui.avatar_active += 1;
@@ -2825,19 +2837,40 @@ impl Waku {
             let avatar_seed = seed.clone();
             cx.spawn(async move |this, cx| {
                 let image = cx.background_executor().spawn(async move {
-                    let svg = boss_moods::avatar_svg(&avatar_seed);
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        renderer.render_single_frame(&svg, avatar_scale(bucket))
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let svg = boss_moods::avatar_svg(&avatar_seed);
+                        renderer
+                            .render_single_frame(&svg, avatar_scale(bucket))
+                            .map_err(anyhow::Error::from)
                     }))
-                    .ok()
-                    .and_then(|result| result.ok())
+                    .unwrap_or_else(|panic| {
+                        let message = panic
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| panic.downcast_ref::<&str>().copied())
+                            .unwrap_or("non-string panic payload");
+                        Err(anyhow::anyhow!("avatar renderer panicked: {message}"))
+                    });
+                    // Log off the UI thread, once per requested seed/size key;
+                    // retries preserve the dedup mark and cannot flood the log.
+                    if attempt == 1 {
+                        if let Err(error) = &result {
+                            eprintln!(
+                                "Goddard: avatar render failed for seed {avatar_seed:?}, bucket {bucket} (up to {AVATAR_MAX_ATTEMPTS} attempts): {error:#}"
+                            );
+                        }
+                    }
+                    result
                 }).await;
                 let _ = this.update(cx, |this, cx| {
                     this.boss_ui.avatar_active -= 1;
-                    if let Some(image) = image {
-                        if let Some(evicted) = this.boss_ui.cache_avatar(seed, bucket, image) {
-                            cx.drop_image(evicted, None);
+                    match image {
+                        Ok(image) => {
+                            if let Some(evicted) = this.boss_ui.cache_avatar(seed, bucket, image) {
+                                cx.drop_image(evicted, None);
+                            }
                         }
+                        Err(_) => this.boss_ui.retry_avatar(seed, bucket, attempt),
                     }
                     signal_event_pump(&this.event_wake_tx); cx.notify();
                 });
@@ -7606,6 +7639,24 @@ mod tests {
         assert_eq!(avatar_bucket(16.0), 16);
         assert_eq!(avatar_bucket(18.0), 24);
         assert_eq!(avatar_bucket(54.0), 56);
+    }
+
+    #[test]
+    fn failed_avatar_retries_are_bounded_and_stay_deduplicated() {
+        let ui = BossUi::default();
+        let key = ("failed".to_string(), 24);
+        ui.avatar_requested.borrow_mut().insert(key.clone());
+        for attempt in 1..=AVATAR_MAX_ATTEMPTS {
+            ui.retry_avatar(key.0.clone(), key.1, attempt);
+            assert!(!ui.avatar_requested.borrow_mut().insert(key.clone()));
+            let queued = ui.avatar_queue.borrow_mut().pop_front();
+            if attempt < AVATAR_MAX_ATTEMPTS {
+                assert_eq!(queued, Some((key.0.clone(), key.1, attempt + 1)));
+            } else {
+                assert!(queued.is_none(), "permanent failures must stop retrying");
+            }
+        }
+        assert!(ui.avatar_queue.borrow().is_empty());
     }
 
     #[gpui::test]

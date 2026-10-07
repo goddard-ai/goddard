@@ -543,11 +543,36 @@ mod tests {
     #[gpui::test]
     fn generated_svg_rasters(cx: &mut gpui::TestAppContext) {
         let renderer = cx.update(|cx| cx.svg_renderer());
-        let svg = avatar_svg("test");
-        let image = renderer
-            .render_single_frame(&svg, 56.0 / AVATAR_SOURCE_SIZE)
-            .unwrap();
-        let frame = image.size(0);
-        assert_eq!((frame.width.0, frame.height.0), (112, 112));
+        // Empty and UUID seeds have both been suspected of leaving employees
+        // on their letter placeholder. Exercise the same scales as the queue.
+        let mut failures = Vec::new();
+        for seed in [
+            "",
+            "test",
+            "b8efc99d-28f9-4dcd-872a-afc315bccb91",
+            "00000000-0000-0000-0000-000000000000",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        ] {
+            let svg = avatar_svg(seed);
+            assert_eq!(svg, avatar_svg(seed), "unstable seed {seed:?}");
+            for bucket in [16, 24, 56] {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    renderer.render_single_frame(&svg, bucket as f32 / AVATAR_SOURCE_SIZE)
+                }));
+                match result {
+                    Ok(Ok(image)) => {
+                        let frame = image.size(0);
+                        assert_eq!((frame.width.0, frame.height.0), (bucket * 2, bucket * 2));
+                    }
+                    Ok(Err(error)) => {
+                        failures.push(format!("seed {seed:?}, bucket {bucket}: {error:#}"))
+                    }
+                    Err(_) => {
+                        failures.push(format!("seed {seed:?}, bucket {bucket}: renderer panicked"))
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }
