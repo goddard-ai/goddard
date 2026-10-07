@@ -69,6 +69,17 @@ impl ProjectScript {
             &self.detail
         }
     }
+
+    pub(super) fn recency_key(&self) -> String {
+        format!("{}\0{}\0{}", self.source.label(), self.name, self.command)
+    }
+}
+
+pub(super) fn order_project_scripts(
+    scripts: &mut [ProjectScript],
+    mut rank: impl FnMut(&ProjectScript) -> Option<usize>,
+) {
+    scripts.sort_by_key(|script| rank(script).unwrap_or(usize::MAX));
 }
 
 /// Quote one shell word only when it carries characters a bare word can't.
@@ -415,6 +426,9 @@ impl Waku {
             return;
         }
         let project_path = project.path.clone();
+        self.state
+            .record_project_script_use(project_id, &script.recency_key());
+        self.save();
         let mut command = CustomCommand::new(script.command.clone());
         command.name = Some(script.name.clone());
         command.icon = script.source.command_icon();
@@ -470,6 +484,7 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::PersistedState;
 
     fn write(root: &Path, name: &str, content: &str) {
         std::fs::write(root.join(name), content).unwrap();
@@ -542,6 +557,33 @@ mod tests {
              \tcargo run\n",
         );
         assert_eq!(recipes, ["_hidden", "quiet", "dev"]);
+    }
+
+    #[test]
+    fn scripts_sort_by_recency_then_keep_declaration_order() {
+        let script = |name: &str| ProjectScript {
+            name: name.to_owned(),
+            command: format!("make {name}"),
+            detail: String::new(),
+            source: ScriptSource::Makefile,
+        };
+        let project_id = Uuid::new_v4();
+        let mut state = PersistedState::empty();
+        state.record_project_script_use(project_id, &script("test").recency_key());
+        state.record_project_script_use(project_id, &script("build").recency_key());
+
+        let mut scripts = vec![script("build"), script("lint"), script("test")];
+        order_project_scripts(&mut scripts, |script| {
+            state.recent_project_script_rank(project_id, &script.recency_key())
+        });
+
+        assert_eq!(
+            scripts
+                .iter()
+                .map(|script| script.name.as_str())
+                .collect::<Vec<_>>(),
+            ["build", "test", "lint"]
+        );
     }
 
     #[test]

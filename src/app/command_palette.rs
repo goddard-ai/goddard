@@ -3535,8 +3535,17 @@ impl Waku {
         let Some(project_id) = self.command_palette.run_script_project else {
             return Vec::new();
         };
-        self.command_palette
+        let mut scripts = self
+            .command_palette
             .run_scripts
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        run_script::order_project_scripts(&mut scripts, |script| {
+            self.state
+                .recent_project_script_rank(project_id, &script.recency_key())
+        });
+        scripts
             .iter()
             .enumerate()
             .map(|(order, script)| CommandPaletteItem {

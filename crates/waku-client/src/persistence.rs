@@ -752,6 +752,13 @@ pub struct RecentModelUse {
     pub used_at: u64,
 }
 
+/// A project script recently run from the command palette, newest first.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RecentProjectScript {
+    pub project_id: Uuid,
+    pub key: String,
+}
+
 /// How many selections the picker keeps in its recent section.
 const RECENT_MODEL_USES_LIMIT: usize = 32;
 
@@ -1725,6 +1732,8 @@ struct AppState {
     /// used" source for the task and project switchers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_sessions: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_project_scripts: Vec<RecentProjectScript>,
     /// Replies the voice briefing already played, so a restart does not
     /// re-speak them. Bounded by the runtime cap; dead ids are inert.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1884,6 +1893,9 @@ pub struct PersistedState {
     /// like the selection, not task state.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_sessions: Vec<Uuid>,
+    /// Project scripts run from the command palette, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_project_scripts: Vec<RecentProjectScript>,
     /// Replies the voice briefing already played, so a restart does not
     /// re-speak them. Bounded by the runtime cap; dead ids are inert.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2524,6 +2536,7 @@ impl PersistedState {
             selected_session: None,
             unseen_completions: HashMap::new(),
             recent_sessions: Vec::new(),
+            recent_project_scripts: Vec::new(),
             briefed_messages: Vec::new(),
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
@@ -2898,6 +2911,27 @@ impl PersistedState {
         self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
     }
 
+    /// Records a script run, moving its project-scoped key to the front.
+    pub fn record_project_script_use(&mut self, project_id: Uuid, key: &str) {
+        self.recent_project_scripts
+            .retain(|script| script.project_id != project_id || script.key != key);
+        self.recent_project_scripts.insert(
+            0,
+            RecentProjectScript {
+                project_id,
+                key: key.to_owned(),
+            },
+        );
+        self.recent_project_scripts.truncate(128);
+    }
+
+    /// Rank of this project-scoped script, with lower ranks being more recent.
+    pub fn recent_project_script_rank(&self, project_id: Uuid, key: &str) -> Option<usize> {
+        self.recent_project_scripts
+            .iter()
+            .position(|script| script.project_id == project_id && script.key == key)
+    }
+
     /// The row's recency rank, when this exact selection — fast flag included —
     /// is the variant last started. The sibling tier carries no rank, so only
     /// one of `effort` and `effort-fast` ever sorts into the recent section.
@@ -3096,6 +3130,7 @@ impl PersistedState {
             selected_session: self.persistable_selected_session(),
             unseen_completions: self.unseen_completions.clone(),
             recent_sessions: self.recent_sessions.clone(),
+            recent_project_scripts: self.recent_project_scripts.clone(),
             briefed_messages: self.briefed_messages.clone(),
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
@@ -3268,6 +3303,7 @@ impl PersistedState {
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
         self.recent_sessions = app_state.recent_sessions;
+        self.recent_project_scripts = app_state.recent_project_scripts;
         self.briefed_messages = app_state.briefed_messages;
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
@@ -5477,6 +5513,27 @@ mod tests {
         // Order survives the round trip; the slot for a task deleted while
         // the app was away is pruned on load.
         assert_eq!(restored.recent_sessions, vec![newer_id, older]);
+    }
+
+    #[test]
+    fn project_script_recency_survives_an_app_state_round_trip() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.projects[0].id;
+        state.record_project_script_use(project_id, "package.json\0build\0npm run build");
+        state.record_project_script_use(project_id, "Makefile\0check\0make check");
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+
+        assert_eq!(
+            restored.recent_project_script_rank(project_id, "Makefile\0check\0make check"),
+            Some(0)
+        );
+        assert_eq!(
+            restored.recent_project_script_rank(project_id, "package.json\0build\0npm run build"),
+            Some(1)
+        );
     }
 
     #[test]
