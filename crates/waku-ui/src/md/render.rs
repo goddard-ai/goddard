@@ -491,8 +491,9 @@ pub fn flatten(
                             false,
                         );
                         let start = flat.text.len();
+                        let slot = crate::input::atom_slot(true);
                         flat.emit(
-                            crate::input::atom_slot(true),
+                            &crate::input::nonbreaking_chip_text(slot),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -500,7 +501,7 @@ pub fn flatten(
                             true,
                         );
                         flat.emit(
-                            &run.text[index..end],
+                            &crate::input::nonbreaking_chip_text(&run.text[index..end]),
                             &run.style,
                             &atom_font,
                             base_color,
@@ -518,10 +519,10 @@ pub fn flatten(
                         let range = start..flat.text.len();
                         flat.fragments.push((
                             range.clone(),
-                            Rc::from(
-                                &flat.text[start + crate::input::ATOM_ICON_SLOT.len()
+                            Rc::from(crate::input::copy_chip_text(
+                                &flat.text[start + crate::input::nonbreaking_chip_text(slot).len()
                                     ..flat.text.len() - ATOM_CHIP_EDGE.len()],
-                            ),
+                            )),
                         ));
                         flat.atom_ranges
                             .push((range.clone(), AtomChipTarget::Session(session)));
@@ -577,7 +578,9 @@ pub fn flatten(
                         // icon into. Its own face: the label's font may
                         // not carry the em/en spaces at all.
                         flat.emit(
-                            crate::input::atom_slot(matches!(target, AtomChipTarget::Session(_))),
+                            &crate::input::nonbreaking_chip_text(crate::input::atom_slot(
+                                matches!(target, AtomChipTarget::Session(_)),
+                            )),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -610,8 +613,10 @@ pub fn flatten(
                         let target = waku_protocol::model::AtomRefKind::from_mark(ch)
                             .map_or(AtomChipTarget::Text, AtomChipTarget::Ref);
                         let start = flat.text.len();
+                        let slot =
+                            crate::input::atom_slot(matches!(target, AtomChipTarget::Session(_)));
                         flat.emit(
-                            crate::input::atom_slot(matches!(target, AtomChipTarget::Session(_))),
+                            &crate::input::nonbreaking_chip_text(slot),
                             &run.style,
                             &slot_font,
                             base_color,
@@ -625,7 +630,7 @@ pub fn flatten(
                 Scan::Label { start, target } => {
                     if ch == waku_protocol::model::MESSAGE_ATOM_END {
                         flat.emit(
-                            &run.text[segment_start..index],
+                            &crate::input::nonbreaking_chip_text(&run.text[segment_start..index]),
                             &run.style,
                             &atom_font,
                             base_color,
@@ -645,10 +650,14 @@ pub fn flatten(
                         // paints its glyph into.
                         flat.fragments.push((
                             range.clone(),
-                            Rc::from(
-                                &flat.text[*start + crate::input::ATOM_ICON_SLOT.len()
+                            Rc::from(crate::input::copy_chip_text(
+                                &flat.text[*start
+                                    + crate::input::nonbreaking_chip_text(crate::input::atom_slot(
+                                        matches!(target, AtomChipTarget::Session(_)),
+                                    ))
+                                    .len()
                                     ..flat.text.len() - ATOM_CHIP_EDGE.len()],
-                            ),
+                            )),
                         ));
                         flat.atom_ranges.push((range.clone(), *target));
                         if let AtomChipTarget::Session(session_id) = target {
@@ -4468,24 +4477,26 @@ mod tests {
         assert_eq!(
             flat.text.as_ref(),
             format!(
-                "fix {AVATAR}Big refactor{EDGE} and {SLOT}Pasted text (2 lines){EDGE} now",
-                AVATAR = crate::input::ATOM_AVATAR_SLOT,
-                EDGE = ATOM_CHIP_EDGE,
-                SLOT = crate::input::ATOM_ICON_SLOT,
+                "fix {avatar}{first}{edge} and {slot}{second}{edge} now",
+                avatar = crate::input::nonbreaking_chip_text(crate::input::ATOM_AVATAR_SLOT),
+                first = crate::input::nonbreaking_chip_text("Big refactor"),
+                slot = crate::input::nonbreaking_chip_text(crate::input::ATOM_ICON_SLOT),
+                second = crate::input::nonbreaking_chip_text("Pasted text (2 lines)"),
+                edge = ATOM_CHIP_EDGE,
             )
         );
         assert_eq!(
             flat.atom_ranges,
             vec![
-                (4..31, AtomChipTarget::Session(session_id)),
-                (36..72, AtomChipTarget::Text)
+                (4..40, AtomChipTarget::Session(session_id)),
+                (45..96, AtomChipTarget::Text)
             ]
         );
         // Only the session chip carries a link — the routed task URL.
         assert_eq!(
             flat.links,
             vec![(
-                4..31,
+                4..40,
                 format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX)
             )]
         );
@@ -4520,7 +4531,12 @@ mod tests {
             Some(crate::fonts::DEFAULT_UI_FAMILY),
             "icon slot must not inherit the label font"
         );
-        assert_eq!(family_at(16), Some("Test Sans"));
+        assert_eq!(
+            family_at(
+                4 + crate::input::nonbreaking_chip_text(crate::input::ATOM_AVATAR_SLOT).len()
+            ),
+            Some("Test Sans")
+        );
     }
 
     #[test]
@@ -4646,8 +4662,13 @@ mod tests {
             assert_eq!(
                 flat.text.as_ref(),
                 format!(
-                    "Use {}{label}{ATOM_CHIP_EDGE} now",
-                    crate::input::atom_slot(matches!(kind, AtomChipTarget::Session(_)))
+                    "Use {}{}{} now",
+                    crate::input::nonbreaking_chip_text(crate::input::atom_slot(matches!(
+                        kind,
+                        AtomChipTarget::Session(_)
+                    ))),
+                    crate::input::nonbreaking_chip_text(label),
+                    ATOM_CHIP_EDGE,
                 )
             );
             assert_eq!(flat.atom_ranges.len(), 1);
@@ -4671,7 +4692,10 @@ mod tests {
             &[],
         );
         assert_eq!(flat.atom_ranges.len(), 1);
-        assert!(flat.text.ends_with(&format!("**Goddard**{ATOM_CHIP_EDGE}")));
+        assert!(flat.text.ends_with(&format!(
+            "{}{ATOM_CHIP_EDGE}",
+            crate::input::nonbreaking_chip_text("**Goddard**")
+        )));
         assert_eq!(super::super::prompt_refs::display(&display), display);
     }
 

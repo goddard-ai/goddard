@@ -743,12 +743,39 @@ impl InlineAtom {
 
     /// Only display text carries spacing; copying and editing keep the atom.
     fn display_label(&self) -> String {
-        format!("{}{}{ATOM_CHIP_EDGE}", self.slot(), self.label)
+        format!(
+            "{}{}{}",
+            nonbreaking_chip_text(self.slot()),
+            nonbreaking_chip_text(&self.label),
+            ATOM_CHIP_EDGE
+        )
     }
 
     fn display_len(&self) -> usize {
-        self.slot().len() + self.label.len() + ATOM_CHIP_EDGE.len()
+        self.display_label().len()
     }
+}
+
+/// Preserve painted widths while suppressing every Unicode line break inside
+/// a chip segment. Source labels remain unchanged.
+pub(crate) fn nonbreaking_chip_text(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (index, opportunity) in unicode_linebreak::linebreaks(text) {
+        if opportunity == unicode_linebreak::BreakOpportunity::Allowed && index < text.len() {
+            output.push_str(&text[copied..index]);
+            output.push('\u{2060}');
+            copied = index;
+        }
+    }
+    output.push_str(&text[copied..]);
+    // The boundary between the slot/label/edge is also inside the chip.
+    output.push('\u{2060}');
+    output
+}
+
+pub(crate) fn copy_chip_text(text: &str) -> String {
+    text.replace('\u{2060}', "")
 }
 
 /// Respect the representation priority chosen by the source application.
@@ -4605,11 +4632,24 @@ mod tests {
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, InputEvent, Paste, SearchPaint, TextInput,
-        UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, Undo, collapsible_paste, cursor_should_be_visible,
-        input_text_runs, media_paste_entries, next_word_boundary, pasted_text_for_mode,
-        previous_word_boundary, single_line_scroll, trimmed_splice, visual_row_count,
-        word_range_at,
+        UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP, Undo, collapsible_paste, copy_chip_text,
+        cursor_should_be_visible, input_text_runs, media_paste_entries, next_word_boundary,
+        nonbreaking_chip_text, pasted_text_for_mode, previous_word_boundary, single_line_scroll,
+        trimmed_splice, visual_row_count, word_range_at,
     };
+
+    #[test]
+    fn chip_display_text_has_no_internal_line_breaks_and_copies_verbatim() {
+        let source = "folder/sub-folder with spaces";
+        let display = nonbreaking_chip_text(source);
+        assert!(
+            unicode_linebreak::linebreaks(&display).all(|(index, opportunity)| {
+                index == display.len()
+                    || opportunity == unicode_linebreak::BreakOpportunity::Mandatory
+            })
+        );
+        assert_eq!(copy_chip_text(&display), source);
+    }
 
     struct InputHarness {
         input: Entity<TextInput>,
