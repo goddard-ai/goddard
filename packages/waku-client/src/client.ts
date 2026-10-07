@@ -20,6 +20,24 @@ export type EventListener = (event: SequencedEvent) => void;
 export type WakuConnectionState = "disconnected" | "connecting" | "connected";
 export type ConnectionStateListener = (state: WakuConnectionState) => void;
 
+/** A `bossSpeechRequested` broadcast — the boss asking connected clients
+ * to voice an utterance through their speech pipeline. Live-only: a client
+ * that missed the moment does not replay it. */
+export interface BossSpeechRequest {
+  requestId: string;
+  parts: string[];
+}
+
+/** A `bossBrowseRequested` broadcast — the boss asking clients to open a
+ * URL in its managed chat panel. */
+export interface BossBrowseRequest {
+  requestId: string;
+  /** The boss session whose panel should reveal the page. */
+  sessionId: string;
+  url: string;
+  title: string | null;
+}
+
 export interface WebSocketLike {
   readonly readyState: number;
   send(data: string): void;
@@ -127,6 +145,8 @@ export class WakuClient {
   private taskStateListeners = new Set<(revision: number) => void>();
   private settingsListeners = new Set<(settings: DaemonSettings) => void>();
   private pairingListeners = new Set<(state: PairingState) => void>();
+  private bossSpeechListeners = new Set<(request: BossSpeechRequest) => void>();
+  private bossBrowseListeners = new Set<(request: BossBrowseRequest) => void>();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -414,6 +434,21 @@ export class WakuClient {
     return () => this.pairingListeners.delete(listener);
   }
 
+  /** Every `bossSpeechRequested` the daemon broadcasts — the boss asking
+   * connected clients to voice an utterance. Clients without a voice
+   * feature ignore it. */
+  subscribeBossSpeech(listener: (request: BossSpeechRequest) => void): () => void {
+    this.bossSpeechListeners.add(listener);
+    return () => this.bossSpeechListeners.delete(listener);
+  }
+
+  /** Every `bossBrowseRequested` the daemon broadcasts — the boss asking
+   * clients to open a URL in the named boss session's panel. */
+  subscribeBossBrowse(listener: (request: BossBrowseRequest) => void): () => void {
+    this.bossBrowseListeners.add(listener);
+    return () => this.bossBrowseListeners.delete(listener);
+  }
+
   /** Observes connection changes, including remote socket closure. */
   subscribeConnectionState(listener: ConnectionStateListener): () => void {
     this.connectionStateListeners.add(listener);
@@ -504,6 +539,24 @@ export class WakuClient {
     }
     if (message.type === "pairingChanged") {
       for (const listener of this.pairingListeners) listener(message.state);
+      return;
+    }
+    if (message.type === "bossSpeechRequested") {
+      const request: BossSpeechRequest = {
+        requestId: message.requestId,
+        parts: message.parts,
+      };
+      for (const listener of this.bossSpeechListeners) listener(request);
+      return;
+    }
+    if (message.type === "bossBrowseRequested") {
+      const request: BossBrowseRequest = {
+        requestId: message.requestId,
+        sessionId: message.sessionId,
+        url: message.url,
+        title: message.title,
+      };
+      for (const listener of this.bossBrowseListeners) listener(request);
       return;
     }
     if (message.type === "shuttingDown") {

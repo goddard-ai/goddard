@@ -266,6 +266,39 @@ describe("WakuClient", () => {
     expect(revisions).toEqual([7]);
   });
 
+  test("delivers boss speech and browse broadcasts to their subscribers", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+    const speech: string[][] = [];
+    const browses: Array<{ sessionId: string; url: string }> = [];
+    const offSpeech = client.subscribeBossSpeech((request) => speech.push(request.parts));
+    client.subscribeBossBrowse((request) =>
+      browses.push({ sessionId: request.sessionId, url: request.url }),
+    );
+
+    socket.receive({
+      type: "bossSpeechRequested",
+      requestId: "req-1",
+      parts: ["Hello", "world"],
+    });
+    socket.receive({
+      type: "bossBrowseRequested",
+      requestId: "req-2",
+      sessionId: "boss-session",
+      url: "https://example.test",
+      title: "Example",
+    });
+    offSpeech();
+    socket.receive({
+      type: "bossSpeechRequested",
+      requestId: "req-3",
+      parts: ["after unsubscribe"],
+    });
+
+    expect(speech).toEqual([["Hello", "world"]]);
+    expect(browses).toEqual([{ sessionId: "boss-session", url: "https://example.test" }]);
+  });
+
   test("disconnected requests reject instead of throwing synchronously", async () => {
     const { client } = fixture();
     const request = client.request({ type: "getSettings" });

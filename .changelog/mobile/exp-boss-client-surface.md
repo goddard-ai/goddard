@@ -1,0 +1,1 @@
+- The mobile app can now reach the Boss: with the Boss experiment on, the checked-in client exposes the boss chat's session and identity, the employee roster and plan state, deliverable and plan actions, and the boss's live speech/browse/terminal requests.
