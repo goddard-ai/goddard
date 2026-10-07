@@ -11743,7 +11743,6 @@ dependencies = [
  "uuid",
  "waku-base",
  "waku-exec",
- "waku-git",
  "waku-localization",
  "waku-protocol",
 ]

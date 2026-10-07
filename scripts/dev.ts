@@ -1682,6 +1682,28 @@ function mergedTarget(
   return current === "app" || next === "app" ? "app" : "daemon";
 }
 
+// Workspace crates linked into the daemon/agent binaries but not the app:
+// an edit rebuilds the daemon lane alone. The crates the app links
+// (waku-protocol, waku-localization, waku-client, waku-share) and the
+// bundled waku-computer-use helper stay on the app lane.
+const daemonOnlyCrates = new Set([
+  "waku-agent",
+  "waku-base",
+  "waku-boss",
+  "waku-core",
+  "waku-daemon",
+  "waku-drivers",
+  "waku-exec",
+  "waku-git",
+  "waku-memory-engine",
+  "waku-repo-map",
+  "waku-server",
+  "waku-sessions",
+  "waku-store",
+  "waku-vcs",
+  "waku-workspace",
+]);
+
 function targetForChange(
   directory: string,
   filename: string | Buffer | null,
@@ -1695,13 +1717,7 @@ function targetForChange(
   }
   if (directory !== "crates" || filename === null) return "app";
   const relativePath = filename.toString().replaceAll("\\", "/");
-  if (
-    relativePath.startsWith("waku-daemon/") ||
-    relativePath.startsWith("waku-agent/") ||
-    relativePath.startsWith("waku-core/") ||
-    relativePath.startsWith("waku-memory-engine/") ||
-    relativePath.startsWith("waku-repo-map/")
-  ) {
+  if (daemonOnlyCrates.has(relativePath.split("/", 1)[0])) {
     return "daemon";
   }
   // The wire protocol is shared by both sides, so the running daemon must be

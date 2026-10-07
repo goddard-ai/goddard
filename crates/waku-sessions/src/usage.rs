@@ -2037,7 +2037,7 @@ fn amp_amounts(line: &str) -> Vec<f64> {
 /// balances are plain dollar balances with no denominator and stay off the
 /// meter.
 fn parse_amp_plan_usage(text: &str) -> Option<PlanUsage> {
-    let text = crate::git_commit::strip_ansi(text).replace("**", "");
+    let text = waku_base::ansi::strip_ansi(text).replace("**", "");
     let mut plan_label = None;
     let mut windows = Vec::new();
     for line in text.lines() {

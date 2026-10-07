@@ -6,7 +6,6 @@ extern crate waku_base;
 
 pub(crate) use waku_base::{fs_ext, http_wire, identity, resource_broker};
 pub(crate) use waku_exec::{command_env, sandbox};
-pub(crate) use waku_git::git_commit;
 pub(crate) use waku_protocol::{APP_EXECUTABLE_ENV, model};
 
 pub mod acp_session;

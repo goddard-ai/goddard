@@ -31,7 +31,6 @@ url = "2"
 uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 waku-base = { path = "../waku-base" }
 waku-exec = { path = "../waku-exec" }
-waku-git = { path = "../waku-git" }
 waku-localization = { path = "../waku-localization" }
 waku-protocol = { path = "../waku-protocol" }
 
