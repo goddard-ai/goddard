@@ -29,6 +29,7 @@
 		"@nativescript/secure-storage": "^4.0.2",
 		"@octane-xplat/effects": "^0.9.0",
 		"@octane-xplat/platform": "^0.9.0",
+		"@octane-xplat/share": "^0.9.0",
 		"@octane-xplat/ui": "^0.9.0",
 		"@valor/nativescript-websockets": "2.0.3",
 		"@waku/client": "workspace:*",

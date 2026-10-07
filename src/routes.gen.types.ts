@@ -5,6 +5,7 @@ export type RouteName =
 	| 'daemon-editor'
 	| 'daemon-scan'
 	| 'daemons'
+	| 'deliverables'
 	| 'index'
 	| 'new-task'
 	| 'notifications'
@@ -15,6 +16,7 @@ export interface RouteParams {
 	'daemon-editor': {  }
 	'daemon-scan': {  }
 	'daemons': {  }
+	'deliverables': {  }
 	'index': {  }
 	'new-task': {  }
 	'notifications': {  }

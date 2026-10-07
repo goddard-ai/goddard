@@ -26,6 +26,7 @@ import {
 
 import { AppSymbol } from '@/components/app-symbol';
 import { BossSection } from '@/components/boss-roster';
+import { DeliverablesSection } from '@/components/deliverables';
 import {
   ConnectionBanner,
   useConnectionNotice,
@@ -471,6 +472,14 @@ function TaskDrawerContent({
               watermarks={watermarks}
               onClose={onClose}
               onSelectSession={showSession}
+            />
+          ) : null}
+          {bossState.data ? (
+            <DeliverablesSection
+              host={daemon.activeProfile?.name}
+              now={now}
+              state={bossState.data}
+              onClose={onClose}
             />
           ) : null}
           {rows.map(renderRow)}

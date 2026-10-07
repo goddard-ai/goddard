@@ -8,6 +8,7 @@
 		"daemon-editor",
 		"daemon-scan",
 		"daemons",
+		"deliverables",
 		"index",
 		"new-task",
 		"notifications",
@@ -58,6 +59,18 @@
 				""
 			],
 			"source": "src/app/daemons.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "deliverables",
+			"path": "deliverables",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/deliverables.tsrx",
 			"loader": false,
 			"guard": false,
 			"head": false

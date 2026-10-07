@@ -1,5 +1,6 @@
 import type {
   AgentSession,
+  BossDeliverable,
   BossEmployee,
   BossIdentity,
   MessageAttachment,
@@ -46,6 +47,12 @@ import {
 
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
+import { deliverableAttachment } from '@/lib/deliverables';
+import {
+  clearDeliverableArm,
+  showArmedDeliverablePreview,
+} from '@/lib/deliverable-arm';
+
 import { GlassSurface, liquidGlass } from './glass-surface';
 import { ModelTraitsSheet } from './session-option-sheets';
 import { Haptics } from '@/lib/haptics';
@@ -214,6 +221,7 @@ export function SendButton({
 export function MobileComposer({
   session,
   boss,
+  deliverable,
   onSubmitted,
 }: {
   session: AgentSession;
@@ -222,6 +230,10 @@ export function MobileComposer({
    * boss chat comes on screen — the same supervision command the desktop
    * arms while an employee is open. */
   boss?: { identity: BossIdentity; employee: BossEmployee } | null;
+  /** Set while a deliverable click armed this chat's composer — the file
+   * rides the next submission as an `@path` attachment, the same command
+   * context the desktop's `command_deliverable` carries. */
+  deliverable?: BossDeliverable | null;
   /** Fires as the submission begins — before the runtime round-trip — so the
    * transcript can pin to the tail the moment the message lands. */
   onSubmitted?: () => void;
@@ -405,10 +417,13 @@ export function MobileComposer({
     const value = draft.trim();
     // A supervision message carries the viewed employee's session
     // reference — its `[session … (task_id: …)]` token splices into the
-    // provider prompt through the ordinary attachment path.
-    const submittedAttachments = boss
-      ? [...attachments, sessionReferenceAttachment(boss.employee.sessionId, boss.employee.identity.name)]
-      : attachments;
+    // provider prompt through the ordinary attachment path; an armed
+    // deliverable rides along as its `@path` file attachment.
+    const submittedAttachments = [
+      ...attachments,
+      ...(boss ? [sessionReferenceAttachment(boss.employee.sessionId, boss.employee.identity.name)] : []),
+      ...(deliverable ? [deliverableAttachment(deliverable)] : []),
+    ];
 
     const submittedAnnotations = draftSync.currentAnnotations();
     if (
@@ -470,6 +485,7 @@ export function MobileComposer({
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
+      if (deliverable) {clearDeliverableArm();}
       await Haptics.selectionAsync();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
@@ -498,6 +514,8 @@ export function MobileComposer({
   const disconnected = daemon.phase !== 'connected';
   const placeholder = boss
     ? 'Use the boss to control this employee…'
+    : deliverable
+      ? 'Ask the boss about this deliverable…'
     : disconnected
       ? daemon.phase === 'reconnecting'
         ? 'Reconnecting…'
@@ -621,11 +639,59 @@ export function MobileComposer({
 
       <ComposerCard
         {...contextPicker.inputProps}
-        beforeInput={attachments.length || importingAttachments ? (
+        beforeInput={attachments.length || importingAttachments || deliverable ? (
           <ScrollView
             horizontal
             style={{ marginBottom: 6 }}>
             <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 4, paddingBottom: 6 }}>
+              {deliverable ? (
+                <Pressable
+                  accessibilityHint="Opens the deliverable preview"
+                  accessibilityLabel={`Deliverable ${deliverable.name}`}
+                  accessibilityRole="button"
+                  onPress={showArmedDeliverablePreview}
+                  style={{
+                    alignItems: 'center',
+                    alignSelf: 'center',
+                    borderColor: theme.border,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: 5,
+                    height: 24,
+                    maxWidth: 240,
+                    paddingLeft: 6,
+                    paddingRight: 4,
+                    backgroundColor: theme.inset,
+                  }}>
+                  <AppSymbol
+                    name={deliverable.directory
+                      ? { ios: 'folder', android: 'folder', web: 'folder' }
+                      : { ios: 'doc', android: 'description', web: 'description' }}
+                    size={11}
+                    tintColor={theme.textTertiary}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={{ flexShrink: 1, fontSize: 13.5, color: theme.textSecondary }}>
+                    {deliverable.name}
+                  </Text>
+                  <Pressable
+                    accessibilityLabel={`Remove ${deliverable.name}`}
+                    accessibilityRole="button"
+                    disabled={submitting}
+                    onPress={clearDeliverableArm}
+                    style={{
+                      alignItems: 'center',
+                      height: 28,
+                      justifyContent: 'center',
+                      opacity: submitting ? 0.4 : 1,
+                      width: 28,
+                    }}>
+                    <AppSymbol name={{ ios: 'xmark', android: 'close', web: 'close' }} size={9} tintColor={theme.textSecondary} />
+                  </Pressable>
+                </Pressable>
+              ) : null}
               {attachments.map((attachment, index) => (
                 <AttachmentTile
                   attachment={attachment}

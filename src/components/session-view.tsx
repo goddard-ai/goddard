@@ -23,6 +23,12 @@ import {
 
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionBanner } from '@/components/connection-banner';
+import {
+  DeliverableSheet,
+  useDeliverableArm,
+} from '@/components/deliverables';
+
+import { clearDeliverableArm, dismissDeliverablePreview } from '@/lib/deliverable-arm';
 import { MobileComposer, PermissionPanel } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
 import { ModelSheet, modelDisplayName, type ModelSelection } from '@/components/session-option-sheets';
@@ -292,6 +298,25 @@ export function SessionView({
   const bossData = bossState.data;
   const employee = bossEmployeeForSession(bossData, session?.id);
   const isBossChat = Boolean(bossData?.sessionId && bossData.sessionId === session?.id);
+
+  // A deliverable row's click arms this chat's composer: the chip shows the
+  // freshest record for the armed id, a dismissed record disarms silently,
+  // and viewing another session retires the arm — the desktop's
+  // `command_deliverable` lifecycle.
+  const arm = useDeliverableArm();
+  const armedDeliverable = arm && session && arm.sessionId === session.id
+    ? bossData?.deliverables.find((item) => item.id === arm.deliverable.id)
+      ?? arm.deliverable
+    : null;
+
+  useEffect(() => {
+    if (!arm || !session) {return;}
+    if (arm.sessionId !== session.id) {clearDeliverableArm(); return;}
+    if (bossData && !bossData.deliverables.some((item) => item.id === arm.deliverable.id)) {
+      clearDeliverableArm();
+    }
+  }, [arm, bossData, session?.id]);
+
   const employeeLifecycle = employee ? bossEmployeeLifecycle(employee) : null;
   const queueRank = useMemo(
     () => (bossData ? bossQueueRanks(bossData) : new Map<string, number>()),
@@ -668,6 +693,7 @@ export function SessionView({
           boss={employee && bossData
             ? { employee, identity: bossData.identity }
             : null}
+          deliverable={isBossChat ? armedDeliverable : null}
           session={session}
           onSubmitted={() => listRef.current?.followNextGrowth()}
         />
@@ -717,6 +743,16 @@ export function SessionView({
           visible={capacityOpen}
         />
       )}
+      {arm && armedDeliverable ? (
+        <DeliverableSheet
+          deliverable={armedDeliverable}
+          host={daemon.activeProfile?.name}
+          sessions={taskState?.sessions ?? []}
+          state={bossData ?? null}
+          visible={arm.previewOpen}
+          onDismiss={dismissDeliverablePreview}
+        />
+      ) : null}
     </View>
   );
 }

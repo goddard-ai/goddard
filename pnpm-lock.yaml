@@ -80,6 +80,9 @@ importers:
       '@octane-xplat/platform':
         specifier: ^0.9.0
         version: 0.9.0(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+      '@octane-xplat/share':
+        specifier: ^0.9.0
+        version: 0.9.0(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
       '@octane-xplat/ui':
         specifier: ^0.9.0
         version: 0.9.0(@nativescript-community/gesturehandler@2.0.45)(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript-community/ui-drawer@0.1.32)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
@@ -861,6 +864,9 @@ packages:
   '@nativescript/secure-storage@4.0.2':
     resolution: {integrity: sha512-4sWU4tmvGjh9ZfuApt0enwcT3tGN88dR5IeOuQsYqUSeUQbxK7Xo2JTF1dy7KIxnh0Fnxrs5O61x7hp9JBn/kw==}
 
+  '@nativescript/social-share@2.3.0':
+    resolution: {integrity: sha512-9ldEOH6cnYJNEihQfk/2iOHfNlrvSCUl2bCrZsh8qauMHJEqqV/GPUzN3kh4sDgG4eCffonEF0ySlGSKOU8FmA==}
+
   '@nativescript/swift-ui@4.0.2':
     resolution: {integrity: sha512-tPmOnjCmslUpDPe6+ye2gPG+MxamuzvEwL656RFmg+HQFOcnxymmFIrp/X0vpY8nHTKi/rX9+srCN06KGZBLbw==}
 
@@ -1012,6 +1018,20 @@ packages:
       '@nativescript-community/octane':
         optional: true
       '@nativescript/core':
+        optional: true
+
+  '@octane-xplat/share@0.9.0':
+    resolution: {integrity: sha512-5bylGCn5ABbqZqGGvZGv/s4J+3X0xGpBXL9dFXfP6f8Q8GYeBTdGkXtnlesDxc4xatDNmCG09Xw0DX4DDA+arw==}
+    peerDependencies:
+      '@nativescript-community/octane': '>=0.2.1 <1'
+      '@nativescript/core': '>=9.1.0 <10'
+      octane: '>=0.6.3 <1'
+    peerDependenciesMeta:
+      '@nativescript-community/octane':
+        optional: true
+      '@nativescript/core':
+        optional: true
+      octane:
         optional: true
 
   '@octane-xplat/ui@0.9.0':
@@ -4541,6 +4561,8 @@ snapshots:
 
   '@nativescript/secure-storage@4.0.2': {}
 
+  '@nativescript/social-share@2.3.0': {}
+
   '@nativescript/swift-ui@4.0.2': {}
 
   '@nativescript/types-android@9.0.0': {}
@@ -4752,6 +4774,15 @@ snapshots:
     optionalDependencies:
       '@nativescript-community/octane': 0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
       '@nativescript/core': 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
+
+  '@octane-xplat/share@0.9.0(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
+    dependencies:
+      '@nativescript/social-share': 2.3.0
+      '@octane-xplat/platform': 0.9.0(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+    optionalDependencies:
+      '@nativescript-community/octane': 0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+      '@nativescript/core': 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
+      octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
 
   '@octane-xplat/ui@0.9.0(@nativescript-community/gesturehandler@2.0.45)(@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))))(@nativescript-community/ui-drawer@0.1.32)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
     dependencies:
