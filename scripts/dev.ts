@@ -6,6 +6,7 @@ import { startDevServe, type DevServe } from "./dev-serve";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -36,9 +37,16 @@ const profile = serveMode ? "release" : "debug";
 const appName = serveMode ? "Goddard" : "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const developmentDataDir = process.env.GODDARD_DATA_DIR || join(root, "temp");
+// Lane copies, the stable app/daemon links, and watcher state live here
+// instead of target/: mbx owns target as a symlink into its shared cache, so
+// `mbx clean`/`gc` would delete the last completed build and lock the app out
+// until a rebuild finished. The layout mirrors target/debug.
+const stableDir = join(developmentDataDir, "debug");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
-  ? join(targetDir, `${profile}/${appName}.app`)
+  ? serveMode
+    ? join(targetDir, `${profile}/${appName}.app`)
+    : join(stableDir, `${appName}.app`)
   : join(targetDir, `debug/goddard${executableSuffix}`);
 const daemonPath = join(
   targetDir,
@@ -61,33 +69,31 @@ const appExecutablePath = isMacOS
 // completed lane that the app watches for rebuild swaps.
 type Lane = "a" | "b";
 const laned = isMacOS && !serveMode;
-const laneRoot = join(targetDir, profile, "lanes");
+const laneRoot = join(stableDir, "lanes");
 const laneAppPath = (lane: Lane) => join(laneRoot, lane, `${appName}.app`);
 const laneLinkTarget = (lane: Lane) =>
   join("lanes", lane, `${appName}.app`);
 const laneMarkerPath = (lane: Lane) => join(laneRoot, lane, ".complete");
-const daemonLaneRoot = join(targetDir, "debug", "daemon-lanes");
+const daemonLaneRoot = join(stableDir, "daemon-lanes");
 const laneDaemonPath = (lane: Lane) =>
   join(daemonLaneRoot, lane, basename(daemonPath));
 const laneDaemonLinkTarget = (lane: Lane) =>
   join("daemon-lanes", lane, basename(daemonPath));
 const laneDaemonMarkerPath = (lane: Lane) =>
   join(daemonLaneRoot, lane, ".complete");
-const daemonLinkPath = join(
-  targetDir,
-  "debug",
-  `${basename(daemonPath)}-latest`,
-);
+const daemonLinkPath = join(stableDir, `${basename(daemonPath)}-latest`);
 // The app's "auto-restart" command palette toggle lands here; the app only
 // offers it when the watcher hands it this path.
-const devStatePath = join(targetDir, "debug", "goddard-dev.json");
+const devStatePath = join(stableDir, "goddard-dev.json");
 // The daemon token is stable across watcher restarts so mobile and external
 // clients keep working: GODDARD_DAEMON_TOKEN wins, then a persisted token
 // file, then a fresh random one.
-const daemonTokenPath = join(targetDir, "debug", "goddard-daemon-token");
+const daemonTokenPath = join(stableDir, "goddard-daemon-token");
 // Written next to the token so scripts (and humans) can read the current
 // daemon address + token after the watcher log has scrolled away.
-const daemonInfoPath = join(targetDir, "debug", "goddard-daemon.json");
+const daemonInfoPath = join(stableDir, "goddard-daemon.json");
+// Progress-bar denominators persist across runs here.
+const buildStatsPath = join(stableDir, "goddard-build-stats.json");
 // Adopting an external daemon needs its GODDARD_DAEMON_TOKEN as well — a
 // lone address (usually a stray inherited variable) leaves every client
 // rejected, so the pair counts as unset and the watcher spawns locally.
@@ -111,6 +117,55 @@ const daemonBindIsLoopback = ["127.0.0.1", "localhost", "::1"].includes(
 );
 const interactive = process.stdin.isTTY === true;
 
+function pathPresent(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// target/ may be an mbx symlink onto another volume, where renameSync fails
+// with EXDEV; fall back to a copy that preserves the relative lane links.
+function movePath(from: string, to: string): void {
+  if (!pathPresent(from) || pathPresent(to)) return;
+  mkdirSync(dirname(to), { recursive: true });
+  try {
+    renameSync(from, to);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+    cpSync(from, to, { recursive: true, verbatimSymlinks: true });
+    rmSync(from, { recursive: true, force: true });
+  }
+}
+
+// State written before stableDir existed still sits in target/debug; pull it
+// forward so the upgrade itself never costs a launchable build. Runs before
+// the token read below so the persisted daemon token survives the move.
+function migrateLegacyTargetState(): void {
+  const legacyDir = join(targetDir, "debug");
+  const moves: Array<[string, string]> = [
+    [join(legacyDir, "lanes"), laneRoot],
+    [join(legacyDir, "daemon-lanes"), daemonLaneRoot],
+    [join(legacyDir, basename(daemonLinkPath)), daemonLinkPath],
+    [join(legacyDir, basename(devStatePath)), devStatePath],
+    [join(legacyDir, basename(daemonTokenPath)), daemonTokenPath],
+    [join(legacyDir, basename(daemonInfoPath)), daemonInfoPath],
+    [join(legacyDir, basename(buildStatsPath)), buildStatsPath],
+  ];
+  if (laned) moves.push([join(legacyDir, `${appName}.app`), appPath]);
+  for (const [from, to] of moves) {
+    try {
+      movePath(from, to);
+    } catch (error) {
+      console.error(`[goddard-dev] Could not migrate ${from}:`, error);
+    }
+  }
+}
+mkdirSync(stableDir, { recursive: true });
+migrateLegacyTargetState();
+
 function resolveDaemonToken(): string {
   if (process.env.GODDARD_DAEMON_TOKEN)
     return process.env.GODDARD_DAEMON_TOKEN;
@@ -125,7 +180,7 @@ function resolveDaemonToken(): string {
     mkdirSync(dirname(daemonTokenPath), { recursive: true });
     writeFileSync(daemonTokenPath, `${generated}\n`, { mode: 0o600 });
   } catch {
-    // A transient target dir problem only means the token stays per-run.
+    // A transient filesystem problem only means the token stays per-run.
   }
   return generated;
 }
@@ -481,7 +536,6 @@ async function releaseHyprlandRules(): Promise<void> {
 // denominator is the previous build's dirty-unit count for the same label,
 // persisted across runs. Tiny or unknown counts render an animated
 // indeterminate bar instead of a fake percentage.
-const buildStatsPath = join(targetDir, "debug", "goddard-build-stats.json");
 const progressBarWidth = 16;
 
 function readBuildStats(): Record<string, number> {

@@ -845,10 +845,12 @@ mod macos {
         #[test]
         #[ignore = "requires a packaged debug app with Sparkle"]
         fn routing_user_driver_satisfies_sparkle_protocols() {
-            let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            // The dev watcher keeps the launchable bundle under the dev data
+            // dir, not target/ (see stableDir in scripts/dev.ts).
+            let data_dir = std::env::var_os("GODDARD_DATA_DIR")
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
-            let library = target_dir
+                .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("temp"));
+            let library = data_dir
                 .join("debug/Goddard Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
             assert!(library.exists(), "packaged debug app must contain Sparkle");
 

@@ -32,9 +32,10 @@ bun install
 bun run dev
 ```
 
-On macOS the watcher builds and signs `target/debug/Goddard Debug.app`; on Linux
-and Windows it builds `target/debug/goddard`. The watcher also manages the
-separate provider daemon. Keep it running while you work; do not start a
+On macOS the watcher builds and signs `temp/debug/Goddard Debug.app` (a symlink
+to the newest completed lane, so `mbx clean` never strands the last build); on
+Linux and Windows it builds `target/debug/goddard`. The watcher also manages
+the separate provider daemon. Keep it running while you work; do not start a
 second watcher or launch a second debug app yourself.
 
 After a successful rebuild, type `a` and Enter in the watcher terminal to

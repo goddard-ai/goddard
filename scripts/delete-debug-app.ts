@@ -83,6 +83,13 @@ if (process.env.CARGO_TARGET_DIR) {
   }
 }
 
+// The dev watcher keeps launchable lanes and its state under the dev data
+// dir's `debug/` subtree (covered by the temp/ candidate above unless
+// GODDARD_DATA_DIR relocates it).
+if (process.env.GODDARD_DATA_DIR) {
+  addCandidate(join(resolve(projectRoot, process.env.GODDARD_DATA_DIR), "debug"));
+}
+
 // Debug app bundles that may have been copied outside the checkout.
 for (const app of ["Goddard Debug.app", "Waku Debug.app"]) {
   addCandidate(join(userHome, "Applications", app));

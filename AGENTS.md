@@ -32,7 +32,9 @@ compiled artifacts across checkouts and worktrees into
   depending on where it was launched.
 - `target/` may be a symlink into the managed cache. Don't delete it or
   `cargo clean` to reclaim disk — use `mbx gc` or `mbx clean`. Never put
-  `cargo clean` in a watch loop.
+  `cargo clean` in a watch loop. The watcher's launchable state (app/daemon
+  lanes, stable links, dev state, update feed) lives under `temp/` instead,
+  so cleaning the cache never strands the last completed build.
 - `check`/`clippy` get their own `target/check/` lane and can run beside a
   `cargo build` watcher without waiting on its lock.
 - Scope verification to the crates you touched: `mbx check -p <crate>` and
