@@ -4160,9 +4160,9 @@ fn surname_suffix(mut value: usize) -> String {
     suffix
 }
 
-/// Draw from a shuffled pool, skipping names held by the live roster. Retired
-/// names become available again; only a fully held pool requires a suffix.
-/// The durable cursor also separates draws prepared before roster insertion.
+/// Draw from a shuffled pool, preferring initials not held by the roster.
+/// Retired names become available again; only a fully held pool requires a
+/// suffix. The durable cursor also separates draws prepared before insertion.
 fn employee_human_name<'a>(
     existing_names: impl IntoIterator<Item = &'a str>,
     cursor: &mut u64,
@@ -4177,12 +4177,23 @@ fn employee_human_name<'a>(
     let existing_names = existing_names
         .into_iter()
         .collect::<std::collections::HashSet<_>>();
+    let existing_initials = existing_names
+        .iter()
+        .filter_map(|name| name.as_bytes().first().map(u8::to_ascii_uppercase))
+        .collect::<std::collections::HashSet<_>>();
     let len = names.len() as u64;
-    for step in 0..len {
-        let index = ((*cursor % len) + step) % len;
-        if !existing_names.contains(names[index as usize]) {
-            *cursor = (*cursor).saturating_add(step + 1);
-            return names[index as usize].into();
+    for prefer_unused_initial in [true, false] {
+        for step in 0..len {
+            let index = ((*cursor % len) + step) % len;
+            let candidate = names[index as usize];
+            let unused_initial = candidate
+                .as_bytes()
+                .first()
+                .is_some_and(|initial| !existing_initials.contains(&initial.to_ascii_uppercase()));
+            if !existing_names.contains(candidate) && (!prefer_unused_initial || unused_initial) {
+                *cursor = (*cursor).saturating_add(step + 1);
+                return candidate.into();
+            }
         }
     }
 
@@ -4521,6 +4532,32 @@ mod tests {
         let suffixed = employee_human_name(held.iter().map(String::as_str), &mut cursor);
         assert!(!held.contains(&suffixed));
         assert!(suffixed.ends_with('.'));
+    }
+
+    #[test]
+    fn employee_names_prefer_unused_initials_until_the_alphabet_is_held() {
+        let mut cursor = 0;
+        let mut held = Vec::new();
+        let mut initials = std::collections::HashSet::new();
+        let initial_capacity = EMPLOYEE_NAMES
+            .iter()
+            .filter_map(|name| name.as_bytes().first().copied())
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            .min(26);
+
+        for _ in 0..initial_capacity {
+            let name = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+            let initial = name.as_bytes()[0].to_ascii_uppercase();
+            assert!(
+                initials.insert(initial),
+                "duplicate initial in {held:?} + {name}"
+            );
+            held.push(name);
+        }
+
+        let repeated = employee_human_name(held.iter().map(String::as_str), &mut cursor);
+        assert!(initials.contains(&repeated.as_bytes()[0].to_ascii_uppercase()));
     }
 
     #[test]

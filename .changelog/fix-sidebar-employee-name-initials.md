@@ -1,0 +1,1 @@
+- Fresh employee summons prefer initials not already used by current or recently finished employees.
