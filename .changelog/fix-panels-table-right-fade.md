@@ -1,0 +1,1 @@
+- Fixed the right edge fade on horizontally scrolling Markdown tables so it stays at the table viewport's right edge.

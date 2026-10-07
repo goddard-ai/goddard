@@ -328,7 +328,10 @@ pub fn edge_fade(
     )
     .absolute()
     .top_0()
-    .left_0()
+    .when(
+        matches!(side, FadeEdge::Top | FadeEdge::Bottom | FadeEdge::Left),
+        |element| element.left_0(),
+    )
     .when(
         matches!(side, FadeEdge::Top | FadeEdge::Bottom),
         |element| element.w_full().h(px(18.0)),
