@@ -4348,9 +4348,6 @@ impl Waku {
             }
             return;
         }
-        let Some(text) = type_to_focus_text(&event.keystroke) else {
-            return;
-        };
         if window.context_stack().iter().any(|context| {
             TYPING_OWNED_CONTEXTS
                 .iter()
@@ -4358,6 +4355,17 @@ impl Waku {
         }) {
             return;
         }
+        // A standing scratchpad selection or caret owns the edit keys
+        // wherever focus actually landed — a pill or the panel chrome
+        // holding focus must not divert typing into the draft, and a
+        // dead caret swallows rather than leak.
+        if self.voice_scratchpad_claims_edit_keys() {
+            self.voice_scratchpad_edit_key(event, window, cx);
+            return;
+        }
+        let Some(text) = type_to_focus_text(&event.keystroke) else {
+            return;
+        };
         let composer = self.typing_target_composer();
         let focus = composer.read(cx).focus();
         window.focus(&focus, cx);

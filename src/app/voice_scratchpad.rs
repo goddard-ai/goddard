@@ -806,8 +806,12 @@ pub(super) struct ScratchpadTranscript {
     interim_written: Option<Instant>,
     /// The caret the surface paints — set by a selection edit, an arrow
     /// press, or a click on an unwritten line. It marks where dictation
-    /// lands, never a typing target: keys only edit through a selection.
+    /// lands; whether it also takes keys is `caret_typing`.
     caret: Option<CaretPos>,
+    /// The caret a selection edit left is a live insertion point —
+    /// typing and Backspace/Delete write at it. A click- or focus-placed
+    /// caret stays a marker only: keys at it are swallowed.
+    caret_typing: bool,
     /// The fixed end of a shift-grown selection; `None` for mouse drags,
     /// which the `Selection` anchors itself.
     caret_anchor: Option<CaretPos>,
@@ -1451,6 +1455,7 @@ impl ScratchpadTranscript {
                 offset: 0,
             });
             self.caret_anchor = None;
+            self.caret_typing = false;
             return false;
         }
         // Speech retargets into the box — the closing append point's
@@ -1460,6 +1465,7 @@ impl ScratchpadTranscript {
         self.annotation_interim = std::mem::take(&mut self.interim);
         self.caret = None;
         self.caret_anchor = None;
+        self.caret_typing = false;
         true
     }
 
@@ -1482,6 +1488,7 @@ impl ScratchpadTranscript {
             self.annotation_interim = std::mem::take(&mut self.interim);
             self.caret = None;
             self.caret_anchor = None;
+            self.caret_typing = false;
         }
     }
 
@@ -1870,6 +1877,75 @@ impl ScratchpadTranscript {
         }
         self.collapse_emptied(&mut caret);
         Some(caret)
+    }
+
+    /// Type into the caret a selection edit left — the live insertion
+    /// point `caret_typing` marks. Click- and focus-placed carets stay
+    /// inert: this writes nothing and the caller swallows the key.
+    /// Returns whether text landed.
+    fn insert_at_caret(&mut self, text: &str) -> bool {
+        let Some(mut caret) = self.caret.filter(|_| self.caret_typing) else {
+            return false;
+        };
+        let Some(buffer) = self.node_text_mut(caret.node) else {
+            return false;
+        };
+        caret.offset = caret.offset.min(buffer.len());
+        while !buffer.is_char_boundary(caret.offset) {
+            caret.offset -= 1;
+        }
+        buffer.insert_str(caret.offset, text);
+        caret.offset += text.len();
+        self.caret = Some(caret);
+        self.note_user_edit(caret.node);
+        true
+    }
+
+    /// Backspace/Delete at a live caret — one character inside the node's
+    /// bounds; a node edge eats the key without moving. A cut that
+    /// empties a bullet collapses its row the way a selection edit does.
+    /// Returns whether text moved.
+    fn delete_at_caret(&mut self, forward: bool) -> bool {
+        let Some(mut caret) = self.caret.filter(|_| self.caret_typing) else {
+            return false;
+        };
+        let Some(buffer) = self.node_text_mut(caret.node) else {
+            return false;
+        };
+        caret.offset = caret.offset.min(buffer.len());
+        while !buffer.is_char_boundary(caret.offset) {
+            caret.offset -= 1;
+        }
+        let cut = if forward {
+            buffer[caret.offset..]
+                .chars()
+                .next()
+                .map(|c| caret.offset..caret.offset + c.len_utf8())
+        } else {
+            buffer[..caret.offset]
+                .char_indices()
+                .next_back()
+                .map(|(start, c)| start..start + c.len_utf8())
+        };
+        let Some(cut) = cut else {
+            return false;
+        };
+        buffer.replace_range(cut.clone(), "");
+        caret.offset = cut.start;
+        self.note_user_edit(caret.node);
+        self.collapse_emptied(&mut caret);
+        self.caret = Some(caret);
+        true
+    }
+
+    /// An open annotation box holding nothing — no committed words, no
+    /// live interim, no armed edit instruction. A drag-select cancels it
+    /// outright; a box holding speech keeps its claim instead.
+    fn annotation_blank(&self) -> bool {
+        self.annotation_target.is_some()
+            && self.annotation_text.trim().is_empty()
+            && self.annotation_interim.trim().is_empty()
+            && self.annotation_edit.is_none()
     }
 
     /// Drop bullets and paragraphs an edit emptied outright — the last
@@ -3047,6 +3123,7 @@ impl Waku {
             {
                 scratchpad.transcript.caret =
                     Some(scratchpad.transcript.append_point_caret());
+                scratchpad.transcript.caret_typing = false;
                 cx.notify();
             }
         })
@@ -3280,6 +3357,7 @@ impl Waku {
             scratchpad.selection.selection.borrow_mut().clear();
             scratchpad.transcript.caret = None;
             scratchpad.transcript.caret_anchor = None;
+            scratchpad.transcript.caret_typing = false;
             // Typing goes home to the composer once the edit is dropped.
             let focus = self.composer_focus(cx);
             window.focus(&focus, cx);
@@ -3294,14 +3372,17 @@ impl Waku {
         self.request_cancel_voice_scratchpad(window, cx);
     }
 
-    /// Keystrokes on the scratchpad's transcript surface — a selection is
-    /// the only edit target: typed text replaces it and Backspace/Delete
-    /// cut it, arrows walk or extend the caret through paragraphs and
-    /// bullets, and ⌘A selects all. A bare caret marks where dictation
-    /// lands but takes no keys — typed input at it is swallowed, while
-    /// with no caret and no grab a character keeps its type-to-focus trip
-    /// to the composer.
-    fn voice_scratchpad_edit_key(
+    /// Keystrokes on the scratchpad's transcript surface — typed text
+    /// and Backspace/Delete edit through a selection or the live caret
+    /// an edit leaves, arrows walk or extend the caret through
+    /// paragraphs and bullets, and ⌘A selects all. A click- or
+    /// focus-placed caret marks where dictation lands but takes no keys
+    /// — input at it is swallowed, while with no caret and no grab a
+    /// character keeps its type-to-focus trip to the composer. The same
+    /// handler answers for the root listener when a selection or caret
+    /// stands but focus sits elsewhere (a pill, the panel chrome), so a
+    /// keystroke can never leak into the draft mid-edit.
+    pub(super) fn voice_scratchpad_edit_key(
         &mut self,
         event: &KeyDownEvent,
         _window: &mut Window,
@@ -3326,48 +3407,105 @@ impl Waku {
             }
             return;
         }
+        // ⌥M is the pause chord, not text — a layout resolving it to "µ"
+        // must not write that into the transcript or eat it at a caret.
+        // Let it travel so the root listener's mute gate sees it.
+        if modifiers == Modifiers::alt() && keystroke.key == "m" {
+            return;
+        }
         let spans = scratchpad.selection.selection.borrow().spans().to_vec();
         let has_selection = spans.iter().any(|span| !span.range.is_empty());
         if let Some(text) = sessions::type_to_focus_text(keystroke) {
-            if !has_selection && scratchpad.transcript.caret.is_none() {
-                // No edit target — the composer field takes the keystroke.
-                return;
+            if self.voice_scratchpad_take_text(text, cx) {
+                cx.stop_propagation();
             }
-            if has_selection {
-                let text = text.to_owned();
-                scratchpad.transcript.caret =
-                    scratchpad.transcript.apply_selection_edit(&spans, &text);
-                scratchpad.transcript.caret_anchor = None;
-                scratchpad.selection.selection.borrow_mut().clear();
-                cx.notify();
-            }
-            // A bare caret marks where dictation lands — it is not a
-            // typing target, so the keystroke is swallowed rather than
-            // written into the transcript or leaked into the draft.
-            cx.stop_propagation();
             return;
         }
         match keystroke.key.as_str() {
             "backspace" | "delete" => {
-                if !has_selection && scratchpad.transcript.caret.is_none() {
-                    return;
+                if self.voice_scratchpad_take_delete(keystroke.key == "delete", cx) {
+                    cx.stop_propagation();
                 }
-                if has_selection {
-                    scratchpad.transcript.caret =
-                        scratchpad.transcript.apply_selection_edit(&spans, "");
-                    scratchpad.selection.selection.borrow_mut().clear();
-                    scratchpad.transcript.caret_anchor = None;
-                    cx.notify();
-                }
-                // The bare caret is no edit target — same swallow as
-                // typed text.
-                cx.stop_propagation();
             }
             "left" | "right" | "up" | "down" | "home" | "end" => {
                 self.voice_scratchpad_move_caret(keystroke, has_selection, &spans, cx);
             }
             _ => {}
         }
+    }
+
+    /// Typed text into the transcript's edit target. A standing
+    /// selection is replaced and the caret its edit leaves goes live;
+    /// a live caret inserts; a click-placed caret writes nothing. True
+    /// whenever a selection or caret stands — the keystroke is claimed
+    /// even when nothing changed, so it can't leak into the composer.
+    fn voice_scratchpad_take_text(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
+            return false;
+        };
+        if scratchpad.transcript.annotation_target.is_some() {
+            return false;
+        }
+        let spans = scratchpad.selection.selection.borrow().spans().to_vec();
+        if spans.iter().any(|span| !span.range.is_empty()) {
+            scratchpad.transcript.caret =
+                scratchpad.transcript.apply_selection_edit(&spans, text);
+            scratchpad.transcript.caret_typing = scratchpad.transcript.caret.is_some();
+            scratchpad.transcript.caret_anchor = None;
+            scratchpad.selection.selection.borrow_mut().clear();
+            cx.notify();
+            return true;
+        }
+        if scratchpad.transcript.caret.is_none() {
+            return false;
+        }
+        if scratchpad.transcript.insert_at_caret(text) {
+            cx.notify();
+        }
+        true
+    }
+
+    /// Backspace/Delete against the edit target — the cutting side of
+    /// [`Self::voice_scratchpad_take_text`]: a selection is cut, a live
+    /// caret eats one character, a dead caret swallows the key.
+    fn voice_scratchpad_take_delete(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
+            return false;
+        };
+        if scratchpad.transcript.annotation_target.is_some() {
+            return false;
+        }
+        let spans = scratchpad.selection.selection.borrow().spans().to_vec();
+        if spans.iter().any(|span| !span.range.is_empty()) {
+            scratchpad.transcript.caret =
+                scratchpad.transcript.apply_selection_edit(&spans, "");
+            scratchpad.transcript.caret_typing = scratchpad.transcript.caret.is_some();
+            scratchpad.transcript.caret_anchor = None;
+            scratchpad.selection.selection.borrow_mut().clear();
+            cx.notify();
+            return true;
+        }
+        if scratchpad.transcript.caret.is_none() {
+            return false;
+        }
+        if scratchpad.transcript.delete_at_caret(forward) {
+            cx.notify();
+        }
+        true
+    }
+
+    /// Whether the transcript's edit surface owns typing keys right now:
+    /// a selection or a caret stands and no annotation box has reclaimed
+    /// the stream. The root type-to-focus listener asks this before a
+    /// keystroke would land in the composer — while it holds,
+    /// [`Self::voice_scratchpad_edit_key`] answers regardless of where
+    /// focus sits.
+    pub(super) fn voice_scratchpad_claims_edit_keys(&self) -> bool {
+        self.selected_voice_scratchpad().is_some_and(|scratchpad| {
+            scratchpad.transcript.annotation_target.is_none()
+                && (!scratchpad.selection.selection.borrow().is_empty()
+                    || scratchpad.transcript.caret.is_some())
+        })
     }
 
     /// An arrow/Home/End on the edit surface: plain moves walk the caret —
@@ -3487,6 +3625,7 @@ impl Waku {
         if let Some((start, end)) = scratchpad.transcript.spans_endpoints(&spans) {
             scratchpad.transcript.caret_anchor = Some(start);
             scratchpad.transcript.caret = Some(end);
+            scratchpad.transcript.caret_typing = false;
         }
         cx.notify();
     }
@@ -4041,9 +4180,15 @@ impl Waku {
                                 // without a live drag — a click into the
                                 // composer while a selection still stands —
                                 // leaves focus where the press put it.
+                                // With an annotation box open, the grab
+                                // arbitrates the gesture: an empty box
+                                // cancels so the selection can edit, a box
+                                // holding speech keeps the gesture and the
+                                // selection drops.
                                 window.on_mouse_event({
                                     let selection = selection.clone();
                                     let focus = edit_focus.clone();
+                                    let weak = weak.clone();
                                     move |_: &MouseUpEvent, phase, window, cx| {
                                         if phase != DispatchPhase::Bubble {
                                             return;
@@ -4054,9 +4199,37 @@ impl Waku {
                                             selection.is_dragging()
                                                 && !selection.is_empty()
                                         };
-                                        if grabbed {
-                                            window.focus(&focus, cx);
+                                        if !grabbed {
+                                            return;
                                         }
+                                        let _ = weak.update(cx, |this, cx| {
+                                            let Some(scratchpad) =
+                                                this.selected_voice_scratchpad_mut()
+                                            else {
+                                                return;
+                                            };
+                                            if scratchpad
+                                                .transcript
+                                                .annotation_target
+                                                .is_none()
+                                            {
+                                                window.focus(&focus, cx);
+                                            } else if scratchpad
+                                                .transcript
+                                                .annotation_blank()
+                                            {
+                                                scratchpad.transcript.exit_annotation();
+                                                window.focus(&focus, cx);
+                                                cx.notify();
+                                            } else {
+                                                scratchpad
+                                                    .selection
+                                                    .selection
+                                                    .borrow_mut()
+                                                    .clear();
+                                                cx.notify();
+                                            }
+                                        });
                                     }
                                 });
                                 if let Some((key, offset)) = &caret_glyph
@@ -4220,13 +4393,22 @@ impl Waku {
             })
             .on_click({
                 let weak = weak.clone();
-                move |_, window, cx| {
+                move |event: &ClickEvent, window, cx| {
+                    // Enter is the scratchpad's send wherever focus sits —
+                    // the pill's keyboard activation is Space alone, so the
+                    // synthesized Enter click must not fire the action.
+                    if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
+                    {
+                        return;
+                    }
                     let _ = weak.update(cx, |this, cx| action(this, window, cx));
                 }
             })
             .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                // Space activates; Enter keeps traveling — while the
+                // scratchpad is up it sends the transcript.
                 if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    && event.keystroke.key == "space"
                 {
                     let _ = weak.update(cx, |this, cx| action(this, window, cx));
                     cx.stop_propagation();
@@ -4356,6 +4538,7 @@ impl Waku {
                     && scratchpad.transcript.caret.take().is_some()
                 {
                     scratchpad.transcript.caret_anchor = None;
+                    scratchpad.transcript.caret_typing = false;
                     cx.notify();
                 }
             }))
@@ -4495,6 +4678,13 @@ impl Waku {
                         .when_some(landing_ghost, |row, ghost| row.child(ghost)),
                 )
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                    // A focused row's keyboard Enter arrives as this
+                    // synthesized click — while the scratchpad is up Enter
+                    // sends the transcript instead of annotating.
+                    if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
+                    {
+                        return;
+                    }
                     if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                         && !scratchpad_click_was_drag(event, &scratchpad.selection)
                         && !scratchpad.transcript.annotate(index)
@@ -4510,8 +4700,12 @@ impl Waku {
                     cx.notify();
                 }))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    // Space is the row's annotate key; Enter keeps
+                    // traveling to the send. While a selection or caret
+                    // stands the edit surface claims the key as text.
                     if !event.keystroke.modifiers.modified()
-                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        && event.keystroke.key == "space"
+                        && !this.voice_scratchpad_claims_edit_keys()
                     {
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                             && !scratchpad.transcript.annotate(index)
@@ -4622,6 +4816,12 @@ impl Waku {
                         |row| row.child(scratchpad_cleanup_spinner(14.0, theme)),
                     )
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        // Same rule as the paragraph row — a keyboard
+                        // Enter clicks here; Enter sends instead.
+                        if matches!(event, ClickEvent::Keyboard(click) if click.button == gpui::KeyboardButton::Enter)
+                        {
+                            return;
+                        }
                         if let Some(scratchpad) = this.selected_voice_scratchpad_mut()
                             && !scratchpad_click_was_drag(event, &scratchpad.selection)
                         {
@@ -4633,7 +4833,8 @@ impl Waku {
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            && event.keystroke.key == "space"
+                            && !this.voice_scratchpad_claims_edit_keys()
                         {
                             if let Some(scratchpad) = this.selected_voice_scratchpad_mut() {
                                 scratchpad.transcript.annotate_bullet(index, bullet_index);
@@ -4693,6 +4894,7 @@ impl Waku {
                             let caret = scratchpad.transcript.append_point_caret();
                             scratchpad.transcript.caret = Some(caret);
                             scratchpad.transcript.caret_anchor = None;
+                            scratchpad.transcript.caret_typing = false;
                             let focus = scratchpad.edit_focus.clone();
                             window.focus(&focus, cx);
                         }
@@ -4719,6 +4921,7 @@ impl Waku {
                     }
                     if scratchpad.transcript.caret.take().is_some() {
                         scratchpad.transcript.caret_anchor = None;
+                        scratchpad.transcript.caret_typing = false;
                         changed = true;
                     }
                     if scratchpad.edit_focus.is_focused(window) {
@@ -6233,6 +6436,88 @@ mod tests {
                 offset
             }) if offset == "second line".len()
         ));
+    }
+
+    #[test]
+    fn an_edits_caret_types_and_deletes() {
+        // The caret a selection cut leaves is live: typed characters —
+        // space included — land at it and Backspace/Delete cut beside
+        // it. A caret placed by a click or a focus landing writes
+        // nothing.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("alpha beta okay next");
+        let spans = vec![md::selection::Span {
+            key: md::selection::TextKey::new("vs-p-0", 0),
+            range: 5..10,
+            text: "alpha beta".into(),
+            block_break: false,
+            copy: Rc::default(),
+        }];
+        transcript.caret = transcript.apply_selection_edit(&spans, "");
+        transcript.caret_typing = transcript.caret.is_some();
+        assert_eq!(transcript.paragraphs[0].text, "alpha");
+        assert!(transcript.insert_at_caret(" "));
+        assert!(transcript.insert_at_caret("omega"));
+        assert_eq!(transcript.paragraphs[0].text, "alpha omega");
+        assert!(matches!(
+            transcript.caret,
+            Some(CaretPos {
+                node: ScratchpadNode::Paragraph(0),
+                offset
+            }) if offset == "alpha omega".len()
+        ));
+        // Backspace eats backward, forward Delete the char ahead — both
+        // stay inside the node at an edge.
+        assert!(transcript.delete_at_caret(false));
+        assert_eq!(transcript.paragraphs[0].text, "alpha omeg");
+        assert!(!transcript.delete_at_caret(true));
+        assert!(transcript.delete_at_caret(false));
+        assert_eq!(transcript.paragraphs[0].text, "alpha ome");
+        // A dead caret — a click's insertion point — takes no keys.
+        transcript.caret_typing = false;
+        assert!(!transcript.insert_at_caret("x"));
+        assert!(!transcript.delete_at_caret(false));
+        assert_eq!(transcript.paragraphs[0].text, "alpha ome");
+    }
+
+    #[test]
+    fn caret_typing_survives_only_while_the_caret_stands() {
+        // Opening a box or clicking an unwritten line drops the live
+        // caret — the flag follows the caret, not the paragraph.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("alpha beta okay next");
+        let spans = vec![md::selection::Span {
+            key: md::selection::TextKey::new("vs-p-0", 0),
+            range: 0..5,
+            text: "alpha beta".into(),
+            block_break: false,
+            copy: Rc::default(),
+        }];
+        transcript.caret = transcript.apply_selection_edit(&spans, "x");
+        transcript.caret_typing = true;
+        transcript.annotate(0);
+        assert!(!transcript.caret_typing);
+        assert!(transcript.caret.is_none());
+        assert!(!transcript.insert_at_caret("y"));
+    }
+
+    #[test]
+    fn a_blank_annotation_box_is_blank() {
+        // The drag arbitration reads "empty" as nothing dictated, no
+        // interim in flight, and no edit instruction armed — any of the
+        // three keeps the box's claim.
+        let mut transcript = ScratchpadTranscript::default();
+        transcript.append_finalized("the plan okay next");
+        assert!(!transcript.annotation_blank());
+        transcript.annotate(0);
+        assert!(transcript.annotation_blank());
+        transcript.set_interim("something".to_owned());
+        assert!(!transcript.annotation_blank());
+        transcript.solidify_interim();
+        assert!(!transcript.annotation_blank());
+        transcript.annotation_text.clear();
+        transcript.arm_edit();
+        assert!(!transcript.annotation_blank());
     }
 
     #[test]
