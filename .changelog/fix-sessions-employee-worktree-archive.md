@@ -1,0 +1,1 @@
+- Archiving a chat whose employee worktree still holds uncommitted work is now refused with the worktree's path instead of silently discarding it; clean worktrees archive as before.

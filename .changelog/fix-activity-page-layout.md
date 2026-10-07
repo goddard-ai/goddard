@@ -1,0 +1,1 @@
+- Projects → Activity rows line up: the header, release titles, and status/date columns no longer misalign or repeat titles.

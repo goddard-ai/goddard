@@ -1,0 +1,1 @@
+- OpenCode tasks now run on OpenCode 2.0 — the provider adopts the shared `opencode` background service instead of starting a per-project server, turns survive service restarts, and tasks created under the earlier OpenCode 2 beta provider keep their history and composer preference.

@@ -1,0 +1,1 @@
+- Saving a task no longer reverts daemon-owned project fields — a project's Boss submissions opt-in, QA-branch override, and Friends marker now survive client saves.
