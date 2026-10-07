@@ -3,4 +3,4 @@
 /**
  * How an agent prompt reaches the target session.
  */
-export type AgentPromptDelivery = "queue" | "steer";
+export type AgentPromptDelivery = "interrupt" | "queue" | "steer";

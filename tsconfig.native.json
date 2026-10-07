@@ -16,5 +16,5 @@
 		"skipLibCheck": true
 	},
 	"include": ["src/**/*", "references.d.ts"],
-	"exclude": ["node_modules", "platforms", "**/*.web.*"]
+	"exclude": ["node_modules", "platforms", "**/*.web.*", "src/**/*.test.*"]
 }

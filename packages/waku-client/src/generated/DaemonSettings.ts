@@ -81,23 +81,29 @@ provider_route_classes?: { [key in ProviderKind]?: { [key in TaskClass]?: RouteC
  */
 auto_prompts: Array<AutoPromptRule>,
 /**
- * Experimental opt-in for project memory: the daemon maintains a
- * `.goddard/memory/` store per project, distills finished turns into it
- * in the background, and injects it into each session's first prompt.
- * Defaults on in development builds, opt-in in release builds.
+ * Experimental opt-in for the Boss assistant, employee management,
+ * personas, and plans surfaces. Defaults on in development builds and
+ * opt-in in release builds.
  */
-memory_experiment_enabled: boolean,
+boss_experiment_enabled: boolean,
+/**
+ * Disable automatic rotation of settled Boss chats. Off by default, including release builds.
+ */
+boss_rotation_disabled: boolean,
+/**
+ * Context fraction that makes a settled Boss session eligible to rotate.
+ */
+boss_rotation_context_threshold: number,
+/**
+ * Per-provider prompt-cache TTL in seconds; zero means the provider has
+ * no reusable prompt cache. Missing entries use the five-minute policy.
+ */
+boss_rotation_cache_ttl_secs?: { [key in ProviderKind]?: number },
 /**
  * Experimental opt-in for cross-session composer drafts. Defaults on in
  * development builds and off in release builds.
  */
 composer_drafts_experiment_enabled: boolean,
-/**
- * Per-provider model override for memory distillation runs. A provider
- * absent here distills on its advertised default model; the value is a
- * catalog model id handed to that provider's headless driver.
- */
-memory_models?: { [key in ProviderKind]?: string },
 /**
  * Preferred inexpensive model for background session title rewrites.
  * Claude and Codex have inexpensive defaults; other supported providers
@@ -134,6 +140,13 @@ sandbox_experiment_enabled: boolean,
  * access menu still wins for that task.
  */
 sandbox_default_enabled: boolean,
+/**
+ * Experimental opt-in for planning-session wireframes — the emit
+ * affordance and the file viewer's themed preview stay hidden while
+ * this is off, and emitted `.wireframe.json` files persist either
+ * way. Defaults on in development builds, opt-in in release builds.
+ */
+wireframes_experiment_enabled: boolean,
 /**
  * Seconds a settled provider runtime may sit idle before the daemon
  * reclaims it. `None` keeps the built-in default (30 minutes); `0`

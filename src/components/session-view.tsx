@@ -1,4 +1,5 @@
 import { atomVisibleText } from '@waku/client/transcript-presentation';
+import { bossEmployeeLifecycle } from '@waku/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
 import {
   Absolute,
@@ -12,6 +13,14 @@ import {
 
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { AppSymbol } from '@/components/app-symbol';
+import {
+  BossAssignmentSheet,
+  BossBlockerNotice,
+  BossCapacitySheet,
+  EmployeeExpiredCard,
+  EmployeeStatusCard,
+} from '@/components/boss-roster';
+
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { MobileComposer, PermissionPanel } from '@/components/mobile-composer';
@@ -35,7 +44,8 @@ import {
 } from '@/components/transcript-list';
 
 import { SessionEmpty } from '@/components/transcript-rows';
-import { useProviderModels, useSession, useTaskState } from '@/lib/daemon-queries';
+import { useBossState, useProviderModels, useSession, useTaskState } from '@/lib/daemon-queries';
+import { bossEmployeeForSession, bossQueueRanks } from '@/lib/boss';
 import { useKeyboardPadding } from '@/lib/use-keyboard-padding';
 import { useTheme } from '@/lib/use-theme';
 import { useHasUnseenReplies } from '@/lib/use-unseen-replies';
@@ -62,6 +72,10 @@ const SURFACE_MENU_COMMANDS = [
   { id: 'git', title: 'Git', symbol: 'arrow.triangle.branch' },
   { id: 'queue', title: 'Review queue', symbol: 'checkmark.circle' },
 ] as const;
+
+// Employee lifecycle commands — rename, compact, rollback, delete — belong
+// to the boss; the human supervises through the boss chat instead.
+const EMPLOYEE_HIDDEN_COMMANDS = new Set(['rename', 'compact', 'rollback', 'delete']);
 
 const TASK_MENU_COMMANDS = [
   { id: 'rename', title: 'Rename task', symbol: 'pencil' },
@@ -100,6 +114,8 @@ export function SessionView({
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [turnRefs, setTurnRefs] = useState<ReadonlySet<number> | null>(null);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [capacityOpen, setCapacityOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findIndex, setFindIndex] = useState(0);
@@ -241,6 +257,10 @@ export function SessionView({
     (command: string) => {
       if (command === 'terminal' || command === 'files' || command === 'review' || command === 'git' || command === 'queue') {
         openTaskSurface(command);
+      } else if (command === 'assignment') {
+        setAssignmentOpen(true);
+      } else if (command === 'capacity') {
+        setCapacityOpen(true);
       } else if (command === 'model') {
         setModelSheetOpen(true);
       } else if (command === 'rename') {
@@ -264,6 +284,19 @@ export function SessionView({
 
   const taskState = useTaskState().data;
   const project = taskState?.projects.find((item) => item.id === session?.project_id);
+
+  // Boss context: a viewed employee gets the supervision composer plus its
+  // lifecycle chrome; the boss's own chat gets the blocker notice and the
+  // capacity readout.
+  const bossState = useBossState();
+  const bossData = bossState.data;
+  const employee = bossEmployeeForSession(bossData, session?.id);
+  const isBossChat = Boolean(bossData?.sessionId && bossData.sessionId === session?.id);
+  const employeeLifecycle = employee ? bossEmployeeLifecycle(employee) : null;
+  const queueRank = useMemo(
+    () => (bossData ? bossQueueRanks(bossData) : new Map<string, number>()),
+    [bossData],
+  );
 
   // Checkpoint turn counts drive the rewind affordance — one workspace op
   // per settle, mirroring desktop's checkpoint ref cache.
@@ -407,19 +440,37 @@ export function SessionView({
         icon: item.symbol,
         onSelect: () => handleTaskMenuCommand(item.id),
       })),
+      ...(employee
+        ? [{
+            key: 'assignment',
+            label: 'Assignment',
+            icon: 'info.circle',
+            onSelect: () => handleTaskMenuCommand('assignment'),
+          }]
+        : []),
+      ...(isBossChat && bossData
+        ? [{
+            key: 'capacity',
+            label: 'Capacity',
+            icon: 'gauge',
+            onSelect: () => handleTaskMenuCommand('capacity'),
+          }]
+        : []),
       {
         key: 'model',
         label: modelLabel,
         onSelect: () => handleTaskMenuCommand('model'),
       },
-      ...TASK_MENU_COMMANDS.map((item) => ({
-        key: item.id,
-        label: item.title,
-        icon: item.symbol,
-        onSelect: () => handleTaskMenuCommand(item.id),
-      })),
+      ...TASK_MENU_COMMANDS
+        .filter((item) => !employee || !EMPLOYEE_HIDDEN_COMMANDS.has(item.id))
+        .map((item) => ({
+          key: item.id,
+          label: item.title,
+          icon: item.symbol,
+          onSelect: () => handleTaskMenuCommand(item.id),
+        })),
     ],
-    [handleTaskMenuCommand, modelLabel],
+    [bossData, employee, handleTaskMenuCommand, isBossChat, modelLabel],
   );
 
   const keyboardPadding = useKeyboardPadding();
@@ -528,6 +579,27 @@ export function SessionView({
             />
           </Absolute>
         ) : null}
+        {employee && bossData && (employeeLifecycle === 'queued' || employeeLifecycle === 'dispatching') ? (
+          <Absolute style={{ left: 12, right: 12, top: headerInset + 8 }}>
+            <EmployeeStatusCard
+              employee={employee}
+              queueRank={queueRank.get(employee.sessionId)}
+            />
+          </Absolute>
+        ) : null}
+        {employee && bossData && employeeLifecycle === 'expired' ? (
+          <Absolute style={{ left: 12, right: 12, top: headerInset + 8 }}>
+            <EmployeeExpiredCard employee={employee} />
+          </Absolute>
+        ) : null}
+        {isBossChat && bossData ? (
+          <Absolute style={{ left: 12, right: 12, top: headerInset + 8 }}>
+            <BossBlockerNotice
+              state={bossData}
+              onOpen={(id) => pushRoute({ stack: 'root', name: 'session/:id', params: { id } })}
+            />
+          </Absolute>
+        ) : null}
         {findOpen && session && (
           <GlassSurface
             fallbackColor={theme.surface}
@@ -593,6 +665,9 @@ export function SessionView({
       </View>
       {session && (
         <MobileComposer
+          boss={employee && bossData
+            ? { employee, identity: bossData.identity }
+            : null}
           session={session}
           onSubmitted={() => listRef.current?.followNextGrowth()}
         />
@@ -624,6 +699,22 @@ export function SessionView({
           onDismiss={() => setRenaming(false)}
           onSubmit={(nextTitle) => runtime.renameSession(session.id, nextTitle)}
           visible={renaming}
+        />
+      )}
+      {bossData && employee && (
+        <BossAssignmentSheet
+          employee={employee}
+          onDismiss={() => setAssignmentOpen(false)}
+          session={session ?? undefined}
+          state={bossData}
+          visible={assignmentOpen}
+        />
+      )}
+      {bossData && (
+        <BossCapacitySheet
+          onDismiss={() => setCapacityOpen(false)}
+          state={bossData}
+          visible={capacityOpen}
         />
       )}
     </View>

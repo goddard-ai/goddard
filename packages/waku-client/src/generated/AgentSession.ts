@@ -12,6 +12,7 @@ import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionEnvironment } from "./SessionEnvironment";
 import type { SessionPhase } from "./SessionPhase";
+import type { SessionPlanning } from "./SessionPlanning";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
 import type { SuspendedProviderSession } from "./SuspendedProviderSession";
@@ -170,7 +171,21 @@ incognito?: boolean,
 /**
  * The user has allowed this task's agent to set its own title.
  */
-agent_rename_allowed?: boolean, provider_cursor: ProviderResumeCursor | null,
+agent_rename_allowed?: boolean,
+/**
+ * Stamped when the session belongs to a boss — its own chat or a
+ * summoned employee's task. Roster membership ends when an employee
+ * retires, but this stays set so task lists keep the session out of
+ * the ordinary rows; it opens through the boss transcript as an
+ * ordinary task.
+ */
+boss_managed?: boolean,
+/**
+ * The planning-session kind marker — `Some` only on boss-managed
+ * sessions opened through `createPlan`. Daemon-owned like
+ * `boss_managed`: client saves can never unset it or unfreeze a plan.
+ */
+planning?: SessionPlanning | null, provider_cursor: ProviderResumeCursor | null,
 /**
  * Provider conversations this session ran on before switching away.
  * Each holds a resumable cursor and the transcript boundary the return

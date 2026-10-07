@@ -4,4 +4,4 @@
  * The icon a custom command shows in the command palette, on its settings
  * row, and on its terminal tab.
  */
-export type CustomCommandIcon = "terminal" | "command" | "zap" | "wrench" | "gauge" | "package" | "git_branch" | "git_hub" | "folder" | "file" | "search" | "globe" | "server" | "cloud_upload" | "download" | "bot" | "sparkle" | "star" | "target" | "queue" | "compose" | "chart" | "refresh" | "archive";
+export type CustomCommandIcon = "terminal" | "command" | "zap" | "wrench" | "gauge" | "package" | "git_branch" | "git_hub" | "folder" | "file" | "search" | "globe" | "server" | "cloud_upload" | "download" | "bot" | "sparkle" | "star" | "target" | "queue" | "compose" | "chart" | "refresh" | "archive" | "bug" | "languages" | "database" | "circle_check" | "beaker" | "git_merge" | "eye" | "pencil" | "folder_search" | "file_text" | "lock" | "fork" | "brain";

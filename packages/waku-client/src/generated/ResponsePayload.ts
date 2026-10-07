@@ -8,6 +8,7 @@ import type { AgentSessionTranscript } from "./AgentSessionTranscript";
 import type { Automation } from "./Automation";
 import type { AutomationRun } from "./AutomationRun";
 import type { AutomationsState } from "./AutomationsState";
+import type { BossResult } from "./BossResult";
 import type { CodexResetCreditOutcome } from "./CodexResetCreditOutcome";
 import type { ComposerDrafts } from "./ComposerDrafts";
 import type { ComputerPermissions } from "./ComputerPermissions";
@@ -26,16 +27,18 @@ import type { ProviderSessionCatalogStatus } from "./ProviderSessionCatalogStatu
 import type { ProviderSessionFork } from "./ProviderSessionFork";
 import type { ProviderSessionHistory } from "./ProviderSessionHistory";
 import type { ProviderSessionSummary } from "./ProviderSessionSummary";
+import type { ResourceStatus } from "./ResourceStatus";
 import type { RouteDecision } from "./RouteDecision";
 import type { SessionMessageMatch } from "./SessionMessageMatch";
 import type { SharedSessionSummary } from "./SharedSessionSummary";
 import type { SkillsCatalog } from "./SkillsCatalog";
 import type { StoredAttachment } from "./StoredAttachment";
 import type { UsageHistory } from "./UsageHistory";
+import type { WhistleWord } from "./WhistleWord";
 import type { WorkspaceResult } from "./WorkspaceResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ResponsePayload = { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
+export type ResponsePayload = { "type": "whistleStatus", available: boolean, downloaded: boolean, } | { "type": "transcription", text: string, language: string, words: Array<WhistleWord>, } | { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
 /**
  * The transport can settle a user-input request without structured
  * answers — clarify and dismiss are both offered on this bit.

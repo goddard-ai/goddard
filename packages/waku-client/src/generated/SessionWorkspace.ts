@@ -18,4 +18,10 @@ branch?: string | null,
  * commits. `None` for sessions persisted before it was recorded or
  * for worktrees that adopted a checkout's state.
  */
-baseBranch?: string | null, };
+baseBranch?: string | null,
+/**
+ * The session that adopted this worktree away — set when a later
+ * summon takes ownership. This session no longer claims the
+ * checkout and cannot resume into it.
+ */
+adoptedBy?: string | null, };

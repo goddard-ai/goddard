@@ -19,6 +19,7 @@
 	"exclude": [
 		"node_modules",
 		"src/main.ts",
+		"src/**/*.test.*",
 		"src/**/*.mobile.*",
 		"src/**/*.ios.*",
 		"src/**/*.android.*",

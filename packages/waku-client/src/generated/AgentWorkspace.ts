@@ -2,7 +2,7 @@
 
 /**
  * Where an agent-created task runs. Mirrors the New Task flow's workspace
- * choices; there is no attach-a-worktree path because a task created by an
- * agent always starts fresh.
+ * choices; `Adopt` is summon-only — a task created by an agent always
+ * starts fresh, so only a Boss summon may attach an existing worktree.
  */
-export type AgentWorkspace = "local" | "worktree";
+export type AgentWorkspace = "local" | "worktree" | "adopt";

@@ -1,10 +1,14 @@
 import type {
   AgentSession,
+  BossEmployee,
+  BossIdentity,
   MessageAttachment,
   PendingPermission,
   PendingUserInput,
   UserInputAnswer,
 } from '@waku/client';
+
+import { openBossSession } from '@waku/client/boss';
 
 import {
   annotationBubbleContent,
@@ -23,11 +27,14 @@ import {
   ScrollView,
   Text,
   TextArea,
+  pushRoute,
   useSafeAreaInsets,
   View,
 } from '@octane-xplat/ui';
 
 import { AppSymbol } from './app-symbol';
+import { BossAvatar } from './boss-roster';
+import { sessionReferenceAttachment } from '@/lib/boss';
 import { AttachmentTile } from './attachment-tile';
 import { ComposerAccessMenu } from './composer-access-menu';
 import { ComposerContextPicker } from './composer-context-picker';
@@ -206,9 +213,15 @@ export function SendButton({
 
 export function MobileComposer({
   session,
+  boss,
   onSubmitted,
 }: {
   session: AgentSession;
+  /** Set when the viewed session is a boss employee: every submission is
+   * routed to the boss chat with a session-reference attachment, then the
+   * boss chat comes on screen — the same supervision command the desktop
+   * arms while an employee is open. */
+  boss?: { identity: BossIdentity; employee: BossEmployee } | null;
   /** Fires as the submission begins — before the runtime round-trip — so the
    * transcript can pin to the tail the moment the message lands. */
   onSubmitted?: () => void;
@@ -390,7 +403,13 @@ export function MobileComposer({
 
   async function submit() {
     const value = draft.trim();
-    const submittedAttachments = attachments;
+    // A supervision message carries the viewed employee's session
+    // reference — its `[session … (task_id: …)]` token splices into the
+    // provider prompt through the ordinary attachment path.
+    const submittedAttachments = boss
+      ? [...attachments, sessionReferenceAttachment(boss.employee.sessionId, boss.employee.identity.name)]
+      : attachments;
+
     const submittedAnnotations = draftSync.currentAnnotations();
     if (
       (!value && submittedAttachments.length === 0 && submittedAnnotations.length === 0)
@@ -432,7 +451,20 @@ export function MobileComposer({
       }
 
       onSubmitted?.();
-      if (canSteer) {await runtime.steerPrompt(session, displayPrompt, submittedAttachments, providerPrompt);}
+      if (boss) {
+        // The message goes to the boss chat — created on first use — and
+        // the chat comes on screen so the command's destination is visible.
+        const client = daemon.client;
+        if (!client) {throw new Error('Goddard daemon is disconnected');}
+        const { session: bossSession } = await openBossSession(client, {
+          provider: session.provider,
+          model: session.model ?? null,
+          mode: session.runtime_mode,
+        });
+
+        await runtime.sendPrompt(bossSession, displayPrompt, submittedAttachments, providerPrompt);
+        pushRoute({ stack: 'root', name: 'session/:id', params: { id: bossSession.id } });
+      } else if (canSteer) {await runtime.steerPrompt(session, displayPrompt, submittedAttachments, providerPrompt);}
       else {await runtime.sendPrompt(session, displayPrompt, submittedAttachments, providerPrompt);}
 
       draftSync.removeSubmittedDraft();
@@ -464,17 +496,19 @@ export function MobileComposer({
   }
 
   const disconnected = daemon.phase !== 'connected';
-  const placeholder = disconnected
-    ? daemon.phase === 'reconnecting'
-      ? 'Reconnecting…'
-      : daemon.phase === 'connecting' || daemon.phase === 'booting'
-        ? 'Connecting…'
-        : 'Reconnect to message this agent'
-    : canSteer
-      ? 'Message the working agent…'
-      : busy
-        ? 'Queue a follow-up…'
-        : 'Message agent';
+  const placeholder = boss
+    ? 'Use the boss to control this employee…'
+    : disconnected
+      ? daemon.phase === 'reconnecting'
+        ? 'Reconnecting…'
+        : daemon.phase === 'connecting' || daemon.phase === 'booting'
+          ? 'Connecting…'
+          : 'Reconnect to message this agent'
+      : canSteer
+        ? 'Message the working agent…'
+        : busy
+          ? 'Queue a follow-up…'
+          : 'Message agent';
 
   return (
     <View style={[{ paddingHorizontal: 12, paddingTop: 4 }, shellPadding]}>
@@ -565,6 +599,26 @@ export function MobileComposer({
         </View>
       ))}
 
+      {boss && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={{
+            alignItems: 'center',
+            borderRadius: Radius.small,
+            flexDirection: 'row',
+            gap: 7,
+            marginBottom: 7,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            backgroundColor: theme.overlay,
+          }}>
+          <BossAvatar identity={boss.identity} size={16} />
+          <Text style={{ flex: '1 1', fontSize: 13, color: theme.textSecondary }}>
+            Messages go to {boss.identity.name}
+          </Text>
+        </View>
+      )}
+
       <ComposerCard
         {...contextPicker.inputProps}
         beforeInput={attachments.length || importingAttachments ? (
@@ -650,7 +704,12 @@ export function MobileComposer({
             <SendButton
               busy={submitting}
               disabled={
-                (!draft.trim() && attachments.length === 0 && draftSync.currentAnnotations().length === 0)
+                // A bare session reference is a complete supervision
+                // command — the boss reads "look at this employee" from it.
+                (!draft.trim()
+                  && attachments.length === 0
+                  && !boss
+                  && draftSync.currentAnnotations().length === 0)
                 || submitting
                 || importingAttachments
                 || disconnected

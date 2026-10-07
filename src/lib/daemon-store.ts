@@ -222,7 +222,9 @@ async function activate(profileId: string, candidates = profilesRef): Promise<bo
   });
 
   unsubscribeTaskState = next.subscribeTaskState(() => {
-    invalidateDaemonQueries(profile.id, (kind) => kind === 'task-state');
+    // Boss document mutations broadcast through the same notifier, so the
+    // roster view re-fetches with the task list.
+    invalidateDaemonQueries(profile.id, (kind) => kind === 'task-state' || kind === 'boss-state');
   });
 
   // The broadcast carries the whole settings document, so it lands in

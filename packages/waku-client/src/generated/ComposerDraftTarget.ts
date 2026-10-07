@@ -6,4 +6,4 @@
  * Draft updates are keyed so multiple connected clients cannot overwrite
  * unrelated drafts by sending stale whole-file snapshots.
  */
-export type ComposerDraftTarget = { "type": "newSession", projectId: string, } | { "type": "session", sessionId: string, };
+export type ComposerDraftTarget = { "type": "newSession", projectId: string, } | { "type": "session", sessionId: string, } | { "type": "deliverable", deliverableId: string, };

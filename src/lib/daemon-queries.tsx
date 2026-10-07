@@ -1,4 +1,5 @@
-import type { ProviderKind } from '@waku/client';
+import type { BossState, ProviderKind } from '@waku/client';
+import { loadBossState } from '@waku/client/boss';
 import {
   PROVIDER_PROBE_CACHE_STALE_TIME,
   readProviderProbeCache,
@@ -25,7 +26,6 @@ const PROVIDERS: ProviderKind[] = [
   'amp',
   'copilot',
   'openCode',
-  'openCode2',
   'grok',
   'kimi',
   'deepSeek',
@@ -73,6 +73,21 @@ export function useSession(sessionId: string | undefined): DaemonQueryResult<Age
 }
 
 type AgentSessionLike = Awaited<ReturnType<typeof hydrateSession>>;
+
+/** The daemon's Boss document — employees, plans, deliverables — or `null`
+ * when the host's boss experiment is off. Re-fetches on every
+ * `taskStateChanged` broadcast, the same notifier boss mutations use. */
+export function useBossState(): DaemonQueryResult<BossState | null> {
+  const { activeProfile, client, phase } = useDaemon();
+  return useDaemonQuery(
+    daemonKeys.bossState(activeProfile?.id ?? 'disconnected'),
+    () => loadBossState(requireClient(client)),
+    {
+      enabled: phase === 'connected' && Boolean(activeProfile && client),
+      staleTime: 1_000,
+    },
+  );
+}
 
 export function useDaemonSettings(): DaemonQueryResult<import('@waku/client').DaemonSettings> {
   const { activeProfile, client, phase } = useDaemon();

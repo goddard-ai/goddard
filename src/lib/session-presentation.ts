@@ -180,7 +180,6 @@ const CONVERSATION_EDIT_PROVIDERS: ReadonlySet<ProviderKind> = new Set([
   'muse',
   'ohMyPi',
   'openCode',
-  'openCode2',
   'pi',
 ]);
 
@@ -284,7 +283,6 @@ export function providerLabel(provider: ProviderKind): string {
     droid: 'Droid',
     fx: 'Fx',
     openCode: 'OpenCode',
-    openCode2: 'OpenCode 2',
     goose: 'Goose',
     grok: 'Grok',
     kimi: 'Kimi',

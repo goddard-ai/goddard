@@ -8,4 +8,10 @@
  * was made on the rendered markdown preview, where the span text holds the
  * rendered passage rather than the file's own slice.
  */
-export type ComposerDraftFileAnnotation = { path: string, start: number, end: number, start_line: number, end_line: number, source?: string | null, };
+export type ComposerDraftFileAnnotation = { path: string, start: number, end: number, start_line: number, end_line: number, source?: string | null,
+/**
+ * Set when the pin was made on a planning session's plan document:
+ * routes restores to that session's plan store rather than a workspace
+ * file editor's.
+ */
+plan_session?: string | null, };

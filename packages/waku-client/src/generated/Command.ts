@@ -4,8 +4,10 @@ import type { AgentSession } from "./AgentSession";
 import type { AgentWorkspace } from "./AgentWorkspace";
 import type { AttachmentUpload } from "./AttachmentUpload";
 import type { AutomationInput } from "./AutomationInput";
+import type { BossOperation } from "./BossOperation";
 import type { ComposerDraftChange } from "./ComposerDraftChange";
 import type { ComposerDrafts } from "./ComposerDrafts";
+import type { ComputerUseRunRequest } from "./ComputerUseRunRequest";
 import type { CustomCommand } from "./CustomCommand";
 import type { DaemonExposure } from "./DaemonExposure";
 import type { DaemonSettings } from "./DaemonSettings";
@@ -20,6 +22,7 @@ import type { ProjectMapIntent } from "./ProjectMapIntent";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderResumeCursor } from "./ProviderResumeCursor";
 import type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
+import type { ResourceOperation } from "./ResourceOperation";
 import type { RouteCandidate } from "./RouteCandidate";
 import type { RouteTarget } from "./RouteTarget";
 import type { SessionDetailTail } from "./SessionDetailTail";
@@ -34,7 +37,7 @@ import type { WireSessionOptions } from "./WireSessionOptions";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type Command = { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every
@@ -66,7 +69,7 @@ hidden?: boolean, } | { "type": "compact" } | { "type": "cancel" } | { "type": "
  * stored prefix rather than replacing it. Entries not listed here
  * are complete sessions as before.
  */
-sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "hydrateSession", sessionId: string, } | { "type": "searchSessionMessages", query: string, limit: number,
+sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "hydrateSession", sessionId: string, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
 /**
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.
@@ -155,7 +158,17 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentRenameSelf", title: string, } | { "type": "cancelQueuedPrompt", queuedMessageId: string, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, title: string | null, note: string | null, } | { "type": "sendMessageToFriend", nodeId: string, text: string, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+/**
+ * Waku task ids to archive. Each must name a started, unarchived
+ * task in the caller's own project; side chats leave with their
+ * parent instead.
+ */
+taskIds: Array<string>,
+/**
+ * The agent's stated reason, shown on the approval card.
+ */
+reason?: string | null, } | { "type": "agentMergeSubmit" } | { "type": "cancelQueuedPrompt", queuedMessageId: string, } | { "type": "getFriends" } | { "type": "sendFriendRequest", code: string, name: string, } | { "type": "respondFriendRequest", nodeId: string, accept: boolean, } | { "type": "withdrawFriendRequest", nodeId: string, } | { "type": "removeFriend", nodeId: string, } | { "type": "sendFileToFriend", nodeId: string, path: string, title: string | null, note: string | null, } | { "type": "sendMessageToFriend", nodeId: string, text: string, } | { "type": "cancelTransfer", transferId: string, } | { "type": "probeFriend", nodeId: string, } | { "type": "setFriendDisplayName", name: string, } | { "type": "setFriendNickname", nodeId: string, nickname: string | null, } | { "type": "getAutomations" } | { "type": "upsertAutomation", input: AutomationInput, } | { "type": "removeAutomation", automationId: string, } | { "type": "runAutomationNow", automationId: string, } | { "type": "agentReadSession",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
  * required for a foreign read.
@@ -172,4 +185,4 @@ threadId?: string | null, provider?: ProviderKind | null,
  * number — `items` each carry it, so a full read names the turn to
  * revisit.
  */
-turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentProjectMap", query: string, path?: string | null, maxTokens?: number | null, intent: ProjectMapIntent, anchors: Array<string>, knownPaths: string[], } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "agentListModels" } | { "type": "agentComputerUse", code: string, timeoutMs: number | null, title: string | null, } | { "type": "agentComputerUseReset" } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };
+turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentProjectMap", query: string, path?: string | null, maxTokens?: number | null, intent: ProjectMapIntent, anchors: Array<string>, knownPaths: string[], } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "agentListModels" } | { "type": "agentComputerUse", code: string, timeoutMs: number | null, title: string | null, } | { "type": "agentComputerUseRun", request: ComputerUseRunRequest, } | { "type": "agentComputerUseReset" } | { "type": "agentResources", operation: ResourceOperation, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };

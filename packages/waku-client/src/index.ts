@@ -4,6 +4,8 @@ export {
   WakuRpcError,
   daemonUrl,
   requestPair,
+  type BossBrowseRequest,
+  type BossSpeechRequest,
   type ConnectionStateListener,
   type PairOptions,
   type PairOutcome,
@@ -15,6 +17,7 @@ export {
   type WebSocketLike,
 } from "./client";
 export * from "./generated";
+export * from "./boss";
 export * from "./event-reducer";
 export * from "./transcript-presentation";
 export * from "./composer-annotations";

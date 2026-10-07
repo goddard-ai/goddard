@@ -2,6 +2,8 @@
 import type { MessageAtom } from "./MessageAtom";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { MessageRole } from "./MessageRole";
+import type { ReferenceContext } from "./ReferenceContext";
+import type { ReportTrigger } from "./ReportTrigger";
 import type { TranscriptNotice } from "./TranscriptNotice";
 
 export type Message = { id: string, turn_id: string | null, role: MessageRole, content: string,
@@ -31,4 +33,16 @@ sent_by_task?: string | null,
  * "continue" sends to an interrupted session. The message stays in the
  * record so every projection carries the same ids.
  */
-hidden?: boolean, created_at: number, streaming: boolean, };
+hidden?: boolean,
+/**
+ * The report this hidden prompt delivered — an employee's outcome or
+ * a finalized plan's handoff; the transcript's turn-trigger record.
+ * `None` for every other message: human prompts,
+ * visible task-to-task sends, nudges, and context injections carry no
+ * marker.
+ */
+report_trigger?: ReportTrigger | null,
+/**
+ * Checkout snapshot for a visible employee prompt, without a report marker.
+ */
+reference_context?: ReferenceContext | null, created_at: number, streaming: boolean, };

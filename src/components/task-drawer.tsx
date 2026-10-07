@@ -25,6 +25,7 @@ import {
 } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { BossSection } from '@/components/boss-roster';
 import {
   ConnectionBanner,
   useConnectionNotice,
@@ -38,7 +39,7 @@ import { ProviderIcon } from '@/components/provider-icon';
 import { RenameDialog } from '@/components/rename-dialog';
 import { TaskRowMenu } from '@/components/task-row-menu';
 import { Radius, Spacing } from '@/lib/theme-colors';
-import { useTaskState } from '@/lib/daemon-queries';
+import { useBossState, useTaskState } from '@/lib/daemon-queries';
 import { useTheme } from '@/lib/use-theme';
 import { useUnseenReplyWatermarks } from '@/lib/use-unseen-replies';
 import { listNotifications, searchSessionMessages } from '@/lib/daemon-api';
@@ -298,14 +299,22 @@ function TaskDrawerContent({
     });
   }, [search, frame.data, contentMatches]);
 
+  const bossState = useBossState();
   const sections = useMemo(
-    () => frame.data ? groupSessions(frame.data.projects, visibleSessions) : [],
+    // Boss-owned sessions — the chat, planning sessions, employee tasks —
+    // leave the ordinary groups to the roster rows above them.
+    () => frame.data
+      ? groupSessions(
+          frame.data.projects,
+          visibleSessions.filter((session) => session.boss_managed !== true),
+        )
+      : [],
     [frame.data, visibleSessions],
   );
 
   const rows = useMemo(() => drawerRows(sections), [sections]);
   const notice = useConnectionNotice();
-  const hasRows = rows.length > 0;
+  const hasRows = rows.length > 0 || Boolean(bossState.data);
   const _emptyShown = !hasRows && !(notice && notice.kind !== 'restored');
   const showNewTask = useCallback(() => {
     onClose();
@@ -453,6 +462,17 @@ function TaskDrawerContent({
         style={styles.listHost}>
         <ConnectionBanner />
         <View style={{ paddingTop: insets.top + DaemonPickerHeight + 20 }}>
+          {bossState.data ? (
+            <BossSection
+              now={now}
+              selectedSessionId={frame.selectedSessionId}
+              state={bossState.data}
+              taskState={frame.data}
+              watermarks={watermarks}
+              onClose={onClose}
+              onSelectSession={showSession}
+            />
+          ) : null}
           {rows.map(renderRow)}
         </View>
       </ScrollView>
