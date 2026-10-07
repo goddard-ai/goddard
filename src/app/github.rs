@@ -1778,6 +1778,7 @@ impl Waku {
                 Rc::from(format!("{doc_key}-body")),
                 &body,
                 &palette,
+                theme.surface,
                 cx,
             ));
         } else {
@@ -1834,12 +1835,15 @@ impl Waku {
     /// A markdown block rendered through the transcript engine, cached per
     /// key so unchanged text never re-parses. GitHub's raw HTML is cleaned
     /// first, and remote media resolves through the browser's download cache.
+    /// `surface` is the fill the block sits on — table edge fades dissolve
+    /// into it.
     fn github_markdown_section(
         &self,
         project_id: Uuid,
         key: Rc<str>,
         text: &str,
         palette: &MarkdownPalette,
+        surface: Hsla,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(browser) = self.github_browsers.get(&project_id) else {
@@ -1868,7 +1872,8 @@ impl Waku {
                 .borrow()
                 .contains(url)
                 .then(|| github_media_placeholder(&theme))
-        }));
+        }))
+        .with_surface(surface);
         md::render::markdown(view, &ctx).unwrap_or_else(|| div().into_any_element())
     }
 
@@ -1931,6 +1936,7 @@ impl Waku {
                         Rc::from(format!("{doc_key}-comment-{index}")),
                         &comment.body,
                         palette,
+                        theme.inset,
                         cx,
                     )),
             )

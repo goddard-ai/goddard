@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Div, Font,
     FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
-    StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font,
-    img, point, prelude::*, px, quad, relative, size,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
+    SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window,
+    canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 use unicode_script::{Script, UnicodeScript};
@@ -53,6 +53,7 @@ use crate::fonts::Fonts;
 use crate::input::{ATOM_CHIP_EDGE, ATOM_CHIP_INSET_Y, ATOM_CHIP_RADIUS};
 use crate::theme::{Theme, hairline};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
+use crate::ui::scrollbar::{self, FadeEdge, HorizontalScroll};
 use crate::ui::tooltip::Tooltip;
 
 mod math_text;
@@ -256,6 +257,10 @@ pub struct Palette {
     pub active_search_match: Hsla,
     /// Soft fill marking a commented transcript passage.
     pub annotation: Hsla,
+    /// The opaque fill the rendered body sits on — table edge fades dissolve
+    /// into it. Hosts that place markdown over another fill override it via
+    /// [`Ctx::with_surface`].
+    pub surface: Hsla,
     /// Keyboard-focus highlight wash, in place of a ring.
     pub focus: Hsla,
     pub accent: Hsla,
@@ -299,6 +304,7 @@ impl Palette {
                 0.70
             }),
             annotation: search_yellow.opacity(if theme.is_dark { 0.16 } else { 0.18 }),
+            surface: theme.surface,
             focus: theme.focus_highlight(),
             accent: theme.accent,
             added: theme.success,
@@ -1305,6 +1311,10 @@ pub struct MarkdownView {
     /// with the painted move/up listeners, which is why it lives behind `Rc`
     /// like `copied_code_blocks`.
     table_resize: Rc<RefCell<TableResize>>,
+    /// Per-table horizontal scroll positions, keyed by the same table-block
+    /// ordinal `table_resize` uses, so a scrolled table holds its position
+    /// across re-renders and streaming repaints.
+    table_scroll: RefCell<HashMap<usize, ScrollHandle>>,
     streaming: Cell<bool>,
 }
 
@@ -1339,6 +1349,21 @@ const RESIZE_HANDLE_WIDTH: f32 = 9.0;
 /// Arrow-key step for a focused resize handle, as a fraction of the table.
 const RESIZE_KEY_STEP: f32 = 0.04;
 
+/// Rough advance of an average glyph at a cell's text size, for estimating a
+/// column's natural width without shaping it. Deliberately generous: an
+/// overestimate scrolls a table that could have fit, while an underestimate
+/// ellipsizes text the estimate promised room for.
+const TABLE_CHAR_EM: f32 = 0.55;
+
+/// A cell's `px(9.0)` horizontal padding twice over, added to its text when
+/// estimating a column's natural width.
+const TABLE_CELL_PAD_PX: f32 = 18.0;
+
+/// The widest a column's natural width may grow (~28rem at the default rem
+/// size). Longer cell text ellipsizes inside the column rather than
+/// stretching the scrolled table without bound.
+const TABLE_MAX_COLUMN_PX: f32 = 448.0;
+
 /// The pair of fractions a boundary drag or key step produces: the left
 /// column takes `delta` from the right, both clamped to the floor while
 /// their sum stays constant.
@@ -1371,6 +1396,7 @@ impl MarkdownView {
             veil: RefCell::new(RowVeil::default()),
             copied_code_blocks: Rc::new(RefCell::new(HashMap::new())),
             table_resize: Rc::new(RefCell::new(TableResize::default())),
+            table_scroll: RefCell::new(HashMap::new()),
             streaming: Cell::new(false),
         }
     }
@@ -1601,6 +1627,10 @@ pub struct Ctx<'a> {
     /// because the cache keys on it — a font change must not leak into flats
     /// built for the previous family.
     families: Fonts,
+    /// The opaque fill this render sits on — table edge fades dissolve into
+    /// it. Defaults to [`Palette::surface`]; hosts on another fill override
+    /// through [`Ctx::with_surface`].
+    surface: Hsla,
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
@@ -1686,6 +1716,7 @@ impl<'a> Ctx<'a> {
             palette,
             metrics,
             families: Fonts::default(),
+            surface: palette.surface,
             selection,
             search: None,
             link_handler: None,
@@ -1873,6 +1904,14 @@ impl<'a> Ctx<'a> {
         self
     }
 
+    /// The fill the markdown renders on, when it isn't [`Palette::surface`] —
+    /// a raised user bubble, an inset comment card. Table edge fades
+    /// dissolve into it.
+    pub fn with_surface(mut self, surface: Hsla) -> Self {
+        self.surface = surface;
+        self
+    }
+
     fn with_cache(&self, view: &'a MarkdownView) -> Self {
         if *view.reference_context.borrow() != self.reference_context {
             *view.reference_context.borrow_mut() = self.reference_context.clone();
@@ -1884,6 +1923,7 @@ impl<'a> Ctx<'a> {
             palette: self.palette,
             metrics: self.metrics,
             families: self.families.clone(),
+            surface: self.surface,
             selection: self.selection.clone(),
             search: self.search.clone(),
             link_handler: self.link_handler.clone(),
@@ -3954,19 +3994,33 @@ fn render_table(
     if columns == 0 {
         return div().into_any_element();
     }
-    // The table's base ordinal doubles as its resize-state key: stable across
-    // re-renders, unique within the row.
+    // The table's base ordinal doubles as its resize-state and scroll-handle
+    // key: stable across re-renders, unique within the row.
     let table_id = ctx.next_ordinal.get();
     let resize = ctx.cache.map(|view| view.table_resize.clone());
+    let scroll = ctx.cache.map(|view| {
+        view.table_scroll
+            .borrow_mut()
+            .entry(table_id)
+            .or_default()
+            .clone()
+    });
+    let estimates = column_estimates(header, rows, columns, table_text_size(ctx));
     let widths = resize
         .as_ref()
         .and_then(|state| state.borrow().widths.get(&table_id).cloned())
         .filter(|stored| stored.len() == columns)
-        .unwrap_or_else(|| column_widths(header, rows, columns));
+        .unwrap_or_else(|| column_widths(&estimates, columns));
 
+    // The table is a strip laid out at its natural width — the sum of the
+    // column estimates — inside a horizontal scrollport. Wider than the row
+    // it scrolls; narrower, `min_w_full` still fills it. `flex_none` keeps
+    // the scrollport's flex layout from shrinking the strip back to the
+    // viewport.
     let mut table = div()
-        .w_full()
-        .min_w_0()
+        .w(px(estimates.iter().sum::<f32>()))
+        .min_w_full()
+        .flex_none()
         .relative()
         .rounded(px(10.0))
         .border(hairline())
@@ -4015,7 +4069,38 @@ fn render_table(
         }
         table = table.child(table_resize_listeners(table_id, state));
     }
-    table.into_any_element()
+
+    // Axis-locked so a vertical wheel gesture over the table keeps scrolling
+    // the transcript instead of dragging the table sideways.
+    let mut viewport = div()
+        .id(SharedString::from(format!(
+            "md-table-scroll-{table_id}-{}",
+            ctx.row
+        )))
+        .w_full()
+        .min_w_0()
+        .restrict_scroll_to_axis()
+        .overflow_x_scroll()
+        .child(table);
+    if let Some(handle) = &scroll {
+        viewport = viewport.track_scroll(handle);
+    }
+
+    let mut outer = div().w_full().min_w_0().relative().child(viewport);
+    if let Some(handle) = scroll {
+        outer = outer
+            .child(scrollbar::edge_fade(
+                HorizontalScroll(handle.clone()),
+                FadeEdge::Left,
+                ctx.surface,
+            ))
+            .child(scrollbar::edge_fade(
+                HorizontalScroll(handle),
+                FadeEdge::Right,
+                ctx.surface,
+            ));
+    }
+    outer.into_any_element()
 }
 
 /// The pointer target over one column boundary: a 9px strip centered on the
@@ -4200,9 +4285,13 @@ fn table_row(
             div()
                 .w(relative(widths.get(index).copied().unwrap_or(0.0)))
                 .min_w_0()
+                // Content-sized columns do not wrap: text that outgrows its
+                // share truncates to an ellipsis, and the table's horizontal
+                // scroll reveals the rest.
+                .truncate()
                 .px(px(9.0))
                 .py(px(6.0))
-                .text_size(px((ctx.metrics.text_size - 0.5).max(12.5)))
+                .text_size(px(table_text_size(ctx)))
                 .line_height(px(ctx.metrics.line_height - 2.0))
                 .map(|element| match alignment {
                     TableAlign::Left => element,
@@ -4215,15 +4304,21 @@ fn table_row(
     row
 }
 
-/// Content-proportional column widths as fractions of the table, floored so a
-/// narrow column stays readable.
-fn column_widths(
+/// The slightly reduced text size table cells render at.
+fn table_text_size(ctx: &Ctx) -> f32 {
+    (ctx.metrics.text_size - 0.5).max(12.5)
+}
+
+/// Natural column widths in px: each column's longest cell in characters
+/// times an average advance, plus cell padding — capped so one outsize cell
+/// cannot stretch the scrolled table without bound. What the cap cuts, the
+/// cell's ellipsis covers.
+fn column_estimates(
     header: &[Vec<InlineRun>],
     rows: &[Vec<Vec<InlineRun>>],
     columns: usize,
+    text_size: f32,
 ) -> Vec<f32> {
-    const MIN_FRACTION_SCALE: f32 = 0.55;
-
     let mut content = vec![0.0f32; columns];
     let mut note = |index: usize, cell: &Vec<InlineRun>| {
         if let Some(slot) = content.get_mut(index) {
@@ -4243,6 +4338,21 @@ fn column_widths(
         }
     }
 
+    let advance = text_size * TABLE_CHAR_EM;
+    content
+        .iter()
+        .map(|chars| (chars * advance + TABLE_CELL_PAD_PX).min(TABLE_MAX_COLUMN_PX))
+        .collect()
+}
+
+/// Content-proportional column widths as fractions of the table, floored so a
+/// narrow column stays readable. `estimates` is each column's natural-width
+/// estimate, so the fractions come out as shares of the table's natural
+/// width.
+fn column_widths(estimates: &[f32], columns: usize) -> Vec<f32> {
+    const MIN_FRACTION_SCALE: f32 = 0.55;
+
+    let content = estimates;
     let even = 1.0 / columns as f32;
     let floor = even * MIN_FRACTION_SCALE;
     if content.iter().sum::<f32>() <= 0.0 {
@@ -5442,8 +5552,7 @@ mod tests {
 
     #[test]
     fn column_widths_are_content_proportional_and_floored() {
-        let header = vec![runs_of("id"), runs_of("a much longer description column")];
-        let widths = column_widths(&header, &[], 2);
+        let widths = column_widths(&[30.0, 200.0], 2);
         assert!(widths[1] > widths[0], "wider content gets a wider column");
         // The floor survives the fill, and the fractions still sum to one.
         let floor = 0.55 / 2.0;
@@ -5454,12 +5563,110 @@ mod tests {
         assert!((widths.iter().sum::<f32>() - 1.0).abs() < 1e-4);
 
         // A column that is merely narrow, not starved, stays proportional.
-        let balanced = column_widths(&[runs_of("aaaa"), runs_of("bbbbbb")], &[], 2);
+        let balanced = column_widths(&[40.0, 60.0], 2);
         assert!((balanced[0] - 0.4).abs() < 1e-3, "{balanced:?}");
 
-        // An empty table falls back to even columns.
-        let even = column_widths(&[], &[], 3);
+        // An empty estimate falls back to even columns.
+        let even = column_widths(&[0.0, 0.0, 0.0], 3);
         assert!(even.iter().all(|width| (width - 1.0 / 3.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn column_estimates_grow_with_content_and_cap() {
+        let header = vec![runs_of("id"), runs_of(&"x".repeat(2000))];
+        let estimates = column_estimates(&header, &[], 2, 13.5);
+        assert!(estimates[0] < estimates[1]);
+        // The degenerate column caps instead of demanding its full length.
+        assert_eq!(estimates[1], TABLE_MAX_COLUMN_PX);
+        // Padding alone keeps an empty column measurable.
+        let empty = column_estimates(&[], &[], 2, 13.5);
+        assert_eq!(empty, vec![TABLE_CELL_PAD_PX, TABLE_CELL_PAD_PX]);
+    }
+
+    struct TableHarness {
+        palette: Palette,
+        markdown: MarkdownView,
+        width: f32,
+    }
+
+    impl Render for TableHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let ctx = Ctx::new(
+                "table-row",
+                &self.palette,
+                Metrics::BODY,
+                TranscriptSelection::default(),
+            );
+            div()
+                .w(px(self.width))
+                .child(markdown(&self.markdown, &ctx).unwrap_or_else(|| div().into_any_element()))
+        }
+    }
+
+    fn table_scroll_handle(
+        view: &gpui::Entity<TableHarness>,
+        cx: &gpui::VisualTestContext,
+    ) -> ScrollHandle {
+        view.read_with(cx, |harness, _| {
+            harness
+                .markdown
+                .table_scroll
+                .borrow()
+                .values()
+                .next()
+                .cloned()
+                .unwrap()
+        })
+    }
+
+    #[gpui::test]
+    fn a_wide_table_scrolls_horizontally_instead_of_squishing(cx: &mut gpui::TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text(
+            "| name | description | status |\n| --- | --- | --- |\n| alpha | a fairly long piece of descriptive text here | green |\n| beta | another generously worded description column | red |\n",
+            false,
+        );
+        let (view, cx) = cx.add_window_view(|_, _| TableHarness {
+            palette: palette(),
+            markdown,
+            width: 320.0,
+        });
+        let handle = table_scroll_handle(&view, cx);
+        // The strip outgrows the 320px row, and the scrollport reports the
+        // overflow rather than compressing the columns into it.
+        assert!(
+            handle.max_offset().x > px(50.0),
+            "{:?}",
+            handle.max_offset()
+        );
+        let strip = handle
+            .bounds_for_item(0)
+            .expect("the table strip is the scrollport's tracked child");
+        assert!(
+            strip.size.width > handle.bounds().size.width,
+            "{strip:?} vs {:?}",
+            handle.bounds()
+        );
+    }
+
+    #[gpui::test]
+    fn a_narrow_table_still_fills_the_row(cx: &mut gpui::TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text("| a | b |\n| --- | --- |\n| 1 | 2 |\n", false);
+        let (view, cx) = cx.add_window_view(|_, _| TableHarness {
+            palette: palette(),
+            markdown,
+            width: 320.0,
+        });
+        let handle = table_scroll_handle(&view, cx);
+        assert_eq!(handle.max_offset().x, px(0.0));
+        // Nothing to scroll, so `min_w_full` keeps the strip at the row's
+        // width rather than shrink-wrapping to its two short cells.
+        let strip = handle.bounds_for_item(0).unwrap();
+        assert!(
+            (f32::from(strip.size.width) - 320.0).abs() < 1.0,
+            "{strip:?}"
+        );
     }
 
     #[test]

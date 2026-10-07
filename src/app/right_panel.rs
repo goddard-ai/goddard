@@ -5228,6 +5228,11 @@ impl Waku {
                     {
                         ctx = ctx.with_annotation_labels(set.len());
                     }
+                    if message.role == MessageRole::User {
+                        // Tables in a user bubble fade into its raised fill,
+                        // not the panel surface.
+                        ctx = ctx.with_surface(theme.raised);
+                    }
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(

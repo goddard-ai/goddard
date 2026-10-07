@@ -199,6 +199,29 @@ impl Scrollable for ScrollHandle {
     }
 }
 
+/// A `ScrollHandle` read along its horizontal axis, so a surface that
+/// scrolls in x can feed the [`Scrollable`] reads the edge fades make.
+pub struct HorizontalScroll(pub ScrollHandle);
+
+impl Scrollable for HorizontalScroll {
+    fn viewport_height(&self) -> Pixels {
+        self.0.bounds().size.width
+    }
+
+    fn max_offset(&self) -> Pixels {
+        self.0.max_offset().x
+    }
+
+    fn scrolled(&self) -> Pixels {
+        -self.0.offset().x
+    }
+
+    fn scroll_to(&self, offset: Pixels) {
+        let y = self.0.offset().y;
+        self.0.set_offset(Point::new(-offset, y));
+    }
+}
+
 /// A surface chooses its scrollable per render — a file's preview is a
 /// `ListState`, its source view a `ScrollHandle`.
 impl Scrollable for Box<dyn Scrollable> {
@@ -245,10 +268,14 @@ fn arm_fade_wake(state: &Rc<ScrollbarState>, view: gpui::EntityId, delay: Durati
 pub enum FadeEdge {
     Top,
     Bottom,
+    Left,
+    Right,
 }
 
 /// A paint-only cue at an edge with content outside the viewport. Place after
 /// the scrollable child so its freshly laid-out bounds decide visibility.
+/// `Left`/`Right` expect a horizontally [`Scrollable`] surface such as
+/// [`HorizontalScroll`].
 pub fn edge_fade(
     scroll: impl Scrollable + 'static,
     side: FadeEdge,
@@ -263,8 +290,8 @@ pub fn edge_fade(
             // it reads as a shadow, not a fade.
             let visible = surface.a >= 1.0
                 && match side {
-                    FadeEdge::Top => scrolled > px(0.5),
-                    FadeEdge::Bottom => max_offset - scrolled > px(0.5),
+                    FadeEdge::Top | FadeEdge::Left => scrolled > px(0.5),
+                    FadeEdge::Bottom | FadeEdge::Right => max_offset - scrolled > px(0.5),
                 };
             visible.then(|| {
                 let transparent = surface.opacity(0.0);
@@ -279,6 +306,16 @@ pub fn edge_fade(
                         linear_color_stop(transparent, 0.0),
                         linear_color_stop(surface, 1.0),
                     ),
+                    FadeEdge::Left => linear_gradient(
+                        90.0,
+                        linear_color_stop(surface, 0.0),
+                        linear_color_stop(transparent, 1.0),
+                    ),
+                    FadeEdge::Right => linear_gradient(
+                        90.0,
+                        linear_color_stop(transparent, 0.0),
+                        linear_color_stop(surface, 1.0),
+                    ),
                 };
                 fill(bounds, background)
             })
@@ -290,13 +327,20 @@ pub fn edge_fade(
         },
     )
     .absolute()
+    .top_0()
     .left_0()
-    .w_full()
-    .h(px(18.0))
-    .when(matches!(side, FadeEdge::Top), |element| element.top_0())
+    .when(
+        matches!(side, FadeEdge::Top | FadeEdge::Bottom),
+        |element| element.w_full().h(px(18.0)),
+    )
+    .when(
+        matches!(side, FadeEdge::Left | FadeEdge::Right),
+        |element| element.h_full().w(px(18.0)),
+    )
     .when(matches!(side, FadeEdge::Bottom), |element| {
         element.bottom_0()
     })
+    .when(matches!(side, FadeEdge::Right), |element| element.right_0())
 }
 
 /// An overlay vertical scrollbar pinned to the right edge of its parent.

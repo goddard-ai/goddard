@@ -2127,7 +2127,10 @@ impl Waku {
                         ctx = ctx.with_file_link_root(
                             self.selected_workspace_path()
                                 .map(std::path::Path::to_path_buf),
-                        );
+                        )
+                        // Tables in a user bubble fade into its raised fill,
+                        // not the transcript surface.
+                        .with_surface(theme.raised);
                     }
                     // Planning chips paint the compass everywhere. On a
                     // boss surface — the chat, a planning session, a
