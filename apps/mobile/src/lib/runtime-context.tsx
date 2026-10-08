@@ -11,6 +11,7 @@ import type {
 } from '@waku/client';
 import {
   continuationPrompt,
+  dropQueuedMessage,
   managedGoalDecision,
   managedGoalEvaluation,
   managedGoalOperation,
@@ -50,6 +51,7 @@ import {
   beginTurn,
   createSession,
   providerPromptForSubmission,
+  queueSteerSubmission,
   queueSubmission,
   sessionBusy,
   sessionCwd,
@@ -334,10 +336,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
     drainingQueues.current.add(sessionId);
     try {
-      const dequeued = {
-        ...latest,
-        queued_messages: latest.queued_messages?.filter((message) => message.id !== next.id),
-      };
+      // A parked steer's preview message leaves the transcript with its
+      // queue entry — the delivered turn writes its own row.
+      const dequeued = dropQueuedMessage(latest, next.id);
       cacheSession(dequeued);
       const persisted = await persistOrdered(dequeued);
       await sendPromptRef.current?.(
@@ -431,7 +432,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       } else if (event.event.kind === 'steerRejected') {
         const pending = pendingSteers.current.get(session.id)?.shift();
         if (pending) {
-          state.current = queueSubmission(
+          // A rejection behind a live turn parks behind a transcript
+          // preview; one landing after settle keeps the queue chip.
+          state.current = (sessionBusy(state.current) ? queueSteerSubmission : queueSubmission)(
             state.current,
             pending.displayContent,
             clock,
@@ -798,15 +801,32 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       ? providerPromptForSubmission(prompt, attachments)
       : providerPromptOverride.trim();
     if (!client || daemon.phase !== 'connected') throw new Error('Goddard daemon is disconnected');
+    const latest = queryClient.getQueryData<AgentSession>(
+      daemonKeys.session(daemon.activeProfile?.id ?? '', session.id),
+    ) ?? session;
+    // A steer into a settled session is just a send — the same retargeting
+    // a desktop steer takes.
+    if (!sessionBusy(latest)) {
+      await sendPrompt(latest, prompt, attachments, providerPrompt);
+      return;
+    }
     const runtime = entries.current.get(session.id);
-    if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(session)) {
-      throw new Error('This task can no longer accept a steer. Try again when it is running.');
+    // The provider can't fold a steer into the running turn right now —
+    // assistant text is streaming or it can't steer at all — so the message
+    // parks in the follow-up queue behind a transcript preview that trails
+    // the working strip. Delivery is unchanged: the parked entry still
+    // drains when the turn settles.
+    if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(latest)) {
+      const parked = queueSteerSubmission(latest, prompt, clock, attachments, providerPrompt);
+      cacheSession(parked);
+      await persistOrdered(parked);
+      return;
     }
     const pending = pendingSteers.current.get(session.id) ?? [];
     pending.push({ providerPrompt, displayContent: prompt, attachments });
     pendingSteers.current.set(session.id, pending);
     await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId);
-  }, [daemon.client, daemon.phase, sendPrompt]);
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, persistOrdered, queryClient, sendPrompt]);
 
   const createTask = useCallback(async (
     projectId: string,
@@ -1206,10 +1226,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       await client.request({ type: 'cancelQueuedPrompt', queuedMessageId: messageId }, sessionId);
       return;
     }
-    const next = {
-      ...current,
-      queued_messages: (current.queued_messages ?? []).filter((item) => item.id !== messageId),
-    };
+    const next = dropQueuedMessage(current, messageId);
     cacheSession(next);
     await persistOrdered(next);
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient]);

@@ -8,7 +8,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
-import { attachmentPromptToken, queuedMessageIsManagedGoal } from '@waku/client';
+import { appendQueuedSteerPreview, attachmentPromptToken, queuedMessageIsManagedGoal } from '@waku/client';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -174,6 +174,22 @@ export function queueSubmission(
       },
     ],
   };
+}
+
+/** A steer the provider can't take mid-turn parks in the follow-up queue
+ * behind a transcript preview — a user message carrying the entry's id that
+ * trails the working strip — instead of holding a queue chip. Mirrors
+ * desktop's `enqueue_steer_follow_up_submission`. */
+export function queueSteerSubmission(
+  session: AgentSession,
+  prompt: string,
+  clock: MobileRuntimeClock,
+  attachments: MessageAttachment[] = [],
+  providerPromptOverride?: string,
+): AgentSession {
+  const queued = queueSubmission(session, prompt, clock, attachments, providerPromptOverride);
+  const entry = queued.queued_messages?.at(-1);
+  return entry ? appendQueuedSteerPreview(queued, entry) : queued;
 }
 
 export function providerPromptForSubmission(

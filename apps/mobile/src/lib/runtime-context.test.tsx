@@ -166,13 +166,41 @@ describe('mobile runtime history', () => {
       .toMatchObject({ content: 'Review changes carefully', display_content: '/review changes' });
   });
 
-  test('rejects a steer while assistant text is streaming', async () => {
+  test('parks a steer while assistant text is streaming behind a transcript preview', async () => {
     const f = fixture();
     f.queryClient.setQueryData(f.key, f.history);
     await f.runtime.attachSession(f.history);
-    await expect(f.runtime.steerPrompt(f.current(), 'Follow up')).rejects.toThrow('no longer accept a steer');
+    // The fixture's tail is still-streaming assistant text, so the provider
+    // can't take the steer — it parks instead of erroring or chipping.
+    await f.runtime.steerPrompt(f.current(), 'Follow up');
     expect(f.commands.some((command) => command.type === 'steer')).toBe(false);
-    expect(f.current().queued_messages?.at(-1)?.content).not.toBe('Follow up');
+    const queued = f.current().queued_messages?.at(-1);
+    expect(queued?.content).toBe('Follow up');
+    expect(f.current().messages.at(-1)).toMatchObject({
+      id: queued?.id,
+      turn_id: null,
+      role: 'user',
+      content: 'Follow up',
+    });
+  });
+
+  test('a rejected steer parks behind a transcript preview too', async () => {
+    const f = fixture();
+    f.queryClient.setQueryData(f.key, f.history);
+    await f.runtime.attachSession(f.history);
+    // A new tool ends the fixture's streamed reply text, so the steer goes
+    // out live; the driver's rejection parks it.
+    f.emit('activity', { id: 'tool-1', kind: 'tool', title: 'Inspect', complete: false });
+    await f.runtime.steerPrompt(f.current(), 'Follow up');
+    expect(f.commands.some((command) => command.type === 'steer')).toBe(true);
+    f.emit('steerRejected', { message: 'Follow up', reason: 'busy' });
+    const queued = f.current().queued_messages?.at(-1);
+    expect(queued?.content).toBe('Follow up');
+    expect(f.current().messages.at(-1)).toMatchObject({
+      id: queued?.id,
+      role: 'user',
+      content: 'Follow up',
+    });
   });
 
   test('queues expanded command content without starting another provider turn', async () => {

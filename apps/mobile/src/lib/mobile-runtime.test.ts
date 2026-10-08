@@ -6,6 +6,7 @@ import {
   beginTurn,
   createSession,
   createResumedSession,
+  queueSteerSubmission,
   queueSubmission,
   runtimeEventAlreadyApplied,
   sessionBusy,
@@ -163,6 +164,43 @@ describe('mobile runtime projection', () => {
     }]);
     expect(queued.updated_at).toBe(99);
     expect(busy.queued_messages ?? []).toEqual([]);
+  });
+
+  test('parks a mid-turn steer behind a transcript preview sharing the entry id', () => {
+    let id = 0;
+    const busy = session({
+      status: 'working',
+      turns: [{
+        id: 'turn', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 10, completed_at: null, checkpoint: null,
+      }],
+      messages: [{
+        id: 'prompt', turn_id: 'turn', role: 'user', content: 'go', created_at: 1, streaming: false,
+      }],
+    });
+    const parked = queueSteerSubmission(busy, 'steer mid-turn', {
+      nowSeconds: () => 99,
+      randomUUID: () => `queued-${++id}`,
+    });
+    expect(parked.queued_messages).toEqual([{
+      id: 'queued-1',
+      content: 'steer mid-turn',
+      display_content: null,
+      attachments: [],
+      created_at: 99,
+    }]);
+    expect(parked.messages.at(-1)).toMatchObject({
+      id: 'queued-1',
+      turn_id: null,
+      role: 'user',
+      content: 'steer mid-turn',
+    });
+    // A plain queued follow-up keeps its chip and earns no preview.
+    const queued = queueSubmission(busy, 'follow up', {
+      nowSeconds: () => 99,
+      randomUUID: () => `queued-${++id}`,
+    });
+    expect(queued.messages).toEqual(busy.messages);
   });
 
   test('uses a hydrated turn to correct a lagging running status', () => {

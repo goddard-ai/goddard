@@ -616,6 +616,30 @@ export function turnAnswerStart<T>(
 }
 
 /**
+ * Split transcript rows into the message flow and parked-steer previews. A
+ * queue entry whose id a message carries is a steer the provider couldn't
+ * take mid-turn; its preview leaves the flow and trails the working
+ * indicator at the transcript's end — stacked in park order — instead of
+ * sitting where the message appended. Mirrors the parked-steer pull in the
+ * desktop's `folded_transcript_row_kinds` (src/app/transcript.rs).
+ */
+export function partitionPendingSteerRows<T>(
+  session: AgentSession,
+  rows: readonly T[],
+  messageId: (row: T) => string | null,
+): { flow: T[]; pendingSteers: T[] } {
+  const queuedIds = new Set((session.queued_messages ?? []).map((queued) => queued.id))
+  const flow: T[] = []
+  const pendingSteers: T[] = []
+  for (const row of rows) {
+    const id = messageId(row)
+    if (id !== null && queuedIds.has(id)) pendingSteers.push(row)
+    else flow.push(row)
+  }
+  return { flow, pendingSteers }
+}
+
+/**
  * The desktop attaches one footer to the terminal assistant part of each
  * settled turn. Its copy value is the complete visible answer, not merely the
  * final provider chunk, and its time is the turn completion time.

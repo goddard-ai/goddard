@@ -47,6 +47,7 @@ import {
   formatMessageTime,
   formatWorkingElapsed,
   isContextCompaction,
+  partitionPendingSteerRows,
   reasoningTitle,
   shouldVirtualizeActivityText,
   turnAnswerStart,
@@ -627,7 +628,15 @@ function buildTranscriptItems(
 ): TranscriptRenderItem[] {
   const turns = new Map(session.turns.map((turn) => [turn.id, turn]))
   const rawRows = transcriptRows(session)
-  const folds = turnFolds(session, rawRows)
+  // A steer parked mid-turn keeps a preview — a user message carrying the
+  // queue entry's id. Its row leaves the message flow and trails the working
+  // indicator at the transcript's end, stacked in park order.
+  const { flow, pendingSteers } = partitionPendingSteerRows(
+    session,
+    rawRows,
+    (row) => row.kind === 'message' ? row.message.id : null,
+  )
+  const folds = turnFolds(session, flow)
   const responseFooters = assistantResponseFooters(session)
   const inlineCheckpoints = new Map<number, NonNullable<AgentSession['turns'][number]['checkpoint']>>()
   const standaloneCheckpoints = new Map<string, NonNullable<AgentSession['turns'][number]['checkpoint']>>()
@@ -650,7 +659,7 @@ function buildTranscriptItems(
   }
   const items: TranscriptRenderItem[] = []
   let seenUserMessage = false
-  for (const row of rawRows) {
+  for (const row of flow) {
     const fold = folds.anchors.get(row.key)
     if (fold) {
       items.push({
@@ -765,6 +774,23 @@ function buildTranscriptItems(
     })
     }
   }
+  // Pending steers close the transcript, stacked in the order they parked.
+  // The first clears the working indicator like a follow-up prompt; the rest
+  // cluster tight the way back-to-back user messages do.
+  pendingSteers.forEach((row, index) => {
+    if (row.kind !== 'message') return
+    items.push({
+      kind: 'message',
+      key: row.key,
+      message: row.message,
+      first: false,
+      followUp: index === 0,
+      footer: null,
+      forkTurnCount: null,
+      rewindTurnCount: null,
+      checkpoint: null,
+    })
+  })
   items.push({ kind: 'tail', key: 'tail' })
   return items
 }

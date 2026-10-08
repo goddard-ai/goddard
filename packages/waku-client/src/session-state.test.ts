@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 
-import type { AgentSession } from "./generated";
-import { sessionAcceptsImmediateSteer, sessionProviderLocked } from "./session-state";
+import type { AgentSession, QueuedMessage } from "./generated";
+import {
+  appendQueuedSteerPreview,
+  dropQueuedMessage,
+  queuedMessageIsPendingSteer,
+  sessionAcceptsImmediateSteer,
+  sessionProviderLocked,
+} from "./session-state";
 
 function session(overrides: Partial<AgentSession>): AgentSession {
   return {
@@ -52,4 +58,46 @@ test("steering reaches thinking and tools, but queues during assistant text", ()
   running.status = "working";
   running.turns[0]!.provider_turn_started = false;
   expect(sessionAcceptsImmediateSteer(running)).toBe(false);
+});
+
+test("a parked steer preview shares the queue entry's id until it drains", () => {
+  const queued = { id: "queued-1", content: "steer here", created_at: 7 } as QueuedMessage;
+  const base = session({
+    messages: [{ id: "prompt", role: "user" } as never],
+    queued_messages: [queued],
+  });
+
+  expect(queuedMessageIsPendingSteer(base, queued)).toBe(false);
+
+  const parked = appendQueuedSteerPreview(base, queued);
+  const preview = parked.messages.at(-1)!;
+  expect(preview).toMatchObject({
+    id: "queued-1",
+    turn_id: null,
+    role: "user",
+    content: "steer here",
+  });
+  expect(queuedMessageIsPendingSteer(parked, queued)).toBe(true);
+  // Idempotent — a second append can't duplicate the row.
+  expect(appendQueuedSteerPreview(parked, queued)).toBe(parked);
+  // A hidden entry stays provider-facing: no preview.
+  expect(appendQueuedSteerPreview(base, { ...queued, hidden: true })).toBe(base);
+});
+
+test("dropping a queued message clears its preview row too", () => {
+  const other = { id: "queued-2", content: "follow up", created_at: 8 } as QueuedMessage;
+  const parked = appendQueuedSteerPreview(session({
+    messages: [
+      { id: "prompt", role: "user" } as never,
+      { id: "answer", role: "assistant" } as never,
+    ],
+  }), { id: "queued-1", content: "steer here", created_at: 7 } as QueuedMessage);
+  const queued = { ...parked, queued_messages: [
+    { id: "queued-1", content: "steer here", created_at: 7 } as QueuedMessage,
+    other,
+  ] };
+
+  const dropped = dropQueuedMessage(queued, "queued-1");
+  expect(dropped.messages.map((message) => message.id)).toEqual(["prompt", "answer"]);
+  expect(dropped.queued_messages).toEqual([other]);
 });

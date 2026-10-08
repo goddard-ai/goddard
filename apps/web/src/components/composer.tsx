@@ -6,6 +6,7 @@ import {
   atomPayloadContent,
   atomVisibleText,
   isAgentQueuedMessage,
+  queuedMessageIsPendingSteer,
   sessionAcceptsImmediateSteer,
 } from '@waku/client'
 import type {
@@ -577,7 +578,7 @@ export function Composer({
   }
 
   async function steer() {
-    if (!hasDraft || !canSteer) return
+    if (!hasDraft) return
     const submittedPrompt = prompt
     const grantRename = parseRenameSubmission(submittedPrompt) === null
     if (!grantRename && executeLocalComposerCommand()) {
@@ -712,7 +713,10 @@ export function Composer({
     }
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
-    if ((event.metaKey || event.ctrlKey) && canSteer) void steer()
+    // The steer modifier expresses steer intent even when the provider can't
+    // take one mid-turn — a busy session parks it behind the transcript's
+    // working indicator rather than queueing a card row.
+    if ((event.metaKey || event.ctrlKey) && busy) void steer()
     else void submit()
   }
 
@@ -1719,8 +1723,11 @@ function QueuedMessages({
 }) {
   const { t } = useI18n()
   // Hidden entries are provider-facing text — internal nudges and goal
-  // reminders — and never render a chip.
-  const messages = (session.queued_messages ?? []).filter((message) => !message.hidden)
+  // reminders — and never render a chip. Neither do parked steers: their
+  // preview trails the transcript's working indicator until delivery.
+  const messages = (session.queued_messages ?? []).filter((message) =>
+    !message.hidden && !queuedMessageIsPendingSteer(session, message),
+  )
   if (!messages.length) return null
   return (
     <div className="px-3.5">

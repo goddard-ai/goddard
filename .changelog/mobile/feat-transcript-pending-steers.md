@@ -1,0 +1,1 @@
+- A steer the agent can't take mid-turn now parks as a pending message at the end of the transcript — below the working strip — instead of occupying the follow-up queue above the composer.

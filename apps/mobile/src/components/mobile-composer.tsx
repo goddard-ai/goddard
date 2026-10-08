@@ -5,7 +5,7 @@ import type {
   PendingUserInput,
   UserInputAnswer,
 } from '@waku/client';
-import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage, sessionAcceptsImmediateSteer } from '@waku/client';
+import { annotationBubbleContent, annotationPromptPrefix, attachmentPromptToken, isAgentQueuedMessage, queuedMessageIsPendingSteer, sessionAcceptsImmediateSteer } from '@waku/client';
 import { atomVisibleText } from '@waku/client/transcript-presentation';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
@@ -219,8 +219,11 @@ export function MobileComposer({
     : runtimeError;
   const visibleError = visibleLocalError || visibleRuntimeError;
   // Hidden entries are provider-facing text — internal nudges and goal
-  // reminders — and never render a chip.
-  const queued = (session.queued_messages ?? []).filter((message) => !message.hidden);
+  // reminders — and never render a chip. Neither do parked steers: their
+  // preview trails the transcript's working strip until delivery.
+  const queued = (session.queued_messages ?? []).filter(
+    (message) => !message.hidden && !queuedMessageIsPendingSteer(session, message),
+  );
   const taskState = useTaskState();
   const project = taskState.data?.projects.find((item) => item.id === session.project_id);
 

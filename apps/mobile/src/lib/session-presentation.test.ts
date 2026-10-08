@@ -12,6 +12,7 @@ import {
   findActivityBlock,
   forkableTurnIds,
   groupSessions,
+  pendingSteerRows,
   relativeSessionTime,
   rewindableTurnIds,
   sessionDateGroup,
@@ -309,6 +310,43 @@ describe('mobile session presentation', () => {
     const fromAnswer = expandTranscriptRows(pipeline, md, 2);
     expect(fromAnswer.map((row) => row.key).slice(0, 2)).toEqual(['md:a1.0', 'md:a1.1']);
     expect(fromAnswer.map((row) => row.topGap).slice(0, 2)).toEqual([12, 12]);
+  });
+
+  test('parked steer previews leave the message flow and close the transcript', () => {
+    const current = session({
+      status: 'working',
+      turns: [turn({ id: 'turn', status: 'running', started_at: 10, completed_at: null })],
+      messages: [
+        { id: 'user', turn_id: 'turn', role: 'user', content: 'go', created_at: 1, streaming: false },
+        { id: 'agent', turn_id: 'turn', role: 'assistant', content: 'Still streaming', created_at: 2, streaming: true },
+        // Preview user messages carrying their queue entries' ids — parked
+        // in send order behind the running turn.
+        { id: 'queued-1', turn_id: null, role: 'user', content: 'first steer', created_at: 3, streaming: false },
+        { id: 'queued-2', turn_id: null, role: 'user', content: 'second steer', created_at: 4, streaming: false },
+      ],
+      queued_messages: [
+        { id: 'queued-1', content: 'first steer', created_at: 3 },
+        { id: 'queued-2', content: 'second steer', created_at: 4 },
+        // A plain follow-up has no preview message — it keeps its chip and
+        // its place in the queue.
+        { id: 'queued-3', content: 'plain follow-up', created_at: 5 },
+      ],
+    });
+    expect(buildTranscriptRows(current).map((row) => row.key)).toEqual([
+      'user:user',
+      'md:agent.0',
+    ]);
+    expect(pendingSteerRows(current).map((row) => row.key)).toEqual([
+      'user:queued-1',
+      'user:queued-2',
+    ]);
+    // Once the entry drains, its preview leaves with it — nothing lingers.
+    const drained = {
+      ...current,
+      messages: current.messages.filter((message) => message.id !== 'queued-1'),
+      queued_messages: (current.queued_messages ?? []).filter((queued) => queued.id !== 'queued-1'),
+    };
+    expect(pendingSteerRows(drained).map((row) => row.key)).toEqual(['user:queued-2']);
   });
 
   test('stabilizes row identity across commits so memoized rows bail out', () => {

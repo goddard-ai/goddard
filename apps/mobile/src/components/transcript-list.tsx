@@ -37,6 +37,7 @@ import { useTheme } from '@/hooks/use-theme';
 import {
   buildTranscriptPipeline,
   expandTranscriptRows,
+  pendingSteerRows,
   stabilizeTranscriptRows,
   type TranscriptRow,
 } from '@/lib/session-presentation';
@@ -158,6 +159,9 @@ export function TranscriptList({
 
   const freshRows = useMemo(() => expandTranscriptRows(pipeline, md, start), [md, pipeline, start]);
   const rows = useStableRows(freshRows);
+  // Steers parked behind the live turn trail the working strip inside the
+  // always-mounted tail child — parked order, one row each.
+  const pendingSteers = useMemo(() => pendingSteerRows(session), [session]);
 
   // Messages already present when this list first rendered (or hydrated)
   // show their markdown at full opacity — only content streamed while
@@ -538,9 +542,23 @@ export function TranscriptList({
           onTouchCancel={onTouchEnd}
           onTouchEnd={onTouchEnd}
           onTouchStart={onTouchStart}>
-          {/* Child 0, always mounted: the native anchor while pinned. */}
+          {/* Child 0, always mounted: the native anchor while pinned. Its
+              contents are un-inverted, so the strip reads above the pending
+              steer previews that close the transcript. */}
           <View style={[styles.inverted, styles.column]}>
             {running ? <WorkingStrip session={session} /> : null}
+            {pendingSteers.map((row) => (
+              <View key={row.key} style={{ paddingTop: row.topGap }}>
+                <TranscriptRowView
+                  markdownStyles={markdownStyles}
+                  md={md}
+                  row={row}
+                  seeded
+                  veils={veils}
+                  onToggleFold={toggleFold}
+                />
+              </View>
+            ))}
           </View>
           {rows.map((_, reversed) => {
             const row = rows[rows.length - 1 - reversed]!;

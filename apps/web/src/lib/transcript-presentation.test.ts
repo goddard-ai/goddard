@@ -13,6 +13,7 @@ import {
   activityTextRows,
   assistantResponseFooters,
   fencedCode,
+  partitionPendingSteerRows,
   reasoningTitle,
   shouldVirtualizeActivityText,
   turnAnswerStart,
@@ -256,6 +257,41 @@ describe('desktop transcript language', () => {
     session.provider_cursor = { provider: 'codex', threadId: 'thread' }
     session.status = 'working'
     expect(userMessageRewindTurnCount(session, firstMessage, new Set([0]))).toBeNull()
+  })
+
+  test('pulls parked steer previews out of the message flow in park order', () => {
+    const session = transcriptSession()
+    session.status = 'working'
+    session.turns[0]!.status = 'running'
+    // Previews are user messages carrying their queue entry's id, appended
+    // as the steer parked — block rows between them stay in the flow.
+    session.messages.push(
+      { ...message('user', 'first steer', 4), id: 'queued-1', turn_id: null },
+      { ...message('user', 'second steer', 5), id: 'queued-2', turn_id: null },
+    )
+    session.queued_messages = [
+      { id: 'queued-1', content: 'first steer', created_at: 104 },
+      { id: 'queued-2', content: 'second steer', created_at: 105 },
+      { id: 'queued-3', content: 'plain follow-up', created_at: 106 },
+    ]
+
+    const rows = [
+      ...session.transcript_blocks.map(() => ({ kind: 'block' as const, id: null })),
+      ...session.messages.map((entry) => ({ kind: 'message' as const, id: entry.id })),
+    ]
+    const { flow, pendingSteers } = partitionPendingSteerRows(
+      session,
+      rows,
+      (row) => row.id,
+    )
+    expect(flow.map((row) => row.id)).toEqual([
+      null,
+      'message-0',
+      'message-1',
+      'message-2',
+      'message-3',
+    ])
+    expect(pendingSteers.map((row) => row.id)).toEqual(['queued-1', 'queued-2'])
   })
 })
 

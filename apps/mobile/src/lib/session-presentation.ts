@@ -366,6 +366,10 @@ export function buildTranscriptPipeline(
 ): TranscriptPipelineRow[] {
   const runningTurnId = session.turns.find((turn) => turn.status === 'running')?.id ?? null;
   const latestBlock = session.transcript_blocks.at(-1);
+  // A steer parked mid-turn keeps a preview — a user message carrying the
+  // queue entry's id. Its row leaves the message flow; the list mounts it
+  // below the working strip instead (see `pendingSteerRows`).
+  const parkedSteerIds = new Set((session.queued_messages ?? []).map((queued) => queued.id));
 
   const blocksByAnchor = new Map<number, Array<{ block: TranscriptBlock; index: number }>>();
   session.transcript_blocks.forEach((block, index) => {
@@ -411,7 +415,7 @@ export function buildTranscriptPipeline(
     const message = session.messages[messageIndex];
     // A hidden prompt stays in `session.messages` so every client's
     // projection names the same ids — it just renders no row.
-    if (message && !message.hidden) {
+    if (message && !message.hidden && !parkedSteerIds.has(message.id)) {
       tag({
         row: {
           kind: 'message',
@@ -474,6 +478,25 @@ export function buildTranscriptPipeline(
   for (const [turnId, row] of answerRowByTurn) {
     const turn = turnsById.get(turnId);
     if (turn?.completed_at && !row.message.streaming) row.footerTimestamp = turn.completed_at;
+  }
+  return rows;
+}
+
+/** Pending steer previews — user messages parked behind a live turn share
+ * their queue entry's id. They close the transcript under the working
+ * strip, stacked in park order. Mirrors the parked rows the desktop fold
+ * appends after its working indicator. */
+export function pendingSteerRows(session: AgentSession): TranscriptRow[] {
+  const queuedIds = new Set((session.queued_messages ?? []).map((queued) => queued.id));
+  if (!queuedIds.size) return [];
+  const rows: TranscriptRow[] = [];
+  for (const message of session.messages) {
+    if (!queuedIds.has(message.id)) continue;
+    if (message.role === 'system') {
+      rows.push({ kind: 'system', key: `system:${message.id}`, turnId: null, message, topGap: GAP_TURN });
+    } else {
+      rows.push({ kind: 'user', key: `user:${message.id}`, turnId: null, message, topGap: GAP_TURN });
+    }
   }
   return rows;
 }

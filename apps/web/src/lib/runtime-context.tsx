@@ -11,8 +11,10 @@ import type {
   UserInputAnswer,
 } from '@waku/client'
 import {
+  appendQueuedSteerPreview,
   attachmentPromptToken,
   continuationPrompt,
+  dropQueuedMessage,
   managedGoalDecision,
   managedGoalEvaluation,
   managedGoalOperation,
@@ -449,12 +451,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             await managedGoalSettleRef.current?.(latest)
             return
           }
-          const dequeued = {
-            ...latest,
-            queued_messages: latest.queued_messages?.filter(
-              (message) => message.id !== nextQueued.id,
-            ),
-          }
+          // A parked steer's preview message leaves the transcript with its
+          // queue entry — the delivered turn writes its own row.
+          const dequeued = dropQueuedMessage(latest, nextQueued.id)
           cacheSession(dequeued)
           const persisted = await persistOrdered(dequeued)
           await sendPromptRef.current?.(
@@ -543,7 +542,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         } else if (event.event.kind === 'steerRejected') {
           const pending = pendingSteers.current.get(session.id)?.shift()
           if (pending) {
-            current = queueSubmission(
+            // A rejection behind a live turn parks behind a transcript
+            // preview; one landing after settle keeps the queue row.
+            const busy = ['connecting', 'working', 'waiting', 'background'].includes(current.status)
+            current = (busy ? queueSteerSubmission : queueSubmission)(
               current,
               pending.displayContent,
               pending.providerPrompt,
@@ -1171,16 +1173,33 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             attachments.map(attachmentPromptToken).join(' '),
           ].filter(Boolean).join(' ')
         : providerPromptOverride.trim()
+      const current = (config
+        ? queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, session.id))
+        : undefined) ?? session
+      // A steer into a settled session is just a send — the same
+      // retargeting a desktop steer takes.
+      if (!['connecting', 'working', 'waiting', 'background'].includes(current.status)) {
+        await sendPrompt(current, prompt, attachments, providerPrompt)
+        return
+      }
       const runtime = entries.current.get(session.id)
-      if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(session)) {
-        throw new Error('This task can no longer accept a steer. Try again when it is running.')
+      // The provider can't fold a steer into the running turn right now —
+      // assistant text is streaming or it can't steer at all — so the
+      // message parks in the follow-up queue behind a transcript preview
+      // that trails the working indicator. Delivery is unchanged: the
+      // parked entry still drains when the turn settles.
+      if (!runtime || !runtime.supportsSteer || !sessionAcceptsImmediateSteer(current)) {
+        const parked = queueSteerSubmission(current, prompt, providerPrompt, attachments)
+        cacheSession(parked)
+        await persistOrdered(parked)
+        return
       }
       const pending = pendingSteers.current.get(session.id) ?? []
       pending.push({ providerPrompt, displayContent: prompt, attachments })
       pendingSteers.current.set(session.id, pending)
       await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId)
     },
-    [client, phase, sendPrompt],
+    [client, phase, config, queryClient, cacheSession, persistOrdered, sendPrompt],
   )
 
   const removeQueuedMessage = useCallback(
@@ -1203,10 +1222,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         )
         return
       }
-      const next = {
-        ...session,
-        queued_messages: (session.queued_messages ?? []).filter((queued) => queued.id !== messageId),
-      }
+      const next = dropQueuedMessage(session, messageId)
       cacheSession(next)
       await persistOrdered(next)
     },
@@ -1547,6 +1563,21 @@ function queueSubmission(
       },
     ],
   }
+}
+
+/** A steer the provider can't take mid-turn parks in the follow-up queue
+ * behind a transcript preview — a user message carrying the entry's id that
+ * trails the working indicator — instead of holding a queue card row.
+ * Mirrors desktop's `enqueue_steer_follow_up_submission`. */
+function queueSteerSubmission(
+  session: AgentSession,
+  displayContent: string,
+  providerPrompt: string,
+  attachments: MessageAttachment[],
+): AgentSession {
+  const queued = queueSubmission(session, displayContent, providerPrompt, attachments)
+  const entry = queued.queued_messages?.at(-1)
+  return entry ? appendQueuedSteerPreview(queued, entry) : queued
 }
 
 export function useRuntime() {
