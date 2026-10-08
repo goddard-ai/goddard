@@ -2061,7 +2061,7 @@ fn handle_connection(
                 &mut socket,
                 &ServerMessage::Rejected {
                     message: format!(
-                        "protocol {protocol_version} is unsupported; expected {PROTOCOL_VERSION}"
+                        "client protocol {protocol_version} does not match daemon protocol {PROTOCOL_VERSION}; press b + enter in the dev watcher, or quit the foreign daemon and relaunch Goddard"
                     ),
                 },
             )?;

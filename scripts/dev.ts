@@ -4,8 +4,6 @@ import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
 import { startDevServe, type DevServe } from "./dev-serve";
 import {
-  chmodSync,
-  copyFileSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -43,16 +41,14 @@ const profile = serveMode ? "release" : "debug";
 const appName = serveMode ? "Goddard" : "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const developmentDataDir = process.env.GODDARD_DATA_DIR || join(root, "temp");
-// Lane copies, the stable app/daemon links, and watcher state live here
+// Lane copies, the stable app link, and watcher state live here
 // instead of target/: mbx owns target as a symlink into its shared cache, so
 // `mbx clean`/`gc` would delete the last completed build and lock the app out
 // until a rebuild finished. The layout mirrors target/debug.
 const stableDir = join(developmentDataDir, "debug");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
-  ? serveMode
-    ? join(targetDir, `${profile}/${appName}.app`)
-    : join(stableDir, `${appName}.app`)
+  ? join(stableDir, `${appName}.app`)
   : join(targetDir, `debug/goddard${executableSuffix}`);
 const daemonPath = join(
   targetDir,
@@ -61,33 +57,30 @@ const daemonPath = join(
 const appExecutablePath = isMacOS
   ? join(appPath, "Contents/MacOS", appName)
   : appPath;
-// The debug app builds into two bundle lanes so an eager compile never blocks
+// The macOS app builds into complete runtime lanes so compilation never blocks
 // testing: a build always targets the lane the running app is not using, and
 // 'a' relaunches the newest completed build instead of waiting. appPath is a
-// symlink that only ever resolves to a finished bundle — it flips to the
-// fallback lane when a build starts tearing the newest, then to the new build
+// symlink that only ever resolves to a finished bundle and changes only
 // once bundling succeeds. A lane carries a .complete marker so a watcher
 // killed mid-bundle doesn't leave a half-written app looking launchable.
-// The daemon binary gets the same treatment for the same reason: macOS kills
-// a signed process whose executable is replaced under it, so the running
-// daemon executes a lane copy and cargo's output at daemonPath is never run
-// directly. daemonLinkPath mirrors appPath — a stable symlink to the newest
-// completed lane that the app watches for rebuild swaps.
-type Lane = "a" | "b";
-const laned = isMacOS && !serveMode;
-const laneRoot = join(stableDir, "lanes");
+// App and daemon can occupy different lanes after an app-only relaunch.
+// A fourth slot preserves the latest completed runtime too, even when both
+// live processes occupy older lanes. Daemon-only builds clone that latest lane.
+const lanes = ["a", "b", "c", "d"] as const;
+type Lane = (typeof lanes)[number];
+const laned = isMacOS;
+const laneDirectory = serveMode ? "release-lanes" : "lanes";
+const laneRoot = join(stableDir, laneDirectory);
 const laneAppPath = (lane: Lane) => join(laneRoot, lane, `${appName}.app`);
-const laneLinkTarget = (lane: Lane) =>
-  join("lanes", lane, `${appName}.app`);
+const laneLinkTarget = (lane: Lane) => join(laneDirectory, lane, `${appName}.app`);
 const laneMarkerPath = (lane: Lane) => join(laneRoot, lane, ".complete");
-const daemonLaneRoot = join(stableDir, "daemon-lanes");
 const laneDaemonPath = (lane: Lane) =>
-  join(daemonLaneRoot, lane, basename(daemonPath));
-const laneDaemonLinkTarget = (lane: Lane) =>
-  join("daemon-lanes", lane, basename(daemonPath));
-const laneDaemonMarkerPath = (lane: Lane) =>
-  join(daemonLaneRoot, lane, ".complete");
-const daemonLinkPath = join(stableDir, `${basename(daemonPath)}-latest`);
+  join(
+    laneAppPath(lane),
+    "Contents",
+    "MacOS",
+    serveMode ? "goddard-daemon" : "goddard-debug-daemon",
+  );
 // The app's "auto-restart" command palette toggle lands here; the app only
 // offers it when the watcher hands it this path.
 const devStatePath = join(stableDir, "goddard-dev.json");
@@ -152,15 +145,15 @@ function movePath(from: string, to: string): void {
 function migrateLegacyTargetState(): void {
   const legacyDir = join(targetDir, "debug");
   const moves: Array<[string, string]> = [
-    [join(legacyDir, "lanes"), laneRoot],
-    [join(legacyDir, "daemon-lanes"), daemonLaneRoot],
-    [join(legacyDir, basename(daemonLinkPath)), daemonLinkPath],
     [join(legacyDir, basename(devStatePath)), devStatePath],
     [join(legacyDir, basename(daemonTokenPath)), daemonTokenPath],
     [join(legacyDir, basename(daemonInfoPath)), daemonInfoPath],
     [join(legacyDir, basename(buildStatsPath)), buildStatsPath],
   ];
-  if (laned) moves.push([join(legacyDir, `${appName}.app`), appPath]);
+  if (laned && !serveMode) {
+    moves.push([join(legacyDir, "lanes"), laneRoot]);
+    moves.push([join(legacyDir, `${appName}.app`), appPath]);
+  }
   for (const [from, to] of moves) {
     try {
       movePath(from, to);
@@ -276,8 +269,6 @@ let runningLane: Lane | undefined;
 let appBundlePath: string | undefined;
 // Same invariants as the app lanes, for the daemon binary: runningDaemonLane
 // is the copy the live daemon executes and is never a build target.
-let completeDaemonLanes: Lane[] = [];
-let latestDaemonLane: Lane | undefined;
 let runningDaemonLane: Lane | undefined;
 let appChangeRevision = 0;
 let daemonChangeRevision = 0;
@@ -752,10 +743,6 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   return true;
 }
 
-function otherLane(lane: Lane): Lane {
-  return lane === "a" ? "b" : "a";
-}
-
 // appPath is the stable launch path; keep it aimed at a complete bundle or
 // remove it so nothing can open a half-written app through it.
 function linkAppPath(lane: Lane | undefined): void {
@@ -794,9 +781,11 @@ function adoptAppLanes(): void {
       );
     }
   }
-  for (const lane of ["a", "b"] as const) {
+  for (const lane of lanes) {
     const complete =
       existsSync(join(laneAppPath(lane), "Contents", "MacOS", appName)) &&
+      existsSync(laneDaemonPath(lane)) &&
+      existsSync(join(laneAppPath(lane), "Contents", "Resources", "goddard-agent")) &&
       existsSync(laneMarkerPath(lane));
     if (complete) completeLanes.push(lane);
     else rmSync(join(laneRoot, lane), { recursive: true, force: true });
@@ -804,14 +793,17 @@ function adoptAppLanes(): void {
   try {
     const linked = basename(dirname(readlinkSync(appPath)));
     if (
-      (linked === "a" || linked === "b") &&
-      completeLanes.includes(linked)
+      lanes.includes(linked as Lane) &&
+      completeLanes.includes(linked as Lane)
     ) {
-      latestLane = linked;
+      latestLane = linked as Lane;
     }
   } catch {
     // No link yet; the newest complete lane wins below.
   }
+  completeLanes.sort(
+    (x, y) => statSync(laneMarkerPath(x)).mtimeMs - statSync(laneMarkerPath(y)).mtimeMs,
+  );
   latestLane ??= completeLanes.at(-1);
   let linkExists = false;
   try {
@@ -823,11 +815,12 @@ function adoptAppLanes(): void {
   if (latestLane !== undefined || linkExists) linkAppPath(latestLane);
 }
 
-// Builds go into whichever lane preserves a usable app: never the lane the
-// running instance came from, and otherwise never the newest complete build.
+// Builds preserve the running app, running daemon, and newest complete runtime.
 function appBuildLane(): Lane {
-  const pinned = runningLane ?? latestLane;
-  return pinned === undefined ? "a" : otherLane(pinned);
+  const available = lanes.filter(
+    (lane) => lane !== runningLane && lane !== runningDaemonLane,
+  );
+  return available.find((lane) => lane !== latestLane)!;
 }
 
 // Retire a lane the moment bundling starts tearing it so nothing — including
@@ -842,105 +835,12 @@ function retireLane(lane: Lane): void {
 }
 
 function publishLane(lane: Lane): void {
-  if (!completeLanes.includes(lane)) completeLanes.push(lane);
+  // The marker attests the entire runtime; a failed stamp cannot publish it.
+  writeFileSync(laneMarkerPath(lane), `${new Date().toISOString()}\n`);
+  completeLanes = completeLanes.filter((entry) => entry !== lane);
+  completeLanes.push(lane);
   latestLane = lane;
-  try {
-    writeFileSync(laneMarkerPath(lane), `${new Date().toISOString()}\n`);
-  } catch {
-    // The marker only matters after a crashed watcher; the in-memory state
-    // carries correctness until then.
-  }
   linkAppPath(lane);
-}
-
-// daemonLinkPath is the stable path the app is handed for its daemon — the
-// supervisor watches it and swaps when a rebuild changes it — so keep it
-// aimed at a complete lane or absent, exactly like appPath.
-function linkDaemonPath(lane: Lane | undefined): void {
-  try {
-    rmSync(daemonLinkPath, { force: true });
-    if (lane !== undefined) {
-      symlinkSync(laneDaemonLinkTarget(lane), daemonLinkPath);
-    }
-  } catch (error) {
-    console.error(
-      "[goddard-dev] Could not repoint the daemon binary link:",
-      error,
-    );
-  }
-}
-
-// Rebuild daemon lane state from disk after a watcher restart. A lane without
-// its marker was torn mid-copy so it is reclaimed, not trusted; the newest
-// surviving marker names the newest build. A leftover daemonPath only counts
-// when no lane survived — it was the pre-lanes binary then — because after
-// this change it is cargo's scratch output and may hold a half-linked file.
-function adoptDaemonLanes(): void {
-  for (const lane of ["a", "b"] as const) {
-    const complete =
-      existsSync(laneDaemonPath(lane)) && existsSync(laneDaemonMarkerPath(lane));
-    if (complete) completeDaemonLanes.push(lane);
-    else rmSync(join(daemonLaneRoot, lane), { recursive: true, force: true });
-  }
-  if (completeDaemonLanes.length === 0 && existsSync(daemonPath)) {
-    try {
-      mkdirSync(join(daemonLaneRoot, "a"), { recursive: true });
-      renameSync(daemonPath, laneDaemonPath("a"));
-      writeFileSync(laneDaemonMarkerPath("a"), "adopted\n");
-      completeDaemonLanes.push("a");
-      console.log(
-        "[goddard-dev] Moved the existing daemon binary into lane a.",
-      );
-    } catch (error) {
-      console.error(
-        "[goddard-dev] Could not adopt the existing daemon binary:",
-        error,
-      );
-    }
-  }
-  completeDaemonLanes.sort(
-    (x, y) =>
-      statSync(laneDaemonMarkerPath(x)).mtimeMs -
-      statSync(laneDaemonMarkerPath(y)).mtimeMs,
-  );
-  latestDaemonLane = completeDaemonLanes.at(-1);
-  linkDaemonPath(latestDaemonLane);
-}
-
-// The build's lane is whichever one keeps a runnable daemon: never the lane
-// the running daemon executes, and otherwise never the newest complete build.
-function daemonBuildLane(): Lane {
-  const pinned = runningDaemonLane ?? latestDaemonLane;
-  return pinned === undefined ? "a" : otherLane(pinned);
-}
-
-// Retire a lane the moment it becomes the copy target so nothing — including
-// the daemonLinkPath link — can spawn a half-written binary.
-function retireDaemonLane(lane: Lane): void {
-  completeDaemonLanes = completeDaemonLanes.filter((entry) => entry !== lane);
-  rmSync(laneDaemonMarkerPath(lane), { force: true });
-  if (latestDaemonLane === lane) {
-    latestDaemonLane = completeDaemonLanes.at(-1);
-    linkDaemonPath(latestDaemonLane);
-  }
-}
-
-function publishDaemonLane(lane: Lane): void {
-  if (!completeDaemonLanes.includes(lane)) completeDaemonLanes.push(lane);
-  latestDaemonLane = lane;
-  try {
-    writeFileSync(laneDaemonMarkerPath(lane), `${new Date().toISOString()}\n`);
-  } catch {
-    // The marker only matters after a crashed watcher; the in-memory state
-    // carries correctness until then.
-  }
-  linkDaemonPath(lane);
-}
-
-// Where the app should look for the daemon: the stable link on macOS so its
-// supervisor sees every rebuild, cargo's output where lanes are off.
-function daemonEnvironmentPath(): string {
-  return laned && latestDaemonLane !== undefined ? daemonLinkPath : daemonPath;
 }
 
 async function build(target: BuildTarget): Promise<boolean> {
@@ -949,7 +849,7 @@ async function build(target: BuildTarget): Promise<boolean> {
   }
 
   console.log(`[goddard-dev] Building ${isMacOS ? "app bundle" : "app"}...`);
-  if (!(await buildDaemon())) {
+  if (!(await buildDaemon(false))) {
     console.error(
       "[goddard-dev] Daemon build failed; keeping the current app open.",
     );
@@ -998,8 +898,9 @@ async function build(target: BuildTarget): Promise<boolean> {
     if (lane !== undefined) retireLane(lane);
     // The watcher already ran cargo itself so it could draw progress;
     // bundle.sh only packages and signs the binaries it just produced.
-    const laneEnv =
-      lane === undefined ? [] : [`GODDARD_BUNDLE_DIR=${laneAppPath(lane)}`];
+    const laneEnv = [
+      `GODDARD_BUNDLE_DIR=${lane === undefined ? appPath : laneAppPath(lane)}`,
+    ];
     const bundleArgs = [profile, ...(serveMode ? ["--debug-icon"] : [])];
     const result =
       await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${join(root, "scripts/bundle.sh")} ${bundleArgs}`.nothrow();
@@ -1009,10 +910,13 @@ async function build(target: BuildTarget): Promise<boolean> {
       );
       return false;
     }
-    if (lane !== undefined) publishLane(lane);
-    if (serveMode && serve !== undefined && !(await serve.deploy(appPath))) {
+    const bundledApp = lane === undefined ? appPath : laneAppPath(lane);
+    // Feed publication stamps and signs the bundle too; finish it before the
+    // complete marker makes this runtime available to concurrent commands.
+    if (serveMode && serve !== undefined && !(await serve.deploy(bundledApp))) {
       console.error("[goddard-dev] Deploy failed; the update feed is stale.");
     }
+    if (lane !== undefined) publishLane(lane);
   } else {
     try {
       await bundleComputerUse(
@@ -1028,15 +932,18 @@ async function build(target: BuildTarget): Promise<boolean> {
   return true;
 }
 
-async function buildDaemon(): Promise<boolean> {
+async function buildDaemon(publishRuntime = true): Promise<boolean> {
+  if (serveMode && publishRuntime) return build("app");
+  // A first build needs the app and helpers too before any lane is launchable.
+  if (laned && publishRuntime && latestLane === undefined) return build("app");
   if (
     !(await cargoBuild("daemon", [
+      ...(serveMode ? ["--release"] : []),
       "--package",
       "waku-daemon",
-      "--features",
-      "dev-binary",
+      ...(serveMode ? [] : ["--features", "dev-binary"]),
       "--bin",
-      "goddard-debug-daemon",
+      serveMode ? "goddard-daemon" : "goddard-debug-daemon",
       "--package",
       "waku-agent",
       "--bin",
@@ -1048,24 +955,20 @@ async function buildDaemon(): Promise<boolean> {
     );
     return false;
   }
-  if (laned) {
-    // Cargo's output at daemonPath is scratch space nobody executes; the
-    // runnable copy lands in the lane the running daemon is not using, so a
-    // compile can never overwrite a live daemon's binary.
-    const lane = daemonBuildLane();
-    retireDaemonLane(lane);
-    try {
-      mkdirSync(join(daemonLaneRoot, lane), { recursive: true });
-      copyFileSync(daemonPath, laneDaemonPath(lane));
-      chmodSync(laneDaemonPath(lane), 0o755);
-    } catch (error) {
+  if (laned && publishRuntime) {
+    const source = laneAppPath(latestLane!);
+    const lane = appBuildLane();
+    retireLane(lane);
+    // Reuse the unchanged app and helpers, then replace daemon + CLI and
+    // re-sign the new bundle. Neither live lane is modified.
+    const result = await $`env GODDARD_SKIP_CARGO_BUILD=1 GODDARD_BUNDLE_SOURCE=${source} GODDARD_BUNDLE_DIR=${laneAppPath(lane)} ${join(root, "scripts/bundle.sh")} debug`.nothrow();
+    if (result.exitCode !== 0) {
       console.error(
-        "[goddard-dev] Could not stage the rebuilt daemon:",
-        error,
+        "[goddard-dev] Could not package the rebuilt daemon; keeping the current runtime.",
       );
       return false;
     }
-    publishDaemonLane(lane);
+    publishLane(lane);
   }
   daemonBuildDirty = true;
   return true;
@@ -1092,9 +995,13 @@ function writeDaemonInfo(): void {
 }
 
 async function spawnDaemon(bind: string): Promise<void> {
-  const lane = laned ? latestDaemonLane : undefined;
+  const lane = laned ? latestLane : undefined;
+  if (laned && lane === undefined) {
+    throw new Error("No completed runtime to start the daemon from.");
+  }
   const command = [
-    lane === undefined ? daemonPath : laneDaemonPath(lane),
+    process.env.GODDARD_DAEMON_PATH ||
+      (lane !== undefined ? laneDaemonPath(lane) : daemonPath),
     "--bind",
     bind,
     "--parent-pid",
@@ -1106,7 +1013,10 @@ async function spawnDaemon(bind: string): Promise<void> {
       env: {
         ...process.env,
         GODDARD_DAEMON_TOKEN: daemonToken,
-        GODDARD_APP_EXECUTABLE: appExecutablePath,
+        GODDARD_APP_EXECUTABLE:
+          lane === undefined
+            ? appExecutablePath
+            : join(laneAppPath(lane), "Contents", "MacOS", appName),
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -1480,7 +1390,7 @@ function printShortcuts(): void {
 function printBanner(): void {
   const daemonDetail =
     externalDaemonAddress === undefined
-      ? `survives app relaunches and quits${laned ? ` · lane ${latestDaemonLane ?? "none yet"}` : ""}`
+      ? `survives app relaunches and quits${laned ? ` · lane ${latestLane ?? "none yet"}` : ""}`
       : "external — not restarted by the watcher";
   console.log(
     `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
@@ -1638,10 +1548,10 @@ async function stopApp(): Promise<void> {
     // matters: a bare `tell application ... to quit` would launch it. Naming
     // the bundle by path keeps other worktrees' "Goddard Debug" instances
     // from being quit — a bare name hits whichever copy LaunchServices picks.
-    // A leftover app can be running from either lane (e.g. after a crashed
+    // A leftover app can be running from any lane (e.g. after a crashed
     // watcher), so quit every lane path, not just the tracked one.
     const quitBundles = laned
-      ? [...new Set([runningBundle, laneAppPath("a"), laneAppPath("b")])]
+      ? [...new Set([runningBundle, ...lanes.map(laneAppPath)])]
       : [runningBundle];
     for (const bundle of quitBundles) {
       await $`osascript -e 'if application "${bundle}" is running then tell application "${bundle}" to quit'`
@@ -1685,7 +1595,9 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     env: {
       ...process.env,
       ...(serveMode ? { GODDARD_DEV_DATA_DIR: developmentDataDir } : {}),
-      GODDARD_DAEMON_PATH: daemonEnvironmentPath(),
+      ...(!isMacOS
+        ? { GODDARD_DAEMON_PATH: process.env.GODDARD_DAEMON_PATH || daemonPath }
+        : {}),
       GODDARD_DAEMON_ADDRESS: daemonAddress,
       GODDARD_DAEMON_TOKEN: daemonToken,
       // Marks this launch as watcher-owned; the app writes its auto-restart
@@ -1743,8 +1655,8 @@ function mergedTarget(
 }
 
 // Workspace crates linked into the daemon/agent binaries but not the app:
-// an edit rebuilds the daemon lane alone. The crates the app links
-// (waku-protocol, waku-localization, waku-client, waku-share) and the
+// an edit copies the unchanged app into a fresh runtime lane. Crates linked
+// by the app (waku-protocol, waku-localization, waku-client, waku-share) and the
 // bundled waku-computer-use helper stay on the app lane.
 const daemonOnlyCrates = new Set([
   "waku-agent",
@@ -1989,17 +1901,15 @@ if (serveMode) {
 }
 if (laned) {
   adoptAppLanes();
-  adoptDaemonLanes();
 }
 // What the last completed build left behind: on macOS the newest surviving
-// app/daemon lanes, elsewhere cargo's outputs at appPath/daemonPath.
+// complete runtime lanes, elsewhere cargo's outputs at appPath/daemonPath.
 const completedAppAvailable = laned
   ? latestLane !== undefined
   : existsSync(appPath);
 const daemonBinaryAvailable =
   externalDaemonAddress !== undefined ||
-  latestDaemonLane !== undefined ||
-  existsSync(daemonPath);
+  (laned ? latestLane !== undefined : existsSync(daemonPath));
 // --no-build only holds when there is a build to run — a first-ever checkout
 // has nothing to launch, so fall back to a normal initial build.
 const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;

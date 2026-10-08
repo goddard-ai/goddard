@@ -237,29 +237,44 @@ pub(crate) fn daemon_executable_path() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("GODDARD_DAEMON_PATH").filter(|path| !path.is_empty()) {
         return Ok(path.into());
     }
-    let executable = format!("goddard-daemon{}", std::env::consts::EXE_SUFFIX);
     let current = std::env::current_exe().context("could not locate the Goddard executable")?;
+    daemon_executable_beside(&current)
+}
 
-    // Development keeps the daemon beside Cargo's debug artifacts rather than
-    // inside Goddard Debug.app. The supervisor watches this file and swaps only
-    // the daemon when the development watcher relinks it.
-    #[cfg(debug_assertions)]
-    if let Some(debug_directory) = current
-        .ancestors()
-        .find(|candidate| candidate.file_name().is_some_and(|name| name == "debug"))
+fn daemon_executable_beside(current: &std::path::Path) -> anyhow::Result<PathBuf> {
+    let executable = format!("goddard-daemon{}", std::env::consts::EXE_SUFFIX);
+
+    let directory = current
+        .parent()
+        .ok_or_else(|| anyhow!("Goddard executable has no parent directory"))?;
+    // Packaged debug and release apps own their daemon sibling. Never let a
+    // debug-named ancestor redirect a bundle to another runtime.
+    #[cfg(all(target_os = "macos", debug_assertions))]
     {
-        let external = debug_directory.join(&executable);
-        if external.is_file() {
-            return Ok(external);
+        let sibling = directory.join("goddard-debug-daemon");
+        if sibling.is_file() {
+            return Ok(sibling);
         }
     }
-
-    let sibling = current
-        .parent()
-        .map(|directory| directory.join(&executable))
-        .ok_or_else(|| anyhow!("Goddard executable has no parent directory"))?;
+    let sibling = directory.join(&executable);
     if sibling.is_file() {
         return Ok(sibling);
+    }
+    // Only an unbundled cargo run uses the ancestor debug directory fallback.
+    #[cfg(debug_assertions)]
+    if !current
+        .ancestors()
+        .any(|path| path.extension().is_some_and(|ext| ext == "app"))
+    {
+        if let Some(debug_directory) = current
+            .ancestors()
+            .find(|candidate| candidate.file_name().is_some_and(|name| name == "debug"))
+        {
+            let external = debug_directory.join(&executable);
+            if external.is_file() {
+                return Ok(external);
+            }
+        }
     }
     #[cfg(debug_assertions)]
     bail!(
@@ -276,6 +291,30 @@ pub(crate) fn daemon_executable_path() -> anyhow::Result<PathBuf> {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[test]
+    fn bundled_daemon_wins_over_a_debug_ancestor() {
+        let root = std::env::temp_dir().join(format!("daemon-lookup-{}", uuid::Uuid::new_v4()));
+        let debug = root.join("debug");
+        let macos = debug.join("lane/Goddard Debug.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::write(debug.join("goddard-daemon"), b"foreign").unwrap();
+        let sibling = macos.join("goddard-debug-daemon");
+        std::fs::write(&sibling, b"bundled").unwrap();
+        assert_eq!(
+            super::daemon_executable_beside(&macos.join("Goddard Debug")).unwrap(),
+            sibling
+        );
+        std::fs::remove_file(sibling).unwrap();
+        // A broken bundle must fail rather than adopting the foreign runtime.
+        assert!(super::daemon_executable_beside(&macos.join("Goddard Debug")).is_err());
+        assert_eq!(
+            super::daemon_executable_beside(&debug.join("goddard")).unwrap(),
+            debug.join("goddard-daemon")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn crash_report_fields_pull_termination_signal_and_uptime() {

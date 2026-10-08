@@ -73,20 +73,26 @@ fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
 if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
   if [ "$profile" = "release" ]; then
-    cargo build --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
+    mbx build --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
   else
-    cargo build --package waku --bin goddard --bin goddard_js_repl --package waku-agent --bin goddard-agent
+    mbx build --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent
   fi
 fi
 
 # The dev watcher builds each lane under its own directory so an in-progress
 # bundle never tears the app copy a running instance was launched from.
-bundle="${GODDARD_BUNDLE_DIR:-$cargo_target_dir/$profile/$app_name.app}"
+bundle_default="$cargo_target_dir/$profile/$app_name.app"
+if [ "$profile" = "debug" ]; then
+  bundle_default="${GODDARD_DATA_DIR:-temp}/debug/$app_name.app"
+fi
+bundle="${GODDARD_BUNDLE_DIR:-$bundle_default}"
 contents="$bundle/Contents"
 helper_bundle="$contents/Helpers/$helper_name.app"
 repl_executable="$contents/Resources/goddard_js_repl"
 agent_executable="$contents/Resources/goddard-agent"
-daemon_executable="$contents/MacOS/goddard-daemon"
+daemon_name="goddard-daemon"
+if [ "$profile" = "debug" ]; then daemon_name="goddard-debug-daemon"; fi
+daemon_executable="$contents/MacOS/$daemon_name"
 shuru_executable="$contents/Resources/shuru"
 swift_module_cache="$cargo_target_dir/$profile/swift-module-cache"
 helper_source="resources/computer-use/WakuComputerUse.swift"
@@ -177,54 +183,70 @@ if [ ! -d "$sparkle_framework_source" ]; then
   mv "$sparkle_staging" "$sparkle_cache_entry"
 fi
 
-rm -rf "$bundle"
-mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/goddard-computer-use" "$contents/Helpers"
-cp "$cargo_target_dir/$profile/goddard" "$contents/MacOS/$app_name"
-# espeak-ng's phoneme tables ship under Contents/Resources — piper-rs voices
-# text through libespeak-ng, and data files in Contents/MacOS invalidate the
-# code signature since that directory may only hold executable code. The
-# app's build script stages the compiled tables into the profile dir, and
-# piper.rs resolves Contents/Resources from the executable at runtime.
-if [ -d "$cargo_target_dir/$profile/espeak-ng-data" ]; then
-  cp -R "$cargo_target_dir/$profile/espeak-ng-data" "$contents/Resources/espeak-ng-data"
+# Daemon-only rebuilds clone a complete runtime, retaining the app and helpers.
+# The watcher always selects a destination distinct from every live lane.
+if [ -n "${GODDARD_BUNDLE_SOURCE:-}" ]; then
+  if [ "$profile" != "debug" ] || [ "$GODDARD_BUNDLE_SOURCE" = "$bundle" ]; then
+    echo "bundle: runtime reuse requires a distinct debug bundle destination" >&2
+    exit 2
+  fi
+  rm -rf "$bundle"
+  mkdir -p "$(dirname "$bundle")"
+  cp -R "$GODDARD_BUNDLE_SOURCE" "$bundle"
+else
+  rm -rf "$bundle"
+  mkdir -p "$contents/MacOS" "$contents/Resources/computer-use" "$contents/Resources/skills/goddard-computer-use" "$contents/Helpers"
+  cp "$cargo_target_dir/$profile/goddard" "$contents/MacOS/$app_name"
+  # espeak-ng's phoneme tables ship under Contents/Resources — piper-rs voices
+  # text through libespeak-ng, and data files in Contents/MacOS invalidate the
+  # code signature since that directory may only hold executable code. The
+  # app's build script stages the compiled tables into the profile dir, and
+  # piper.rs resolves Contents/Resources from the executable at runtime.
+  if [ -d "$cargo_target_dir/$profile/espeak-ng-data" ]; then
+    cp -R "$cargo_target_dir/$profile/espeak-ng-data" "$contents/Resources/espeak-ng-data"
+  fi
+  cp "$cargo_target_dir/$profile/goddard_js_repl" "$repl_executable"
+  chmod 755 "$repl_executable"
+  cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"
+  chmod 755 "$agent_executable"
+  if [ "$profile" = "release" ]; then
+    # The sandbox VM runner travels with the bundled daemon. The build machine
+    # supplies it via GODDARD_SHURU_BIN or the default install location; it
+    # must carry the virtualization entitlement to boot VMs once signed.
+    shuru_source="${GODDARD_SHURU_BIN:-$HOME/.local/bin/shuru}"
+    if [ -x "$shuru_source" ]; then
+      cp "$shuru_source" "$shuru_executable"
+      chmod 755 "$shuru_executable"
+    else
+      echo "bundle: no shuru binary at $shuru_source — sandboxed sessions will ask users to install it" >&2
+    fi
+  fi
+  cp resources/Info.plist "$contents/Info.plist"
+  cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
+  bun scripts/cua-api.ts "$cached_helper_bundle/Contents/MacOS/$helper_name" "$contents/Resources/skills/goddard-computer-use/SKILL.md"
+  frameworks_directory="$contents/Frameworks"
+  sparkle_framework="$frameworks_directory/Sparkle.framework"
+  mkdir -p "$frameworks_directory"
+  cp -R "$sparkle_framework_source" "$sparkle_framework"
+  # Goddard is not sandboxed, so Sparkle's XPC services never run; drop them along
+  # with the header and module folders so the shipped framework carries no dev
+  # artifacts and no unsigned nested code.
+  for sparkle_extra in XPCServices Headers PrivateHeaders Modules; do
+    rm -rf "$sparkle_framework/$sparkle_extra" \
+      "$sparkle_framework/Versions/B/$sparkle_extra"
+  done
+  plutil -replace CFBundleDisplayName -string "$app_name" "$contents/Info.plist"
+  plutil -replace CFBundleExecutable -string "$app_name" "$contents/Info.plist"
+  plutil -replace CFBundleIdentifier -string "$bundle_identifier" "$contents/Info.plist"
+  plutil -replace CFBundleName -string "$app_name" "$contents/Info.plist"
+  cp -R "$cached_helper_bundle" "$helper_bundle"
 fi
-cp "$cargo_target_dir/$profile/goddard_js_repl" "$repl_executable"
-chmod 755 "$repl_executable"
+sparkle_framework="$contents/Frameworks/Sparkle.framework"
+cp "$cargo_target_dir/$profile/$daemon_name" "$daemon_executable"
+chmod 755 "$daemon_executable"
+# Refresh the CLI alongside a daemon-only rebuild as well.
 cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"
 chmod 755 "$agent_executable"
-if [ "$profile" = "release" ]; then
-  cp "$cargo_target_dir/$profile/goddard-daemon" "$daemon_executable"
-  chmod 755 "$daemon_executable"
-  # The sandbox VM runner travels with the bundled daemon. The build machine
-  # supplies it via GODDARD_SHURU_BIN or the default install location; it
-  # must carry the virtualization entitlement to boot VMs once signed.
-  shuru_source="${GODDARD_SHURU_BIN:-$HOME/.local/bin/shuru}"
-  if [ -x "$shuru_source" ]; then
-    cp "$shuru_source" "$shuru_executable"
-    chmod 755 "$shuru_executable"
-  else
-    echo "bundle: no shuru binary at $shuru_source — sandboxed sessions will ask users to install it" >&2
-  fi
-fi
-cp resources/Info.plist "$contents/Info.plist"
-cp "resources/$icon_file" "$contents/Resources/AppIcon.icns"
-bun scripts/cua-api.ts "$cached_helper_bundle/Contents/MacOS/$helper_name" "$contents/Resources/skills/goddard-computer-use/SKILL.md"
-frameworks_directory="$contents/Frameworks"
-sparkle_framework="$frameworks_directory/Sparkle.framework"
-mkdir -p "$frameworks_directory"
-cp -R "$sparkle_framework_source" "$sparkle_framework"
-# Goddard is not sandboxed, so Sparkle's XPC services never run; drop them along
-# with the header and module folders so the shipped framework carries no dev
-# artifacts and no unsigned nested code.
-for sparkle_extra in XPCServices Headers PrivateHeaders Modules; do
-  rm -rf "$sparkle_framework/$sparkle_extra" \
-    "$sparkle_framework/Versions/B/$sparkle_extra"
-done
-plutil -replace CFBundleDisplayName -string "$app_name" "$contents/Info.plist"
-plutil -replace CFBundleExecutable -string "$app_name" "$contents/Info.plist"
-plutil -replace CFBundleIdentifier -string "$bundle_identifier" "$contents/Info.plist"
-plutil -replace CFBundleName -string "$app_name" "$contents/Info.plist"
-cp -R "$cached_helper_bundle" "$helper_bundle"
 # Finder info and resource forks on copied resources make codesign reject the
 # bundle as "detritus"; strip extended attributes before signing.
 xattr -cr "$bundle"
@@ -240,9 +262,7 @@ if [ "$codesign_identity" = "-" ]; then
   codesign --force --sign - "$sparkle_framework"
   codesign --force --identifier "$bundle_identifier.js-repl" --sign - "$repl_executable"
   codesign --force --identifier "$bundle_identifier.agent" --sign - "$agent_executable"
-  if [ "$profile" = "release" ]; then
-    codesign --force --identifier "$bundle_identifier.daemon" --sign - "$daemon_executable"
-  fi
+  codesign --force --identifier "$bundle_identifier.daemon" --sign - "$daemon_executable"
   if [ "$profile" = "debug" ]; then
     # An ordinary ad-hoc signature's designated requirement contains its
     # changing code hash, so macOS TCC treats every rebuild as a different app
@@ -269,6 +289,7 @@ else
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
+  codesign --force --options runtime --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
   codesign --force --options runtime --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
   codesign --force --options runtime --entitlements scripts/goddard.entitlements --sign "$codesign_identity" "$bundle"
 fi

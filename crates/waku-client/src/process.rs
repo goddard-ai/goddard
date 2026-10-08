@@ -250,7 +250,7 @@ impl DaemonProcess {
             let _ = child.kill();
             let _ = child.wait();
             bail!(
-                "daemon protocol {} does not match desktop protocol {}",
+                "daemon protocol {} does not match desktop protocol {}; press b + enter in the dev watcher, or quit the foreign daemon and relaunch Goddard",
                 ready.protocol_version,
                 PROTOCOL_VERSION
             );

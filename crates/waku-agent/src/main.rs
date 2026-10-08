@@ -1078,6 +1078,10 @@ fn main() -> ExitCode {
 
 fn run() -> anyhow::Result<()> {
     let mut raw_args = std::env::args().skip(1).collect::<Vec<_>>();
+    if raw_args == ["--build-commit"] {
+        println!("{}", option_env!("GODDARD_COMMIT_SHA").unwrap_or("unknown"));
+        return Ok(());
+    }
     let mut explicit_output = None;
     let mut index = 0;
     let value_options = [

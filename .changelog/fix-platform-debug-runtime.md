@@ -1,0 +1,1 @@
+- Debug builds keep the app, daemon, and agent CLI together, preventing stale CLI copies after rebuilds and keeping completed runtimes available after build-cache cleanup.

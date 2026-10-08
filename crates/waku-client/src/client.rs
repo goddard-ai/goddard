@@ -334,7 +334,7 @@ impl DaemonClient {
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
-                "daemon protocol {protocol_version} does not match desktop protocol {PROTOCOL_VERSION}"
+                "daemon protocol {protocol_version} does not match desktop protocol {PROTOCOL_VERSION}; press b + enter in the dev watcher, or quit the foreign daemon and relaunch Goddard"
             ),
             ServerMessage::Rejected { message } => bail!("daemon rejected connection: {message}"),
             other => bail!("daemon sent an invalid handshake response: {other:?}"),

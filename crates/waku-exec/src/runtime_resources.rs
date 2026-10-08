@@ -5,12 +5,8 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// Locate the `goddard-agent` binary to place on a provider's `PATH`.
-///
-/// Development and unpackaged installs keep it beside the daemon
-/// executable; a packaged macOS app keeps it in `Contents/Resources` like
-/// `goddard_js_repl`. Resolution goes through the staged copy so a
-/// directory lost under a running daemon — a collected build cache, a
-/// swapped app bundle — does not strip every new session's agent surface.
+/// Packaged macOS builds prefer their own Resources copy, retaining a
+/// commit-scoped fallback for a bundle lost under a running daemon.
 pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
     let executable =
         std::env::current_exe().context("Goddard daemon executable path is unavailable")?;
@@ -23,12 +19,71 @@ pub fn agent_cli_path() -> anyhow::Result<PathBuf> {
         .parent()
         .and_then(|macos| macos.parent())
         .map(|contents| contents.join("Resources").join(name));
-    let packaged = [Some(executable.with_file_name(name)), bundled]
-        .into_iter()
-        .flatten()
-        .find(|path| path.is_file());
+    #[cfg(target_os = "macos")]
+    let candidates = [bundled, Some(executable.with_file_name(name))];
+    #[cfg(not(target_os = "macos"))]
+    let candidates = [Some(executable.with_file_name(name)), bundled];
+    let packaged = candidates.into_iter().flatten().find(|path| path.is_file());
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    {
+        let commit = option_env!("GODDARD_COMMIT_SHA").context(
+            "this debug daemon has no build identity; rebuild before using its agent CLI",
+        )?;
+        let staged = runtime_install_root()?.join(commit).join(name);
+        return resolve_debug_cli(packaged.as_deref(), &staged, commit);
+    }
+    #[cfg(not(all(target_os = "macos", debug_assertions)))]
     staged_resource(packaged.as_deref(), name, None)
         .ok_or_else(|| anyhow!("the goddard-agent CLI is missing from this Goddard build"))
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn resolve_debug_cli(
+    packaged: Option<&Path>,
+    staged: &Path,
+    commit: &str,
+) -> anyhow::Result<PathBuf> {
+    if let Some(source) = packaged {
+        verify_cli_commit(source, commit)?;
+        if let Err(error) = refresh_staged(source, staged, None) {
+            eprintln!(
+                "goddard-daemon: could not stage {}: {error:#}",
+                source.display()
+            );
+        }
+        return Ok(source.to_path_buf());
+    }
+    if staged.is_file() {
+        verify_cli_commit(staged, commit)?;
+        return Ok(staged.to_path_buf());
+    }
+    anyhow::bail!(
+        "the goddard-agent CLI for daemon build {commit} is missing from its bundle and {}; rebuild the debug runtime (b + enter in the watcher)",
+        staged.display()
+    )
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn verify_cli_commit(path: &Path, expected: &str) -> anyhow::Result<()> {
+    let output = std::process::Command::new(path)
+        .arg("--build-commit")
+        .output()
+        .with_context(|| {
+            format!(
+                "could not read agent CLI build identity from {}",
+                path.display()
+            )
+        })?;
+    let actual = String::from_utf8_lossy(&output.stdout);
+    let actual = actual.trim();
+    if !output.status.success() || actual != expected {
+        anyhow::bail!(
+            "refusing stale goddard-agent at {}: CLI build {}, daemon build {expected}; rebuild the debug runtime (b + enter in the watcher)",
+            path.display(),
+            if actual.is_empty() { "unknown" } else { actual }
+        );
+    }
+    Ok(())
 }
 
 /// A daemon-owned copy of every resource the agent surface and Computer Use
@@ -154,6 +209,44 @@ pub fn copy_directory(source: &Path, destination: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     const HELPER_FINGERPRINT_PATH: &str = "Contents/Resources/.goddard-helper-fingerprint";
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[test]
+    fn debug_cli_prefers_its_bundle_and_refuses_a_stale_fallback() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = std::env::temp_dir().join(format!("runtime-identity-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let packaged = root.join("goddard-agent");
+        let staged = root.join("Runtime").join("commit-a").join("goddard-agent");
+        let cli = |path: &Path, commit: &str| {
+            fs::write(path, format!("#!/bin/sh\nprintf '%s\\n' '{commit}'\n")).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        cli(&packaged, "commit-a");
+        assert_eq!(
+            resolve_debug_cli(Some(&packaged), &staged, "commit-a").unwrap(),
+            packaged
+        );
+        assert!(staged.is_file());
+        fs::remove_file(&packaged).unwrap();
+        assert_eq!(
+            resolve_debug_cli(None, &staged, "commit-a").unwrap(),
+            staged
+        );
+        cli(&staged, "commit-b");
+        let error = resolve_debug_cli(None, &staged, "commit-a")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("CLI build commit-b, daemon build commit-a"));
+        assert!(error.contains("b + enter"));
+        // The bundle wins even if an existing staged copy has the wrong stamp.
+        cli(&packaged, "commit-a");
+        assert_eq!(
+            resolve_debug_cli(Some(&packaged), &staged, "commit-a").unwrap(),
+            packaged
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn staged_resources_survive_a_lost_packaged_copy() {
         let root = std::env::temp_dir().join(format!("runtime-stage-{}", Uuid::new_v4()));
