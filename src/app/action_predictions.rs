@@ -1513,8 +1513,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         // The scratchpad owns the lane's airspace while it is up — its
-        // control row anchors where these chips would float.
-        if self.voice_scratchpad_visible() {
+        // control row anchors where these chips would float. Press to
+        // Talk's chrome owns the same slot while an indicator, bubble,
+        // or outcome is up.
+        if self.voice_scratchpad_visible() || self.main_composer_press_to_talk_claimed() {
             return None;
         }
         let session = self.composer_session()?;

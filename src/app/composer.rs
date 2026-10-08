@@ -6019,6 +6019,12 @@ impl Waku {
             .when(interactive, |card| {
                 card.children(self.render_pasted_text_editor(cx))
             })
+            // Press to Talk's chrome — the hold's status, the latest
+            // recording's bubble, or the outcome — floats above the
+            // card in the slot suggestions and status markers share.
+            .when_some(session_id, |card, owner| {
+                card.children(self.render_press_to_talk_composer_chrome(surface, owner, cx))
+            })
             .child(
                 div()
                     .mt(px(8.0))
@@ -6043,6 +6049,16 @@ impl Waku {
                     .children(self.render_composer_incognito_chip(&controls, cx))
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
+                    // The Voicepad · N lines pill — and the clear's
+                    // explicit recovery — rides this card's chip line
+                    // for whatever owner its composer answers to.
+                    .when_some(session_id, |row, owner| {
+                        row.children(self.render_voice_pad_pill_row(
+                            owner,
+                            press_to_talk::PressToTalkContext::Composer { owner },
+                            cx,
+                        ))
+                    })
                     .when(
                         interactive
                             && matches!(surface, ComposerCard::Main)

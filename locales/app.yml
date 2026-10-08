@@ -1961,6 +1961,8 @@ a11y.comment:
   en: Comment
 a11y.pasted_text:
   en: Pasted text
+a11y.latest_voicepad_recording:
+  en: Latest VoicePad recording
 a11y.draft_edit:
   en: Draft text
 
@@ -6638,6 +6640,30 @@ voice_scratchpad.connection_lost:
   en: Transcription paused — connection lost
 voice_scratchpad.paused:
   en: Transcription paused by the service — still listening
+voice_scratchpad.pill_one:
+  en: Voicepad · 1 line
+voice_scratchpad.pill_many:
+  en: Voicepad · %{count} lines
+voice_scratchpad.open_pad:
+  en: Open VoicePad
+voice_scratchpad.clear_pad:
+  en: Clear VoicePad
+voice_scratchpad.pad_cleared:
+  en: VoicePad cleared
+voice_scratchpad.undo_clear:
+  en: Undo clear
+voice_scratchpad.latest_recording:
+  en: Latest VoicePad recording
+voice_scratchpad.edit_recording:
+  en: Edit recording
+voice_scratchpad.remove_recording:
+  en: Remove recording
+voice_scratchpad.remove_recording_tooltip:
+  en: Remove recording · ⌘Z
+voice_scratchpad.undo_removes_recording:
+  en: ⌘Z removes this recording
+voice_scratchpad.ptt_hint:
+  en: Hold ⌥Space to record
 
 experiments.voice_briefing_tts_voice:
   en: Voice
@@ -6665,3 +6691,5 @@ press_to_talk.mic_unavailable:
   en: Microphone unavailable
 press_to_talk.no_credential:
   en: No AI Gateway credential — set one under Inference providers
+press_to_talk.cancelled:
+  en: Recording cancelled

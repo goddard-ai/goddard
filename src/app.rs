@@ -15,9 +15,9 @@ use gpui::{
     Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment,
     ListOffset, ListState, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollAnchor, ScrollHandle,
-    SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
-    deferred, div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list,
-    point, prelude::*, pulsating_between, px, rgb, size,
+    SharedString, Stateful, StyleRefinement, Subscription, TextRun, WeakEntity, Window,
+    WindowBounds, canvas, deferred, div, ease_out_quint, fill, font, img, linear_color_stop,
+    linear_gradient, list, point, prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
 
@@ -4168,6 +4168,16 @@ pub struct Waku {
     /// and the field that carries its text.
     pasted_text_editor: Option<composer::PastedTextEditor>,
     pasted_text_input: Entity<TextInput>,
+    /// The press-to-talk bubble's open edit — which owner's paragraph the
+    /// shared field carries — and the field itself. One bubble edits at
+    /// a time; blur commits, Escape restores.
+    press_to_talk_bubble_edit: Option<voice_scratchpad::PressToTalkBubbleEdit>,
+    press_to_talk_bubble_input: Entity<TextInput>,
+    /// ⌘Z's isolation guard: intercepted ahead of binding dispatch so a
+    /// bubble-owned press removes the recording instead of leaking into
+    /// the field's undo stack or the workspace's draft-use undo. Lives
+    /// for the window's lifetime.
+    _press_to_talk_undo_guard: Subscription,
     /// Highlight under the pointer; `visible` once the hover delay elapsed.
     annotation_hover: Option<annotations::AnnotationHover>,
     /// A mouse-down that landed on a highlight, pending its mouse-up.
@@ -5339,6 +5349,34 @@ impl Waku {
                 .max_lines(10)
                 .accessibility_label(tr!("a11y.pasted_text"))
         });
+        // The bubble's editable text — Enter must break lines, so the
+        // commit path is focus leaving and Escape restores the pre-edit
+        // text rather than submitting anything.
+        let press_to_talk_bubble_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(6)
+                .accessibility_label(tr!("a11y.latest_voicepad_recording"))
+        });
+        // While a hold or its bubble is up, ⌘Z belongs to the recording:
+        // consumed outright during capture and a whole-paragraph removal
+        // after it — never the field's undo stack or the workspace's
+        // draft-use undo. Interception runs ahead of binding dispatch,
+        // which is the only point that outranks a focused TextInput's
+        // own secondary-z binding.
+        let press_to_talk_undo_guard = cx.intercept_keystrokes(|event, window, cx| {
+            if event.keystroke.key != "z" || event.keystroke.modifiers != Modifiers::secondary_key()
+            {
+                return;
+            }
+            let Some(Some(waku)) = window.root::<Waku>() else {
+                return;
+            };
+            waku.update(cx, |this, cx| {
+                this.press_to_talk_undo_key(window, cx);
+            });
+        });
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -6032,6 +6070,14 @@ impl Waku {
             cx.on_blur(&updater_button_focus, window, |this: &mut Self, _, cx| {
                 this.set_updater_button_focused(false, cx);
             })
+            .detach();
+            // Focus leaving the bubble's field saves the edit — the same
+            // commit a pointer click outside performs.
+            cx.on_blur(
+                &press_to_talk_bubble_input.read(cx).focus(),
+                window,
+                |this: &mut Self, _, cx| this.commit_press_to_talk_bubble_edit(cx),
+            )
             .detach();
 
             if let Some(updater_events) = updater_events {
@@ -7654,6 +7700,9 @@ impl Waku {
                 annotation_comment_input,
                 pasted_text_editor: None,
                 pasted_text_input,
+                press_to_talk_bubble_edit: None,
+                press_to_talk_bubble_input,
+                _press_to_talk_undo_guard: press_to_talk_undo_guard,
                 annotation_hover: None,
                 annotation_press: None,
                 sent_annotations: HashMap::new(),

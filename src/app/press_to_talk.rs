@@ -71,7 +71,7 @@ pub(super) enum PressToTalkContext {
 
 impl PressToTalkContext {
     /// The VoicePad owner this context's paragraph belongs to.
-    fn owner(&self) -> VoicePadOwner {
+    pub(super) fn owner(&self) -> VoicePadOwner {
         match self {
             Self::Composer { owner } | Self::Annotation { owner } => *owner,
         }
@@ -112,6 +112,9 @@ pub(super) enum PressToTalkNotice {
     MicDenied,
     /// Startup or transcription failed; the cause is the message.
     Error(String),
+    /// Escape, navigation, focus loss, or the setting going off retired
+    /// the hold — its unfinished text was discarded.
+    Cancelled,
 }
 
 /// Worker-thread → event-pump traffic for the hold. `generation` binds
@@ -152,10 +155,15 @@ pub(super) enum PressToTalkDirective {
     /// A cancel boundary — drop the tap, retire the worker, discard the
     /// in-flight transcript.
     AbortCapture,
-    /// Land the hold's text as one paragraph on `owner`'s scratchpad
-    /// — bound at start, carried here because the machine's reset
-    /// clears `context` before the app performs the commit.
-    Commit { owner: VoicePadOwner, text: String },
+    /// Land the hold's text as one paragraph on the bound owner's
+    /// scratchpad — bound at start, carried here because the machine's
+    /// reset clears `context` before the app performs the commit. The
+    /// full context rides along so the bubble can anchor where the hold
+    /// started.
+    Commit {
+        context: PressToTalkContext,
+        text: String,
+    },
 }
 
 /// One hold's worth of state plus the chord's live halves. Repeats and
@@ -183,6 +191,9 @@ pub(super) struct PressToTalk {
     /// What the status row announces — an outcome survives its hold's
     /// reset so too-short and error feedback outlive the attempt.
     notice: PressToTalkNotice,
+    /// The context the most recent ended hold was bound to — pairs with
+    /// `notice` so an outcome lands on the surface it was recorded in.
+    last_context: Option<PressToTalkContext>,
     /// Retires the worker when its events would land on a dead hold.
     stop: Arc<AtomicBool>,
     audio_tx: Sender<AudioChunk>,
@@ -201,6 +212,7 @@ impl PressToTalk {
             interim: String::new(),
             settled: String::new(),
             notice: PressToTalkNotice::Idle,
+            last_context: None,
             stop: Arc::new(AtomicBool::new(false)),
             audio_tx,
             audio_rx,
@@ -251,6 +263,7 @@ impl PressToTalk {
             PressToTalkNotice::Busy => Some(tr!("press_to_talk.busy")),
             PressToTalkNotice::MicDenied => Some(tr!("press_to_talk.mic_denied")),
             PressToTalkNotice::Error(cause) => Some(cause.clone()),
+            PressToTalkNotice::Cancelled => Some(tr!("press_to_talk.cancelled")),
         }
     }
 
@@ -258,6 +271,13 @@ impl PressToTalk {
     /// clears on the bound session wait for this.
     pub(super) fn busy(&self) -> bool {
         self.phase != PressToTalkPhase::Ready
+    }
+
+    /// The surface the current notice belongs to — the live hold's
+    /// context while busy, the ended hold's context afterward, so a
+    /// too-short or error outcome renders where it was recorded.
+    pub(super) fn notice_context(&self) -> Option<PressToTalkContext> {
+        self.context.or(self.last_context)
     }
 
     /// The hold is bound to `owner`'s pad — a send or clear on that
@@ -332,6 +352,7 @@ impl PressToTalk {
                 self.generation = self.generation.wrapping_add(1);
                 self.stop.store(true, Ordering::Relaxed);
                 self.reset_hold();
+                self.notice = PressToTalkNotice::Cancelled;
                 vec![PressToTalkDirective::AbortCapture]
             }
             PressToTalkPhase::Recording => {
@@ -354,14 +375,17 @@ impl PressToTalk {
         self.generation = self.generation.wrapping_add(1);
         self.stop.store(true, Ordering::Relaxed);
         self.reset_hold();
+        self.notice = PressToTalkNotice::Cancelled;
         vec![PressToTalkDirective::AbortCapture]
     }
 
     /// Hold-fields reset without touching the outcome notice — the
     /// caller sets the next one, or the notice stays whatever the last
-    /// attempt announced.
+    /// attempt announced. The ended hold's context is kept so the
+    /// outcome lands on the surface it came from.
     fn reset_hold(&mut self) {
         self.phase = PressToTalkPhase::Ready;
+        self.last_context = self.context;
         self.context = None;
         self.interim.clear();
         self.settled.clear();
@@ -441,13 +465,9 @@ impl PressToTalk {
                         self.notice = PressToTalkNotice::TooShort;
                         Vec::new()
                     }
-                    (
-                        Some(PressToTalkContext::Composer { owner })
-                        | Some(PressToTalkContext::Annotation { owner }),
-                        Acceptance::Accepted,
-                    ) => {
+                    (Some(context), Acceptance::Accepted) => {
                         self.notice = PressToTalkNotice::Recorded;
-                        vec![PressToTalkDirective::Commit { owner, text }]
+                        vec![PressToTalkDirective::Commit { context, text }]
                     }
                     (None, Acceptance::Accepted) => Vec::new(),
                 }
@@ -619,6 +639,21 @@ impl Waku {
             return false;
         }
         cx.stop_propagation();
+        // A fresh hold dismisses the previous bubble the moment capture
+        // is accepted — a failed or too-short attempt never restores it.
+        if directives.contains(&PressToTalkDirective::ResolvePermission) {
+            let mut ended_edit = false;
+            for (owner, scratchpad) in &mut self.voice_scratchpads {
+                if let Some(bubble) = scratchpad.press_to_talk_bubble.take() {
+                    ended_edit |= self.press_to_talk_bubble_edit.as_ref().is_some_and(|edit| {
+                        edit.owner == *owner && edit.paragraph == bubble.paragraph
+                    });
+                }
+            }
+            if ended_edit {
+                self.press_to_talk_bubble_edit = None;
+            }
+        }
         self.apply_press_to_talk_directives(directives, cx);
         true
     }
@@ -672,18 +707,13 @@ impl Waku {
         self.apply_press_to_talk_directives(directives, cx);
     }
 
-    /// Navigation, page opens, and composer teardown: the hold's bound
-    /// context is rechecked for liveness — gone or changed means cancel,
-    /// since a final result must never land on a different screen. The
-    /// annotation binding lives while its editor does; the composer
-    /// binding lives while the composer stays mounted and its chat is
-    /// still the visible target.
-    pub(super) fn press_to_talk_navigation(&mut self, cx: &mut Context<Self>) {
-        if !self.press_to_talk.busy() {
-            return;
-        }
-        let alive = match self.press_to_talk.context() {
-            Some(PressToTalkContext::Annotation { owner }) => {
+    /// Whether the context a hold, bubble, or clear-recovery was bound
+    /// to is still on screen — the annotation binding lives while its
+    /// editor does; the composer binding lives while the composer stays
+    /// mounted and its chat is still the visible target.
+    pub(super) fn press_to_talk_context_alive(&self, context: PressToTalkContext) -> bool {
+        match context {
+            PressToTalkContext::Annotation { owner } => {
                 self.annotation_editor
                     .as_ref()
                     .and_then(|editor| match &editor.target {
@@ -694,18 +724,98 @@ impl Waku {
                     })
                     == Some(owner)
             }
-            Some(PressToTalkContext::Composer { owner }) => {
+            PressToTalkContext::Composer { owner } => {
                 self.composer_mounted()
                     && self.settings_page.is_none()
                     && (self.state.selected_session == Some(owner)
                         || self.visible_side_chat_id() == Some(owner))
             }
-            None => false,
-        };
-        if !alive {
+        }
+    }
+
+    /// Navigation, page opens, and composer teardown: the hold's bound
+    /// context is rechecked for liveness — gone or changed means cancel,
+    /// since a final result must never land on a different screen.
+    /// Bubbles and the clear-recovery snapshot die with the contexts
+    /// that anchored them — returning does not restore either.
+    pub(super) fn press_to_talk_navigation(&mut self, cx: &mut Context<Self>) {
+        if self.press_to_talk.busy()
+            && !self
+                .press_to_talk
+                .context()
+                .is_some_and(|context| self.press_to_talk_context_alive(context))
+        {
             let directives = self.press_to_talk.cancel();
             self.apply_press_to_talk_directives(directives, cx);
         }
+        let mut expired_bubbles = Vec::new();
+        let mut expired_undos = Vec::new();
+        for (owner, scratchpad) in &self.voice_scratchpads {
+            if let Some(bubble) = scratchpad.press_to_talk_bubble
+                && !self.press_to_talk_context_alive(bubble.context)
+            {
+                expired_bubbles.push((*owner, bubble));
+            }
+            if let Some(undo) = &scratchpad.clear_undo
+                && !self.press_to_talk_context_alive(undo.context)
+            {
+                expired_undos.push(*owner);
+            }
+        }
+        let mut changed = false;
+        for (owner, bubble) in expired_bubbles {
+            if self
+                .press_to_talk_bubble_edit
+                .as_ref()
+                .is_some_and(|edit| edit.owner == owner && edit.paragraph == bubble.paragraph)
+            {
+                self.press_to_talk_bubble_edit = None;
+            }
+            if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) {
+                scratchpad.press_to_talk_bubble = None;
+            }
+            changed = true;
+        }
+        for owner in expired_undos {
+            if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) {
+                scratchpad.clear_undo = None;
+            }
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// ⌘Z's one dedicated meaning while a hold or a bubble owns the
+    /// shortcut: consumed outright during recording/finalization, and a
+    /// whole-bubble removal once a paragraph is up. Intercepted ahead of
+    /// binding dispatch so the same event can never reach the field's
+    /// undo stack or the workspace's draft-use undo. Returns without
+    /// claiming anything when neither applies, leaving ordinary undo
+    /// routing intact.
+    pub(super) fn press_to_talk_undo_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.press_to_talk.busy() {
+            cx.stop_propagation();
+            return;
+        }
+        let bubble = self
+            .voice_scratchpads
+            .iter()
+            .find_map(|(owner, scratchpad)| {
+                let bubble = scratchpad.press_to_talk_bubble?;
+                (self.press_to_talk_context_alive(bubble.context)
+                    && scratchpad
+                        .transcript
+                        .paragraph_text(bubble.paragraph)
+                        .is_some())
+                .then_some((*owner, bubble))
+            });
+        let Some((owner, bubble)) = bubble else {
+            return;
+        };
+        self.remove_press_to_talk_bubble(owner, bubble, window, cx);
+        cx.stop_propagation();
     }
 
     /// The settings toggle: off cancels an in-flight hold; on ends
@@ -715,6 +825,12 @@ impl Waku {
         if !enabled {
             let directives = self.press_to_talk.cancel();
             self.apply_press_to_talk_directives(directives, cx);
+            // The bubble is the mode's chrome — the mode going off puts
+            // it away; the committed paragraphs stay in their pads.
+            for scratchpad in self.voice_scratchpads.values_mut() {
+                scratchpad.press_to_talk_bubble = None;
+            }
+            self.press_to_talk_bubble_edit = None;
         } else if self
             .selected_voice_scratchpad()
             .is_some_and(|scratchpad| scratchpad.capture_live)
@@ -940,15 +1056,25 @@ impl Waku {
 
     /// `Commit` — the accepted final lands as one paragraph on the bound
     /// owner's scratchpad, created muted and hidden when that pad never
-    /// opened. Typed composer drafts are untouched.
-    fn commit_press_to_talk(&mut self, owner: VoicePadOwner, text: &str, cx: &mut Context<Self>) {
+    /// opened, and becomes the pad's bubble. Typed composer drafts are
+    /// untouched.
+    fn commit_press_to_talk(
+        &mut self,
+        context: PressToTalkContext,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let owner = context.owner();
         let scratchpad = self.voice_scratchpads.entry(owner).or_insert_with(|| {
             let mut scratchpad = voice_scratchpad::VoiceScratchpad::new(cx);
             scratchpad.muted = true;
             scratchpad.hidden = true;
             scratchpad
         });
-        scratchpad.transcript.commit_press_to_talk(text);
+        if let Some(paragraph) = scratchpad.transcript.commit_press_to_talk(text) {
+            scratchpad.press_to_talk_bubble =
+                Some(voice_scratchpad::PressToTalkBubble { paragraph, context });
+        }
         cx.notify();
     }
 
@@ -966,8 +1092,8 @@ impl Waku {
                 PressToTalkDirective::StartCapture => self.start_press_to_talk_capture(cx),
                 PressToTalkDirective::FinishCapture => self.finish_press_to_talk_capture(),
                 PressToTalkDirective::AbortCapture => self.abort_press_to_talk_capture(),
-                PressToTalkDirective::Commit { owner, text } => {
-                    self.commit_press_to_talk(owner, &text, cx)
+                PressToTalkDirective::Commit { context, text } => {
+                    self.commit_press_to_talk(context, &text, cx)
                 }
             }
         }
@@ -1472,7 +1598,7 @@ mod tests {
         assert_eq!(
             directives,
             vec![PressToTalkDirective::Commit {
-                owner: OWNER,
+                context: COMPOSER,
                 text: "review this change".to_owned(),
             }],
         );
@@ -1511,7 +1637,7 @@ mod tests {
                 assert_eq!(
                     directives,
                     vec![PressToTalkDirective::Commit {
-                        owner: OWNER,
+                        context: ANNOTATION,
                         text: text.trim().to_owned(),
                     }],
                 );
@@ -1542,6 +1668,28 @@ mod tests {
             PressToTalkNotice::Error("socket dropped".to_owned())
         );
         assert_eq!(machine.phase, PressToTalkPhase::Ready);
+    }
+
+    #[test]
+    fn a_cancelled_hold_leaves_its_outcome_on_the_bound_context() {
+        let (mut machine, _) = hold();
+        let directives = machine.cancel();
+        assert_eq!(directives, vec![PressToTalkDirective::AbortCapture]);
+        assert_eq!(machine.notice, PressToTalkNotice::Cancelled);
+        assert_eq!(machine.notice_context(), Some(COMPOSER));
+        // Releasing mid-startup reads the same way — the aborted hold
+        // announces where it was bound.
+        let (mut machine, _) = hold();
+        machine.space_up();
+        assert_eq!(machine.notice, PressToTalkNotice::Cancelled);
+        assert_eq!(machine.notice_context(), Some(COMPOSER));
+        // The live hold's own context wins while one is bound — the
+        // outcome of a previous attempt can't float on another surface.
+        let (mut machine, _) = hold();
+        machine.space_up();
+        let (claimed, _) = machine.space_down(false, Some(ANNOTATION));
+        assert!(claimed);
+        assert_eq!(machine.notice_context(), Some(ANNOTATION));
     }
 
     #[test]
@@ -1599,7 +1747,7 @@ mod tests {
         assert_eq!(
             directives,
             vec![PressToTalkDirective::Commit {
-                owner: OWNER,
+                context: COMPOSER,
                 text: "please review this change".to_owned(),
             }],
         );

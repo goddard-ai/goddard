@@ -2114,7 +2114,12 @@ impl Waku {
                                         .child(label),
                                 )
                             })
-                            .child(self.annotation_comment_input.clone()),
+                            .child(self.annotation_comment_input.clone())
+                            // Press to Talk's annotation chrome — hold
+                            // status, the latest recording's bubble, or
+                            // the outcome, plus the pad's pill — lives
+                            // inside the card under the field.
+                            .children(self.render_press_to_talk_annotation_chrome(cx)),
                     )
                     .child(
                         icon_button("annotation-remove", "icons/trash.svg", theme)

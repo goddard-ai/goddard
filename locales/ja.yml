@@ -2057,6 +2057,7 @@ a11y.task_description: タスクの説明
 a11y.answer: あなたの回答
 a11y.comment: コメント
 a11y.pasted_text: ペーストしたテキスト
+a11y.latest_voicepad_recording: 最新の VoicePad 録音
 keybind.category.projects: プロジェクト
 keybind.category.git: Git
 keybind.category.skills: スキル
@@ -3309,6 +3310,18 @@ voice_scratchpad.open_settings: 設定を開く
 voice_scratchpad.connecting: 接続中…
 voice_scratchpad.connection_lost: 接続が切れました——文字起こしを一時停止中
 voice_scratchpad.paused: サービスが文字起こしを一時停止しました——待機中です
+voice_scratchpad.pill_one: Voicepad · 1 行
+voice_scratchpad.pill_many: Voicepad · %{count} 行
+voice_scratchpad.open_pad: VoicePad を開く
+voice_scratchpad.clear_pad: VoicePad をクリア
+voice_scratchpad.pad_cleared: VoicePad をクリアしました
+voice_scratchpad.undo_clear: クリアを取り消す
+voice_scratchpad.latest_recording: 最新の VoicePad 録音
+voice_scratchpad.edit_recording: 録音を編集
+voice_scratchpad.remove_recording: 録音を削除
+voice_scratchpad.remove_recording_tooltip: 録音を削除 · ⌘Z
+voice_scratchpad.undo_removes_recording: ⌘Z でこの録音を削除
+voice_scratchpad.ptt_hint: ⌥Space を押し続けて録音
 experiments.voice_scratchpad_backend_label: 文字起こしエンジン
 experiments.press_to_talk_title: プッシュトゥトーク
 experiments.press_to_talk_description: Alt+Space を押し続けると、VoicePad を開かずに録音を追加できます。VoicePad はマイクをミュートした状態で開きます。
@@ -3322,3 +3335,4 @@ press_to_talk.busy: 別の録音が進行中です
 press_to_talk.mic_denied: プッシュトゥトークにはマイクへのアクセスが必要です
 press_to_talk.mic_unavailable: マイクを利用できません
 press_to_talk.no_credential: AI Gateway の認証情報がありません——「推論プロバイダー」で設定してください
+press_to_talk.cancelled: 録音をキャンセルしました

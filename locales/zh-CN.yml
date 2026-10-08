@@ -2010,6 +2010,7 @@ a11y.task_description: 任务描述
 a11y.answer: 你的回答
 a11y.comment: 评论
 a11y.pasted_text: 粘贴的文本
+a11y.latest_voicepad_recording: 最新的 VoicePad 录音
 keybind.category.projects: 项目
 keybind.category.git: Git
 keybind.category.skills: 技能
@@ -3260,6 +3261,18 @@ voice_scratchpad.open_settings: 打开设置
 voice_scratchpad.connecting: 正在连接…
 voice_scratchpad.connection_lost: 连接已断开——转写暂停
 voice_scratchpad.paused: 服务已暂停转写——仍在监听
+voice_scratchpad.pill_one: Voicepad · 1 行
+voice_scratchpad.pill_many: Voicepad · %{count} 行
+voice_scratchpad.open_pad: 打开 VoicePad
+voice_scratchpad.clear_pad: 清空 VoicePad
+voice_scratchpad.pad_cleared: 已清空 VoicePad
+voice_scratchpad.undo_clear: 撤销清空
+voice_scratchpad.latest_recording: 最新的 VoicePad 录音
+voice_scratchpad.edit_recording: 编辑录音
+voice_scratchpad.remove_recording: 删除录音
+voice_scratchpad.remove_recording_tooltip: 删除录音 · ⌘Z
+voice_scratchpad.undo_removes_recording: ⌘Z 删除此录音
+voice_scratchpad.ptt_hint: 按住 ⌥Space 录音
 experiments.voice_scratchpad_backend_label: 转写引擎
 experiments.press_to_talk_title: 按键说话
 experiments.press_to_talk_description: 按住 Alt+Space 即可在不打开 VoicePad 的情况下添加录音。VoicePad 打开时麦克风处于静音状态。
@@ -3273,3 +3286,4 @@ press_to_talk.busy: 另一个录音正在进行中
 press_to_talk.mic_denied: 按键说话需要麦克风权限
 press_to_talk.mic_unavailable: 麦克风不可用
 press_to_talk.no_credential: 没有 AI Gateway 凭据——请在"推理提供商"中设置
+press_to_talk.cancelled: 录音已取消
