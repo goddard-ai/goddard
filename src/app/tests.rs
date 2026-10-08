@@ -650,6 +650,31 @@ fn reference_atoms_splice_their_token_and_chip() {
 }
 
 #[test]
+fn boss_prompt_project_reference_sets_response_context_only_for_one_project() {
+    use super::transcript::single_project_prompt_context;
+
+    let one =
+        single_project_prompt_context("inspect [project \"Goddard\" (path: /work/goddard)] now")
+            .unwrap();
+    assert_eq!(one.project_root, std::path::PathBuf::from("/work/goddard"));
+    assert_eq!(one.worktree, None);
+
+    assert!(single_project_prompt_context("no project here").is_none());
+    assert!(
+        single_project_prompt_context(
+            "[project \"A\" (path: /work/a)] [project \"B\" (path: /work/b)]"
+        )
+        .is_none()
+    );
+    assert!(
+        single_project_prompt_context(
+            "[project \"A\" (path: /work/a)] [project \"B\" (path: /work/a)]"
+        )
+        .is_some()
+    );
+}
+
+#[test]
 fn inline_atoms_splice_back_at_their_markers() {
     use crate::input::INLINE_ATOM_MARKER as M;
     // Each marker splices to its atom's payload in marker order — pasted

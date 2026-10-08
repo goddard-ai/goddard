@@ -109,6 +109,7 @@ impl Waku {
                 }
             }
             if let Some(session) = session {
+                let boss_chat = self.boss_chat_key().is_some();
                 let mut seen = HashSet::new();
                 for prompt in session
                     .messages
@@ -124,6 +125,10 @@ impl Waku {
                             .or_else(|| prompt.report_trigger.as_ref()?.reference_context.as_ref())
                         {
                             contexts.insert(turn_id, context.clone());
+                        } else if boss_chat
+                            && let Some(context) = single_project_prompt_context(&prompt.content)
+                        {
+                            contexts.insert(turn_id, context);
                         }
                     }
                 }
@@ -713,6 +718,36 @@ mod display_message_content_tests {
         let assistant = Message::new(MessageRole::Assistant, prompt);
         assert_eq!(display_message_content(&assistant), prompt);
     }
+}
+
+/// Boss chat replies use a project chip in their prompt as their link context
+/// when that prompt names exactly one distinct project.
+pub(super) fn single_project_prompt_context(
+    prompt: &str,
+) -> Option<crate::model::ReferenceContext> {
+    const PREFIX: &str = "[project \"";
+    const PATH: &str = " (path: ";
+    let mut projects = HashSet::new();
+    let mut remaining = prompt;
+    while let Some(start) = remaining.find(PREFIX) {
+        remaining = &remaining[start + PREFIX.len()..];
+        let (_, token) = remaining.split_once(PATH)?;
+        let (path, suffix) = token.split_once(")]")?;
+        if !path.is_empty() {
+            projects.insert(std::path::PathBuf::from(path));
+        }
+        remaining = suffix;
+    }
+    if projects.len() != 1 {
+        return None;
+    }
+    let project_root = projects.into_iter().next()?;
+    project_root
+        .is_absolute()
+        .then_some(crate::model::ReferenceContext {
+            project_root,
+            worktree: None,
+        })
 }
 
 // ── Shared pieces ──────────────────────────────────────────────────────────

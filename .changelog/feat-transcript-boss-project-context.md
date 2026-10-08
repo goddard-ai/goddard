@@ -1,0 +1,1 @@
+- In boss chat, file and commit references in a reply use the project named by that prompt when it includes exactly one project chip.
