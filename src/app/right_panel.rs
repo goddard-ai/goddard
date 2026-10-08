@@ -8805,9 +8805,19 @@ impl Waku {
         // file's flatten and layout stay proportional to the viewport instead
         // of the document. A block-count change splices; a same-count edit
         // only invalidates measured heights.
-        let list_state = self
-            .preview_list_state(relative_path)
-            .unwrap_or_else(|| ListState::new(0, ListAlignment::Top, px(1024.0)));
+        let list_state = if deliverable_page {
+            self.boss_ui.deliverable_page.map(|page| {
+                self.boss_ui
+                    .deliverable_page_scroll
+                    .entry(page)
+                    .or_insert_with(|| ListState::new(0, ListAlignment::Top, px(1024.0)))
+                    .clone()
+            })
+        } else {
+            None
+        }
+        .or_else(|| self.preview_list_state(relative_path))
+        .unwrap_or_else(|| ListState::new(0, ListAlignment::Top, px(1024.0)));
         if list_state.item_count() != block_count {
             list_state.splice(0..list_state.item_count(), block_count);
         } else if content_changed {

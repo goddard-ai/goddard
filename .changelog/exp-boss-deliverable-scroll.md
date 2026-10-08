@@ -1,0 +1,1 @@
+- Reopen a Boss deliverable to return to its previous reading position; each deliverable keeps its own position.

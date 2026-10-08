@@ -250,6 +250,9 @@ pub(super) struct BossUi {
     /// and dies with `command_deliverable` — the same arm brands the composer's
     /// boss chip and roots the page's file at the deliverable's directory.
     pub deliverable_page: Option<(DaemonKey, Uuid)>,
+    /// Markdown list offsets for preview pages, scoped to the owning daemon
+    /// and deliverable so opening another file cannot inherit this position.
+    pub(super) deliverable_page_scroll: HashMap<(DaemonKey, Uuid), ListState>,
     pub revision: u64,
     pub page: Option<(DaemonKey, BossTab)>,
     last_section: HashMap<DaemonKey, BossTab>,
@@ -367,6 +370,7 @@ impl Default for BossUi {
             command_memory_correction: None,
             pending_deliverable: None,
             deliverable_page: None,
+            deliverable_page_scroll: HashMap::new(),
             revision: 0,
             page: None,
             last_section: HashMap::new(),
