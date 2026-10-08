@@ -1,0 +1,70 @@
+diff --git a/lib/iphone-simulator-common.js b/lib/iphone-simulator-common.js
+index b6e67920ad85aea00ca2fa37093ef3ec79543c08..eff730f00ad01d8cb2167a2f0d5152b846cbb966 100644
+--- a/lib/iphone-simulator-common.js
++++ b/lib/iphone-simulator-common.js
+@@ -37,14 +37,22 @@ function getInstalledApplications(deviceId) {
+     return result;
+ }
+ exports.getInstalledApplications = getInstalledApplications;
+-function startSimulator(deviceId) {
+-    let simulatorPath = path.resolve(xcode.getPathFromXcodeSelect(), "Applications", "Simulator.app");
+-    let args = ["open", simulatorPath];
++async function startSimulator(deviceId) {
++    const simulatorPath = path.resolve(xcode.getPathFromXcodeSelect(), "Applications", "Simulator.app");
++    if (!fs.existsSync(simulatorPath)) {
++        if (!deviceId) {
++            throw new Error("A device identifier is required when Simulator.app is unavailable.");
++        }
++        await childProcess.spawn("xcrun", ["simctl", "bootstatus", deviceId, "-b"]);
++        return;
++    }
++    const args = [simulatorPath];
+     if (deviceId) {
+         args.push("--args", "-CurrentDeviceUDID", deviceId);
+     }
+-    childProcess.execSync(args.join(" "));
++    await childProcess.spawn("open", args);
+ }
++
+ exports.startSimulator = startSimulator;
+ function parsePlist(fileNameOrBuffer) {
+     let data;
+diff --git a/lib/iphone-simulator-xcode-simctl.js b/lib/iphone-simulator-xcode-simctl.js
+index b14b1496b8b8216ad610b36064dbd21987c68a87..e5bbe7d27d95507a71e13e1c7f4f0ae6e31495c9 100644
+--- a/lib/iphone-simulator-xcode-simctl.js
++++ b/lib/iphone-simulator-xcode-simctl.js
+@@ -46,7 +46,7 @@ class XCodeSimctlSimulator extends iphone_simulator_name_getter_1.IPhoneSimulato
+     run(applicationPath, applicationIdentifier, options) {
+         return __awaiter(this, void 0, void 0, function* () {
+             const device = yield this.getDeviceToRun(options);
+-            this.startSimulator(options, device);
++            yield this.startSimulator(options, device);
+             if (!options.skipInstall) {
+                 yield this.installApplication(device.id, applicationPath);
+             }
+@@ -278,16 +278,16 @@ class XCodeSimctlSimulator extends iphone_simulator_name_getter_1.IPhoneSimulato
+                 device = null;
+             }
+             if (!device || !this.isDeviceBooted(device)) {
+-                const isSimulatorAppRunning = this.isSimulatorAppRunning();
+-                const haveBootedDevices = yield this.haveBootedDevices();
+-                if (isSimulatorAppRunning) {
+-                    // In case user closes simulator window but simulator app is still alive
+-                    if (!haveBootedDevices || !device) {
+-                        device = yield this.getDeviceToRun(options);
+-                    }
+-                    this.simctl.boot(device.id);
++                if (!device) {
++                    device = yield this.getDeviceToRun(options);
++                }
++                if (!device) {
++                    errors.fail("No available simulator device found.");
++                }
++                if (this.isSimulatorAppRunning() && !this.isDeviceBooted(device)) {
++                    yield this.simctl.boot(device.id);
+                 }
+-                common.startSimulator(device && device.id);
++                yield common.startSimulator(device.id);
+                 // startSimulaltor doesn't always finish immediately, and the subsequent
+                 // install fails since the simulator is not running.
+                 // Give it some time to start before we attempt installing.

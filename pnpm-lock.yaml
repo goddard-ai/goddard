@@ -34,6 +34,7 @@ patchedDependencies:
   '@octanejs/tiptap@0.0.51': 1d7d0d3864e41ae3008c316e81dd7c21c9b8dca6af3d89da1cd748c519346bf1
   '@tsrx/typescript-plugin@0.4.11': d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee
   css@3.0.0: f850496626b52d1bf5ca127576a655d5e46c02def5de9905d568490d4b71959b
+  ios-sim-portable@4.5.1: 112322a31b23c85b3dea52d6acb58d06ebd65d4841332caa8ead372b196bc7f0
   linkifyjs@4.3.3: 6b103bc96e531c5a90bc869f12bc9e28023b5e6c686c4205d96734a28526e202
   octane@0.6.3: 758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6
 
@@ -78,17 +79,17 @@ importers:
         specifier: ^4.0.2
         version: 4.0.2
       '@octane-xplat/effects':
-        specifier: link:../../../../../alloc/octane-xplat/packages/effects
-        version: link:../../../../../alloc/octane-xplat/packages/effects
+        specifier: link:../../alloc/octane-xplat/packages/effects
+        version: link:../../alloc/octane-xplat/packages/effects
       '@octane-xplat/platform':
-        specifier: link:../../../../../alloc/octane-xplat/packages/platform
-        version: link:../../../../../alloc/octane-xplat/packages/platform
+        specifier: link:../../alloc/octane-xplat/packages/platform
+        version: link:../../alloc/octane-xplat/packages/platform
       '@octane-xplat/share':
-        specifier: link:../../../../../alloc/octane-xplat/packages/share
-        version: link:../../../../../alloc/octane-xplat/packages/share
+        specifier: link:../../alloc/octane-xplat/packages/share
+        version: link:../../alloc/octane-xplat/packages/share
       '@octane-xplat/ui':
-        specifier: link:../../../../../alloc/octane-xplat/packages/ui
-        version: link:../../../../../alloc/octane-xplat/packages/ui
+        specifier: link:../../alloc/octane-xplat/packages/ui
+        version: link:../../alloc/octane-xplat/packages/ui
       '@valor/nativescript-websockets':
         specifier: 2.0.3
         version: 2.0.3
@@ -130,11 +131,11 @@ importers:
         specifier: 8.0.17
         version: 8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
       '@octane-xplat/cli':
-        specifier: link:../../../../../alloc/octane-xplat/packages/cli
-        version: link:../../../../../alloc/octane-xplat/packages/cli
+        specifier: link:../../alloc/octane-xplat/packages/cli
+        version: link:../../alloc/octane-xplat/packages/cli
       '@octane-xplat/lint':
-        specifier: link:../../../../../alloc/octane-xplat/packages/lint
-        version: link:../../../../../alloc/octane-xplat/packages/lint
+        specifier: link:../../alloc/octane-xplat/packages/lint
+        version: link:../../alloc/octane-xplat/packages/lint
       '@octanejs/vite-plugin':
         specifier: 0.1.61
         version: 0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
@@ -5764,7 +5765,7 @@ snapshots:
       plist: 3.1.0
       yargs: 17.7.2
 
-  ios-sim-portable@4.5.1:
+  ios-sim-portable@4.5.1(patch_hash=112322a31b23c85b3dea52d6acb58d06ebd65d4841332caa8ead372b196bc7f0):
     dependencies:
       bplist-parser: 0.3.2
       lodash: 4.17.21
@@ -6385,7 +6386,7 @@ snapshots:
       font-finder: 1.1.0
       ios-device-lib: 0.9.5
       ios-mobileprovision-finder: 1.2.1
-      ios-sim-portable: 4.5.1
+      ios-sim-portable: 4.5.1(patch_hash=112322a31b23c85b3dea52d6acb58d06ebd65d4841332caa8ead372b196bc7f0)
       jimp: 1.6.1(supports-color@7.2.0)
       lodash: 4.18.1
       log4js: 6.9.1(supports-color@7.2.0)
