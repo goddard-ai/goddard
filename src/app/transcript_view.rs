@@ -2029,6 +2029,7 @@ impl Waku {
                         .map(|message| (message, session.provider))
                 })
                 .map(|(message, provider)| {
+                    let display_content = super::transcript::display_message_content(&message);
                     let copied = self.copied_message_feedback.contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =
                         self.assistant_response_footer_cached(message_index);
@@ -2179,7 +2180,7 @@ impl Waku {
                             self.work_item_refs_for_content(
                                 self.transcript_display_session()
                                     .and_then(|session| self.workspace_path_for_session(session)),
-                                message.visible_content(),
+                                &display_content,
                             )
                         })
                         .unwrap_or_default();
@@ -2188,7 +2189,7 @@ impl Waku {
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
                             view.set_transcript_text(
-                                message.visible_content(),
+                                &display_content,
                                 message.streaming,
                                 message.role == MessageRole::User,
                             );
@@ -2247,6 +2248,7 @@ impl Waku {
                                 .collect(),
                             attachments_can_reveal,
                             markdown: view,
+                            display_content: &display_content,
                             work_item_refs,
                             ctx: &ctx,
                             menu,

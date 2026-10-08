@@ -1541,6 +1541,7 @@ impl Waku {
                                 .collect(),
                             attachments_can_reveal: !self.is_remote_session(session_id),
                             markdown: view,
+                            display_content: message.visible_content(),
                             work_item_refs,
                             ctx: &ctx,
                             menu,

@@ -1,5 +1,29 @@
 use super::*;
 
+pub(super) fn display_message_content(message: &Message) -> String {
+    const OPEN: &str = "<boss-session-rotation>";
+    const CLOSE: &str = "</boss-session-rotation>";
+
+    let content = message.visible_content();
+    if message.role != MessageRole::User || !content.contains(OPEN) {
+        return content.to_owned();
+    }
+
+    let mut visible = String::with_capacity(content.len());
+    let mut remaining = content;
+    while let Some((before, injected)) = remaining.split_once(OPEN) {
+        visible.push_str(before);
+        let Some((_, after)) = injected.split_once(CLOSE) else {
+            visible.push_str(OPEN);
+            visible.push_str(injected);
+            return visible;
+        };
+        remaining = after;
+    }
+    visible.push_str(remaining);
+    visible
+}
+
 impl Waku {
     /// One list row per message plus each ordered non-message turn block.
     pub(super) fn transcript_row_count(&self) -> usize {
@@ -672,6 +696,22 @@ impl Waku {
         if let Some(row) = row {
             self.remeasure_transcript_rows(row..row + 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod display_message_content_tests {
+    use super::*;
+
+    #[test]
+    fn display_message_content_hides_boss_rotation_context_only_for_users() {
+        let prompt = "Before\n<boss-session-rotation>private context</boss-session-rotation>\nAfter";
+        let user = Message::new(MessageRole::User, prompt);
+        assert_eq!(display_message_content(&user), "Before\n\nAfter");
+        assert_eq!(user.content, prompt, "stored content remains unchanged");
+
+        let assistant = Message::new(MessageRole::Assistant, prompt);
+        assert_eq!(display_message_content(&assistant), prompt);
     }
 }
 

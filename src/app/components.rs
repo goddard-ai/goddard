@@ -486,6 +486,8 @@ pub(super) struct MessageRender<'a> {
     pub(super) attachments_can_reveal: bool,
     /// The parsed human or assistant body. System messages remain verbatim.
     pub(super) markdown: Option<&'a MarkdownView>,
+    /// The row's display-only body, with injected transcript context removed.
+    pub(super) display_content: &'a str,
     /// `#N` mentions in a user message resolved against the workspace's
     /// work-item store — the chips under the bubble. Empty when none.
     pub(super) work_item_refs: Vec<ComposerWorkItem>,
@@ -1273,9 +1275,10 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         composer,
         landed_notice,
         transfer_notice,
+        display_content,
     } = params;
 
-    let content = message.visible_content().to_owned();
+    let content = display_content.to_owned();
     // "Copy Message" must match what the row presents. The terminal part of a
     // settled response stands in for the whole visible answer, so its menu
     // shares the footer's copy content — parts hidden behind "Worked for X"
