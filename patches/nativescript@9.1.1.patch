@@ -1,0 +1,32 @@
+diff --git a/lib/services/cocoapods-service.js b/lib/services/cocoapods-service.js
+index 09d424788b1a7ea9216a5323d9f163338f50f55a..c75feea2f4f6fa291b6fca95a0f8fdabc903ae6e 100644
+--- a/lib/services/cocoapods-service.js
++++ b/lib/services/cocoapods-service.js
+@@ -34,16 +34,17 @@ class CocoaPodsService {
+         let podTool = this.$config.USE_POD_SANDBOX ? "sandbox-pod" : "pod";
+         const args = ["install"];
+         if (process.platform === "darwin" && process.arch === "arm64") {
+-            const res = await this.$childProcess
+-                .exec("arch -x86_64 pod --version", null, {
+-                showStderr: true,
+-            })
+-                .then((res) => res.stdout + " " + res.stderr)
+-                .catch((err) => err.message);
+-            if (!res.includes("Bad CPU type in executable")) {
+-                this.$logger.trace("Running on arm64 but pod is installed under rosetta2 - running pod through rosetta2");
+-                args.unshift(podTool);
+-                args.unshift("-x86_64");
++            try {
++                await this.$childProcess.exec(`${podTool} --version`, null, {
++                    showStderr: true,
++                });
++            }
++            catch (err) {
++                if (!/Bad CPU type in executable|Exec format error/i.test(err.message)) {
++                    throw err;
++                }
++                this.$logger.trace("Native pod execution is unavailable - running pod through rosetta2");
++                args.unshift("-x86_64", podTool);
+                 podTool = "arch";
+             }
+         }

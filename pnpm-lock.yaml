@@ -36,6 +36,7 @@ patchedDependencies:
   css@3.0.0: f850496626b52d1bf5ca127576a655d5e46c02def5de9905d568490d4b71959b
   ios-sim-portable@4.5.1: 112322a31b23c85b3dea52d6acb58d06ebd65d4841332caa8ead372b196bc7f0
   linkifyjs@4.3.3: 6b103bc96e531c5a90bc869f12bc9e28023b5e6c686c4205d96734a28526e202
+  nativescript@9.1.1: d346def3acdba037bde11615062167e88ee1d079a0043f797d4073dca607e1b6
   octane@0.6.3: 758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6
 
 importers:
@@ -147,7 +148,7 @@ importers:
         version: 4.0.4
       nativescript:
         specifier: 9.1.1
-        version: 9.1.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
+        version: 9.1.1(patch_hash=d346def3acdba037bde11615062167e88ee1d079a0043f797d4073dca607e1b6)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       oxlint:
         specifier: ^1.74.0
         version: 1.86.0(oxlint-tsgolint@7.0.2002)
@@ -6368,7 +6369,7 @@ snapshots:
       simple-plist: 1.3.1
       uuid: 11.1.1
 
-  nativescript@9.1.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
+  nativescript@9.1.1(patch_hash=d346def3acdba037bde11615062167e88ee1d079a0043f797d4073dca607e1b6)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0):
     dependencies:
       '@foxt/js-srp': 0.0.3-patch2
       '@nativescript/doctor': 2.0.18
