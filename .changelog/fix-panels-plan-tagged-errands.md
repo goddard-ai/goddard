@@ -1,0 +1,1 @@
+- Errands assigned to a plan now appear in the Goals tab alongside goal assignments.

@@ -752,6 +752,11 @@ fn viewed_plan_just_finalized(
             .any(|plan| plan.session_id == session_id && plan.finalized_at.is_some())
 }
 
+/// Plan affiliation belongs on Goals regardless of finish-reporting semantics.
+fn employee_belongs_on_goals(employee: &waku_protocol::boss::BossEmployee) -> bool {
+    employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal || employee.plan_id.is_some()
+}
+
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -793,9 +798,7 @@ impl Waku {
                 state
                     .employees
                     .iter()
-                    .filter(|employee| {
-                        employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
-                    })
+                    .filter(|employee| employee_belongs_on_goals(employee))
                     .map(|employee| BossGoalRow {
                         session_id: employee.session_id,
                         name: employee.identity.name.clone(),
@@ -7804,6 +7807,33 @@ mod tests {
             request_fingerprint: None,
             plan_id: None,
             item_id: None,
+        }
+    }
+
+    #[test]
+    fn goals_include_plan_tagged_errands_in_every_lifecycle() {
+        use waku_protocol::boss::{EmployeeGoal, EmployeeLifecycle};
+
+        for lifecycle in [
+            EmployeeLifecycle::Queued,
+            EmployeeLifecycle::Dispatching,
+            EmployeeLifecycle::Working,
+            EmployeeLifecycle::Finishing,
+            EmployeeLifecycle::Expired,
+        ] {
+            let mut employee = employee(1, lifecycle, None);
+            assert!(!employee_belongs_on_goals(&employee));
+
+            employee.item_id = Some(Uuid::from_u128(3));
+            assert!(!employee_belongs_on_goals(&employee));
+
+            employee.plan_id = Some(Uuid::from_u128(2));
+            assert!(employee_belongs_on_goals(&employee));
+            assert_eq!(employee.work_goal, EmployeeGoal::Errand);
+
+            employee.plan_id = None;
+            employee.work_goal = EmployeeGoal::Goal;
+            assert!(employee_belongs_on_goals(&employee));
         }
     }
 
