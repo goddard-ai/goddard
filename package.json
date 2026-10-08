@@ -4,6 +4,7 @@
 	"type": "module",
 	"main": "src/main.ts",
 	"scripts": {
+		"preinstall": "node scripts/ensure-xplat-link.mjs",
 		"xplat": "xplat",
 		"dev": "vite",
 		"dev:ios": "ns run ios",
