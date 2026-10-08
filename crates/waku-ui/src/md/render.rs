@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Div, Font,
     FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
-    SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window,
-    canvas, div, font, img, point, prelude::*, px, quad, relative, size,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollDelta,
+    ScrollHandle, SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun,
+    UnderlineStyle, Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 use unicode_script::{Script, UnicodeScript};
@@ -4085,6 +4085,27 @@ fn render_table(
     if let Some(handle) = &scroll {
         viewport = viewport.track_scroll(handle);
     }
+    let wheel_scroll = scroll.clone();
+    viewport = viewport.on_scroll_wheel(move |event, _, cx| {
+        let delta_x = match event.delta {
+            ScrollDelta::Pixels(delta) => delta.x,
+            ScrollDelta::Lines(delta) if delta.x != 0.0 => px(delta.x),
+            ScrollDelta::Lines(_) => px(0.0),
+        };
+        let Some(handle) = &wheel_scroll else {
+            return;
+        };
+        let offset = handle.offset().x;
+        let max_offset = handle.max_offset().x;
+        let can_scroll_horizontally = max_offset > px(0.5)
+            && offset >= -max_offset
+            && offset <= px(0.0)
+            && ((delta_x > px(0.0) && offset < px(0.0))
+                || (delta_x < px(0.0) && offset > -max_offset));
+        if can_scroll_horizontally {
+            cx.stop_propagation();
+        }
+    });
 
     let mut outer = div().w_full().min_w_0().relative().child(viewport);
     if let Some(handle) = scroll {

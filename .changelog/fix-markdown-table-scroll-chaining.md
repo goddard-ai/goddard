@@ -1,0 +1,1 @@
+- Horizontal scrolling in Markdown tables no longer moves the containing page vertically during the same gesture.
