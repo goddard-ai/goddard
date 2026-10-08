@@ -5313,20 +5313,9 @@ impl Waku {
                         12.0,
                         theme.text_tertiary,
                     )))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            // Three lines is enough to recognise a prompt without
-                            // the queue becoming a second transcript.
-                            .py(px(6.0))
-                            .line_height(sp(18.0))
-                            .line_clamp(3)
-                            .text_ellipsis()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .child(SharedString::from(content)),
-                    )
+                    // Three lines is enough to recognise a prompt without
+                    // the queue becoming a second transcript.
+                    .child(queued_preview_body(message, &content, &theme))
                     .child(
                         div()
                             .h(px(30.0))
@@ -9176,6 +9165,257 @@ pub(super) fn restore_inline_atoms(
 /// title or a restored draft where the atoms ride along separately.
 pub(super) fn text_without_atom_markers(content: &str) -> String {
     content.replace(INLINE_ATOM_MARKER, "")
+}
+
+/// One piece of a queued row's preview — a wrapped text run or a
+/// display-only chip for an annotation quote or a composer atom.
+#[derive(Debug, PartialEq)]
+pub(super) enum QueuedPreviewPart {
+    Text(String),
+    Chip {
+        icon: Option<&'static str>,
+        label: SharedString,
+    },
+}
+
+/// A queued row's preview content: the message's visible text split into
+/// plain runs and display-only chips. Annotation quote blocks lead the
+/// display text, and the prompt's own "Annotation N" header — which a
+/// queue entry still carries after a restart, unlike the parked
+/// `queued_annotations` set — names each comment so a comment paragraph
+/// never reads as typed text. Composer atoms — session references, pasted
+/// text, named references — chip anywhere in the remaining text.
+pub(super) fn queued_message_preview_parts(message: &QueuedMessage) -> Vec<QueuedPreviewPart> {
+    let mut parts = Vec::new();
+    let mut rest = message.visible_content();
+    if let Some(comments) = queued_annotation_comments(&message.content)
+        && let Some((labels, stripped)) = strip_queued_annotation_blocks(rest, &comments)
+    {
+        parts.extend(labels.into_iter().map(|label| QueuedPreviewPart::Chip {
+            icon: Some("icons/compose.svg"),
+            label: SharedString::from(label),
+        }));
+        rest = stripped;
+    }
+    push_queued_preview_text(rest, &mut parts);
+    parts
+}
+
+/// The tail of [`annotation_prompt_prefix`] — its presence is what makes
+/// "Annotation N:" headers trustworthy rather than typed text.
+const QUEUED_ANNOTATION_TRAILER: &str =
+    "When responding, refer to the annotations above by their label";
+
+/// The comments a queued prompt's annotation header names, in block order.
+/// `None` when the prefix deviates from [`annotation_prompt_prefix`]'s
+/// grammar anywhere, so the row degrades to the flat text it shows for a
+/// message without annotations.
+fn queued_annotation_comments(content: &str) -> Option<Vec<String>> {
+    let mut comments = Vec::new();
+    let mut rest = content;
+    let mut index = 1usize;
+    while let Some(after_header) = rest.strip_prefix(format!("Annotation {index}:\n").as_str()) {
+        rest = after_header;
+        if !rest.starts_with("> ") {
+            return None;
+        }
+        while let Some(line) = rest.strip_prefix("> ") {
+            let end = line.find('\n').map(|i| i + 1).unwrap_or(line.len());
+            rest = &line[end..];
+        }
+        rest = rest.strip_prefix("\nComment: ")?;
+        // The comment and a history-sourced annotation's "Source:" line share
+        // one paragraph block, ended by the blank line ahead of the next
+        // header or the trailer.
+        let end = rest.find("\n\n")?;
+        let block = match rest[..end].rsplit_once("\nSource: ") {
+            // Only a whole trailing line is provenance — a comment that
+            // mentions "Source:" mid-text keeps its tail.
+            Some((head, tail)) if !tail.contains('\n') => head,
+            _ => &rest[..end],
+        };
+        comments.push(block.trim().to_owned());
+        rest = &rest[end + 2..];
+        index += 1;
+    }
+    (rest.starts_with(QUEUED_ANNOTATION_TRAILER) && !comments.is_empty()).then_some(comments)
+}
+
+/// Peel `visible`'s leading annotation blocks — each a `>`-quoted passage
+/// plus an optional comment paragraph — into chip labels, returning them
+/// with the remaining typed text. `None` on any deviation from
+/// [`annotation_bubble_content`]'s shape: the row then shows the text
+/// as-is rather than guessing where a quote ends.
+fn strip_queued_annotation_blocks<'a>(
+    visible: &'a str,
+    comments: &[String],
+) -> Option<(Vec<String>, &'a str)> {
+    let mut labels = Vec::with_capacity(comments.len());
+    let mut rest = visible;
+    for comment in comments {
+        if !rest.starts_with("> ") {
+            return None;
+        }
+        let mut quote = "";
+        while let Some(line) = rest.strip_prefix("> ") {
+            let end = line.find('\n').map(|i| i + 1).unwrap_or(line.len());
+            if quote.is_empty() {
+                quote = line[..end].trim();
+            }
+            rest = &line[end..];
+        }
+        rest = rest.strip_prefix('\n')?;
+        if !comment.is_empty() {
+            rest = rest
+                .strip_prefix(comment.as_str())
+                .and_then(|rest| rest.strip_prefix("\n\n"))?;
+        }
+        let comment = comment.lines().next().map(str::trim).unwrap_or("");
+        labels.push(if comment.is_empty() {
+            quote.to_owned()
+        } else {
+            comment.to_owned()
+        });
+    }
+    Some((labels, rest))
+}
+
+/// Split `text` into the preview's parts: plain runs stay text and each
+/// composer atom's span becomes a chip carrying its unescaped label. A
+/// malformed span degrades to label text, matching `atom_visible_text`.
+fn push_queued_preview_text(text: &str, parts: &mut Vec<QueuedPreviewPart>) {
+    use waku_protocol::model::{MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN};
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN) {
+        push_queued_preview_segment(&rest[..start], parts);
+        let after_open = &rest[start + OPEN.len_utf8()..];
+        let Some(end) = after_open.find(END) else {
+            push_queued_preview_segment(
+                &waku_protocol::model::atom_visible_text(&rest[start..]),
+                parts,
+            );
+            return;
+        };
+        let span = &rest[start..start + OPEN.len_utf8() + end + END.len_utf8()];
+        parts.push(QueuedPreviewPart::Chip {
+            icon: queued_atom_chip_icon(&after_open[..end]),
+            label: SharedString::from(waku_protocol::model::atom_visible_text(span)),
+        });
+        rest = &after_open[end + END.len_utf8()..];
+    }
+    push_queued_preview_segment(rest, parts);
+}
+
+fn push_queued_preview_segment(text: &str, parts: &mut Vec<QueuedPreviewPart>) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(QueuedPreviewPart::Text(existing)) = parts.last_mut() {
+        existing.push_str(text);
+        return;
+    }
+    parts.push(QueuedPreviewPart::Text(text.to_owned()));
+}
+
+/// The chip glyph an atom span's invisible header names — a session id's
+/// selector run picks the chat icon, a `REF` mark its kind's icon, and a
+/// bare span the pasted-text icon. An unknown reference kind still chips,
+/// just iconless.
+fn queued_atom_chip_icon(inner: &str) -> Option<&'static str> {
+    use waku_protocol::model::{AtomRefKind, MESSAGE_ATOM_REF as REF, decode_atom_session_id};
+    if let Some(rest) = inner.strip_prefix(REF) {
+        return rest
+            .chars()
+            .next()
+            .and_then(AtomRefKind::from_mark)
+            .map(crate::input::atom_ref_icon);
+    }
+    Some(if decode_atom_session_id(inner).0.is_some() {
+        crate::input::ATOM_SESSION_ICON
+    } else {
+        crate::input::ATOM_PASTED_ICON
+    })
+}
+
+/// A queued row's chip: the annotation or atom's icon and label in the
+/// preview's own chrome — bordered and inert, so row clicks and key focus
+/// still belong to the follow-up itself.
+fn queued_preview_chip(
+    id: SharedString,
+    icon_path: Option<&'static str>,
+    label: SharedString,
+    theme: &Theme,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .h(px(18.0))
+        .max_w(px(220.0))
+        .mx(px(2.0))
+        .pl(px(4.0))
+        .pr(px(6.0))
+        .rounded(px(6.0))
+        .border(hairline())
+        .border_color(theme.border_subtle)
+        .bg(theme.inset)
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .text_size(sp(12.0))
+        .text_color(theme.text_secondary)
+        .children(icon_path.map(|path| icon(path, 10.0, theme.text_tertiary)))
+        .child(div().min_w_0().truncate().child(label.clone()))
+        .tooltip(Tooltip::text(label))
+}
+
+/// A queued row's preview body: one clamped text run until a chip appears,
+/// then a wrapping flow of runs and chips under the same three-line
+/// budget. Every item stands a line tall or a multiple of it, so the
+/// overflow cut always lands on a line boundary.
+fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -> Div {
+    let parts = queued_message_preview_parts(message);
+    if !parts
+        .iter()
+        .any(|part| matches!(part, QueuedPreviewPart::Chip { .. }))
+    {
+        return div()
+            .flex_1()
+            .min_w_0()
+            .py(px(6.0))
+            .line_height(sp(18.0))
+            .line_clamp(3)
+            .text_ellipsis()
+            .text_size(sp(12.5))
+            .text_color(theme.text)
+            .child(SharedString::from(fallback.to_owned()));
+    }
+    div()
+        .flex_1()
+        .min_w_0()
+        .py(px(6.0))
+        .max_h(px(66.0))
+        .overflow_hidden()
+        .flex()
+        .flex_wrap()
+        .content_start()
+        .items_center()
+        .line_height(sp(18.0))
+        .text_size(sp(12.5))
+        .text_color(theme.text)
+        .children(parts.into_iter().enumerate().map(|(index, part)| {
+            match part {
+                QueuedPreviewPart::Text(text) => {
+                    div().min_w_0().max_w_full().child(text).into_any_element()
+                }
+                QueuedPreviewPart::Chip { icon, label } => queued_preview_chip(
+                    SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),
+                    icon,
+                    label,
+                    theme,
+                )
+                .into_any_element(),
+            }
+        }))
 }
 
 /// `prompt` with each [`INLINE_ATOM_MARKER`] replaced by its transcript

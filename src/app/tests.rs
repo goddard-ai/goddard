@@ -809,6 +809,83 @@ fn atom_display_content_escapes_markdown_in_labels() {
 }
 
 #[test]
+fn queued_preview_chips_annotations_and_atoms() {
+    use super::composer::{QueuedPreviewPart, queued_message_preview_parts};
+    use waku_protocol::model::{
+        MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, encode_atom_session_id,
+    };
+
+    // A parked follow-up carrying two annotations and a session atom —
+    // the strings exactly as `submission_with_attachments` writes them.
+    let content = concat!(
+        "Annotation 1:\n> quoted agent text\n\nComment: fix this\n\n",
+        "Annotation 2:\n> second passage\n> continues\n\nComment: \n\n",
+        "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+        "now do it"
+    );
+    let display = format!(
+        "> quoted agent text\n\nfix this\n\n> second passage\n> continues\n\nnow {OPEN}{id}Big refactor{END} do it",
+        id = encode_atom_session_id(Uuid::nil())
+    );
+    let mut message = QueuedMessage::new(content);
+    message.display_content = Some(display);
+    assert_eq!(
+        queued_message_preview_parts(&message),
+        vec![
+            QueuedPreviewPart::Chip {
+                icon: Some("icons/compose.svg"),
+                label: "fix this".into(),
+            },
+            QueuedPreviewPart::Chip {
+                icon: Some("icons/compose.svg"),
+                label: "second passage".into(),
+            },
+            QueuedPreviewPart::Text("now ".into()),
+            QueuedPreviewPart::Chip {
+                icon: Some("icons/chat.svg"),
+                label: "Big refactor".into(),
+            },
+            QueuedPreviewPart::Text(" do it".into()),
+        ]
+    );
+}
+
+#[test]
+fn queued_preview_degrades_when_the_blocks_do_not_match() {
+    use super::composer::{QueuedPreviewPart, queued_message_preview_parts};
+    use waku_protocol::model::MESSAGE_ATOM_OPEN as OPEN;
+
+    // Plain prompt: a single text run, nothing chip-shaped.
+    let message = QueuedMessage::new("just a follow-up");
+    assert_eq!(
+        queued_message_preview_parts(&message),
+        vec![QueuedPreviewPart::Text("just a follow-up".into())]
+    );
+
+    // A header claiming annotations whose quote blocks are missing from
+    // the visible text falls back to that text untouched.
+    let mut message = QueuedMessage::new(concat!(
+        "Annotation 1:\n> quoted\n\nComment: note\n\n",
+        "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+        "body"
+    ));
+    message.display_content = Some("no quote block here".to_owned());
+    assert_eq!(
+        queued_message_preview_parts(&message),
+        vec![QueuedPreviewPart::Text("no quote block here".into())]
+    );
+
+    // An unterminated atom span keeps its label as text rather than
+    // leaking the sentinel.
+    let mut message = QueuedMessage::new("body");
+    message.display_content = Some(format!("use {OPEN}loose label"));
+    assert_eq!(
+        queued_message_preview_parts(&message),
+        vec![QueuedPreviewPart::Text("use loose label".into())]
+    );
+}
+
+#[test]
 fn session_mentions_offer_only_the_composers_project() {
     let project = Uuid::new_v4();
     let mut same = started_session(Uuid::new_v4());

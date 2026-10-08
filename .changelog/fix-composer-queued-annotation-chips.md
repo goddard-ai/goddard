@@ -1,0 +1,1 @@
+- Queued follow-ups carrying annotations or session and paste references now preview them as compact inline chips above the composer instead of raw quoted blocks.
