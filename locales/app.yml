@@ -969,8 +969,10 @@ experiments.voice_briefing_reset_instructions:
   en: Reset to default
 experiments.voice_briefing_autoplay:
   en: Automatic playback
-experiments.voice_briefing_autoplay_unfocused:
-  en: Auto-play while unfocused
+experiments.voice_briefing_eager:
+  en: Eager voice briefings
+experiments.voice_briefing_eager_caption:
+  en: Prepare summaries and audio before you return — turn off to generate only when you open a chat. Requires automatic playback.
 experiments.voice_briefing_volume:
   en: Volume
 experiments.voice_briefing_dnd:

@@ -519,6 +519,10 @@ pub fn default_voice_briefing_piper_voice() -> String {
     "en_US-lessac-high".to_owned()
 }
 
+fn default_voice_briefing_eager() -> bool {
+    true
+}
+
 /// Briefings default to the Vercel AI Gateway — the provider the feature
 /// shipped on.
 fn default_voice_briefing_provider() -> waku_protocol::inference::InferenceProvider {
@@ -1511,9 +1515,11 @@ pub struct AppSettings {
     /// prefetches.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_autoplay: bool,
-    /// Allow automatic briefing playback while the app has no active window.
-    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
-    pub voice_briefing_autoplay_unfocused: bool,
+    /// Prepare summary text and one audio clip while a chat is away, so an
+    /// eligible arrival can speak immediately. Subordinate to autoplay —
+    /// it never plays or generates on its own.
+    #[serde(default = "default_voice_briefing_eager")]
+    pub voice_briefing_eager: bool,
     /// Relative briefing playback volume, from silence (0) to full volume (1).
     #[serde(default = "default_completion_sound_volume")]
     pub voice_briefing_volume: f32,
@@ -1620,7 +1626,7 @@ impl Default for AppSettings {
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
-            voice_briefing_autoplay_unfocused: false,
+            voice_briefing_eager: default_voice_briefing_eager(),
             voice_briefing_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             voice_briefing_sleep_window: None,
             voice_briefing_gate_enabled: false,
@@ -2220,9 +2226,10 @@ pub struct PersistedState {
     pub voice_briefing_summary_instructions_full_prompt: bool,
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub voice_briefing_autoplay: bool,
-    /// Allow automatic briefing playback while the app has no active window.
-    #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
-    pub voice_briefing_autoplay_unfocused: bool,
+    /// Prepare summaries and one audio clip while a chat is away —
+    /// subordinate to `voice_briefing_autoplay`; see the AppSettings twin.
+    #[serde(default = "default_voice_briefing_eager")]
+    pub voice_briefing_eager: bool,
     /// Relative briefing playback volume, from silence (0) to full volume (1).
     #[serde(default = "default_completion_sound_volume")]
     pub voice_briefing_volume: f32,
@@ -2638,7 +2645,7 @@ impl PersistedState {
             voice_briefing_summary_instructions: String::new(),
             voice_briefing_summary_instructions_full_prompt: false,
             voice_briefing_autoplay: false,
-            voice_briefing_autoplay_unfocused: false,
+            voice_briefing_eager: default_voice_briefing_eager(),
             voice_briefing_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             voice_briefing_sleep_window: None,
             voice_briefing_gate_enabled: false,
@@ -3113,7 +3120,7 @@ impl PersistedState {
             voice_briefing_summary_instructions_full_prompt: self
                 .voice_briefing_summary_instructions_full_prompt,
             voice_briefing_autoplay: self.voice_briefing_autoplay,
-            voice_briefing_autoplay_unfocused: self.voice_briefing_autoplay_unfocused,
+            voice_briefing_eager: self.voice_briefing_eager,
             voice_briefing_volume: self.voice_briefing_volume,
             voice_briefing_sleep_window: self.voice_briefing_sleep_window,
             voice_briefing_gate_enabled: self.voice_briefing_gate_enabled,
@@ -3282,7 +3289,7 @@ impl PersistedState {
         self.voice_briefing_summary_instructions_full_prompt =
             settings.voice_briefing_summary_instructions_full_prompt;
         self.voice_briefing_autoplay = settings.voice_briefing_autoplay;
-        self.voice_briefing_autoplay_unfocused = settings.voice_briefing_autoplay_unfocused;
+        self.voice_briefing_eager = settings.voice_briefing_eager;
         self.voice_briefing_volume =
             sanitized_completion_sound_volume(settings.voice_briefing_volume).min(1.0);
         self.voice_briefing_sleep_window =

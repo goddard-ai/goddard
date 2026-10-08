@@ -1,6 +1,8 @@
-//! Voice briefing: automatic generation follows the visible idle chat.
-//! One ready clip may wait behind the current playback; a newer successful
-//! generation replaces it. Manual replay bypasses autoplay and the Jev gate.
+//! Voice briefing: automatic work happens while a chat is away — summary
+//! text refreshes for the latest eligible completion and one eager audio
+//! attempt per absence voices it — so arrival can speak without waiting.
+//! A turn settling on screen is read, never briefed; leaving consumes the
+//! visit's claim. Manual replay bypasses autoplay and the Jev gate.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -45,6 +47,8 @@ const BRIEFING_QUEUE_GAP: Duration = Duration::from_millis(1500);
 /// Pipelines in flight at once; past this a settle simply misses its
 /// prefetch and generates on arrival instead.
 const BRIEFING_PENDING_CAP: usize = 4;
+/// Away completions remembered per absence — well past any realistic burst.
+const BRIEFING_CANDIDATES_CAP: usize = 16;
 /// The dedupe set is a bound, not a history: past this it clears and a
 /// revisit can brief again.
 const BRIEFED_MESSAGES_CAP: usize = 256;
@@ -53,10 +57,6 @@ const BRIEFED_MESSAGES_CAP: usize = 256;
 const GATE_FEATURE: &str = "voice-briefing-gate";
 const GATE_QUESTION: &str = "brief";
 const GATE_THRESHOLD: f64 = 0.5;
-
-fn autoplay_focus_allowed(allow_unfocused: bool, has_active_window: bool) -> bool {
-    allow_unfocused || has_active_window
-}
 
 /// A rendered briefing clip: the transcript the summary model wrote and
 /// the audio `voice` gave it. `voice` keys the clip to the engine and
@@ -90,12 +90,35 @@ pub(super) fn effective_voice_briefing_summary_instructions(
     instructions
 }
 
+/// Who a running job serves — cancellation scopes read it. Leaving a visit
+/// drops arrival work, the eager switch drops eager work, and only an
+/// explicit footer or palette request is manual.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BriefingWork {
+    Eager,
+    Arrival,
+    Manual,
+}
+
+/// What a running job produces. Gate evals decide a candidate's
+/// eligibility; a summary job lands as prepared text; audio and full
+/// pipelines end in the clip cache.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BriefingStage {
+    Gate,
+    Summary,
+    Audio,
+    Full,
+}
+
 /// Identity prevents a cancelled async result from consuming a later request
 /// for the same message. Manual activation can claim an existing pipeline.
 pub(super) struct PendingBriefing {
     generation: u64,
+    session_id: Uuid,
     play: bool,
-    manual: bool,
+    work: BriefingWork,
+    stage: BriefingStage,
 }
 
 impl PendingBriefing {
@@ -109,6 +132,67 @@ impl PendingBriefing {
         }
         pending.remove(&message_id)
     }
+}
+
+/// Where a recorded away completion stands against the length floor and
+/// the Jev gate. A rejection is final for the absence — it never displaces
+/// an older eligible target.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BriefingEligibility {
+    Unchecked,
+    Checking,
+    Eligible,
+    Ineligible,
+}
+
+/// A settled off-screen reply that may earn a briefing — captured at
+/// completion, before arrival's acknowledgement, so clearing unread state
+/// never erases it.
+struct BriefingCandidate {
+    message_id: Uuid,
+    turn_id: Option<Uuid>,
+    eligibility: BriefingEligibility,
+}
+
+/// One visit's automatic briefing state. Arrival resolves the captured
+/// candidates into a single claim; leaving, playing, failing, or a manual
+/// takeover consumes it — nothing retries or re-arms inside a visit.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum BriefingVisit {
+    #[default]
+    Away,
+    Resolving,
+    Claimed,
+    Done,
+}
+
+/// Per-chat briefing state — this absence's completions, what was prepared
+/// for them, and the current visit's claim. Runtime only: a restart neither
+/// prepares nor plays old unread history.
+#[derive(Default)]
+pub(super) struct SessionBriefing {
+    /// Away completions this absence, oldest first.
+    candidates: Vec<BriefingCandidate>,
+    visit: BriefingVisit,
+    /// The completion the current visit claimed for briefing.
+    claim: Option<Uuid>,
+    /// The latest eligible away completion — the eager target.
+    target: Option<Uuid>,
+    /// Latest prepared summary text and the reply it voices.
+    summary: Option<(Uuid, String)>,
+    /// The newest summary request waiting behind the running job — one
+    /// replaceable slot, never a queue.
+    summary_wanted: Option<Uuid>,
+    /// A reply whose speculative summary already failed this absence — the
+    /// job does not loop; arrival retries it once as the claim.
+    summary_failed: Option<Uuid>,
+    /// Generation ids of the session's in-flight automatic jobs — at most
+    /// one summary and one audio job run at a time.
+    summary_job: Option<u64>,
+    audio_job: Option<u64>,
+    /// This absence's one speculative audio attempt, spent at job start —
+    /// a failed attempt stays spent.
+    eager_audio_used: bool,
 }
 
 /// Ready automatic clips have one waiting slot. Older async completions
@@ -148,24 +232,43 @@ impl BriefingQueue {
     }
 }
 
-fn automatic_briefing_allowed(
-    viewed: Option<Uuid>,
-    session_id: Uuid,
-    status: SessionStatus,
-) -> bool {
-    viewed == Some(session_id)
-        && !matches!(
-            status,
-            SessionStatus::Connecting | SessionStatus::Working | SessionStatus::Background
-        )
+/// The next step toward an arrival claim, walking candidates newest-first:
+/// claim the first eligible reply, wait on a check already asked, ask the
+/// first unchecked one, or exhaust the set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CandidateScan {
+    Claim(Uuid),
+    Check(Uuid),
+    Wait,
+    Done,
+}
+
+fn scan_briefing_candidates(
+    candidates: &[BriefingCandidate],
+    briefed: &HashSet<Uuid>,
+) -> CandidateScan {
+    for candidate in candidates.iter().rev() {
+        if briefed.contains(&candidate.message_id) {
+            continue;
+        }
+        match candidate.eligibility {
+            BriefingEligibility::Eligible => {
+                return CandidateScan::Claim(candidate.message_id);
+            }
+            BriefingEligibility::Checking => return CandidateScan::Wait,
+            BriefingEligibility::Unchecked => {
+                return CandidateScan::Check(candidate.message_id);
+            }
+            BriefingEligibility::Ineligible => {}
+        }
+    }
+    CandidateScan::Done
 }
 
 impl Waku {
-    /// The settle-side half: a reply that finishes off screen gets its
-    /// clip built now, so landing on the task plays instantly. Runs only
-    /// under automatic playback — manual mode leaves generation to the
-    /// footer's on-demand button.
-    fn viewed_briefing_session(&self) -> Option<Uuid> {
+    /// The chat whose transcript is on screen — navigation only; the
+    /// window's focus state is the caller's job.
+    pub(super) fn viewed_briefing_session(&self) -> Option<Uuid> {
         if self.settings_page.is_some() || self.selected_terminal.is_some() {
             return None;
         }
@@ -175,12 +278,67 @@ impl Waku {
         }
     }
 
+    /// Viewed means on screen *and* in a foreground window: a backgrounded
+    /// or minimized app is away, and activating it is an arrival at the
+    /// active session.
+    fn briefing_is_viewed(&self, session_id: Uuid, has_active_window: bool) -> bool {
+        has_active_window && self.viewed_briefing_session() == Some(session_id)
+    }
+
+    /// The session's eligibility marks on one candidate. A rejection is
+    /// final — nothing resurrects it inside the absence.
+    fn set_briefing_eligibility(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        eligibility: BriefingEligibility,
+    ) {
+        if let Some(candidate) = self
+            .briefings
+            .get_mut(&session_id)
+            .and_then(|state| {
+                state
+                    .candidates
+                    .iter_mut()
+                    .find(|candidate| candidate.message_id == message_id)
+            })
+            .filter(|candidate| candidate.eligibility != BriefingEligibility::Ineligible)
+        {
+            candidate.eligibility = eligibility;
+        }
+    }
+
+    /// Everything the automatic paths need before a provider call is worth
+    /// making: the feature armed, a credential for the summary model, and a
+    /// resolvable speech model.
+    fn briefing_config_ready(&self) -> bool {
+        let provider = self.state.voice_briefing_provider;
+        self.state
+            .inference
+            .get(&provider)
+            .is_some_and(|entry| entry.credential_configured)
+            && !self.state.voice_briefing_summary_model.trim().is_empty()
+            && (self.state.voice_briefing_tts_model != VoiceBriefingTtsModel::Custom
+                || !self.state.voice_briefing_tts_custom_model.trim().is_empty())
+    }
+
+    /// Speculation is on only while the whole chain is armed — feature,
+    /// autoplay, and the eager switch — and a provider can actually answer.
+    fn eager_briefing_active(&self) -> bool {
+        self.state.voice_briefing_enabled
+            && self.state.voice_briefing_autoplay
+            && self.state.voice_briefing_eager
+            && self.briefing_config_ready()
+    }
+
     pub(super) fn sync_voice_briefing_navigation(&mut self) -> bool {
         let viewed = self.viewed_briefing_session();
         if viewed == self.briefing_viewed_session {
             return false;
         }
-        self.briefing_viewed_session = viewed;
+        if let Some(departed) = std::mem::replace(&mut self.briefing_viewed_session, viewed) {
+            self.briefing_departed(departed, true);
+        }
         // Pausing is terminal for the chrome. A manual replay remains possible.
         if self
             .voice_briefing_playback
@@ -192,71 +350,644 @@ impl Waku {
                 self.voice_briefing_playback_generation.wrapping_add(1);
         }
         self.briefing_queue.waiting = None;
-        self.briefing_pending.clear();
-        self.briefing_gate_pending.clear();
         true
     }
 
-    /// A completed turn can brief only while its chat is visible.
-    pub(super) fn prefetch_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        self.maybe_voice_brief(session_id, cx);
+    /// The chat left view — a navigation hop or a window deactivation.
+    /// The visit's claim is consumed: arrival work cancels, automatic audio
+    /// stops, and a fresh absence resets the candidates and the eager audio
+    /// allowance. `include_manual` matches navigation's habit of dropping a
+    /// manual pipeline mid-flight; window blurs keep it.
+    pub(super) fn briefing_departed(&mut self, session_id: Uuid, include_manual: bool) {
+        self.briefing_pending.retain(|_, pending| {
+            pending.session_id != session_id
+                || (pending.work == BriefingWork::Manual && !include_manual)
+        });
+        self.briefing_gate_pending
+            .retain(|_, pending| pending.session_id != session_id);
+        if let Some(state) = self.briefings.get_mut(&session_id) {
+            state.visit = BriefingVisit::Away;
+            state.claim = None;
+            state.candidates.clear();
+            state.target = None;
+            state.summary_wanted = None;
+            state.summary_failed = None;
+            state.summary_job = None;
+            state.audio_job = None;
+            state.eager_audio_used = false;
+        }
+        // Only automatic audio belongs to the visit — boss speech and a
+        // manual replay keep their own rules.
+        if self
+            .voice_briefing_playback
+            .is_some_and(|playback| playback.automatic)
+        {
+            crate::platform::stop_briefing_audio();
+            self.voice_briefing_playback = None;
+            self.voice_briefing_playback_generation =
+                self.voice_briefing_playback_generation.wrapping_add(1);
+        }
+        self.briefing_queue.waiting = None;
     }
 
-    /// On arrival, consider only the last completed reply of an idle chat —
-    /// play the clip if it is ready, ride a prefetch already in flight,
-    /// revoice a stale clip in place, or build it.
-    pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if !self.state.voice_briefing_autoplay
-            || !autoplay_focus_allowed(
-                self.state.voice_briefing_autoplay_unfocused,
-                cx.active_window().is_some(),
-            )
-            || self.viewed_briefing_session() != Some(session_id)
-        {
+    /// The chat is gone — cancel its work and clear the opportunity.
+    pub(super) fn drop_session_briefing(&mut self, session_id: Uuid) {
+        self.briefings.remove(&session_id);
+        self.briefing_pending
+            .retain(|_, pending| pending.session_id != session_id);
+        self.briefing_gate_pending
+            .retain(|_, pending| pending.session_id != session_id);
+    }
+
+    /// A settled turn is a briefing candidate only while its chat is away —
+    /// a completion on screen is read, never briefed. Boss chats, active
+    /// goals, and ordinary sessions record alike: the settled reply stands
+    /// on its own regardless of what the session does next.
+    pub(super) fn note_voice_briefing_completion(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        if self.briefing_is_viewed(session_id, cx.active_window().is_some()) {
             return;
         }
-        let Some((message_id, turn_id, response)) = self.voice_briefing_candidate(session_id)
+        let Some((message_id, turn_id, _)) = self.briefing_latest_reply(session_id) else {
+            return;
+        };
+        {
+            let state = self.briefings.entry(session_id).or_default();
+            if state
+                .candidates
+                .iter()
+                .any(|candidate| candidate.message_id == message_id)
+            {
+                return;
+            }
+            state.candidates.push(BriefingCandidate {
+                message_id,
+                turn_id,
+                eligibility: BriefingEligibility::Unchecked,
+            });
+            if state.candidates.len() > BRIEFING_CANDIDATES_CAP {
+                state.candidates.remove(0);
+            }
+        }
+        if self.eager_briefing_active() {
+            self.check_briefing_candidate(session_id, message_id, BriefingWork::Eager, cx);
+        }
+        self.advance_voice_briefing(session_id, cx);
+    }
+
+    /// Arrival: the chat's surface came into view — a selection, leaving a
+    /// page, or the window reactivating. The visit resolves the captured
+    /// candidates once; repeat calls inside the same visit only keep the
+    /// claimed work moving.
+    pub(super) fn maybe_voice_brief(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Sync first: the previous chat's departure is what stops its
+        // audio, and it must land before this arrival can play a cached
+        // clip — a later sync would pause the claim it just started.
+        self.sync_voice_briefing_navigation();
+        if !self.briefing_is_viewed(session_id, cx.active_window().is_some()) {
+            return;
+        }
+        let ready = self.state.voice_briefing_enabled
+            && self.state.voice_briefing_autoplay
+            && self.briefing_config_ready();
+        // Manual audio or a boss announcement already owns the speaker —
+        // the opportunity is consumed, not deferred.
+        let audio_busy =
+            self.voice_briefing_playback.is_some() || !self.speech_clip_queue.is_empty();
+        {
+            let state = self.briefings.entry(session_id).or_default();
+            match state.visit {
+                BriefingVisit::Away => {
+                    if !ready || audio_busy {
+                        state.visit = BriefingVisit::Done;
+                        return;
+                    }
+                    state.visit = BriefingVisit::Resolving;
+                }
+                BriefingVisit::Done => return,
+                _ => {}
+            }
+        }
+        self.advance_voice_briefing(session_id, cx);
+    }
+
+    /// Move one session's briefing state forward: resolve an arrival claim,
+    /// keep the claimed reply's missing stages generating, or — while away
+    /// and eager — retarget and coalesce speculative work. Idempotent;
+    /// every state change re-enters here.
+    fn advance_voice_briefing(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.state.voice_briefing_enabled || !self.state.voice_briefing_autoplay {
+            return;
+        }
+        if self.briefing_is_viewed(session_id, cx.active_window().is_some()) {
+            match self.briefings.get(&session_id).map(|state| state.visit) {
+                Some(BriefingVisit::Resolving) => self.resolve_briefing_arrival(session_id, cx),
+                Some(BriefingVisit::Claimed) => self.ensure_briefing_claim(session_id, cx),
+                _ => {}
+            }
+        } else {
+            // A claim outliving its view means a transition was missed —
+            // fold it into a departure rather than trusting the state.
+            if self
+                .briefings
+                .get(&session_id)
+                .is_some_and(|state| state.visit != BriefingVisit::Away)
+            {
+                self.briefing_departed(session_id, false);
+            }
+            self.advance_eager_briefing(session_id, cx);
+        }
+    }
+
+    /// Walk the captured candidates newest-first: claim the first eligible
+    /// reply, wait on a check already asked, or ask the next unchecked one.
+    /// A rejection never displaces an older eligible target.
+    fn resolve_briefing_arrival(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        loop {
+            let scan = self
+                .briefings
+                .get(&session_id)
+                .map(|state| scan_briefing_candidates(&state.candidates, &self.briefed_messages))
+                .unwrap_or(CandidateScan::Done);
+            match scan {
+                CandidateScan::Claim(message_id) => {
+                    let state = self.briefings.entry(session_id).or_default();
+                    state.visit = BriefingVisit::Claimed;
+                    state.claim = Some(message_id);
+                    self.ensure_briefing_claim(session_id, cx);
+                    return;
+                }
+                CandidateScan::Check(message_id) => {
+                    self.check_briefing_candidate(
+                        session_id,
+                        message_id,
+                        BriefingWork::Arrival,
+                        cx,
+                    );
+                    // An async gate answer re-enters through advance; a
+                    // synchronous answer just loops to the next candidate.
+                    let checking = self.briefings.get(&session_id).is_some_and(|state| {
+                        state
+                            .candidates
+                            .iter()
+                            .find(|candidate| candidate.message_id == message_id)
+                            .is_some_and(|candidate| {
+                                candidate.eligibility == BriefingEligibility::Checking
+                            })
+                    });
+                    if checking {
+                        return;
+                    }
+                }
+                CandidateScan::Wait => return,
+                CandidateScan::Done => {
+                    if let Some(state) = self.briefings.get_mut(&session_id) {
+                        state.visit = BriefingVisit::Done;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The claimed reply gets its missing stages generated immediately —
+    /// reusing a matching pipeline, clip, or prepared text — and plays when
+    /// ready. The fixed target never retargets during the visit.
+    fn ensure_briefing_claim(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(claim) = self
+            .briefings
+            .get(&session_id)
+            .and_then(|state| state.claim)
         else {
             return;
         };
-
-        if let Some(play) = self
-            .briefing_pending
-            .get_mut(&message_id)
-            .or(self.briefing_gate_pending.get_mut(&message_id))
+        if self.briefed_messages.contains(&claim) {
+            if let Some(state) = self.briefings.get_mut(&session_id) {
+                state.visit = BriefingVisit::Done;
+                state.claim = None;
+            }
+            return;
+        }
+        // A pipeline already running for this reply rides to playback —
+        // claiming it as arrival work keeps an eager-off flip or the
+        // speaker-priority rule from cancelling it.
+        if let Some(pending) = self.briefing_pending.get_mut(&claim) {
+            if pending.work == BriefingWork::Eager {
+                pending.work = BriefingWork::Arrival;
+            }
+            pending.play = true;
+            return;
+        }
+        // Speculation for replies the claim passed over is obsolete —
+        // arrival owns the pipeline now.
+        self.briefing_pending.retain(|message_id, pending| {
+            pending.session_id != session_id
+                || pending.work == BriefingWork::Manual
+                || *message_id == claim
+        });
+        self.briefing_gate_pending
+            .retain(|message_id, pending| pending.session_id != session_id || *message_id == claim);
+        if let Some(state) = self.briefings.get_mut(&session_id) {
+            state.summary_wanted = None;
+            state.summary_job = None;
+            state.audio_job = None;
+        }
+        let voice_key = self.voice_briefing_voice_key();
+        if let Some(clip) = self.briefing_clips.get(&claim) {
+            if clip.voice == voice_key {
+                let sequence = self.briefing_queue.issue();
+                self.briefing_queue.accept(sequence, claim);
+                self.pump_briefing_queue(cx);
+                return;
+            }
+            // The clip outlived a voice change — revoice the prepared text,
+            // or the clip's own transcript, rather than re-summarizing.
+            let transcript = self
+                .briefings
+                .get(&session_id)
+                .and_then(|state| state.summary.as_ref())
+                .filter(|(message_id, _)| *message_id == claim)
+                .map(|(_, text)| text.clone())
+                .unwrap_or_else(|| clip.transcript.clone());
+            self.start_briefing_audio(
+                session_id,
+                claim,
+                transcript,
+                BriefingWork::Arrival,
+                true,
+                cx,
+            );
+            return;
+        }
+        if let Some(transcript) = self
+            .briefings
+            .get(&session_id)
+            .and_then(|state| state.summary.as_ref())
+            .filter(|(message_id, _)| *message_id == claim)
+            .map(|(_, text)| text.clone())
         {
-            // A pipeline for this reply is already running — flag it to
-            // play the moment it lands rather than starting a second.
-            play.play = true;
+            self.start_briefing_audio(
+                session_id,
+                claim,
+                transcript,
+                BriefingWork::Arrival,
+                true,
+                cx,
+            );
             return;
         }
-        if let Some(clip) = self.briefing_clips.get(&message_id) {
-            if clip.voice != self.voice_briefing_voice_key() {
-                // The voice changed since the latest turn's clip rendered
-                // — revoice its cached transcript on arrival. Earlier
-                // turns keep their rendered voice: they're history.
-                let transcript = clip.transcript.clone();
-                self.revoice_voice_briefing(message_id, transcript, cx);
-                return;
+        let Some((_, response)) = self.briefing_reply_source(session_id, claim) else {
+            // The reply left the transcript — nothing left to claim.
+            if let Some(state) = self.briefings.get_mut(&session_id) {
+                state.visit = BriefingVisit::Done;
+                state.claim = None;
             }
-            if self.briefed_messages.contains(&message_id) {
+            return;
+        };
+        self.start_briefing_full(session_id, claim, response, BriefingWork::Arrival, true, cx);
+    }
+
+    /// Away-side speculation: the latest eligible completion becomes the
+    /// target, its summary text refreshes through one coalesced job, and
+    /// the absence's single eager audio attempt voices it once ready.
+    fn advance_eager_briefing(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.eager_briefing_active() {
+            return;
+        }
+        let live_jobs: HashSet<u64> = self
+            .briefing_pending
+            .values()
+            .map(|pending| pending.generation)
+            .collect();
+        let target = {
+            let Some(state) = self.briefings.get_mut(&session_id) else {
                 return;
+            };
+            if state
+                .summary_job
+                .is_some_and(|generation| !live_jobs.contains(&generation))
+            {
+                state.summary_job = None;
             }
-            let sequence = self.briefing_queue.issue();
-            self.briefing_queue.accept(sequence, message_id);
-            self.pump_briefing_queue(cx);
+            if state
+                .audio_job
+                .is_some_and(|generation| !live_jobs.contains(&generation))
+            {
+                state.audio_job = None;
+            }
+            let target = state
+                .candidates
+                .iter()
+                .rev()
+                .find(|candidate| {
+                    candidate.eligibility == BriefingEligibility::Eligible
+                        && !self.briefed_messages.contains(&candidate.message_id)
+                })
+                .map(|candidate| candidate.message_id);
+            state.target = target;
+            if let Some(target) = target
+                && state.summary.as_ref().map(|(id, _)| *id) != Some(target)
+                && state.summary_failed != Some(target)
+            {
+                state.summary_wanted = Some(target);
+            }
+            target
+        };
+        if target.is_some() {
+            self.drive_briefing_summary(session_id, cx);
+        }
+        let Some(target) = target else {
+            return;
+        };
+        let audio_due = self.briefings.get(&session_id).is_some_and(|state| {
+            !state.eager_audio_used
+                && state.audio_job.is_none()
+                && state.summary.as_ref().is_some_and(|(id, _)| *id == target)
+        }) && !self.briefing_pending.contains_key(&target)
+            && !self
+                .briefing_clips
+                .get(&target)
+                .is_some_and(|clip| clip.voice == self.voice_briefing_voice_key());
+        if !audio_due {
             return;
         }
-        if self.briefed_messages.contains(&message_id) {
+        let Some(transcript) = self
+            .briefings
+            .get(&session_id)
+            .and_then(|state| state.summary.as_ref())
+            .filter(|(id, _)| *id == target)
+            .map(|(_, text)| text.clone())
+        else {
+            return;
+        };
+        // The attempt is spent at start — a failure does not free it.
+        if let Some(state) = self.briefings.get_mut(&session_id) {
+            state.eager_audio_used = true;
+        }
+        self.start_briefing_audio(
+            session_id,
+            target,
+            transcript,
+            BriefingWork::Eager,
+            false,
+            cx,
+        );
+    }
+
+    /// One automatic summary job per session — `summary_wanted` holds the
+    /// newest outstanding reply so a settled job starts its replacement,
+    /// never a backlog.
+    fn drive_briefing_summary(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let live_jobs: HashSet<u64> = self
+            .briefing_pending
+            .values()
+            .map(|pending| pending.generation)
+            .collect();
+        let Some(state) = self.briefings.get_mut(&session_id) else {
+            return;
+        };
+        if state
+            .summary_job
+            .is_some_and(|generation| live_jobs.contains(&generation))
+        {
             return;
         }
-        self.queue_voice_briefing(session_id, message_id, turn_id, response, true, cx);
+        state.summary_job = None;
+        let Some(wanted) = state.summary_wanted.take() else {
+            return;
+        };
+        // A pipeline for the same reply — automatic or manual — covers the
+        // text already; its finish stores it.
+        if self.briefing_pending.contains_key(&wanted) {
+            return;
+        }
+        let Some((_, response)) = self.briefing_reply_source(session_id, wanted) else {
+            return;
+        };
+        self.start_briefing_summary(session_id, wanted, response, BriefingWork::Eager, false, cx);
+    }
+
+    /// Resolve one candidate's eligibility: the local length floor first,
+    /// then the optional Jev gate. Anything that keeps the gate from
+    /// answering — unconfigured eval, a blind spot, a failed request —
+    /// fails open and the candidate stays eligible.
+    fn check_briefing_candidate(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        work: BriefingWork,
+        cx: &mut Context<Self>,
+    ) {
+        let passes_floor = self
+            .briefing_reply_source(session_id, message_id)
+            .is_some_and(|(_, content)| content.chars().count() >= MIN_RESPONSE_CHARS);
+        if !passes_floor {
+            self.set_briefing_eligibility(session_id, message_id, BriefingEligibility::Ineligible);
+            return;
+        }
+        let turn_id = self
+            .briefings
+            .get(&session_id)
+            .and_then(|state| {
+                state
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.message_id == message_id)
+            })
+            .and_then(|candidate| candidate.turn_id);
+        if !(self.state.voice_briefing_gate_enabled
+            && self.briefing_gate_pending.len() < BRIEFING_PENDING_CAP)
+        {
+            self.set_briefing_eligibility(session_id, message_id, BriefingEligibility::Eligible);
+            return;
+        }
+        let Some((daemon, state)) = self.voice_briefing_gate_request(session_id, turn_id) else {
+            self.set_briefing_eligibility(session_id, message_id, BriefingEligibility::Eligible);
+            return;
+        };
+        self.set_briefing_eligibility(session_id, message_id, BriefingEligibility::Checking);
+        let sequence = self.briefing_queue.issue();
+        let custom = self
+            .state
+            .voice_briefing_gate_instructions
+            .trim()
+            .to_owned();
+        let instructions = if custom.is_empty() {
+            "Should the user proactively hear a short spoken briefing when they return \
+             to this task? Answer true when the turn's reply warrants the interruption \
+             — a decision only the user can make, a failure or surprise worth flagging \
+             — and false when it is routine or self-explanatory."
+                .to_owned()
+        } else {
+            format!(
+                "Should the user proactively hear a short spoken briefing when they \
+                 return to this task? Apply these criteria from the user: {custom}"
+            )
+        };
+        let questions = BTreeMap::from([(
+            GATE_QUESTION.to_owned(),
+            EvalQuestion::Noul {
+                instructions,
+                criteria: None,
+            },
+        )]);
+        self.briefing_gate_pending.insert(
+            message_id,
+            PendingBriefing {
+                generation: sequence,
+                session_id,
+                play: false,
+                work,
+                stage: BriefingStage::Gate,
+            },
+        );
+        cx.notify();
+        let eval = cx.background_executor().spawn(async move {
+            daemon
+                .client()
+                .request(
+                    Uuid::nil(),
+                    session_id,
+                    waku_client::Command::Evaluate {
+                        state,
+                        questions,
+                        feature: Some(GATE_FEATURE.to_owned()),
+                        timeout_secs: None,
+                    },
+                )
+                .ok()
+                .and_then(|payload| match payload {
+                    waku_client::ResponsePayload::Evaluation { evaluation } => evaluation
+                        .answers
+                        .get(GATE_QUESTION)
+                        .and_then(|answer| match answer {
+                            EvalAnswer::Noul { noul } => Some(*noul >= GATE_THRESHOLD),
+                            _ => None,
+                        }),
+                    _ => None,
+                })
+                .unwrap_or(true)
+        });
+        cx.spawn(async move |this, cx| {
+            let approved = eval.await;
+            let _ = this.update(cx, |this, cx| {
+                // A cancel that landed mid-eval drops the entry — the
+                // answer, whatever it was, goes nowhere.
+                if PendingBriefing::take_current(
+                    &mut this.briefing_gate_pending,
+                    message_id,
+                    sequence,
+                )
+                .is_none()
+                {
+                    return;
+                }
+                this.set_briefing_eligibility(
+                    session_id,
+                    message_id,
+                    if approved {
+                        BriefingEligibility::Eligible
+                    } else {
+                        BriefingEligibility::Ineligible
+                    },
+                );
+                this.advance_voice_briefing(session_id, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The daemon and turn state the gate needs, or `None` when eval cannot
+    /// run — the caller fails open and briefs without asking.
+    fn voice_briefing_gate_request(
+        &self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+    ) -> Option<(waku_client::DaemonSupervisor, Value)> {
+        let daemon = self.daemon_for_session(session_id)?;
+        if !daemon.settings().eval_ready() {
+            return None;
+        }
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        let state = status_markers::turn_eval_state(session, turn_id?, None);
+        Some((daemon, state))
+    }
+
+    /// The session's latest settled reply — the completion a settle event
+    /// just produced.
+    fn briefing_latest_reply(&self, session_id: Uuid) -> Option<(Uuid, Option<Uuid>, String)> {
+        let message = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::Assistant && !message.streaming)?;
+        Some((
+            message.id,
+            message.turn_id,
+            tail_chars(message.visible_content(), RESPONSE_INPUT_CHARS),
+        ))
+    }
+
+    /// One reply's source text, fetched fresh — edits and rewinds after the
+    /// settle invalidate the candidate here rather than at record time.
+    fn briefing_reply_source(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+    ) -> Option<(Option<Uuid>, String)> {
+        let message = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?
+            .messages
+            .iter()
+            .find(|message| message.id == message_id)?;
+        if message.role != MessageRole::Assistant || message.streaming {
+            return None;
+        }
+        let content = message.visible_content();
+        (!content.trim().is_empty())
+            .then(|| (message.turn_id, tail_chars(content, RESPONSE_INPUT_CHARS)))
+    }
+
+    /// Stamp a reply as played. The set is a bound, not a history — past
+    /// the cap it clears and an old revisit can brief again.
+    fn mark_briefed(&mut self, message_id: Uuid) {
+        if self.briefed_messages.len() >= BRIEFED_MESSAGES_CAP {
+            self.briefed_messages.clear();
+        }
+        self.briefed_messages.insert(message_id);
+    }
+
+    /// The visit's claim ends by user action — stop, skip, or a manual
+    /// takeover all consume it rather than pausing it.
+    fn consume_briefing_claim(&mut self, message_id: Uuid) {
+        if let Some(state) = self
+            .briefings
+            .values_mut()
+            .find(|state| state.claim == Some(message_id))
+        {
+            state.visit = BriefingVisit::Done;
+            state.claim = None;
+        }
     }
 
     /// What would voice a briefing rendered now: `piper:<voice>` for the
     /// local engine, `provider:model` for a gateway voice. A cached clip
     /// whose key differs was rendered under an older setting.
-    fn voice_briefing_voice_key(&self) -> String {
+    pub(super) fn voice_briefing_voice_key(&self) -> String {
         let provider = self.state.voice_briefing_provider;
         let tts_model = self.state.voice_briefing_tts_model;
         if tts_model.is_piper() {
@@ -291,191 +1022,6 @@ impl Waku {
         effective_speech_voice(model_id, configured)
     }
 
-    /// Shared gate: experiment on, key and model set, the session settled
-    /// enough that its latest reply is final, and that reply long enough
-    /// to be worth hearing. Returns the message id, its turn id for the
-    /// Jev gate's state, and the tail excerpt the summarizer sees.
-    fn voice_briefing_candidate(&self, session_id: Uuid) -> Option<(Uuid, Option<Uuid>, String)> {
-        if !self.state.voice_briefing_enabled {
-            return None;
-        }
-        let provider = self.state.voice_briefing_provider;
-        if !self
-            .state
-            .inference
-            .get(&provider)
-            .is_some_and(|entry| entry.credential_configured)
-            || self.state.voice_briefing_summary_model.trim().is_empty()
-            || (self.state.voice_briefing_tts_model == VoiceBriefingTtsModel::Custom
-                && self.state.voice_briefing_tts_custom_model.trim().is_empty())
-        {
-            return None;
-        }
-        let session = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)?;
-        // Connecting, working, and parked-with-detached-work all mean the
-        // reply is still moving; waiting-for-input is exactly the moment a
-        // briefing helps.
-        if !automatic_briefing_allowed(self.viewed_briefing_session(), session_id, session.status) {
-            return None;
-        }
-        let message = session
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role == MessageRole::Assistant && !message.streaming)?;
-        if message.visible_content().chars().count() < MIN_RESPONSE_CHARS {
-            return None;
-        }
-        Some((
-            message.id,
-            message.turn_id,
-            tail_chars(message.visible_content(), RESPONSE_INPUT_CHARS),
-        ))
-    }
-
-    /// Stamp a reply as played. The set is a bound, not a history — past
-    /// the cap it clears and an old revisit can brief again.
-    fn mark_briefed(&mut self, message_id: Uuid) {
-        if self.briefed_messages.len() >= BRIEFED_MESSAGES_CAP {
-            self.briefed_messages.clear();
-        }
-        self.briefed_messages.insert(message_id);
-    }
-
-    /// The automatic path's Jev gate: when enabled and evaluable, a `Noul`
-    /// on the turn decides whether the reply is worth a spoken briefing
-    /// before either gateway call runs. Anything that keeps the gate from
-    /// answering — unconfigured backend, a turn the state builder can't
-    /// see, a failed or missing answer — fails open and the briefing
-    /// generates; only a confident "no" suppresses it.
-    fn queue_voice_briefing(
-        &mut self,
-        session_id: Uuid,
-        message_id: Uuid,
-        turn_id: Option<Uuid>,
-        response: String,
-        play: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let sequence = self.briefing_queue.issue();
-        if self.state.voice_briefing_gate_enabled
-            && self.briefing_gate_pending.len() < BRIEFING_PENDING_CAP
-            && let Some((daemon, state)) = self.voice_briefing_gate_request(session_id, turn_id)
-        {
-            let custom = self
-                .state
-                .voice_briefing_gate_instructions
-                .trim()
-                .to_owned();
-            let instructions = if custom.is_empty() {
-                "Should the user proactively hear a short spoken briefing when they return \
-                 to this task? Answer true when the turn's reply warrants the interruption \
-                 — a decision only the user can make, a failure or surprise worth flagging \
-                 — and false when it is routine or self-explanatory."
-                    .to_owned()
-            } else {
-                format!(
-                    "Should the user proactively hear a short spoken briefing when they \
-                     return to this task? Apply these criteria from the user: {custom}"
-                )
-            };
-            let questions = BTreeMap::from([(
-                GATE_QUESTION.to_owned(),
-                EvalQuestion::Noul {
-                    instructions,
-                    criteria: None,
-                },
-            )]);
-            self.briefing_gate_pending.insert(
-                message_id,
-                PendingBriefing {
-                    generation: sequence,
-                    play,
-                    manual: false,
-                },
-            );
-            cx.notify();
-            let work = cx.background_executor().spawn(async move {
-                daemon
-                    .client()
-                    .request(
-                        Uuid::nil(),
-                        session_id,
-                        waku_client::Command::Evaluate {
-                            state,
-                            questions,
-                            feature: Some(GATE_FEATURE.to_owned()),
-                            timeout_secs: None,
-                        },
-                    )
-                    .ok()
-                    .and_then(|payload| match payload {
-                        waku_client::ResponsePayload::Evaluation { evaluation } => evaluation
-                            .answers
-                            .get(GATE_QUESTION)
-                            .and_then(|answer| match answer {
-                                EvalAnswer::Noul { noul } => Some(*noul >= GATE_THRESHOLD),
-                                _ => None,
-                            }),
-                        _ => None,
-                    })
-                    .unwrap_or(true)
-            });
-            cx.spawn(async move |this, cx| {
-                let approved = work.await;
-                let _ = this.update(cx, |this, cx| {
-                    // A cancel that landed mid-eval drops the entry — the
-                    // answer, whatever it was, goes nowhere.
-                    let Some(PendingBriefing { play, .. }) = PendingBriefing::take_current(
-                        &mut this.briefing_gate_pending,
-                        message_id,
-                        sequence,
-                    ) else {
-                        return;
-                    };
-                    if this.viewed_briefing_session() != Some(session_id) {
-                        return;
-                    }
-                    if approved {
-                        this.start_voice_briefing(message_id, response, play, Some(sequence), cx);
-                    } else {
-                        // The gate said no — treat the reply as settled so
-                        // arrivals don't re-ask the same question.
-                        this.mark_briefed(message_id);
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-            return;
-        }
-        self.start_voice_briefing(message_id, response, play, Some(sequence), cx);
-    }
-
-    /// The daemon and turn state the gate needs, or `None` when eval cannot
-    /// run — the caller fails open and briefs without asking.
-    fn voice_briefing_gate_request(
-        &self,
-        session_id: Uuid,
-        turn_id: Option<Uuid>,
-    ) -> Option<(waku_client::DaemonSupervisor, Value)> {
-        let daemon = self.daemon_for_session(session_id)?;
-        if !daemon.settings().eval_ready() {
-            return None;
-        }
-        let session = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)?;
-        let state = status_markers::turn_eval_state(session, turn_id?, None);
-        Some((daemon, state))
-    }
-
     /// The footer's headphones button and the palette command: generate —
     /// or replay — one reply's briefing on demand. Autoplay, the Jev gate,
     /// and the length floor don't apply; an explicit click is its own
@@ -485,17 +1031,64 @@ impl Waku {
             return;
         }
         self.sync_voice_briefing_navigation();
-        // A gate eval in flight loses to the click — generate directly.
+        let session_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.messages.iter().any(|m| m.id == message_id))
+            .map(|session| session.id);
+        // An explicit request takes over the visit: the automatic claim is
+        // consumed and its remaining speculation for the session stops.
+        if let Some(session_id) = session_id
+            && self.briefings.get(&session_id).is_some_and(|state| {
+                matches!(
+                    state.visit,
+                    BriefingVisit::Resolving | BriefingVisit::Claimed
+                )
+            })
+        {
+            if let Some(state) = self.briefings.get_mut(&session_id) {
+                state.visit = BriefingVisit::Done;
+                state.claim = None;
+            }
+            self.briefing_queue.waiting = None;
+            self.briefing_pending.retain(|id, pending| {
+                pending.session_id != session_id
+                    || pending.work == BriefingWork::Manual
+                    || *id == message_id
+            });
+            self.briefing_gate_pending
+                .retain(|id, pending| pending.session_id != session_id || *id == message_id);
+        }
         self.briefing_gate_pending.remove(&message_id);
-        if let Some(play) = self.briefing_pending.get_mut(&message_id) {
-            play.play = true;
-            play.manual = true;
+        if let Some(pending) = self.briefing_pending.get_mut(&message_id) {
+            pending.play = true;
+            pending.work = BriefingWork::Manual;
             return;
         }
         if self.briefing_clips.contains_key(&message_id) {
             if !self.play_voice_briefing_clip(message_id, false, cx) {
                 self.show_toast(tr!("errors.voice_briefing_playback"));
             }
+            return;
+        }
+        // Prepared text for the same reply voices directly — no duplicate
+        // summary call for work the automatic path already did.
+        if let Some((session_id, transcript)) = session_id.and_then(|session_id| {
+            self.briefings
+                .get(&session_id)
+                .and_then(|state| state.summary.as_ref())
+                .filter(|(id, _)| *id == message_id)
+                .map(|(_, text)| (session_id, text.clone()))
+        }) {
+            self.start_briefing_audio(
+                session_id,
+                message_id,
+                transcript,
+                BriefingWork::Manual,
+                true,
+                cx,
+            );
             return;
         }
         let Some(response) = self
@@ -513,14 +1106,28 @@ impl Waku {
         else {
             return;
         };
-        self.start_voice_briefing(message_id, response, true, None, cx);
+        self.start_briefing_full(
+            session_id.unwrap_or_default(),
+            message_id,
+            response,
+            BriefingWork::Manual,
+            true,
+            cx,
+        );
     }
 
-    /// Drop a briefing in flight — gate eval or generation — and treat the
-    /// reply as heard so the automatic path does not re-arm it.
+    /// Drop a briefing in flight — eval, summary, or audio — and treat the
+    /// reply as heard so the automatic path does not re-arm it. Cancelling
+    /// the claimed reply consumes the visit's claim.
     pub(super) fn cancel_voice_briefing(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
         let removed = self.briefing_pending.remove(&message_id).is_some()
             | self.briefing_gate_pending.remove(&message_id).is_some();
+        for state in self.briefings.values_mut() {
+            if state.claim == Some(message_id) && state.visit == BriefingVisit::Claimed {
+                state.visit = BriefingVisit::Done;
+                state.claim = None;
+            }
+        }
         if removed {
             self.mark_briefed(message_id);
             cx.notify();
@@ -580,6 +1187,87 @@ impl Waku {
             .collect()
     }
 
+    /// Autoplay or the feature switching off ends every visit's claim and
+    /// cancels all automatic work — pending, evaluating, waiting, or
+    /// playing. Manual playback stays usable.
+    pub(super) fn cancel_automatic_voice_briefings(&mut self) {
+        self.briefing_pending
+            .retain(|_, pending| pending.work == BriefingWork::Manual);
+        self.briefing_gate_pending.clear();
+        for state in self.briefings.values_mut() {
+            if state.visit != BriefingVisit::Away {
+                state.visit = BriefingVisit::Done;
+                state.claim = None;
+            }
+            state.summary_wanted = None;
+            state.summary_job = None;
+            state.audio_job = None;
+        }
+        if self
+            .voice_briefing_playback
+            .is_some_and(|playback| playback.automatic)
+        {
+            crate::platform::stop_briefing_audio();
+            self.voice_briefing_playback = None;
+            self.voice_briefing_playback_generation =
+                self.voice_briefing_playback_generation.wrapping_add(1);
+        }
+        self.briefing_queue.waiting = None;
+    }
+
+    /// The eager switch off drops only speculation — claimed arrival work
+    /// and manual requests continue, and completed caches stay usable.
+    pub(super) fn cancel_eager_voice_briefings(&mut self) {
+        self.briefing_pending
+            .retain(|_, pending| pending.work != BriefingWork::Eager);
+        self.briefing_gate_pending
+            .retain(|_, pending| pending.work != BriefingWork::Eager);
+        let live_jobs: HashSet<u64> = self
+            .briefing_pending
+            .values()
+            .map(|pending| pending.generation)
+            .collect();
+        for state in self.briefings.values_mut() {
+            state.summary_wanted = None;
+            if state
+                .summary_job
+                .is_some_and(|generation| !live_jobs.contains(&generation))
+            {
+                state.summary_job = None;
+            }
+            if state
+                .audio_job
+                .is_some_and(|generation| !live_jobs.contains(&generation))
+            {
+                state.audio_job = None;
+            }
+        }
+    }
+
+    /// Voice or speech-model edits strand in-flight automatic audio under
+    /// the old voice — cancel those jobs; prepared text stays valid, and a
+    /// matching summary voices through the new settings on the next
+    /// arrival instead of looping here.
+    pub(super) fn retire_stale_briefing_voices(&mut self) {
+        self.briefing_pending.retain(|_, pending| {
+            pending.work == BriefingWork::Manual
+                || !matches!(pending.stage, BriefingStage::Audio | BriefingStage::Full)
+        });
+        let live_jobs: HashSet<u64> = self
+            .briefing_pending
+            .values()
+            .map(|pending| pending.generation)
+            .collect();
+        for state in self.briefings.values_mut() {
+            if state
+                .audio_job
+                .is_some_and(|generation| !live_jobs.contains(&generation))
+            {
+                state.audio_job = None;
+            }
+        }
+    }
+
     pub(super) fn voice_briefing_playback_status(&self) -> Option<super::VoiceBriefingPlayback> {
         self.voice_briefing_playback
     }
@@ -588,6 +1276,13 @@ impl Waku {
         let Some(playback) = self.voice_briefing_playback else {
             return;
         };
+        // Pausing automatic audio is a manual takeover — the visit's claim
+        // does not resume on its own.
+        if playback.automatic
+            && let Some(message_id) = playback.message_id
+        {
+            self.consume_briefing_claim(message_id);
+        }
         self.voice_briefing_playback_generation =
             self.voice_briefing_playback_generation.wrapping_add(1);
         let remaining = if playback.playing {
@@ -733,6 +1428,13 @@ impl Waku {
             && let Some(message_id) = self.briefing_queue.waiting.take()
         {
             self.mark_briefed(message_id);
+            self.consume_briefing_claim(message_id);
+        }
+        if let Some(message_id) = self
+            .voice_briefing_playback
+            .and_then(|playback| playback.message_id)
+        {
+            self.consume_briefing_claim(message_id);
         }
         crate::platform::stop_briefing_audio();
         self.voice_briefing_playback = None;
@@ -843,23 +1545,20 @@ impl Waku {
         }
         let allowed = self.state.voice_briefing_enabled
             && self.state.voice_briefing_autoplay
-            && autoplay_focus_allowed(
-                self.state.voice_briefing_autoplay_unfocused,
-                cx.active_window().is_some(),
-            )
+            && cx.active_window().is_some()
             && !self.voice_briefing_dnd_active();
-        if !self.state.voice_briefing_autoplay_unfocused && cx.active_window().is_none() {
-            // Do not retain an automatic clip for later playback: its cached
-            // audio remains available through the manual replay control.
+        if cx.active_window().is_none() {
+            // Automatic clips never wait out a backgrounded window; the
+            // cached audio stays reachable through the footer replay.
             self.briefing_queue.waiting = None;
         }
         if !allowed && self.briefing_queue.waiting.is_some() && self.voice_briefing_dnd_active() {
             self.schedule_voice_briefing_dnd_wake(cx);
         }
-        if let Some(message_id) = self.briefing_queue.take_ready(allowed) {
-            if !self.play_voice_briefing_clip(message_id, true, cx) {
-                self.show_toast(tr!("errors.voice_briefing_playback"));
-            }
+        if let Some(message_id) = self.briefing_queue.take_ready(allowed)
+            && !self.play_voice_briefing_clip(message_id, true, cx)
+        {
+            self.show_toast(tr!("errors.voice_briefing_playback"));
         }
     }
 
@@ -870,10 +1569,7 @@ impl Waku {
         let allowed = self.viewed_briefing_session().is_some()
             && self.state.voice_briefing_enabled
             && self.state.voice_briefing_autoplay
-            && autoplay_focus_allowed(
-                self.state.voice_briefing_autoplay_unfocused,
-                cx.active_window().is_some(),
-            )
+            && cx.active_window().is_some()
             && !self.voice_briefing_dnd_active();
         if !self.briefing_queue.has_ready(allowed) {
             self.pump_briefing_queue(cx);
@@ -947,10 +1643,18 @@ impl Waku {
                     if this.voice_briefing_playback_generation != generation {
                         return false;
                     }
+                    // Automatic audio belongs to the foreground — a
+                    // backgrounded window stops it outright; the departure
+                    // has already consumed the claim.
                     if this.voice_briefing_playback.is_some_and(|p| p.automatic)
-                        && !this.state.voice_briefing_autoplay_unfocused
                         && cx.active_window().is_none()
                     {
+                        if let Some(message_id) = this
+                            .voice_briefing_playback
+                            .and_then(|playback| playback.message_id)
+                        {
+                            this.consume_briefing_claim(message_id);
+                        }
                         crate::platform::stop_briefing_audio();
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
@@ -968,6 +1672,11 @@ impl Waku {
                     let Some((playing, remaining)) = crate::platform::briefing_audio_status()
                     else {
                         crate::platform::stop_briefing_audio();
+                        if let Some(playback) = this.voice_briefing_playback
+                            && let Some(message_id) = playback.message_id
+                        {
+                            this.consume_briefing_claim(message_id);
+                        }
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
@@ -979,6 +1688,11 @@ impl Waku {
                     };
                     if remaining.is_zero() {
                         crate::platform::stop_briefing_audio();
+                        if let Some(playback) = this.voice_briefing_playback
+                            && let Some(message_id) = playback.message_id
+                        {
+                            this.consume_briefing_claim(message_id);
+                        }
                         this.voice_briefing_playback = None;
                         this.voice_briefing_playback_generation =
                             this.voice_briefing_playback_generation.wrapping_add(1);
@@ -1006,28 +1720,249 @@ impl Waku {
         .detach();
     }
 
-    /// Run the summarize → speak pipeline for one reply. `play` decides
-    /// whether the finished clip sounds on arrival — prefetch runs with it
-    /// off and only fills the cache.
-    fn start_voice_briefing(
+    /// Run the summarize pipeline's text half for one reply — the eager
+    /// target's refresh or a manual request's first stage. The result
+    /// lands in the session's prepared slot; audio follows only when
+    /// something asks for it.
+    fn start_briefing_summary(
         &mut self,
+        session_id: Uuid,
         message_id: Uuid,
         response: String,
+        work: BriefingWork,
         play: bool,
-        sequence: Option<u64>,
         cx: &mut Context<Self>,
     ) {
-        if sequence.is_some() && self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
+        if work != BriefingWork::Manual && self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
             return;
         }
-        let viewed_session = self.viewed_briefing_session();
         let request_id = self.briefing_queue.issue();
         self.briefing_pending.insert(
             message_id,
             PendingBriefing {
                 generation: request_id,
+                session_id,
                 play,
-                manual: sequence.is_none(),
+                work,
+                stage: BriefingStage::Summary,
+            },
+        );
+        if work != BriefingWork::Manual
+            && let Some(state) = self.briefings.get_mut(&session_id)
+        {
+            state.summary_job = Some(request_id);
+        }
+        cx.notify();
+        let provider = self.state.voice_briefing_provider;
+        let summary_model = self.state.voice_briefing_summary_model.trim().to_owned();
+        let instructions = effective_voice_briefing_summary_instructions(
+            &self.state.voice_briefing_summary_instructions,
+            self.state.voice_briefing_summary_instructions_full_prompt,
+        );
+        let http = cx.http_client();
+        let daemon = self.daemon.client();
+        let executor = cx.background_executor().clone();
+        let summary = executor.spawn({
+            let executor = executor.clone();
+            async move {
+                let key = inference_credential(&daemon, provider)?;
+                summarize(
+                    &http,
+                    &executor,
+                    provider,
+                    &key,
+                    &summary_model,
+                    &instructions,
+                    &response,
+                )
+                .await
+                .context("summary generation")
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = summary.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_briefing_summary(session_id, message_id, request_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// A summary job's result: prepared text for the session's latest slot.
+    /// Manual takeovers chain straight into audio; everything else re-enters
+    /// the driver so a claimed reply voices and a settled job frees the
+    /// slot for the newest request.
+    fn finish_briefing_summary(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        request_id: u64,
+        result: anyhow::Result<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pending) =
+            PendingBriefing::take_current(&mut self.briefing_pending, message_id, request_id)
+        else {
+            return;
+        };
+        match result {
+            Ok(transcript) => {
+                if let Some(state) = self.briefings.get_mut(&session_id) {
+                    state.summary = Some((message_id, transcript.clone()));
+                    if state
+                        .summary_job
+                        .is_some_and(|generation| generation == request_id)
+                    {
+                        state.summary_job = None;
+                    }
+                }
+                if pending.work == BriefingWork::Manual && pending.play {
+                    self.start_briefing_audio(
+                        session_id,
+                        message_id,
+                        transcript,
+                        BriefingWork::Manual,
+                        true,
+                        cx,
+                    );
+                }
+            }
+            // Backend error bodies can echo the prompt — the toast stays
+            // generic and the detail only hits stderr.
+            Err(error) => {
+                eprintln!("Goddard: voice briefing failed: {error:#}");
+                if pending.play {
+                    self.show_toast(tr!("errors.voice_briefing"));
+                }
+                match pending.work {
+                    // The claim consumes on failure — nothing retries it
+                    // inside the visit; a click is the retry.
+                    BriefingWork::Arrival => self.consume_briefing_claim(message_id),
+                    // Speculation marks the reply failed so the coalesced
+                    // driver does not retry it into a storm. A later
+                    // eligible completion retargets anyway.
+                    BriefingWork::Eager => {
+                        if let Some(state) = self.briefings.get_mut(&session_id) {
+                            state.summary_failed = Some(message_id);
+                        }
+                    }
+                    BriefingWork::Manual => {}
+                }
+            }
+        }
+        self.advance_voice_briefing(session_id, cx);
+        cx.notify();
+    }
+
+    /// Voice a prepared transcript — the absence's one eager attempt, the
+    /// claimed reply's missing stage, or a manual request reusing text the
+    /// automatic path already wrote.
+    fn start_briefing_audio(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        transcript: String,
+        work: BriefingWork,
+        play: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if work != BriefingWork::Manual && self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
+            return;
+        }
+        let request_id = self.briefing_queue.issue();
+        self.briefing_pending.insert(
+            message_id,
+            PendingBriefing {
+                generation: request_id,
+                session_id,
+                play,
+                work,
+                stage: BriefingStage::Audio,
+            },
+        );
+        if work != BriefingWork::Manual
+            && let Some(state) = self.briefings.get_mut(&session_id)
+        {
+            state.audio_job = Some(request_id);
+        }
+        cx.notify();
+        let voice_key = self.voice_briefing_voice_key();
+        let provider = self.state.voice_briefing_provider;
+        let tts_model = self.state.voice_briefing_tts_model;
+        let tts_model_id = match tts_model {
+            VoiceBriefingTtsModel::Custom => {
+                self.state.voice_briefing_tts_custom_model.trim().to_owned()
+            }
+            _ => tts_model
+                .model_id_for(provider)
+                .unwrap_or_default()
+                .to_owned(),
+        };
+        let gateway_voice = self.voice_briefing_gateway_voice().to_owned();
+        let piper_speaker = self.state.voice_briefing_piper_speaker;
+        let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
+        let http = cx.http_client();
+        let daemon = self.daemon.client();
+        let executor = cx.background_executor().clone();
+        let audio = executor.spawn({
+            let executor = executor.clone();
+            async move {
+                // Piper voices entirely offline — only a gateway engine
+                // needs the provider credential.
+                let audio = if tts_model.is_piper() {
+                    synthesize_piper(&http, &executor, &piper_voice, piper_speaker, &transcript)
+                        .await
+                        .context("speech generation")?
+                } else {
+                    let key = inference_credential(&daemon, provider)?;
+                    synthesize(
+                        &http,
+                        &executor,
+                        provider,
+                        &key,
+                        &tts_model_id,
+                        &gateway_voice,
+                        &transcript,
+                    )
+                    .await
+                    .context("speech generation")?
+                };
+                anyhow::Ok((transcript, audio))
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = audio.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_briefing_clip(message_id, request_id, voice_key, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Summarize and voice one reply in a single pipeline — the claimed
+    /// arrival with no prepared stages, or a manual request with nothing
+    /// reusable.
+    fn start_briefing_full(
+        &mut self,
+        session_id: Uuid,
+        message_id: Uuid,
+        response: String,
+        work: BriefingWork,
+        play: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if work != BriefingWork::Manual && self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
+            return;
+        }
+        let request_id = self.briefing_queue.issue();
+        self.briefing_pending.insert(
+            message_id,
+            PendingBriefing {
+                generation: request_id,
+                session_id,
+                play,
+                work,
+                stage: BriefingStage::Full,
             },
         );
         cx.notify();
@@ -1054,7 +1989,7 @@ impl Waku {
         let http = cx.http_client();
         let daemon = self.daemon.client();
         let executor = cx.background_executor().clone();
-        let work = executor.spawn({
+        let work_fut = executor.spawn({
             let executor = executor.clone();
             async move {
                 let key = inference_credential(&daemon, provider)?;
@@ -1092,138 +2027,44 @@ impl Waku {
             }
         });
         cx.spawn(async move |this, cx| {
-            let result = work.await;
+            let result = work_fut.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_voice_briefing(
-                    message_id,
-                    request_id,
-                    voice_key,
-                    result,
-                    sequence,
-                    viewed_session,
-                    cx,
-                );
+                this.finish_briefing_clip(message_id, request_id, voice_key, result, cx);
             });
         })
         .detach();
     }
 
-    /// Re-voice a clip's cached transcript after the voice setting changed
-    /// — same words, new voice. Only the speech half reruns: the summary
-    /// stands, and Piper needs no credential for it at all.
-    fn revoice_voice_briefing(
-        &mut self,
-        message_id: Uuid,
-        transcript: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self.briefing_pending.len() >= BRIEFING_PENDING_CAP {
-            return;
-        }
-        // The revoiced clip is a fresh utterance — let it sound on landing
-        // even though an earlier voice already briefed this reply.
-        self.briefed_messages.remove(&message_id);
-        let viewed_session = self.viewed_briefing_session();
-        let request_id = self.briefing_queue.issue();
-        self.briefing_pending.insert(
-            message_id,
-            PendingBriefing {
-                generation: request_id,
-                play: true,
-                manual: false,
-            },
-        );
-        cx.notify();
-        let voice_key = self.voice_briefing_voice_key();
-        let provider = self.state.voice_briefing_provider;
-        let tts_model = self.state.voice_briefing_tts_model;
-        let tts_model_id = match tts_model {
-            VoiceBriefingTtsModel::Custom => {
-                self.state.voice_briefing_tts_custom_model.trim().to_owned()
-            }
-            _ => tts_model
-                .model_id_for(provider)
-                .unwrap_or_default()
-                .to_owned(),
-        };
-        let gateway_voice = self.voice_briefing_gateway_voice().to_owned();
-        let piper_speaker = self.state.voice_briefing_piper_speaker;
-        let piper_voice = piper_voice_or_default(&self.state.voice_briefing_piper_voice).to_owned();
-        let http = cx.http_client();
-        let daemon = self.daemon.client();
-        let executor = cx.background_executor().clone();
-        let work = executor.spawn({
-            let executor = executor.clone();
-            async move {
-                let audio = if tts_model.is_piper() {
-                    synthesize_piper(&http, &executor, &piper_voice, piper_speaker, &transcript)
-                        .await
-                        .context("speech generation")?
-                } else {
-                    let key = inference_credential(&daemon, provider)?;
-                    synthesize(
-                        &http,
-                        &executor,
-                        provider,
-                        &key,
-                        &tts_model_id,
-                        &gateway_voice,
-                        &transcript,
-                    )
-                    .await
-                    .context("speech generation")?
-                };
-                anyhow::Ok((transcript, audio))
-            }
-        });
-        cx.spawn(async move |this, cx| {
-            let result = work.await;
-            let _ = this.update(cx, |this, cx| {
-                this.finish_voice_briefing(
-                    message_id,
-                    request_id,
-                    voice_key,
-                    result,
-                    Some(request_id),
-                    viewed_session,
-                    cx,
-                );
-            });
-        })
-        .detach();
-    }
-
-    /// Shared landing for the generate and revoice pipelines: cache the
-    /// clip under the voice that rendered it, evicting the oldest past the
-    /// cap, and sound it when the caller armed playback.
-    fn finish_voice_briefing(
+    /// Shared landing for the audio and full pipelines: cache the clip
+    /// under the voice that rendered it, evicting the oldest past the cap.
+    /// A claimed reply plays on landing; anything else — a stale eager
+    /// target or an already spent visit — just fills the cache.
+    fn finish_briefing_clip(
         &mut self,
         message_id: Uuid,
         request_id: u64,
         voice_key: String,
         result: anyhow::Result<(String, Vec<u8>)>,
-        sequence: Option<u64>,
-        viewed_session: Option<Uuid>,
         cx: &mut Context<Self>,
     ) {
         // A cancel that landed mid-pipeline already dropped the entry —
         // discard the clip rather than caching it.
-        let Some(PendingBriefing { play, manual, .. }) =
+        let Some(pending) =
             PendingBriefing::take_current(&mut self.briefing_pending, message_id, request_id)
         else {
             return;
         };
-        let sequence = if manual { None } else { sequence };
-        if self.viewed_briefing_session() != viewed_session || viewed_session.is_none() {
-            return;
-        }
+        let session_id = pending.session_id;
         match result {
             Ok((transcript, bytes)) => {
-                // An older async completion can't displace a newer clip,
-                // even after that clip started playing.
-                if sequence.is_some_and(|sequence| sequence <= self.briefing_queue.accepted) {
-                    cx.notify();
-                    return;
+                if let Some(state) = self.briefings.get_mut(&session_id) {
+                    state.summary = Some((message_id, transcript.clone()));
+                    if state
+                        .audio_job
+                        .is_some_and(|generation| generation == request_id)
+                    {
+                        state.audio_job = None;
+                    }
                 }
                 // A revoice replaces the stale entry in place — keep its
                 // queue slot so a voice swap can't shuffle recency.
@@ -1247,16 +2088,24 @@ impl Waku {
                         }
                     }
                 }
-                if play && (sequence.is_none() || !self.briefed_messages.contains(&message_id)) {
+                let claimed = self.briefings.get(&session_id).is_some_and(|state| {
+                    state.visit == BriefingVisit::Claimed && state.claim == Some(message_id)
+                });
+                if pending.work == BriefingWork::Manual && pending.play {
                     // AVAudioPlayer must start on the UI thread, so the
                     // bytes ride the spawn back rather than playing from
                     // the executor.
-                    if let Some(sequence) = sequence {
-                        if self.briefing_queue.accept(sequence, message_id) {
-                            self.pump_briefing_queue(cx);
-                        }
-                    } else if !self.play_voice_briefing_clip(message_id, false, cx) {
+                    if !self.play_voice_briefing_clip(message_id, false, cx) {
                         self.show_toast(tr!("errors.voice_briefing_playback"));
+                    }
+                } else if pending.work != BriefingWork::Manual
+                    && claimed
+                    && self.briefing_is_viewed(session_id, cx.active_window().is_some())
+                    && !self.briefed_messages.contains(&message_id)
+                {
+                    let sequence = self.briefing_queue.issue();
+                    if self.briefing_queue.accept(sequence, message_id) {
+                        self.pump_briefing_queue(cx);
                     }
                 }
             }
@@ -1264,8 +2113,13 @@ impl Waku {
             // generic and the detail only hits stderr.
             Err(error) => {
                 eprintln!("Goddard: voice briefing failed: {error:#}");
-                if play {
+                if pending.play {
                     self.show_toast(tr!("errors.voice_briefing"));
+                }
+                if pending.work == BriefingWork::Arrival {
+                    // A failed claim does not retry inside the visit —
+                    // a footer click is the retry.
+                    self.consume_briefing_claim(message_id);
                 }
             }
         }
@@ -1572,23 +2426,27 @@ mod instructions_tests {
 mod queue_tests {
     use super::*;
 
-    #[test]
-    fn unfocused_autoplay_requires_the_opt_in() {
-        assert!(!autoplay_focus_allowed(false, false));
-        assert!(autoplay_focus_allowed(false, true));
-        assert!(autoplay_focus_allowed(true, false));
+    fn candidate(message_id: Uuid, eligibility: BriefingEligibility) -> BriefingCandidate {
+        BriefingCandidate {
+            message_id,
+            turn_id: None,
+            eligibility,
+        }
     }
 
     #[test]
     fn stale_result_preserves_the_replacement_request_for_manual_replay() {
         let id = Uuid::new_v4();
+        let session = Uuid::new_v4();
         let mut pending = HashMap::new();
         pending.insert(
             id,
             PendingBriefing {
                 generation: 1,
+                session_id: session,
                 play: true,
-                manual: false,
+                work: BriefingWork::Eager,
+                stage: BriefingStage::Full,
             },
         );
         pending.clear(); // leaving the chat cancels the old generation
@@ -1596,38 +2454,64 @@ mod queue_tests {
             id,
             PendingBriefing {
                 generation: 2,
+                session_id: session,
                 play: true,
-                manual: true,
+                work: BriefingWork::Manual,
+                stage: BriefingStage::Full,
             },
         );
         assert!(PendingBriefing::take_current(&mut pending, id, 1).is_none());
         let replacement =
             PendingBriefing::take_current(&mut pending, id, 2).expect("replacement preserved");
-        assert!(replacement.manual && replacement.play);
+        assert!(replacement.work == BriefingWork::Manual && replacement.play);
         assert!(pending.is_empty());
     }
 
     #[test]
-    fn automatic_briefing_requires_the_visible_idle_chat() {
-        let chat = Uuid::new_v4();
-        assert!(automatic_briefing_allowed(
-            Some(chat),
-            chat,
-            SessionStatus::Idle
-        ));
-        assert!(!automatic_briefing_allowed(None, chat, SessionStatus::Idle));
-        assert!(!automatic_briefing_allowed(
-            Some(Uuid::new_v4()),
-            chat,
-            SessionStatus::Idle
-        ));
-        for status in [
-            SessionStatus::Connecting,
-            SessionStatus::Working,
-            SessionStatus::Background,
-        ] {
-            assert!(!automatic_briefing_allowed(Some(chat), chat, status));
-        }
+    fn arrival_scans_newest_first_and_rejections_never_displace() {
+        let briefed = HashSet::new();
+        let oldest = Uuid::new_v4();
+        let middle = Uuid::new_v4();
+        let newest = Uuid::new_v4();
+        // The newest eligible candidate wins even with a rejection above it.
+        let candidates = vec![
+            candidate(oldest, BriefingEligibility::Eligible),
+            candidate(middle, BriefingEligibility::Eligible),
+            candidate(newest, BriefingEligibility::Ineligible),
+        ];
+        assert_eq!(
+            scan_briefing_candidates(&candidates, &briefed),
+            CandidateScan::Claim(middle)
+        );
+        // A pending check on a newer reply holds the claim for its answer.
+        let candidates = vec![
+            candidate(oldest, BriefingEligibility::Eligible),
+            candidate(newest, BriefingEligibility::Checking),
+        ];
+        assert_eq!(
+            scan_briefing_candidates(&candidates, &briefed),
+            CandidateScan::Wait
+        );
+        // Unchecked candidates get evaluated newest-first.
+        let candidates = vec![
+            candidate(oldest, BriefingEligibility::Unchecked),
+            candidate(newest, BriefingEligibility::Unchecked),
+        ];
+        assert_eq!(
+            scan_briefing_candidates(&candidates, &briefed),
+            CandidateScan::Check(newest)
+        );
+        // A reply already heard is not a candidate again.
+        let mut briefed = HashSet::new();
+        briefed.insert(newest);
+        let candidates = vec![
+            candidate(oldest, BriefingEligibility::Eligible),
+            candidate(newest, BriefingEligibility::Eligible),
+        ];
+        assert_eq!(
+            scan_briefing_candidates(&candidates, &briefed),
+            CandidateScan::Claim(oldest)
+        );
     }
 
     #[test]

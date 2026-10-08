@@ -1093,8 +1093,9 @@ impl Waku {
                         self.state.completion_sound_volume,
                     );
                 }
-                // Automatic briefings follow only the visible, idle chat.
-                self.prefetch_voice_brief(session_id, cx);
+                // A turn settling off screen is an away-completion
+                // candidate; on screen it is simply read.
+                self.note_voice_briefing_completion(session_id, cx);
                 if let Some((title, body)) = task_notification
                     && inside_focus
                 {

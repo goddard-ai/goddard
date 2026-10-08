@@ -2604,6 +2604,9 @@ pub struct Waku {
     briefing_viewed_session: Option<Uuid>,
     briefing_queue: voice_briefing::BriefingQueue,
     briefing_dnd_wake_pending: bool,
+    /// Per-chat automatic briefing state — this absence's candidates, what
+    /// was prepared for them, and the current visit's claim.
+    briefings: HashMap<Uuid, voice_briefing::SessionBriefing>,
     /// Pipelines in flight per reply, with request identity and playback intent.
     briefing_pending: HashMap<Uuid, voice_briefing::PendingBriefing>,
     /// Replies whose Jev gate eval is still deciding — same play flag.
@@ -6072,8 +6075,18 @@ impl Waku {
                     if this.settings_page == Some(SettingsPage::Providers) {
                         this.refresh_provider_detection(None);
                     }
+                    // Reactivating the window is an arrival at the on-screen
+                    // chat — an unread away completion can brief now.
+                    if let Some(session_id) = this.viewed_briefing_session() {
+                        this.maybe_voice_brief(session_id, cx);
+                    }
                 } else {
                     this.sidebar_shortcuts_window_deactivated(cx);
+                    // A backgrounded or hidden window counts as away: the
+                    // visit's claim ends and a fresh absence opens.
+                    if let Some(session_id) = this.viewed_briefing_session() {
+                        this.briefing_departed(session_id, false);
+                    }
                 }
             })
             .detach();
@@ -6958,6 +6971,7 @@ impl Waku {
                 briefing_viewed_session: None,
                 briefing_queue: voice_briefing::BriefingQueue::default(),
                 briefing_dnd_wake_pending: false,
+                briefings: HashMap::new(),
                 briefing_pending: HashMap::new(),
                 briefing_gate_pending: HashMap::new(),
                 speech_clip_queue: VecDeque::new(),

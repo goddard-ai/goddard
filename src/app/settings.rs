@@ -7956,24 +7956,27 @@ impl Waku {
                 )
                 .into_any_element(),
             ))
+            .child(row(
+                tr!("experiments.voice_briefing_eager"),
+                toggle_switch(
+                    "voice-briefing-eager",
+                    self.state.voice_briefing_eager,
+                    !self.state.voice_briefing_autoplay,
+                    theme,
+                    cx,
+                    move |this, _, cx| {
+                        this.set_voice_briefing_eager(!this.state.voice_briefing_eager, cx)
+                    },
+                )
+                .into_any_element(),
+            ))
+            .child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("experiments.voice_briefing_eager_caption")),
+            )
             .when(self.state.voice_briefing_autoplay, |card| {
-                let card = card.child(row(
-                    tr!("experiments.voice_briefing_autoplay_unfocused"),
-                    toggle_switch(
-                        "voice-briefing-autoplay-unfocused",
-                        self.state.voice_briefing_autoplay_unfocused,
-                        false,
-                        theme,
-                        cx,
-                        |this, _, cx| {
-                            this.set_voice_briefing_autoplay_unfocused(
-                                !this.state.voice_briefing_autoplay_unfocused,
-                                cx,
-                            )
-                        },
-                    )
-                    .into_any_element(),
-                ));
                 let enabled = self.state.voice_briefing_sleep_window.is_some();
                 card.child(row(
                     tr!("experiments.voice_briefing_dnd"),
@@ -8098,6 +8101,7 @@ impl Waku {
         if !enabled {
             self.voice_briefing_volume_slider.cancel();
             self.voice_briefing_sleep_slider.cancel();
+            self.cancel_automatic_voice_briefings();
         }
         self.refresh_voice_briefing_dnd(cx);
         self.save();
@@ -8120,14 +8124,23 @@ impl Waku {
         self.state.voice_briefing_autoplay = autoplay;
         if !autoplay {
             self.voice_briefing_sleep_slider.cancel();
+            self.cancel_automatic_voice_briefings();
         }
         self.refresh_voice_briefing_dnd(cx);
         self.save();
         cx.notify();
     }
 
-    fn set_voice_briefing_autoplay_unfocused(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.state.voice_briefing_autoplay_unfocused = enabled;
+    fn set_voice_briefing_eager(&mut self, eager: bool, cx: &mut Context<Self>) {
+        if self.state.voice_briefing_eager == eager {
+            return;
+        }
+        self.state.voice_briefing_eager = eager;
+        if !eager {
+            // Speculation stops — claimed arrival work, manual requests,
+            // and completed caches all stay.
+            self.cancel_eager_voice_briefings();
+        }
         self.save();
         cx.notify();
     }
@@ -8193,6 +8206,7 @@ impl Waku {
                 .find(|model| !model.is_custom() && !model.is_piper())
                 .unwrap_or_default();
         }
+        self.retire_stale_briefing_voices();
         self.refresh_voice_briefing_voice_input(cx);
         self.save();
         cx.notify();
@@ -8233,6 +8247,7 @@ impl Waku {
             return;
         }
         self.state.voice_briefing_tts_model = model;
+        self.retire_stale_briefing_voices();
         self.refresh_voice_briefing_voice_input(cx);
         self.save();
         cx.notify();
@@ -8413,6 +8428,7 @@ impl Waku {
             super::piper::piper_speaker_or_default(&self.state.voice_briefing_piper_voice, speaker);
         if self.state.voice_briefing_piper_speaker != speaker {
             self.state.voice_briefing_piper_speaker = speaker;
+            self.retire_stale_briefing_voices();
             self.save();
             cx.notify();
         }
@@ -8423,6 +8439,7 @@ impl Waku {
             return;
         }
         self.state.voice_briefing_piper_voice = voice.to_owned();
+        self.retire_stale_briefing_voices();
         self.save();
         cx.notify();
     }
@@ -8432,6 +8449,7 @@ impl Waku {
     /// default, while a deliberately selected custom model may stay empty
     /// until the user finishes entering its ID.
     pub(super) fn save_voice_briefing_fields(&mut self, cx: &mut Context<Self>) {
+        let voice_key_before = self.voice_briefing_voice_key();
         let model = self
             .voice_briefing_model_input
             .read(cx)
@@ -8476,6 +8494,11 @@ impl Waku {
             } else {
                 self.state.voice_briefing_tts_voices.insert(key, voice);
             }
+        }
+        // Voice-affecting fields may have changed — in-flight automatic
+        // audio rendered under the old voice lands stale.
+        if self.voice_briefing_voice_key() != voice_key_before {
+            self.retire_stale_briefing_voices();
         }
         self.state.voice_briefing_summary_instructions = self
             .voice_briefing_instructions_input

@@ -2155,6 +2155,7 @@ impl Waku {
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
         self.state.unseen_completions.remove(&session_id);
+        self.drop_session_briefing(session_id);
         self.undoable_archive.retain(|id| *id != session_id);
         self.pending_workspace_cleanups.remove(&session_id);
         self.project_switch_pending.remove(&session_id);
