@@ -5541,18 +5541,7 @@ impl Waku {
                 enabled: self.state.voice_scratchpad_enabled,
                 set: Self::set_voice_scratchpad_enabled,
                 eval_backed: false,
-                tuning: None,
-            },
-            ExperimentDef {
-                group: ExperimentGroup::Sessions,
-                id: "voice-scratchpad-margin-double-click-toggle",
-                icon: "icons/mouse-pointer-2.svg",
-                title_key: "experiments.voice_scratchpad_margin_double_click_title",
-                description_key: "experiments.voice_scratchpad_margin_double_click_description",
-                enabled: self.state.voice_scratchpad_margin_double_click_enabled,
-                set: Self::set_voice_scratchpad_margin_double_click_enabled,
-                eval_backed: false,
-                tuning: None,
+                tuning: Some(Self::voice_scratchpad_tuning),
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
@@ -8129,6 +8118,112 @@ impl Waku {
                     )
                 },
             )
+            .into_any_element()
+    }
+
+    /// VoicePad's options: which engine transcribes, whether ⌥Space holds
+    /// dictate without opening the panel, and the margin double-click
+    /// gesture. Renders only while the experiment is on — the stored
+    /// values survive the card hiding and reshowing.
+    fn voice_scratchpad_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let row = |label: String, control: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .w(px(110.0))
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(control)
+        };
+
+        let backend = self.state.voice_transcription_backend;
+        let backend_handle = self.menu_handle("voice-transcription-backend".to_owned(), cx);
+        let backend_weak = cx.entity().downgrade();
+        let backend_selector = dropdown_menu(
+            MenuChip::new("voice-transcription-backend")
+                .label(backend.label())
+                .outlined()
+                .selected(backend_handle.is_open())
+                .w(px(200.0))
+                .justify_between(),
+            "voice-transcription-backend-menu",
+            &backend_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                waku_client::persistence::VoiceTranscriptionBackend::ALL
+                    .into_iter()
+                    .map(|option| {
+                        let weak = backend_weak.clone();
+                        MenuItem::new(option.label(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_voice_transcription_backend(option, cx)
+                            });
+                        })
+                        .selected(option == backend)
+                    })
+                    .collect()
+            },
+        );
+
+        let press_to_talk = self.state.press_to_talk_enabled;
+        let press_to_talk_toggle = toggle_switch(
+            "voice-press-to-talk",
+            press_to_talk,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_press_to_talk_enabled(!press_to_talk, cx),
+        );
+
+        let margin_double_click = self.state.voice_scratchpad_margin_double_click_enabled;
+        let margin_toggle = toggle_switch(
+            "voice-scratchpad-margin-double-click",
+            margin_double_click,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| {
+                this.set_voice_scratchpad_margin_double_click_enabled(!margin_double_click, cx)
+            },
+        );
+
+        div()
+            .mt(px(10.0))
+            .pt(px(10.0))
+            .border_t(hairline())
+            .border_color(theme.border)
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                row(
+                    tr!("experiments.voice_scratchpad_backend_label"),
+                    backend_selector.into_any_element(),
+                )
+                .items_start(),
+            )
+            .child(row(
+                tr!("experiments.press_to_talk_title"),
+                press_to_talk_toggle.into_any_element(),
+            ))
+            .child(
+                div()
+                    .pl(px(122.0))
+                    .text_size(sp(12.0))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("experiments.press_to_talk_description")),
+            )
+            .child(row(
+                tr!("experiments.voice_scratchpad_margin_double_click_title"),
+                margin_toggle.into_any_element(),
+            ))
             .into_any_element()
     }
 

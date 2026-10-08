@@ -802,6 +802,10 @@ impl Render for Waku {
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::keyboard_options_modifiers_changed))
+            // Press to Talk reads the chord's release halves off these —
+            // a key-up for Space, the modifier stream for ⌥.
+            .on_modifiers_changed(cx.listener(Self::press_to_talk_modifiers_changed))
+            .on_key_up(cx.listener(Self::press_to_talk_key_up))
             .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
             // Enter-outside-the-composer and type-to-focus are the last
             // listeners on every dispatch path through the workspace: an

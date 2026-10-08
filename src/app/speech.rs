@@ -1013,20 +1013,20 @@ impl Waku {
         let ready = available && crate::platform::voice_listener_running();
         if ready {
             self.voice_input_down_since = None;
-            self.set_voice_input_unavailable(false);
+            self.set_voice_input_unavailable(false, cx);
             return;
         }
         if !self.voice_listener_wanted() {
             // Nobody owns the tap — mirror the device set as before but
             // run no clock; the next start re-checks on its own.
             self.voice_input_down_since = None;
-            self.set_voice_input_unavailable(!available);
+            self.set_voice_input_unavailable(!available, cx);
             return;
         }
         match self.voice_input_down_since {
             None => self.voice_input_down_since = Some(Instant::now()),
             Some(since) if since.elapsed() >= VOICE_INPUT_GRACE => {
-                self.set_voice_input_unavailable(true);
+                self.set_voice_input_unavailable(true, cx);
             }
             _ => {}
         }

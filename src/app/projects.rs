@@ -537,6 +537,9 @@ impl Waku {
         self.fold_terminals_group_for_navigation();
         self.projects_page = Some(project_id);
         self.last_projects_page_project = Some(project_id);
+        // The composer leaves with the workspace — a hold bound to it
+        // cancels rather than recording under a replaced screen.
+        self.press_to_talk_navigation(cx);
         // Whatever owned the strip — a session, a terminal, another page —
         // parks; this project's own strip comes back.
         self.sync_right_panel_owner(cx);

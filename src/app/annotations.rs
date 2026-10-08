@@ -952,6 +952,7 @@ impl Waku {
             annotations.hovered = None;
             annotations.editing = None;
         }
+        self.press_to_talk_navigation(cx);
         cx.notify();
     }
 
@@ -1558,6 +1559,9 @@ impl Waku {
         }
         self.schedule_composer_draft_save(cx);
         self.restore_annotation_focus(editor.previous_focus, cx);
+        // A hold bound to this editor cancels with it — a late result
+        // must not land on a context that closed.
+        self.press_to_talk_navigation(cx);
         cx.notify();
     }
 
@@ -1583,6 +1587,7 @@ impl Waku {
             .previous_focus
             .unwrap_or_else(|| self.composer_focus(cx));
         window.focus(&focus, cx);
+        self.press_to_talk_navigation(cx);
         cx.notify();
     }
 
@@ -1614,6 +1619,7 @@ impl Waku {
                 .previous_focus
                 .unwrap_or_else(|| self.composer_focus(cx));
             window.focus(&focus, cx);
+            self.press_to_talk_navigation(cx);
         }
         self.schedule_composer_draft_save(cx);
         cx.notify();

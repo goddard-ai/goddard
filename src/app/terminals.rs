@@ -1092,7 +1092,7 @@ impl Waku {
             self.capture_and_save_current_composer_draft(cx);
             self.store_transcript_scroll_position();
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
         }
         self.pending_session_activation = None;
         // A terminal claims the main area too: open pages fold, keeping

@@ -154,6 +154,9 @@ impl Waku {
         self.fold_terminals_group_for_navigation();
         self.automations_page = true;
         self.boss_ui.page = None;
+        // The composer leaves with the workspace — a hold bound to it
+        // cancels rather than recording under a replaced screen.
+        self.press_to_talk_navigation(cx);
         // The page owns its own strip — whatever was mounted (a session's,
         // a terminal's) parks until it comes back.
         self.sync_right_panel_owner(cx);

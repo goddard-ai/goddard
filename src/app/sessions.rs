@@ -93,7 +93,7 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
 /// a text surface — or a surface that consumes keystrokes itself — already
 /// holds focus. "TextInput" covers every field in the app; the rest are
 /// focused panes whose typing is not the composer's to take.
-const TYPING_OWNED_CONTEXTS: &[&str] = &[
+pub(super) const TYPING_OWNED_CONTEXTS: &[&str] = &[
     "TextInput",
     "Terminal",
     "Browser",
@@ -797,7 +797,7 @@ impl Waku {
         self.ensure_recent_boss_history(cx);
         // The scratchpad's mic follows the visible chat — the outgoing
         // session's dictation pauses here, not when its panel repaints.
-        self.sync_voice_scratchpad_capture();
+        self.sync_voice_scratchpad_capture(cx);
         // A landing the ⌘⇧D chain aimed keeps its seen set; any other
         // activation ends the chain, so its sessions become ordinary
         // candidates again.
@@ -2170,7 +2170,7 @@ impl Waku {
         self.state.sessions.remove(index);
         // A deleted chat's scratchpad goes with it — this also pauses the
         // mic when the removed row was the selected one.
-        self.sync_voice_scratchpad_capture();
+        self.sync_voice_scratchpad_capture(cx);
         // A removed session can no longer journal an action — its pending
         // predictions are censored, not kept waiting.
         self.pending_action_predictions
@@ -2257,7 +2257,7 @@ impl Waku {
                 }
             } else {
                 self.state.selected_session = None;
-                self.sync_voice_scratchpad_capture();
+                self.sync_voice_scratchpad_capture(cx);
                 self.sync_right_panel_owner(cx);
                 self.save();
                 cx.notify();
@@ -2290,7 +2290,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.state.selected_session = None;
-        self.sync_voice_scratchpad_capture();
+        self.sync_voice_scratchpad_capture(cx);
         self.settings_page = None;
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
         let pending = self
@@ -2589,7 +2589,7 @@ impl Waku {
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
             self.settings_page = None;
             // The departed session's strip is already stored; whatever the
             // navigation below lands on gets its own.
@@ -2850,7 +2850,7 @@ impl Waku {
         self.queue_archived_workspace_cleanup(session_id, cx);
         if was_selected {
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
             self.settings_page = None;
             // The departing session's strip is already stored; whatever the
             // navigation below lands on gets its own.
@@ -4315,20 +4315,13 @@ impl Waku {
         }
         // An overlay owns the keyboard while it is up — including one whose
         // focus has not landed yet, which the context check cannot see.
-        if self.command_palette.is_open()
-            || self.task_switcher.is_open()
-            || self.project_switcher.is_open()
-            || self.keyboard_options_is_open()
-            || self.commit_dialog.is_some()
-            || self.archive_dialog.is_some()
-            || self.full_access_dialog.is_some()
-            || self.incognito_dialog.is_some()
-            || self.provider_switch_dialog.is_some()
-            || self.shortcuts_dialog.is_some()
-            || self.goal_dialog.is_some()
-            || self.image_preview.is_some()
-            || self.menus.borrow().values().any(|menu| menu.is_open())
-        {
+        if self.keyboard_owning_overlay_open() {
+            return;
+        }
+        // ⌥Space is press-to-talk's chord: while the mode claims it — an
+        // eligible composer in front, or a hold already live — it is a
+        // recording boundary, never a nonbreaking space.
+        if self.press_to_talk_key_down(event, window, cx) {
             return;
         }
         // The scratchpad claims ⌥M in either posture: the pause key while
@@ -4382,6 +4375,26 @@ impl Waku {
         let text = text.to_owned();
         composer.update(cx, |composer, cx| composer.insert_text(&text, cx));
         cx.stop_propagation();
+    }
+
+    /// An overlay that owns the keyboard while it is up — including one
+    /// whose focus has not landed yet, which a context-stack check cannot
+    /// see. Type-to-focus, Enter-routing, and press-to-talk eligibility
+    /// all read the same set.
+    pub(super) fn keyboard_owning_overlay_open(&self) -> bool {
+        self.command_palette.is_open()
+            || self.task_switcher.is_open()
+            || self.project_switcher.is_open()
+            || self.keyboard_options_is_open()
+            || self.commit_dialog.is_some()
+            || self.archive_dialog.is_some()
+            || self.full_access_dialog.is_some()
+            || self.incognito_dialog.is_some()
+            || self.provider_switch_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
+            || self.goal_dialog.is_some()
+            || self.image_preview.is_some()
+            || self.menus.borrow().values().any(|menu| menu.is_open())
     }
 
     /// The last-focused visible composer receives global composer shortcuts.
@@ -4494,20 +4507,7 @@ impl Waku {
         {
             return;
         }
-        if self.command_palette.is_open()
-            || self.task_switcher.is_open()
-            || self.project_switcher.is_open()
-            || self.keyboard_options_is_open()
-            || self.commit_dialog.is_some()
-            || self.archive_dialog.is_some()
-            || self.full_access_dialog.is_some()
-            || self.incognito_dialog.is_some()
-            || self.provider_switch_dialog.is_some()
-            || self.shortcuts_dialog.is_some()
-            || self.goal_dialog.is_some()
-            || self.image_preview.is_some()
-            || self.menus.borrow().values().any(|menu| menu.is_open())
-        {
+        if self.keyboard_owning_overlay_open() {
             return;
         }
         if window.context_stack().iter().any(|context| {
@@ -4714,6 +4714,12 @@ impl Waku {
         }
         if self.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
+            return;
+        }
+        // A live press-to-talk hold peels off first — Escape cancels the
+        // capture without sending or deleting prior content, ahead of
+        // every deeper Escape meaning.
+        if !action.immediate && self.press_to_talk_escape(cx) {
             return;
         }
         // The scratchpad owns bare Escape while it's the chat column's

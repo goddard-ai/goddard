@@ -143,6 +143,9 @@ impl Waku {
         }
         self.settings_page = Some(page);
         self.notifications.open = false;
+        // The composer leaves with the workspace — a hold bound to it
+        // cancels rather than recording under a replaced screen.
+        self.press_to_talk_navigation(cx);
         // Closing the inbox uncovers the owner underneath — its strip
         // remounts behind the settings overlay.
         self.sync_right_panel_owner(cx);

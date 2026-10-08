@@ -2441,10 +2441,10 @@ impl Waku {
             .remove(&RightPanelOwner::Session(session_id));
         // A watched chat's scratchpad goes with it — this also pauses the
         // mic when the removed session held the tap.
-        self.sync_voice_scratchpad_capture();
+        self.sync_voice_scratchpad_capture(cx);
         if self.state.selected_session == Some(session_id) {
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
             // The dead session's strip transfers to Bare rather than
             // parking under a key nothing selects again.
             if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {
@@ -2684,7 +2684,7 @@ impl Waku {
         }) {
             let previous_project = self.state.selected_project;
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
             let next = self
                 .state
                 .sessions
@@ -3516,14 +3516,14 @@ impl Waku {
         }
         // Removed chats' scratchpads go with them — this also pauses the
         // mic when a departing session held the tap.
-        self.sync_voice_scratchpad_capture();
+        self.sync_voice_scratchpad_capture(cx);
         if self
             .state
             .selected_session
             .is_some_and(|selected| removed_sessions.contains(&selected))
         {
             self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture();
+            self.sync_voice_scratchpad_capture(cx);
             self.sync_right_panel_owner(cx);
         }
         if self.state.selected_project.is_some_and(|selected| {
@@ -7828,6 +7828,7 @@ impl Waku {
             | self.drain_speech_events(cx)
             | self.drain_voice_gate_events(cx)
             | self.drain_voice_scratchpad_events(cx)
+            | self.drain_press_to_talk_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
             | self.drain_status_marker_events()

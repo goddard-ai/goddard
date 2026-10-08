@@ -1,0 +1,1 @@
+- **VoicePad:** Hold Alt+Space to dictate into a chat's VoicePad without opening it; text lands when you let go. A Whistle transcription engine is also selectable under VoicePad settings — AI Gateway stays the default. Enable both under Settings > Experiments > VoicePad.

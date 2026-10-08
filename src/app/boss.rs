@@ -1413,6 +1413,9 @@ impl Waku {
         self.boss_ui.page = Some((key, tab));
         self.boss_ui.last_section.insert(key, tab);
         self.fold_terminals_group_for_navigation();
+        // The composer leaves with the workspace — a hold bound to it
+        // cancels rather than recording under a replaced screen.
+        self.press_to_talk_navigation(cx);
         self.sync_right_panel_owner(cx);
         self.sync_boss_page_rows();
         if tab == BossTab::Memory {
@@ -7861,7 +7864,11 @@ mod tests {
                 .borrow_mut()
                 .insert((("new-seed".into(), AvatarStyle::DiceBear), 24))
         );
-        assert!(ui.avatar_requested.borrow_mut().insert((("0".into(), AvatarStyle::DiceBear), 56)));
+        assert!(
+            ui.avatar_requested
+                .borrow_mut()
+                .insert((("0".into(), AvatarStyle::DiceBear), 56))
+        );
     }
 
     /// The scale handed to the SVG rasterizer must land each bucket's

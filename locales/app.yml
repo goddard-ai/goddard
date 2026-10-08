@@ -1075,6 +1075,12 @@ experiments.voice_scratchpad_margin_double_click_title:
   en: Double-click chat margins to toggle VoicePad
 experiments.voice_scratchpad_margin_double_click_description:
   en: Double-click the blank space beside chat content to show or hide an open VoicePad. Off by default.
+experiments.voice_scratchpad_backend_label:
+  en: Transcription engine
+experiments.press_to_talk_title:
+  en: Press to Talk
+experiments.press_to_talk_description:
+  en: Hold Alt+Space to add a recording to VoicePad without opening it. VoicePad opens with its microphone muted.
 experiments.memory_title:
   en: Project memory
 experiments.composer_drafts_title:
@@ -6639,3 +6645,23 @@ experiments.voice_briefing_tts_voice_placeholder:
   en: Default voice (or enter a voice name / ID)
 experiments.voice_briefing_tts_voice_caption:
   en: "Using %{voice}. Enter a voice name or ID supported by this model; clear to restore its default."
+press_to_talk.recorded:
+  en: Added to VoicePad
+press_to_talk.starting:
+  en: Starting microphone…
+press_to_talk.recording:
+  en: Recording…
+press_to_talk.finishing:
+  en: Finishing transcription…
+press_to_talk.no_speech:
+  en: No speech detected
+press_to_talk.too_short:
+  en: Recording too short — say at least three words
+press_to_talk.busy:
+  en: Another recording is active
+press_to_talk.mic_denied:
+  en: Microphone access is needed for Press to Talk
+press_to_talk.mic_unavailable:
+  en: Microphone unavailable
+press_to_talk.no_credential:
+  en: No AI Gateway credential — set one under Inference providers

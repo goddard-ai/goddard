@@ -2608,6 +2608,12 @@ pub struct Waku {
     /// worker thread — drained with the rest of the pump's traffic.
     voice_scratchpad_tx: Sender<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
     voice_scratchpad_events: Receiver<(Uuid, u64, voice_scratchpad::ScratchpadEvent)>,
+    /// The press-to-talk hold — ⌥Space on an eligible composer dictates
+    /// one scratchpad paragraph. Its state machine owns the chord's
+    /// lifecycle; these channels carry its worker and permission events.
+    press_to_talk: press_to_talk::PressToTalk,
+    press_to_talk_tx: Sender<(u64, press_to_talk::PressToTalkEvent)>,
+    press_to_talk_events: Receiver<(u64, press_to_talk::PressToTalkEvent)>,
     briefing_viewed_session: Option<Uuid>,
     briefing_queue: voice_briefing::BriefingQueue,
     briefing_dnd_wake_pending: bool,
@@ -4296,6 +4302,7 @@ mod notifications;
 mod phases;
 mod piper;
 mod plan_approval;
+mod press_to_talk;
 mod project_switcher;
 mod projects;
 mod provider_switch;
@@ -5866,6 +5873,7 @@ impl Waku {
         let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (voice_scratchpad_tx, voice_scratchpad_events) = unbounded();
+        let (press_to_talk_tx, press_to_talk_events) = unbounded();
         #[cfg(target_os = "macos")]
         {
             // The persisted mic pick binds before the first listener start;
@@ -6091,6 +6099,9 @@ impl Waku {
                     }
                 } else {
                     this.sidebar_shortcuts_window_deactivated(cx);
+                    // The chord's release events may never arrive across a
+                    // deactivation — the hold ends here instead.
+                    this.press_to_talk_window_deactivated(cx);
                     // A backgrounded or hidden window counts as away: the
                     // visit's claim ends and a fresh absence opens.
                     if let Some(session_id) = this.viewed_briefing_session() {
@@ -6995,6 +7006,9 @@ impl Waku {
                 voice_scratchpads: HashMap::new(),
                 voice_scratchpad_tx,
                 voice_scratchpad_events,
+                press_to_talk: press_to_talk::PressToTalk::new(),
+                press_to_talk_tx,
+                press_to_talk_events,
                 voice_mic_requested: false,
                 dictation_state: DictationState::Idle,
                 dictation_pending_permission: false,

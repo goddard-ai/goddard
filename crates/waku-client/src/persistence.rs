@@ -252,6 +252,30 @@ impl UpdateChannel {
     }
 }
 
+/// Which engine transcribes VoicePad audio — the streaming Vercel AI
+/// Gateway session (the existing behavior and the default) or the
+/// daemon-owned on-device Whistle model, which works in bounded clips and
+/// reports no interim text.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceTranscriptionBackend {
+    #[default]
+    AiGateway,
+    Whistle,
+}
+
+impl VoiceTranscriptionBackend {
+    pub const ALL: [Self; 2] = [Self::AiGateway, Self::Whistle];
+
+    /// Engine names are product names and stay untranslated.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AiGateway => "AI Gateway",
+            Self::Whistle => "Whistle",
+        }
+    }
+}
+
 /// One of the bundled sounds the desktop can play when a task the user is
 /// not looking at finishes its turn. `Crystal` is reserved for starred
 /// projects' completions — it plays in place of the configured sound and is
@@ -1466,6 +1490,15 @@ pub struct AppSettings {
     /// that transcribes mic audio into a sendable message. Off by default,
     /// including debug builds.
     pub voice_scratchpad_enabled: bool,
+    /// Experimental: hold ⌥Space to dictate one VoicePad paragraph
+    /// without opening the panel. Subordinate to `voice_scratchpad_enabled`.
+    /// Off by default.
+    pub press_to_talk_enabled: bool,
+    /// Which engine transcribes VoicePad dictation and press-to-talk
+    /// holds: the streaming AI Gateway session, or the daemon-owned
+    /// on-device Whistle model.
+    #[serde(default)]
+    pub voice_transcription_backend: VoiceTranscriptionBackend,
     /// Double-clicking the blank transcript margins toggles an open VoicePad.
     pub voice_scratchpad_margin_double_click_enabled: bool,
     /// The pinned microphone's CoreAudio device UID — empty follows the
@@ -1615,6 +1648,8 @@ impl Default for AppSettings {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_scratchpad_enabled: false,
+            press_to_talk_enabled: false,
+            voice_transcription_backend: VoiceTranscriptionBackend::default(),
             voice_scratchpad_margin_double_click_enabled: false,
             voice_input_device_uid: String::new(),
             voice_briefing_gateway_key: String::new(),
@@ -2192,6 +2227,15 @@ pub struct PersistedState {
     /// default, including debug builds.
     #[serde(default)]
     pub voice_scratchpad_enabled: bool,
+    /// Experimental: hold ⌥Space to dictate one VoicePad paragraph
+    /// without opening the panel. App-owned like the scratchpad; inert
+    /// while `voice_scratchpad_enabled` is off. Off by default.
+    #[serde(default)]
+    pub press_to_talk_enabled: bool,
+    /// Which engine transcribes VoicePad dictation and press-to-talk
+    /// holds — see the AppSettings twin.
+    #[serde(default)]
+    pub voice_transcription_backend: VoiceTranscriptionBackend,
     /// Double-clicking the blank transcript margins toggles an open VoicePad.
     #[serde(default)]
     pub voice_scratchpad_margin_double_click_enabled: bool,
@@ -2641,6 +2685,8 @@ impl PersistedState {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_scratchpad_enabled: false,
+            press_to_talk_enabled: false,
+            voice_transcription_backend: VoiceTranscriptionBackend::default(),
             voice_scratchpad_margin_double_click_enabled: false,
             voice_input_device_uid: String::new(),
             voice_briefing_gateway_key: String::new(),
@@ -3116,6 +3162,8 @@ impl PersistedState {
             guided_reading_opacity: self.guided_reading_opacity,
             voice_briefing_enabled: self.voice_briefing_enabled,
             voice_scratchpad_enabled: self.voice_scratchpad_enabled,
+            press_to_talk_enabled: self.press_to_talk_enabled,
+            voice_transcription_backend: self.voice_transcription_backend,
             voice_scratchpad_margin_double_click_enabled: self
                 .voice_scratchpad_margin_double_click_enabled,
             voice_input_device_uid: self.voice_input_device_uid.clone(),
@@ -3287,6 +3335,8 @@ impl PersistedState {
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
         self.voice_briefing_enabled = settings.voice_briefing_enabled;
         self.voice_scratchpad_enabled = settings.voice_scratchpad_enabled;
+        self.press_to_talk_enabled = settings.press_to_talk_enabled;
+        self.voice_transcription_backend = settings.voice_transcription_backend;
         self.voice_scratchpad_margin_double_click_enabled =
             settings.voice_scratchpad_margin_double_click_enabled;
         self.voice_input_device_uid = settings.voice_input_device_uid;
@@ -5103,6 +5153,42 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.voice_scratchpad_margin_double_click_enabled);
+    }
+
+    #[test]
+    fn press_to_talk_defaults_off_and_round_trips_as_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.press_to_talk_enabled);
+        assert_eq!(
+            defaults.voice_transcription_backend,
+            VoiceTranscriptionBackend::AiGateway
+        );
+
+        let mut state = PersistedState::empty();
+        assert!(!state.press_to_talk_enabled);
+        assert_eq!(
+            state.voice_transcription_backend,
+            VoiceTranscriptionBackend::AiGateway
+        );
+        state.press_to_talk_enabled = true;
+        state.voice_transcription_backend = VoiceTranscriptionBackend::Whistle;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["press_to_talk_enabled"], true);
+        assert_eq!(settings["voice_transcription_backend"], "whistle");
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("press_to_talk_enabled")
+                .is_none()
+        );
+
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.press_to_talk_enabled);
+        assert_eq!(
+            restored.voice_transcription_backend,
+            VoiceTranscriptionBackend::Whistle
+        );
     }
 
     #[test]
