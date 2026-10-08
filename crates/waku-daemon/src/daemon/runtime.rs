@@ -168,7 +168,13 @@ impl WakuBackend {
                 .unwrap_or_default();
             if crate::integrations::deliver::uses_acp(provider)
                 && !self.integrations.http_mcp_supported(provider)
-                && !daemon_settings.integrations.is_empty()
+                && (!daemon_settings.integrations.is_empty()
+                    || daemon_settings.mcp_servers.iter().any(|server| {
+                        matches!(
+                            server.transport,
+                            waku_protocol::integrations::McpServerTransport::Http { .. }
+                        )
+                    }))
             {
                 bail!(
                     "this provider cannot yet enforce persona-scoped MCP access; choose a provider with session MCP support"

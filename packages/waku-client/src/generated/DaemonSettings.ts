@@ -6,6 +6,7 @@ import type { EvalSettings } from "./EvalSettings";
 import type { InferenceProvider } from "./InferenceProvider";
 import type { InferenceProviderSettings } from "./InferenceProviderSettings";
 import type { IntegrationSetting } from "./IntegrationSetting";
+import type { McpServerSetting } from "./McpServerSetting";
 import type { ProviderKind } from "./ProviderKind";
 import type { RouteClassTarget } from "./RouteClassTarget";
 import type { TaskClass } from "./TaskClass";
@@ -126,6 +127,12 @@ integrations?: Array<IntegrationSetting>,
  * lazily; local-only, it authorizes proxy access and nothing upstream.
  */
 integrations_proxy_token?: string,
+/**
+ * User-declared external MCP servers — stdio commands delivered to
+ * providers directly and remote servers exposed through the local
+ * proxy — governed by the same `integrations_enabled` opt-in.
+ */
+mcp_servers?: Array<McpServerSetting>,
 /**
  * Experimental opt-in for the sandbox environment surface — the access
  * menu's Environment section, the session badge, and the environment

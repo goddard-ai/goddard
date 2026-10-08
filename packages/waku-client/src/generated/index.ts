@@ -132,6 +132,7 @@ export type { IssueTemplate } from "./IssueTemplate";
 export type { IssueTemplateKind } from "./IssueTemplateKind";
 export type { LandOutcome } from "./LandOutcome";
 export type { LandTarget } from "./LandTarget";
+export type { McpServerSetting } from "./McpServerSetting";
 export type { MemoryMigrationCandidate } from "./MemoryMigrationCandidate";
 export type { MemoryMigrationReport } from "./MemoryMigrationReport";
 export type { MemoryNoteKind } from "./MemoryNoteKind";

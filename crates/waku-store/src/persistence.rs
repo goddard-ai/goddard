@@ -684,6 +684,7 @@ impl PersistedState {
             integrations_enabled: cfg!(debug_assertions),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            mcp_servers: Vec::new(),
             // The sandbox experiment postdates the document the same way.
             sandbox_experiment_enabled: cfg!(debug_assertions),
             sandbox_default_enabled: false,

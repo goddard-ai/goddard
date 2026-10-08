@@ -2428,6 +2428,11 @@ pub struct PersistedState {
     /// client `UpdateSettings` round-trip.
     #[serde(skip)]
     pub integrations_proxy_token: String,
+    /// User-declared MCP servers. Daemon-owned; mirrored so clients render
+    /// the Integrations page and `UpdateSettings` round-trips the list —
+    /// writes go through that same whole-document save.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<waku_protocol::integrations::McpServerSetting>,
     /// Idle-runtime eviction timeout. Daemon-owned; mirrored only so it
     /// survives a client `UpdateSettings` round-trip.
     #[serde(skip)]
@@ -2705,6 +2710,7 @@ impl PersistedState {
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            mcp_servers: Vec::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
             wireframes_experiment_enabled: default_experiment_enabled(),
@@ -2984,6 +2990,7 @@ impl PersistedState {
             integrations_enabled: self.integrations_enabled,
             integrations: self.integrations.clone(),
             integrations_proxy_token: self.integrations_proxy_token.clone(),
+            mcp_servers: self.mcp_servers.clone(),
             sandbox_experiment_enabled: self.sandbox_experiment_enabled,
             sandbox_default_enabled: self.sandbox_default_enabled,
             wireframes_experiment_enabled: self.wireframes_experiment_enabled,
@@ -3022,6 +3029,7 @@ impl PersistedState {
         self.integrations_enabled = settings.integrations_enabled;
         self.integrations = settings.integrations;
         self.integrations_proxy_token = settings.integrations_proxy_token;
+        self.mcp_servers = settings.mcp_servers;
         self.sandbox_experiment_enabled = settings.sandbox_experiment_enabled;
         self.sandbox_default_enabled = settings.sandbox_default_enabled;
         self.wireframes_experiment_enabled = settings.wireframes_experiment_enabled;

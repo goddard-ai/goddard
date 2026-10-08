@@ -2,15 +2,24 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use serde_json::{Map, Value, json};
 
+/// The borrowed pieces of a [`McpServerSpec::Stdio`].
+pub(crate) type StdioSpec<'a> = (
+    &'a str,
+    &'a PathBuf,
+    &'a [String],
+    &'a BTreeMap<String, String>,
+);
+
 /// A provider-neutral MCP server description. Provider drivers own the
 /// translation from this transport shape to the provider's configuration.
 #[derive(Clone)]
 pub enum McpServerSpec {
-    // Kept for non-CUA stdio integrations; current connected integrations use HTTP.
-    #[allow(dead_code)]
+    /// User-declared servers launched as provider subprocesses; connected
+    /// catalog integrations use HTTP.
     Stdio {
         name: String,
         command: PathBuf,
+        args: Vec<String>,
         env: BTreeMap<String, String>,
     },
     Http {
@@ -21,15 +30,16 @@ pub enum McpServerSpec {
 }
 
 impl McpServerSpec {
-    #[allow(dead_code)]
     pub(crate) fn stdio(
         name: impl Into<String>,
         command: impl Into<PathBuf>,
+        args: Vec<String>,
         env: BTreeMap<String, String>,
     ) -> Self {
         Self::Stdio {
             name: name.into(),
             command: command.into(),
+            args,
             env,
         }
     }
@@ -59,18 +69,23 @@ impl McpServerSpec {
         }
     }
 
-    pub(crate) fn stdio_parts(&self) -> Option<(&str, &PathBuf, &BTreeMap<String, String>)> {
+    pub(crate) fn stdio_parts(&self) -> Option<StdioSpec<'_>> {
         match self {
-            Self::Stdio { name, command, env } => Some((name, command, env)),
+            Self::Stdio {
+                name,
+                command,
+                args,
+                env,
+            } => Some((name, command, args, env)),
             Self::Http { .. } => None,
         }
     }
 
     pub(crate) fn stdio_config_value(&self) -> Option<Value> {
-        let (_, command, env) = self.stdio_parts()?;
+        let (_, command, args, env) = self.stdio_parts()?;
         Some(json!({
             "command": command,
-            "args": [],
+            "args": args,
             "env": env,
         }))
     }
@@ -112,6 +127,7 @@ mod tests {
             McpServerSpec::stdio(
                 "user_server",
                 "/bin/custom-server",
+                vec!["--serve".to_owned()],
                 [("CUSTOM_ENV".into(), "value".into())].into(),
             ),
             McpServerSpec::http(
@@ -122,6 +138,7 @@ mod tests {
         ];
         let config = config_map(&servers, "http");
         assert_eq!(config["user_server"]["command"], "/bin/custom-server");
+        assert_eq!(config["user_server"]["args"][0], "--serve");
         assert_eq!(config["user_server"]["env"]["CUSTOM_ENV"], "value");
         assert_eq!(
             config["goddard_linear"]["url"],

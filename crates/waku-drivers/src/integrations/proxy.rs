@@ -264,8 +264,8 @@ fn relay(
         .filter(|(name, _)| !SKIP_HEADERS.contains(&name.to_ascii_lowercase().as_str()))
         .map(|(name, value)| (name.as_str(), value.clone()))
         .collect();
-    if let Some(auth) = &upstream.auth_header {
-        headers.push(("Authorization", auth.clone()));
+    for (name, value) in &upstream.headers {
+        headers.push((name.as_str(), value.clone()));
     }
     let job = CurlJob {
         method: &request.method,

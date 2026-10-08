@@ -123,11 +123,12 @@ fn copilot_mcp_servers(servers: &[super::McpServerSpec]) -> Vec<(String, McpServ
     servers
         .iter()
         .filter_map(|server| {
-            if let Some((name, command, env)) = server.stdio_parts() {
+            if let Some((name, command, args, env)) = server.stdio_parts() {
                 return Some((
                     name.to_owned(),
                     McpServerConfig::Stdio(McpStdioServerConfig {
                         command: command.display().to_string(),
+                        args: args.to_vec(),
                         env: env.clone().into_iter().collect(),
                         ..Default::default()
                     }),

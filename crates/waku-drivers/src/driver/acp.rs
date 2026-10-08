@@ -1190,13 +1190,15 @@ fn acp_mcp_servers(servers: &[super::McpServerSpec], http_supported: bool) -> Ve
     servers
         .iter()
         .filter_map(|server| {
-            if let Some((name, command, env)) = server.stdio_parts() {
+            if let Some((name, command, args, env)) = server.stdio_parts() {
                 return Some(McpServer::Stdio(
-                    McpServerStdio::new(name, command.clone()).env(
-                        env.iter()
-                            .map(|(name, value)| EnvVariable::new(name, value))
-                            .collect(),
-                    ),
+                    McpServerStdio::new(name, command.clone())
+                        .args(args.to_vec())
+                        .env(
+                            env.iter()
+                                .map(|(name, value)| EnvVariable::new(name, value))
+                                .collect(),
+                        ),
                 ));
             }
             let (name, url, token) = server.http_parts()?;

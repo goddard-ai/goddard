@@ -33,7 +33,9 @@ pub trait IntegrationEventSink: Clone + Send + Sync + 'static {
 /// What the proxy needs to forward one request.
 pub struct Upstream {
     pub url: String,
-    pub auth_header: Option<String>,
+    /// Headers injected upstream verbatim — a catalog integration's OAuth
+    /// bearer, or a user-declared server's configured headers.
+    pub headers: Vec<(String, String)>,
 }
 
 pub struct Inner {
@@ -57,23 +59,43 @@ impl Inner {
                 .is_some_and(|(_, grants)| grants.iter().any(|id| id == integration))
     }
 
-    /// Resolve `/mcp/<id>` to its upstream URL and credential header.
-    /// `Ok(None)` means the integration is not connected.
+    /// Resolve `/mcp/<id>` to its upstream URL and injected headers.
+    /// `Ok(None)` means neither a connected integration nor a user-declared
+    /// remote server answers for `id`.
     pub fn upstream(&self, id: &str) -> anyhow::Result<Option<Upstream>> {
         let settings = self.settings.get();
-        let Some(setting) = settings.integrations.iter().find(|s| s.id == id) else {
+        if let Some(setting) = settings.integrations.iter().find(|s| s.id == id) {
+            let entry = catalog::find(id).ok_or_else(|| anyhow!("unknown integration {id}"))?;
+            let variant = entry
+                .variant(&setting.variant_id)
+                .unwrap_or_else(|| entry.default_variant());
+            let headers = oauth::access_token(&self.secrets, id)?
+                .map(|token| ("Authorization".to_owned(), format!("Bearer {token}")))
+                .into_iter()
+                .collect();
+            return Ok(Some(Upstream {
+                url: variant.url.to_owned(),
+                headers,
+            }));
+        }
+        let Some(server) = settings.mcp_servers.iter().find(|s| s.id == id) else {
             return Ok(None);
         };
-        let entry = catalog::find(id).ok_or_else(|| anyhow!("unknown integration {id}"))?;
-        let variant = entry
-            .variant(&setting.variant_id)
-            .unwrap_or_else(|| entry.default_variant());
-        let auth_header =
-            oauth::access_token(&self.secrets, id)?.map(|token| format!("Bearer {token}"));
-        Ok(Some(Upstream {
-            url: variant.url.to_owned(),
-            auth_header,
-        }))
+        match &server.transport {
+            waku_protocol::integrations::McpServerTransport::Http { url, headers } => {
+                Ok(Some(Upstream {
+                    url: url.clone(),
+                    headers: headers
+                        .iter()
+                        .map(|(name, value)| (name.clone(), value.clone()))
+                        .collect(),
+                }))
+            }
+            // Stdio servers launch inside the provider, not through the
+            // proxy — the endpoint exists only so granted callers get a
+            // definite refusal rather than a stale route.
+            waku_protocol::integrations::McpServerTransport::Stdio { .. } => Ok(None),
+        }
     }
 }
 
@@ -165,7 +187,38 @@ impl IntegrationService {
                     self.inner.proxy_token.clone(),
                 )
             })
+            .chain(
+                settings
+                    .mcp_servers
+                    .iter()
+                    .filter(|server| server.providers.contains(&provider))
+                    .map(|server| self.server_spec(server, self.inner.proxy_token.clone())),
+            )
             .collect()
+    }
+
+    /// One provider-facing spec for a user-declared server: remote ones route
+    /// through the proxy so configured headers stay out of provider config,
+    /// stdio ones describe the subprocess directly.
+    pub(crate) fn server_spec(
+        &self,
+        server: &waku_protocol::integrations::McpServerSetting,
+        token: String,
+    ) -> McpServerSpec {
+        let name = super::server_name(&server.id);
+        match &server.transport {
+            waku_protocol::integrations::McpServerTransport::Http { .. } => {
+                McpServerSpec::http(name, self.endpoint_url(&server.id), token)
+            }
+            waku_protocol::integrations::McpServerTransport::Stdio { command, args, env } => {
+                McpServerSpec::stdio(
+                    name,
+                    std::path::PathBuf::from(command),
+                    args.clone(),
+                    env.clone(),
+                )
+            }
+        }
     }
 
     pub fn scoped_mcp_servers(&self, task: Uuid, grants: &[String]) -> Vec<McpServerSpec> {
@@ -195,6 +248,22 @@ impl IntegrationService {
                     token.clone(),
                 )
             })
+            .chain(
+                settings
+                    .mcp_servers
+                    .iter()
+                    .filter(|server| {
+                        // A remote server can ride the proxy under the scoped
+                        // token — denied ids fail there. Stdio connects
+                        // directly with no proxy to deny it, so only granted
+                        // servers are handed to the session at all.
+                        matches!(
+                            server.transport,
+                            waku_protocol::integrations::McpServerTransport::Http { .. }
+                        ) || settings.integrations_enabled && grants.contains(&server.id)
+                    })
+                    .map(|server| self.server_spec(server, token.clone())),
+            )
             .collect()
     }
 
@@ -407,6 +476,121 @@ fn load_http_mcp_capable_providers(path: &Path) -> HashSet<ProviderKind> {
 #[cfg(test)]
 mod boss_tests {
     use super::*;
+    use waku_protocol::integrations::{McpServerSetting, McpServerTransport};
+
+    fn user_server(id: &str, transport: McpServerTransport) -> McpServerSetting {
+        McpServerSetting {
+            id: id.to_owned(),
+            name: String::new(),
+            transport,
+            providers: Vec::new(),
+        }
+    }
+
+    fn user_stdio(id: &str) -> McpServerSetting {
+        user_server(
+            id,
+            McpServerTransport::Stdio {
+                command: "/bin/custom".to_owned(),
+                args: vec!["--serve".to_owned()],
+                env: [("TOKEN".to_owned(), "v".to_owned())].into(),
+            },
+        )
+    }
+
+    fn user_http(id: &str) -> McpServerSetting {
+        user_server(
+            id,
+            McpServerTransport::Http {
+                url: "https://mcp.example.com/mcp".to_owned(),
+                headers: [("Authorization".to_owned(), "Bearer user-key".to_owned())].into(),
+            },
+        )
+    }
+
+    fn fixture(
+        edit: impl FnOnce(&mut waku_protocol::DaemonSettings),
+    ) -> (IntegrationService, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("mcp-servers-{}", Uuid::new_v4()));
+        let settings = Arc::new(DaemonSettingsStore::open(root.join("settings.json")).unwrap());
+        let mut document = settings.get();
+        document.integrations_enabled = true;
+        edit(&mut document);
+        settings.replace(document).unwrap();
+        let service = IntegrationService::new(settings, root.clone()).unwrap();
+        (service, root)
+    }
+
+    #[test]
+    fn launch_specs_carry_user_servers_for_their_providers() {
+        let mut stdio = user_stdio("notes");
+        stdio.providers = vec![ProviderKind::Codex];
+        let mut http = user_http("remote");
+        http.providers = vec![ProviderKind::Codex];
+        let mut skipped = user_http("other");
+        skipped.providers = vec![ProviderKind::Claude];
+        let (service, root) = fixture(|settings| {
+            settings.mcp_servers = vec![stdio, http, skipped];
+        });
+        let specs = service.launch_mcp_servers(ProviderKind::Codex);
+        assert_eq!(specs.len(), 2);
+        let (name, command, args, env) = specs[0].stdio_parts().unwrap();
+        assert_eq!(name, "goddard_notes");
+        assert_eq!(command, &std::path::PathBuf::from("/bin/custom"));
+        assert_eq!(args, &["--serve".to_owned()]);
+        assert_eq!(env["TOKEN"], "v");
+        let (name, url, token) = specs[1].http_parts().unwrap();
+        assert_eq!(name, "goddard_remote");
+        assert_eq!(url, &service.endpoint_url("remote"));
+        assert_eq!(token, service.proxy_token());
+        assert!(service.launch_mcp_servers(ProviderKind::Grok).is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scoped_specs_emit_user_servers_under_the_task_token() {
+        let (service, root) = fixture(|settings| {
+            settings.mcp_servers = vec![user_stdio("notes"), user_http("remote")];
+        });
+        let task = Uuid::new_v4();
+        // Stdio bypasses the proxy, so only granted entries are delivered.
+        let specs = service.scoped_mcp_servers(task, &["notes".into(), "remote".into()]);
+        assert_eq!(specs.len(), 2);
+        let token = service
+            .inner
+            .scoped_tokens
+            .lock()
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.http_parts().is_none_or(|(.., t)| t == token))
+        );
+        assert!(service.inner.permits(&token, "remote"));
+        let denied = service.scoped_mcp_servers(task, &[]);
+        assert_eq!(denied.len(), 1);
+        assert!(denied[0].stdio_parts().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn upstream_resolves_user_remote_servers_with_their_headers() {
+        let (service, root) = fixture(|settings| {
+            settings.mcp_servers = vec![user_stdio("notes"), user_http("remote")];
+        });
+        let upstream = service.inner.upstream("remote").unwrap().unwrap();
+        assert_eq!(upstream.url, "https://mcp.example.com/mcp");
+        assert_eq!(
+            upstream.headers,
+            vec![("Authorization".to_owned(), "Bearer user-key".to_owned())]
+        );
+        assert!(service.inner.upstream("notes").unwrap().is_none());
+        assert!(service.inner.upstream("missing").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn boss_scoped_mcp_credentials_limit_endpoints_and_expire() {

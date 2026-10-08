@@ -1,0 +1,1 @@
+- **Custom MCP servers:** Add your own MCP servers on the Integrations settings page — a stdio command or a remote HTTP endpoint, scoped to the providers you pick. Remote calls ride the local proxy so configured headers stay out of provider config files.

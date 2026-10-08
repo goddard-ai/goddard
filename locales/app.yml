@@ -707,6 +707,72 @@ integrations.api_key_placeholder:
   en: API key
 integrations.api_key_hint:
   en: Stored in the keychain — never written to provider config.
+mcp_servers.title:
+  en: Custom MCP servers
+mcp_servers.description:
+  en: Declare any MCP server — a command to run or a remote URL — and Goddard exposes it to your agents like a connected integration. Remote headers are injected by the proxy and stay out of provider config.
+mcp_servers.add_server:
+  en: Add server
+mcp_servers.edit_server:
+  en: Edit server
+mcp_servers.edit:
+  en: Edit
+mcp_servers.name:
+  en: Name
+mcp_servers.name_placeholder:
+  en: Filesystem
+mcp_servers.name_description:
+  en: Agents see it as goddard_<slug> and employees can be granted it by id.
+mcp_servers.transport:
+  en: Transport
+mcp_servers.transport_stdio:
+  en: Command (stdio)
+mcp_servers.transport_http:
+  en: Remote (HTTP)
+mcp_servers.command:
+  en: Command
+mcp_servers.command_placeholder:
+  en: npx
+mcp_servers.command_description:
+  en: Executable the provider spawns — an absolute path or a name on PATH.
+mcp_servers.args:
+  en: Arguments
+mcp_servers.args_placeholder:
+  en: "-y\n@modelcontextprotocol/server-filesystem\n~/Documents"
+mcp_servers.args_description:
+  en: One argument per line.
+mcp_servers.env:
+  en: Environment
+mcp_servers.env_placeholder:
+  en: API_KEY=…
+mcp_servers.env_description:
+  en: One KEY=value pair per line.
+mcp_servers.url:
+  en: URL
+mcp_servers.url_placeholder:
+  en: https://mcp.example.com/mcp
+mcp_servers.url_description:
+  en: A streamable-HTTP MCP endpoint; requests go through the local proxy.
+mcp_servers.headers:
+  en: Headers
+mcp_servers.headers_placeholder:
+  en: Authorization=Bearer …
+mcp_servers.headers_description:
+  en: One Name=value pair per line, injected upstream by the proxy.
+mcp_servers.name_required:
+  en: The server needs a name.
+mcp_servers.name_in_use:
+  en: Another server or integration already uses that name.
+mcp_servers.command_required:
+  en: A stdio server needs a command.
+mcp_servers.url_invalid:
+  en: A remote server needs an http:// or https:// URL.
+mcp_servers.pairs_invalid:
+  en: Enter one KEY=value pair per line.
+mcp_servers.confirm_remove:
+  en: "Remove %{name}?"
+mcp_servers.confirm_remove_detail:
+  en: The server is removed from every provider and the proxy stops serving it.
 settings.archived_empty:
   en: No archived chats.
 settings.archived_search:

@@ -88,7 +88,7 @@ fn desired_entries(
     if !settings.integrations_enabled || service.http_mcp_supported(provider) {
         return BTreeMap::new();
     }
-    settings
+    let mut entries: BTreeMap<String, Value> = settings
         .integrations
         .iter()
         .filter(|setting| setting.providers.contains(&provider))
@@ -99,11 +99,35 @@ fn desired_entries(
                 McpServerSpec::http(super::server_name(&setting.id), url, token.to_owned());
             (server.name().to_owned(), server_entry(provider, &server))
         })
-        .collect()
+        .collect();
+    for server in settings
+        .mcp_servers
+        .iter()
+        .filter(|server| server.providers.contains(&provider))
+    {
+        // ACP launches already carry stdio servers in the session options;
+        // writing them to the provider file too would register each twice.
+        if uses_acp(provider)
+            && matches!(
+                server.transport,
+                waku_protocol::integrations::McpServerTransport::Stdio { .. }
+            )
+        {
+            continue;
+        }
+        let spec = service.server_spec(server, service.proxy_token().to_owned());
+        entries.insert(spec.name().to_owned(), server_entry(provider, &spec));
+    }
+    entries
 }
 
 /// The server object in one provider's dialect.
 fn server_entry(provider: ProviderKind, server: &McpServerSpec) -> Value {
+    // Stdio shape is the de-facto standard every file provider adopted from
+    // the original MCP config; only the remote-server dialects differ.
+    if let Some(entry) = server.stdio_config_value() {
+        return entry;
+    }
     let Some((_, url, token)) = server.http_parts() else {
         unreachable!("file integration delivery requires an HTTP MCP server")
     };
@@ -239,23 +263,42 @@ fn sync_grok(entries: &BTreeMap<String, Value>) -> anyhow::Result<()> {
         return Ok(());
     }
     for (name, entry) in entries {
-        let url = entry
-            .get("url")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("integration entry {name} has no url"))?;
-        let token = entry
-            .pointer("/headers/Authorization")
-            .and_then(Value::as_str)
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .unwrap_or_default();
-        let mut headers = toml::Table::new();
-        headers.insert(
-            "Authorization".to_owned(),
-            toml::Value::String(format!("Bearer {token}")),
-        );
         let mut table = toml::Table::new();
-        table.insert("url".to_owned(), toml::Value::String(url.to_owned()));
-        table.insert("http_headers".to_owned(), toml::Value::Table(headers));
+        if let Some(command) = entry.get("command").and_then(Value::as_str) {
+            table.insert(
+                "command".to_owned(),
+                toml::Value::String(command.to_owned()),
+            );
+            if let Some(args) = entry.get("args").cloned() {
+                table.insert(
+                    "args".to_owned(),
+                    toml::Value::try_from(args).context("integration entry has invalid args")?,
+                );
+            }
+            if let Some(env) = entry.get("env").cloned() {
+                table.insert(
+                    "env".to_owned(),
+                    toml::Value::try_from(env).context("integration entry has invalid env")?,
+                );
+            }
+        } else {
+            let url = entry
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("integration entry {name} has no url"))?;
+            let token = entry
+                .pointer("/headers/Authorization")
+                .and_then(Value::as_str)
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .unwrap_or_default();
+            let mut headers = toml::Table::new();
+            headers.insert(
+                "Authorization".to_owned(),
+                toml::Value::String(format!("Bearer {token}")),
+            );
+            table.insert("url".to_owned(), toml::Value::String(url.to_owned()));
+            table.insert("http_headers".to_owned(), toml::Value::Table(headers));
+        }
         table.insert("enabled".to_owned(), toml::Value::Boolean(true));
         servers.insert(name.clone(), toml::Value::Table(table));
     }
@@ -282,7 +325,13 @@ pub(super) fn write_atomic_json(path: &PathBuf, document: &Value) -> anyhow::Res
 /// bearer, so the token stays out of argv.
 pub(crate) fn codex_config_args(server: &McpServerSpec) -> Vec<String> {
     let mut args = Vec::new();
-    if let Some((name, command, env)) = server.stdio_parts() {
+    if let Some((name, command, server_args, env)) = server.stdio_parts() {
+        let args_toml = toml::Value::Array(
+            server_args
+                .iter()
+                .map(|arg| toml::Value::String(arg.clone()))
+                .collect(),
+        );
         args.extend([
             "-c".to_owned(),
             format!(
@@ -290,7 +339,7 @@ pub(crate) fn codex_config_args(server: &McpServerSpec) -> Vec<String> {
                 toml_string(&command.display().to_string())
             ),
             "-c".to_owned(),
-            format!("mcp_servers.{name}.args=[]"),
+            format!("mcp_servers.{name}.args={args_toml}"),
         ]);
         for (key, value) in env {
             args.extend([
@@ -325,9 +374,10 @@ pub(crate) fn deepseek_overlay_yaml(servers: &[McpServerSpec]) -> String {
                 serde_json::to_string(&format!("Bearer {token}"))
                     .expect("authorization header is valid JSON"),
             ));
-        } else if let Some((name, command, env)) = server.stdio_parts() {
+        } else if let Some((name, command, args, env)) = server.stdio_parts() {
+            let args_json = serde_json::to_string(args).expect("args are valid JSON");
             yaml.push_str(&format!(
-                "- id: {name}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: stdio\n    command: {}\n    args: []\n    env:\n",
+                "- id: {name}\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: {name}\n    transport: stdio\n    command: {}\n    args: {args_json}\n    env:\n",
                 serde_json::to_string(&command.display().to_string())
                     .expect("command path is valid JSON"),
             ));
@@ -458,5 +508,67 @@ mod tests {
         assert!(yaml.contains("@deepseek-ai/dsh-mcp-client"));
         assert!(yaml.contains("transport: streamable-http"));
         assert!(yaml.contains("Bearer tok"));
+    }
+
+    #[test]
+    fn desired_entries_cover_user_servers_for_file_providers() {
+        use waku_protocol::integrations::{McpServerSetting, McpServerTransport};
+        let root = temp_path("user-servers");
+        let settings = std::sync::Arc::new(
+            crate::settings::DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        );
+        let mut document = settings.get();
+        document.integrations_enabled = true;
+        document.mcp_servers = vec![
+            McpServerSetting {
+                id: "notes".into(),
+                name: String::new(),
+                transport: McpServerTransport::Stdio {
+                    command: "/bin/custom".into(),
+                    args: vec!["--serve".into()],
+                    env: BTreeMap::from([("TOKEN".to_owned(), "v".to_owned())]),
+                },
+                providers: vec![ProviderKind::Claude, ProviderKind::Cursor],
+            },
+            McpServerSetting {
+                id: "remote".into(),
+                name: String::new(),
+                transport: McpServerTransport::Http {
+                    url: "https://mcp.example.com/mcp".into(),
+                    headers: BTreeMap::new(),
+                },
+                providers: vec![ProviderKind::Claude, ProviderKind::Cursor],
+            },
+        ];
+        settings.replace(document).unwrap();
+        let service =
+            crate::integrations::IntegrationService::new(settings.clone(), root.clone()).unwrap();
+        let document = settings.get();
+
+        // A plain file provider carries both kinds: the stdio spec inline,
+        // the remote one as a proxied URL with the install bearer.
+        let entries = desired_entries(&document, &service, ProviderKind::Claude);
+        assert_eq!(entries["goddard_notes"]["command"], "/bin/custom");
+        assert_eq!(entries["goddard_notes"]["args"][0], "--serve");
+        assert_eq!(entries["goddard_notes"]["env"]["TOKEN"], "v");
+        assert_eq!(
+            entries["goddard_remote"]["url"],
+            service.endpoint_url("remote")
+        );
+        assert_eq!(
+            entries["goddard_remote"]["headers"]["Authorization"],
+            format!("Bearer {}", service.proxy_token())
+        );
+
+        // ACP providers receive stdio servers in launch options instead, so
+        // the file carries only the remote entry.
+        let entries = desired_entries(&document, &service, ProviderKind::Cursor);
+        assert!(entries.get("goddard_notes").is_none());
+        assert!(entries.get("goddard_remote").is_some());
+
+        // A provider the servers don't target gets nothing.
+        let entries = desired_entries(&document, &service, ProviderKind::Amp);
+        assert!(entries.is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 }

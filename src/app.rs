@@ -2686,6 +2686,8 @@ pub struct Waku {
         Receiver<Result<Vec<waku_protocol::integrations::IntegrationSnapshot>, String>>,
     /// The integration whose connect/edit form is open on the page.
     integration_editor: Option<crate::app::settings::IntegrationEditor>,
+    /// The custom MCP server whose editor is open on the page.
+    mcp_server_editor: Option<crate::app::settings::McpServerEditor>,
     /// Connect/disconnect calls that have not answered yet, keyed by
     /// integration id, so their buttons render busy.
     integration_commands_pending: HashSet<String>,
@@ -7040,6 +7042,7 @@ impl Waku {
                 integration_snapshots_tx,
                 integration_snapshots_events,
                 integration_editor: None,
+                mcp_server_editor: None,
                 integration_commands_pending: HashSet::new(),
                 plan_usage: HashMap::new(),
                 plan_usage_error: HashMap::new(),

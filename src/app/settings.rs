@@ -239,6 +239,31 @@ pub(super) struct IntegrationEditor {
     api_key: Option<Entity<TextInput>>,
 }
 
+/// The transport the custom-server form is editing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum McpServerEditorTransport {
+    Stdio,
+    Http,
+}
+
+/// The Integrations page's open custom-server form. Input entities live for
+/// the editor's lifetime; `env`/`headers` are one `KEY=value` pair per line
+/// and `args` is one argument per line.
+pub(super) struct McpServerEditor {
+    /// The entry's existing id while editing; `None` creates one.
+    id: Option<String>,
+    name: Entity<TextInput>,
+    transport: McpServerEditorTransport,
+    command: Entity<TextInput>,
+    args: Entity<TextInput>,
+    env: Entity<TextInput>,
+    url: Entity<TextInput>,
+    headers: Entity<TextInput>,
+    providers: HashSet<ProviderKind>,
+    /// i18n key for the validation failure under the form, set on Save.
+    error: Option<&'static str>,
+}
+
 /// How the editor reaches the host: over the platform `ssh` with
 /// provisioning and a forwarded socket, or a direct WebSocket to an
 /// already-running daemon. Non-unix builds only offer `Direct`.
@@ -14982,6 +15007,307 @@ impl Waku {
         cx.notify();
     }
 
+    /// Open the custom-server form, prefilled from `server` when editing one.
+    /// Every field entity exists regardless of transport so switching kinds
+    /// keeps typed input.
+    fn open_mcp_server_editor(
+        &mut self,
+        server: Option<&waku_protocol::integrations::McpServerSetting>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use waku_protocol::integrations::McpServerTransport;
+        let field = |cx: &mut Context<Self>,
+                     window: &mut Window,
+                     label: String,
+                     placeholder: String,
+                     content: String,
+                     lines: bool| {
+            cx.new(|cx| {
+                let mut input = TextInput::new(window, cx)
+                    .tab_index(0)
+                    .accessibility_label(label)
+                    .placeholder(placeholder);
+                if lines {
+                    input = input.multi_line().auto_height().max_lines(6);
+                }
+                if !content.is_empty() {
+                    input.set_content(content, cx);
+                }
+                input
+            })
+        };
+        let lines = |map: &BTreeMap<String, String>| {
+            map.iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (transport, command, args, env, url, headers) = match &server {
+            Some(server) => match &server.transport {
+                McpServerTransport::Stdio { command, args, env } => (
+                    McpServerEditorTransport::Stdio,
+                    command.clone(),
+                    args.join("\n"),
+                    lines(env),
+                    String::new(),
+                    String::new(),
+                ),
+                McpServerTransport::Http { url, headers } => (
+                    McpServerEditorTransport::Http,
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    url.clone(),
+                    lines(headers),
+                ),
+            },
+            None => (
+                McpServerEditorTransport::Stdio,
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+        };
+        let name = field(
+            cx,
+            window,
+            tr!("mcp_servers.name"),
+            tr!("mcp_servers.name_placeholder"),
+            server
+                .map(|server| server.display_name().to_owned())
+                .unwrap_or_default(),
+            false,
+        );
+        let editor = McpServerEditor {
+            id: server.map(|server| server.id.clone()),
+            name: name.clone(),
+            transport,
+            command: field(
+                cx,
+                window,
+                tr!("mcp_servers.command"),
+                tr!("mcp_servers.command_placeholder"),
+                command,
+                false,
+            ),
+            args: field(
+                cx,
+                window,
+                tr!("mcp_servers.args"),
+                tr!("mcp_servers.args_placeholder"),
+                args,
+                true,
+            ),
+            env: field(
+                cx,
+                window,
+                tr!("mcp_servers.env"),
+                tr!("mcp_servers.env_placeholder"),
+                env,
+                true,
+            ),
+            url: field(
+                cx,
+                window,
+                tr!("mcp_servers.url"),
+                tr!("mcp_servers.url_placeholder"),
+                url,
+                false,
+            ),
+            headers: field(
+                cx,
+                window,
+                tr!("mcp_servers.headers"),
+                tr!("mcp_servers.headers_placeholder"),
+                headers,
+                true,
+            ),
+            providers: server
+                .map(|server| server.providers.iter().copied().collect())
+                .unwrap_or_else(|| self.default_integration_providers()),
+            error: None,
+        };
+        self.mcp_server_editor = Some(editor);
+        let focus = name.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Persist the open custom-server form into `state.mcp_servers` — the
+    /// whole-document settings write carries it to the daemon, which
+    /// rewrites provider files and serves the new proxy route.
+    fn save_mcp_server_editor(&mut self, cx: &mut Context<Self>) {
+        use waku_protocol::integrations::{McpServerSetting, McpServerTransport};
+        // Read every field up front — validation errors write back to the
+        // editor, which needs `self` free of the field borrow.
+        let Some((
+            editing_id,
+            name,
+            transport_kind,
+            command,
+            args_text,
+            env_text,
+            url,
+            headers_text,
+            providers,
+        )) = self.mcp_server_editor.as_ref().map(|editor| {
+            (
+                editor.id.clone(),
+                editor.name.read(cx).content().trim().to_owned(),
+                editor.transport,
+                editor.command.read(cx).content().trim().to_owned(),
+                editor.args.read(cx).content(),
+                editor.env.read(cx).content(),
+                editor.url.read(cx).content().trim().to_owned(),
+                editor.headers.read(cx).content(),
+                editor.providers.clone(),
+            )
+        })
+        else {
+            return;
+        };
+        let fail = |this: &mut Self, key: &'static str, cx: &mut Context<Self>| {
+            if let Some(editor) = this.mcp_server_editor.as_mut() {
+                editor.error = Some(key);
+            }
+            cx.notify();
+        };
+        let id = editing_id.clone().unwrap_or_else(|| mcp_server_slug(&name));
+        if id.is_empty() {
+            fail(self, "mcp_servers.name_required", cx);
+            return;
+        }
+        if self
+            .state
+            .mcp_servers
+            .iter()
+            .any(|server| server.id == id && editing_id.as_deref() != Some(server.id.as_str()))
+            || (editing_id.is_none()
+                && self
+                    .integration_snapshots
+                    .as_ref()
+                    .is_some_and(|snapshots| {
+                        snapshots.iter().any(|snapshot| snapshot.info.id == id)
+                    }))
+        {
+            fail(self, "mcp_servers.name_in_use", cx);
+            return;
+        }
+        let transport = match transport_kind {
+            McpServerEditorTransport::Stdio => {
+                if command.is_empty() {
+                    fail(self, "mcp_servers.command_required", cx);
+                    return;
+                }
+                let args = args_text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                let Some(env) = parse_key_value_lines(env_text) else {
+                    fail(self, "mcp_servers.pairs_invalid", cx);
+                    return;
+                };
+                McpServerTransport::Stdio { command, args, env }
+            }
+            McpServerEditorTransport::Http => {
+                if !url.starts_with("http://") && !url.starts_with("https://") {
+                    fail(self, "mcp_servers.url_invalid", cx);
+                    return;
+                }
+                let Some(headers) = parse_key_value_lines(headers_text) else {
+                    fail(self, "mcp_servers.pairs_invalid", cx);
+                    return;
+                };
+                McpServerTransport::Http { url, headers }
+            }
+        };
+        let server = McpServerSetting {
+            id,
+            name,
+            transport,
+            providers: providers.into_iter().collect(),
+        };
+        match editing_id.as_deref() {
+            Some(edited) => {
+                if let Some(existing) = self
+                    .state
+                    .mcp_servers
+                    .iter_mut()
+                    .find(|existing| existing.id == edited)
+                {
+                    *existing = server;
+                } else {
+                    self.state.mcp_servers.push(server);
+                }
+            }
+            None => self.state.mcp_servers.push(server),
+        }
+        self.mcp_server_editor = None;
+        self.save();
+        cx.notify();
+    }
+
+    fn remove_mcp_server(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self
+            .mcp_server_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id.as_deref() == Some(id))
+        {
+            self.mcp_server_editor = None;
+        }
+        self.state.mcp_servers.retain(|server| server.id != id);
+        self.save();
+        cx.notify();
+    }
+
+    fn toggle_mcp_server_provider(
+        &mut self,
+        id: &str,
+        provider: ProviderKind,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(server) = self
+            .state
+            .mcp_servers
+            .iter_mut()
+            .find(|server| server.id == id)
+        else {
+            return;
+        };
+        if server.providers.contains(&provider) {
+            server.providers.retain(|existing| *existing != provider);
+        } else {
+            server.providers.push(provider);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn toggle_mcp_editor_provider(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
+        if let Some(editor) = &mut self.mcp_server_editor
+            && !editor.providers.insert(provider)
+        {
+            editor.providers.remove(&provider);
+        }
+        cx.notify();
+    }
+
+    fn set_mcp_editor_transport(
+        &mut self,
+        transport: McpServerEditorTransport,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(editor) = &mut self.mcp_server_editor {
+            editor.transport = transport;
+        }
+        cx.notify();
+    }
+
     /// The Integrations experiment opt-in also decides whether its settings
     /// page appears in navigation.
     fn set_integrations_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -15037,7 +15363,505 @@ impl Waku {
                 )
             })
             .child(div().mt(px(15.0)).child(cards))
+            .child(self.render_mcp_servers_section(&providers, theme, cx))
             .into_any_element()
+    }
+
+    /// The user-declared MCP servers section: rows for each entry plus the
+    /// add affordance, and the inline editor when one is open.
+    fn render_mcp_servers_section(
+        &self,
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut section = div()
+            .mt(px(20.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .rounded(px(16.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .child(settings_row_icon("icons/server.svg", theme))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("mcp_servers.title")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("mcp_servers.description")),
+                            ),
+                    ),
+            );
+
+        for server in &self.state.mcp_servers {
+            section = section.child(self.render_mcp_server_card(server, providers, theme, cx));
+        }
+
+        match &self.mcp_server_editor {
+            Some(editor) if editor.id.is_none() => {
+                section =
+                    section.child(self.render_mcp_server_editor(editor, providers, theme, cx));
+            }
+            _ => {
+                section = section.child(
+                    div()
+                        .id("new-mcp-server")
+                        .tab_index(0)
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(12.0))
+                        .rounded(px(16.0))
+                        .bg(theme.raised)
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .cursor_default()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_secondary)
+                        .hover(|element| element.bg(theme.overlay))
+                        .active(|element| element.bg(theme.overlay_strong))
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .child(icon("icons/plus.svg", 14.0, theme.text_tertiary))
+                        .child(tr!("mcp_servers.add_server"))
+                        .on_activation(cx, |this, window, cx| {
+                            this.open_mcp_server_editor(None, window, cx);
+                        }),
+                );
+            }
+        }
+        section.into_any_element()
+    }
+
+    /// One custom-server row: name, its command or URL, clickable provider
+    /// chips, and Edit/Remove actions — or the editor while it is open.
+    fn render_mcp_server_card(
+        &self,
+        server: &waku_protocol::integrations::McpServerSetting,
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use waku_protocol::integrations::McpServerTransport;
+        let id = server.id.clone();
+        let editing = self
+            .mcp_server_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id.as_deref() == Some(id.as_str()));
+        let summary = match &server.transport {
+            McpServerTransport::Stdio { command, args, .. } => {
+                let mut line = command.clone();
+                for arg in args {
+                    line.push(' ');
+                    line.push_str(arg);
+                }
+                line
+            }
+            McpServerTransport::Http { url, .. } => url.clone(),
+        };
+
+        let remove = integration_button(
+            format!("mcp-server-remove-{id}"),
+            tr!("common.remove"),
+            theme,
+        )
+        .on_activation(cx, {
+            let id = id.clone();
+            let name = server.display_name().to_owned();
+            move |_this, window, cx| {
+                let answer = window.prompt(
+                    gpui::PromptLevel::Warning,
+                    &tr!("mcp_servers.confirm_remove", name = name.clone()),
+                    Some(&tr!("mcp_servers.confirm_remove_detail")),
+                    &[
+                        gpui::PromptButton::cancel(tr!("common.cancel")),
+                        gpui::PromptButton::ok(tr!("common.remove")),
+                    ],
+                    cx,
+                );
+                let id = id.clone();
+                cx.spawn(async move |this, cx| {
+                    if answer.await.ok().map(prompt_answer_index) != Some(1) {
+                        return;
+                    }
+                    let _ = this.update(cx, |this, cx| {
+                        this.remove_mcp_server(&id, cx);
+                    });
+                })
+                .detach();
+            }
+        });
+
+        let mut body = div().flex().flex_col().gap(px(10.0));
+        if editing {
+            if let Some(editor) = &self.mcp_server_editor {
+                body = body.child(self.render_mcp_server_editor(editor, providers, theme, cx));
+            }
+        } else {
+            let id_for_toggle = id.clone();
+            let chips = providers.iter().map(|provider| {
+                let provider = *provider;
+                let on = server.providers.contains(&provider);
+                integration_chip(
+                    format!("mcp-server-{id_for_toggle}-provider-{}", provider.id()),
+                    provider.display_name().to_string(),
+                    on,
+                    theme,
+                )
+                .on_activation(cx, {
+                    let id = id_for_toggle.clone();
+                    move |this, _, cx| this.toggle_mcp_server_provider(&id, provider, cx)
+                })
+                .into_any_element()
+            });
+            body = body.child(
+                div()
+                    .pt(px(10.0))
+                    .border_t(hairline())
+                    .border_color(theme.separator)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("integrations.agents")),
+                    )
+                    .children(chips),
+            );
+        }
+
+        div()
+            .w_full()
+            .px(px(20.0))
+            .py(px(14.0))
+            .rounded(px(16.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon("icons/server.svg", 15.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .text_size(sp(12.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(server.display_name().to_owned()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(sp(11.5))
+                                            .text_color(theme.text_ghost)
+                                            .child(match server.transport {
+                                                McpServerTransport::Stdio { .. } => {
+                                                    tr!("mcp_servers.transport_stdio")
+                                                }
+                                                McpServerTransport::Http { .. } => {
+                                                    tr!("mcp_servers.transport_http")
+                                                }
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(2.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_tertiary)
+                                    .truncate()
+                                    .child(summary),
+                            ),
+                    )
+                    .child(
+                        integration_button(
+                            format!("mcp-server-edit-{id}"),
+                            tr!("mcp_servers.edit"),
+                            theme,
+                        )
+                        .on_activation(cx, {
+                            let server = server.clone();
+                            move |this, window, cx| {
+                                if this.mcp_server_editor.as_ref().is_some_and(|editor| {
+                                    editor.id.as_deref() == Some(server.id.as_str())
+                                }) {
+                                    this.mcp_server_editor = None;
+                                    cx.notify();
+                                } else {
+                                    this.open_mcp_server_editor(Some(&server), window, cx);
+                                }
+                            }
+                        }),
+                    )
+                    .child(remove),
+            )
+            .child(body)
+            .into_any_element()
+    }
+
+    /// The custom-server form: name, a Stdio/HTTP transport chip pair, the
+    /// fields for the active transport, provider chips, and Save/Cancel.
+    fn render_mcp_server_editor(
+        &self,
+        editor: &McpServerEditor,
+        providers: &[ProviderKind],
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let field_label = |text: String| {
+            div()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(text)
+        };
+        let field_hint = |text: String| {
+            div()
+                .mt(px(3.0))
+                .text_size(sp(12.0))
+                .line_height(sp(15.0))
+                .text_color(theme.text_tertiary)
+                .child(text)
+        };
+        let multiline = |input: Entity<TextInput>, theme: Theme| {
+            div()
+                .w_full()
+                .px(px(8.0))
+                .py(px(6.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .bg(theme.inset)
+                .text_size(sp(12.5))
+                .line_height(sp(17.0))
+                .child(input)
+        };
+
+        let mut form = div().flex().flex_col().gap(px(10.0));
+        form = form.child(
+            div()
+                .child(field_label(tr!("mcp_servers.name")))
+                .child(field_hint(tr!("mcp_servers.name_description")))
+                .child(
+                    div()
+                        .mt(px(6.0))
+                        .child(TextField::new("mcp-server-name", editor.name.clone()).w_full()),
+                ),
+        );
+
+        let transport_chips = [
+            (
+                McpServerEditorTransport::Stdio,
+                tr!("mcp_servers.transport_stdio"),
+            ),
+            (
+                McpServerEditorTransport::Http,
+                tr!("mcp_servers.transport_http"),
+            ),
+        ]
+        .into_iter()
+        .map(|(transport, label)| {
+            integration_chip(
+                format!("mcp-server-transport-{}", label),
+                label,
+                editor.transport == transport,
+                theme,
+            )
+            .on_activation(cx, move |this, _, cx| {
+                this.set_mcp_editor_transport(transport, cx);
+            })
+            .into_any_element()
+        });
+        form = form.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("mcp_servers.transport")),
+                )
+                .children(transport_chips),
+        );
+
+        match editor.transport {
+            McpServerEditorTransport::Stdio => {
+                form = form
+                    .child(
+                        div()
+                            .child(field_label(tr!("mcp_servers.command")))
+                            .child(field_hint(tr!("mcp_servers.command_description")))
+                            .child(
+                                div().mt(px(6.0)).child(
+                                    TextField::new("mcp-server-command", editor.command.clone())
+                                        .w_full(),
+                                ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .child(field_label(tr!("mcp_servers.args")))
+                            .child(field_hint(tr!("mcp_servers.args_description")))
+                            .child(
+                                div()
+                                    .mt(px(6.0))
+                                    .child(multiline(editor.args.clone(), theme)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .child(field_label(tr!("mcp_servers.env")))
+                            .child(field_hint(tr!("mcp_servers.env_description")))
+                            .child(
+                                div()
+                                    .mt(px(6.0))
+                                    .child(multiline(editor.env.clone(), theme)),
+                            ),
+                    );
+            }
+            McpServerEditorTransport::Http => {
+                form = form
+                    .child(
+                        div()
+                            .child(field_label(tr!("mcp_servers.url")))
+                            .child(field_hint(tr!("mcp_servers.url_description")))
+                            .child(div().mt(px(6.0)).child(
+                                TextField::new("mcp-server-url", editor.url.clone()).w_full(),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .child(field_label(tr!("mcp_servers.headers")))
+                            .child(field_hint(tr!("mcp_servers.headers_description")))
+                            .child(
+                                div()
+                                    .mt(px(6.0))
+                                    .child(multiline(editor.headers.clone(), theme)),
+                            ),
+                    );
+            }
+        }
+
+        let provider_chips = providers.iter().map(|provider| {
+            let provider = *provider;
+            let on = editor.providers.contains(&provider);
+            integration_chip(
+                format!("mcp-server-edit-provider-{}", provider.id()),
+                provider.display_name().to_string(),
+                on,
+                theme,
+            )
+            .on_activation(cx, move |this, _, cx| {
+                this.toggle_mcp_editor_provider(provider, cx);
+            })
+            .into_any_element()
+        });
+        form = form.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .flex_wrap()
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("integrations.agents")),
+                )
+                .children(provider_chips),
+        );
+
+        if let Some(error) = editor.error {
+            form = form.child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.danger)
+                    .child(crate::i18n::translate(error)),
+            );
+        }
+
+        form = form.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap(px(8.0))
+                .child(
+                    integration_button("mcp-server-editor-cancel", tr!("common.cancel"), theme)
+                        .on_activation(cx, |this, _, cx| {
+                            this.mcp_server_editor = None;
+                            cx.notify();
+                        }),
+                )
+                .child(
+                    integration_button("mcp-server-editor-save", tr!("common.save"), theme)
+                        .on_activation(cx, |this, _, cx| {
+                            this.save_mcp_server_editor(cx);
+                        }),
+                ),
+        );
+
+        if editor.id.is_some() {
+            // An open editor for an existing server sits inside its card —
+            // keep the bare bordered body, like the connect form.
+            div()
+                .pt(px(10.0))
+                .border_t(hairline())
+                .border_color(theme.separator)
+                .child(form)
+                .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .px(px(20.0))
+                .py(px(15.0))
+                .rounded(px(16.0))
+                .bg(theme.raised)
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .mb(px(12.0))
+                        .child(tr!("mcp_servers.add_server")),
+                )
+                .child(form)
+                .into_any_element()
+        }
     }
 
     fn render_integration_card(
@@ -16088,6 +16912,42 @@ fn integration_chip(
         .when(on, |element| element.bg(theme.accent.opacity(0.12)))
         .hover(|element| element.bg(theme.overlay))
         .child(label)
+}
+
+/// Derive a custom server's id from its display name: lowercase ASCII
+/// alphanumerics and `_` kept, every other run collapsed to `-`. The id is
+/// the proxy's `/mcp/<id>` segment and a persona's grant key, so it must be
+/// a single URL-safe slug.
+fn mcp_server_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut pending_dash = false;
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            if pending_dash && !slug.is_empty() {
+                slug.push('-');
+            }
+            pending_dash = false;
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            pending_dash = true;
+        }
+    }
+    slug
+}
+
+/// Parse one `KEY=value` pair per line into a map. `None` when any
+/// non-empty line lacks `=` or a key — callers surface a form error rather
+/// than silently dropping a header.
+fn parse_key_value_lines(text: &str) -> Option<BTreeMap<String, String>> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let (key, value) = line.split_once('=')?;
+            let key = key.trim();
+            (!key.is_empty()).then(|| (key.to_owned(), value.trim().to_owned()))
+        })
+        .collect()
 }
 
 /// A service's square brand mark as a tinted `svg()` alpha mask. Each takes

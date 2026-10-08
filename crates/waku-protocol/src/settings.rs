@@ -114,6 +114,11 @@ pub struct DaemonSettings {
     /// lazily; local-only, it authorizes proxy access and nothing upstream.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub integrations_proxy_token: String,
+    /// User-declared external MCP servers — stdio commands delivered to
+    /// providers directly and remote servers exposed through the local
+    /// proxy — governed by the same `integrations_enabled` opt-in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<crate::integrations::McpServerSetting>,
     /// Experimental opt-in for the sandbox environment surface — the access
     /// menu's Environment section, the session badge, and the environment
     /// toggle all stay hidden while this is off. Defaults on in development
@@ -192,6 +197,7 @@ impl Default for DaemonSettings {
             integrations_enabled: default_experiment_enabled(),
             integrations: Vec::new(),
             integrations_proxy_token: String::new(),
+            mcp_servers: Vec::new(),
             sandbox_experiment_enabled: default_experiment_enabled(),
             sandbox_default_enabled: false,
             wireframes_experiment_enabled: default_experiment_enabled(),
