@@ -1,0 +1,1 @@
+- Boss employees keep internal investigations in supervisor reports and publish deliverables when you ask for an artifact. Markdown deliverables open in reading mode independently of your file editor preference.

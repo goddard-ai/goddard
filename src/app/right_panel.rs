@@ -1162,8 +1162,22 @@ fn file_shows_image(editor: &RightPanelFileEditor, relative_path: &str) -> bool 
     !editor.show_source && image_preview::image_format_for_name(relative_path).is_some()
 }
 
-/// Whether `relative_path` names a `.wireframe.json` document — the file
-/// viewer's preview surface for planning-session wireframes.
+/// Deliverables start in reading mode independently of the source editor preference.
+fn markdown_preview_mode(
+    is_markdown: bool,
+    deliverable_page: bool,
+    show_source: bool,
+    global_preview: bool,
+) -> bool {
+    is_markdown
+        && if deliverable_page {
+            !show_source
+        } else {
+            global_preview
+        }
+}
+
+/// Whether this file names a planning-session wireframe document.
 fn is_wireframe_document(relative_path: &str) -> bool {
     Path::new(relative_path)
         .file_name()
@@ -1937,6 +1951,15 @@ fn boss_goal_panel_row_element(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_deliverables_default_to_reading_without_changing_file_preferences() {
+        assert!(markdown_preview_mode(true, true, false, false));
+        assert!(!markdown_preview_mode(true, true, true, true));
+        assert!(!markdown_preview_mode(true, false, false, false));
+        assert!(markdown_preview_mode(true, false, true, true));
+        assert!(!markdown_preview_mode(false, true, false, true));
+    }
 
     struct FinishedGoalsLayoutHarness {
         ongoing: bool,
@@ -3800,12 +3823,30 @@ impl Waku {
     }
 
     /// The file surface shows `relative_path`'s rendered markdown preview
-    /// rather than its source editor — the toggle is global, so the preview
-    /// is active for every markdown file while it is on. Callers use this to
+    /// rather than its source editor. Deliverable pages use a per-file
+    /// reading preference; other files use the global toggle. Callers use this to
     /// pick which selection surface (and which annotation anchors) a file
     /// action should read.
     pub(super) fn file_markdown_preview_active(&self, relative_path: &str) -> bool {
-        file_highlighter_language(relative_path) == "markdown" && self.state.markdown_preview
+        let deliverable_page = self.live_deliverable_page().is_some_and(|(key, id)| {
+            self.boss_ui.states.get(&key).is_some_and(|state| {
+                state.deliverables.iter().any(|deliverable| {
+                    deliverable.id == id
+                        && Path::new(&deliverable.path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            == Some(relative_path)
+                })
+            })
+        });
+        markdown_preview_mode(
+            file_highlighter_language(relative_path) == "markdown",
+            deliverable_page,
+            self.right_panel_file_editors
+                .get(relative_path)
+                .is_some_and(|editor| editor.show_source),
+            self.state.markdown_preview,
+        )
     }
 
     /// The file the active editor surface is showing, whether via a File tab
@@ -6825,7 +6866,8 @@ impl Waku {
         let (editor_state, writable, _) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
-        // Markdown files carry the global source/preview toggle; every other
+        // Deliverables use a per-file reading toggle; other Markdown files
+        // carry the global source/preview toggle. Every other
         // language always shows source. Image files render pixels instead of
         // text — SVGs alone keep a source view behind the toggle, since
         // their text stays editable. `.wireframe.json` previews as themed
@@ -6845,7 +6887,16 @@ impl Waku {
                 .right_panel_file_editors
                 .get(&relative_path)
                 .is_none_or(|editor| !editor.show_source);
-        let preview = !image_mode && !wireframe_mode && is_markdown && self.state.markdown_preview;
+        let preview = !image_mode
+            && !wireframe_mode
+            && markdown_preview_mode(
+                is_markdown,
+                deliverable_page,
+                self.right_panel_file_editors
+                    .get(&relative_path)
+                    .is_some_and(|editor| editor.show_source),
+                self.state.markdown_preview,
+            );
         let body = if image_mode {
             self.render_file_image_preview(&relative_path, cx)
         } else if wireframe_mode {
@@ -6983,7 +7034,7 @@ impl Waku {
                 .on_click(cx.listener({
                     let relative_path = relative_path.clone();
                     move |this, _, _, cx| {
-                        if is_svg || is_wireframe {
+                        if is_svg || is_wireframe || deliverable_page {
                             this.toggle_file_source_view(&relative_path, cx);
                         } else {
                             this.toggle_markdown_preview(cx);
@@ -6994,7 +7045,7 @@ impl Waku {
                     let relative_path = relative_path.clone();
                     move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            if is_svg || is_wireframe {
+                            if is_svg || is_wireframe || deliverable_page {
                                 this.toggle_file_source_view(&relative_path, cx);
                             } else {
                                 this.toggle_markdown_preview(cx);
@@ -7528,7 +7579,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.markdown_preview {
+        if !self.file_markdown_preview_active(relative_path) {
             return;
         }
         let Some(list) = self.preview_list_state(relative_path) else {
@@ -7899,7 +7950,7 @@ impl Waku {
     }
 
     /// Flips one file between rendered preview and editable source — per
-    /// file, unlike markdown's global toggle. SVGs reload because their
+    /// file, including Markdown deliverables. SVGs reload because their
     /// bytes are only read once source is asked for; `.wireframe.json`
     /// already holds its text, so the reload is a no-op there.
     fn toggle_file_source_view(&mut self, relative_path: &str, cx: &mut Context<Self>) {
