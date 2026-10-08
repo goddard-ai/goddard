@@ -3794,8 +3794,6 @@ session.stopped_before_start:
   en: Stopped before the agent started — the message may not have reached it
 session.prompt_not_delivered:
   en: We couldn't confirm the message reached the agent
-session.codex_exited_before_response:
-  en: Codex app-server exited before returning a response
 session.steer_rejected:
   en: The agent couldn't be steered (%{error}); the message was queued as a follow-up
 session.steer_rejected_plain:

@@ -1428,7 +1428,6 @@ transcript.waiting_background: バックグラウンドタスクを待ってい�
 session.stopped_before_response: エージェントは回答を返す前に停止しました
 session.stopped_before_start: エージェントが開始する前に停止しました — メッセージが届いていない可能性があります
 session.prompt_not_delivered: メッセージがエージェントに届いたことを確認できませんでした
-session.codex_exited_before_response: Codex app-server は回答を返す前に終了しました
 session.steer_rejected: エージェントに追加の指示を送れませんでした（%{error}）。メッセージはフォローアップとしてキューに追加されました
 session.steer_rejected_plain: エージェントに追加の指示を送れませんでした。メッセージはフォローアップとしてキューに追加されました
 session.agent_ran_out_of_context: このターンでエージェントのコンテキストが不足しました

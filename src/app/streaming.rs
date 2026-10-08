@@ -1207,7 +1207,7 @@ impl Waku {
                 let failure_message = runtime
                     .last_driver_error
                     .take()
-                    .unwrap_or_else(|| tr!("session.codex_exited_before_response"));
+                    .unwrap_or_else(|| tr!("session.stopped_before_response"));
                 let should_finish_turn = if let Some(session) = self.state.session_mut(session_id)
                     && session.status.is_busy()
                 {

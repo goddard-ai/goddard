@@ -1398,7 +1398,6 @@ transcript.waiting_background: 正在等待后台任务
 session.stopped_before_response: 智能体在返回回复前停止了
 session.stopped_before_start: 已在智能体开始前停止 — 消息可能尚未送达
 session.prompt_not_delivered: 无法确认消息已送达智能体
-session.codex_exited_before_response: Codex app-server 在返回回复前退出了
 session.steer_rejected: 无法向智能体补充指示（%{error}）；消息已排队，将作为后续消息发送
 session.steer_rejected_plain: 无法向智能体补充指示；消息已排队，将作为后续消息发送
 session.agent_ran_out_of_context: 智能体在本轮任务中耗尽了上下文空间
