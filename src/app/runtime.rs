@@ -431,27 +431,6 @@ pub(super) fn merge_remote_session_catalog(
     removed
 }
 
-/// The planning session a just-merged catalog may steer the user onto.
-/// `createPlan` stamps the session before the row exists anywhere, so a
-/// planning row absent from `known_session_ids` is the "just created"
-/// signal. The steer applies only while the viewed surface is that
-/// daemon's boss chat — the place the op is issued from — and never on a
-/// fresh snapshot, which only describes what already existed.
-pub(super) fn merged_planning_activation_target(
-    sessions: &[AgentSession],
-    known_session_ids: &HashSet<Uuid>,
-    fresh: bool,
-    on_boss_chat: bool,
-) -> Option<Uuid> {
-    if fresh || !on_boss_chat {
-        return None;
-    }
-    sessions
-        .iter()
-        .find(|session| session.planning.is_some() && !known_session_ids.contains(&session.id))
-        .map(|session| session.id)
-}
-
 /// Perform every blocking operation between accepting a submission and
 /// starting its provider. This function is called only from the background
 /// executor; the UI thread owns applying the returned workspace afterward.
@@ -2666,21 +2645,6 @@ impl Waku {
             }
             self.remote_catalogs.insert(host, snapshot);
             self.save_remote_catalogs();
-        }
-
-        // A planning session lands in the catalog already stamped — its row
-        // is new exactly when `createPlan` ran, wherever the op was issued
-        // from (the boss chat, the CLI, another client). The steer onto the
-        // plan only applies while the user is on that daemon's boss chat —
-        // the surface the op came from; on any other surface the row lists
-        // under its boss without taking focus.
-        if let Some(session_id) = merged_planning_activation_target(
-            &self.state.sessions,
-            &known_session_ids,
-            fresh,
-            self.boss_chat_key() == Some(key),
-        ) {
-            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         }
 
         let attach = self

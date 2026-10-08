@@ -12,7 +12,7 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    append_queued_steer_preview, merge_remote_session_catalog, merged_planning_activation_target,
+    append_queued_steer_preview, merge_remote_session_catalog,
     session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
@@ -5622,51 +5622,6 @@ fn planning_session(id: Uuid) -> AgentSession {
         finalized_at: None,
     });
     session
-}
-
-#[test]
-fn merged_planning_steers_only_from_the_boss_chat() {
-    let plan = Uuid::new_v4();
-    let sessions = vec![planning_session(plan)];
-    let known = HashSet::new();
-
-    // On the boss chat the just-created plan takes the surface; anywhere
-    // else the row lists under its boss without stealing focus.
-    assert_eq!(
-        merged_planning_activation_target(&sessions, &known, false, true),
-        Some(plan)
-    );
-    assert_eq!(
-        merged_planning_activation_target(&sessions, &known, false, false),
-        None
-    );
-
-    // Fresh snapshots describe pre-existing state — a plan already running
-    // before connect must never steer on load.
-    assert_eq!(
-        merged_planning_activation_target(&sessions, &known, true, true),
-        None
-    );
-
-    // A plan the catalog already knew is not "just created".
-    let known = HashSet::from([plan]);
-    assert_eq!(
-        merged_planning_activation_target(&sessions, &known, false, true),
-        None
-    );
-}
-
-#[test]
-fn merged_planning_ignores_new_employee_and_task_sessions() {
-    // An employee summon or an externally created task lands in the same
-    // merge — neither is a steer target even from the boss chat.
-    let employee = Uuid::new_v4();
-    let task = Uuid::new_v4();
-    let sessions = vec![started_session(employee), started_session(task)];
-    assert_eq!(
-        merged_planning_activation_target(&sessions, &HashSet::new(), false, true),
-        None
-    );
 }
 
 #[test]
