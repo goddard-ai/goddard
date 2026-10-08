@@ -1,4 +1,5 @@
-import type { AgentSession } from '@waku/client';
+import type { AgentSession, BossIdentity } from '@waku/client';
+import type { BossSessionMention } from '@waku/client/boss-chat';
 import {
   memo,
   useCallback,
@@ -59,6 +60,19 @@ export interface TranscriptDevSample {
   source: 'scroll' | 'size';
 }
 
+/** A rotated boss chat's archived predecessors, resolved by the session
+ * screen: hydrated sessions oldest-first plus the next chain link not yet
+ * loaded. History renders inline above the live transcript — read-only by
+ * construction — and the boundary affordance lazy-loads the next link. */
+export interface BossChatHistory {
+  sessions: AgentSession[];
+  /** The predecessor id the next load fetches (`null` ends the chain). */
+  pending: string | null;
+  loading: boolean;
+  error: string | null;
+  onLoad: () => void;
+}
+
 /**
  * The transcript.
  *
@@ -80,6 +94,9 @@ export function TranscriptList({
   forkTurns,
   onRewindTurn,
   onForkTurn,
+  boss,
+  bossHistory,
+  sessionMentions,
 }: {
   onHandle?: (handle: TranscriptListHandle) => void;
   session: AgentSession;
@@ -93,6 +110,15 @@ export function TranscriptList({
   forkTurns?: ReadonlySet<string>;
   onRewindTurn?: (turnId: string) => void;
   onForkTurn?: (turnId: string) => void;
+  /** The boss identity when this is the boss chat — drives the empty
+   * state's avatar + greeting instead of "No messages yet". */
+  boss?: BossIdentity | null;
+  /** Rotated predecessors of a boss chat, rendered inline above the live
+   * transcript with a lazy-load boundary row where the chain runs out. */
+  bossHistory?: BossChatHistory | null;
+  /** Roster-name → session chips prose resolves on boss surfaces —
+   * desktop's `session_mentions` markdown context. */
+  sessionMentions?: readonly BossSessionMention[];
 }) {
   const markdownStyles = useMarkdownStyles();
   const scrollHandle = useRef<TranscriptScrollHandle | null>(null);
@@ -102,12 +128,13 @@ export function TranscriptList({
   const [veils] = useState(() => new VeilRegistry());
 
   const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedTriggers, setExpandedTriggers] = useState<ReadonlySet<string>>(() => new Set());
 
   const runningTurnId = session.turns.find((turn) => turn.status === 'running')?.id ?? null;
   void runningTurnId;
   const pipeline = useMemo(
-    () => buildTranscriptPipeline(session, expandedFolds),
-    [expandedFolds, session],
+    () => buildTranscriptPipeline(session, expandedFolds, expandedTriggers),
+    [expandedFolds, expandedTriggers, session],
   );
 
   // The mounted window: pipeline rows from `windowStart` to the end. Fixed
@@ -122,8 +149,43 @@ export function TranscriptList({
   const start = Math.min(windowStart ?? initialWindowStart(pipeline.length), pipeline.length);
   const hasEarlier = start > 0;
 
-  const freshRows = useMemo(() => expandTranscriptRows(pipeline, md, start), [md, pipeline, start]);
+  const freshRows = useMemo(
+    () => expandTranscriptRows(pipeline, md, session.provider, start),
+    [md, pipeline, session.provider, start],
+  );
+
   const rows = useStableRows(freshRows);
+
+  // Predecessor transcripts sit above the live rows, oldest first, with the
+  // chain's boundary affordance on top. Their rows reuse the same caches and
+  // expansion — only key namespacing keeps them from ever colliding with a
+  // live row, and no affordance set reaches them, so they render read-only.
+  const historyRows = useMemo(() => {
+    if (!bossHistory || (!bossHistory.sessions.length && !bossHistory.pending)) {return [];}
+    const rows: TranscriptRow[] = [];
+    // The boundary sits at the chain's head — the next link not yet loaded —
+    // above the oldest predecessor already inline.
+    if (bossHistory.pending) {
+      rows.push({
+        kind: 'historyBoundary',
+        key: 'history:boundary',
+        turnId: null,
+        predecessorId: bossHistory.pending,
+        loading: bossHistory.loading,
+        error: bossHistory.error,
+        topGap: 0,
+      });
+    }
+
+    for (const predecessor of bossHistory.sessions) {
+      const pipeline = buildTranscriptPipeline(predecessor, expandedFolds, expandedTriggers);
+      for (const row of expandTranscriptRows(pipeline, md, predecessor.provider, 0)) {
+        rows.push({ ...row, key: `history:${predecessor.id}:${row.key}` });
+      }
+    }
+
+    return rows;
+  }, [expandedFolds, expandedTriggers, bossHistory, md]);
 
   // Messages already present when this list first rendered (or hydrated)
   // show their markdown at full opacity — only content streamed while
@@ -149,6 +211,16 @@ export function TranscriptList({
     });
   }, []);
 
+  const toggleTrigger = useCallback((eventId: string) => {
+    setExpandedTriggers((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {next.delete(eventId);}
+      else {next.add(eventId);}
+
+      return next;
+    });
+  }, []);
+
   const extendTail = useCallback(() => {
     setWindowStart((value) => extendedWindowStart(value ?? start));
   }, [start]);
@@ -165,7 +237,7 @@ export function TranscriptList({
       const pipelineIndex = pipeline.findIndex((row) => {
         if (row.kind !== 'message') {return row.key === rowKey;}
         const id = row.message.id;
-        return rowKey === `user:${id}` || rowKey === `system:${id}` || rowKey.startsWith(`md:${id}.`);
+        return rowKey === `user:${id}` || rowKey === `system:${id}` || rowKey === `notice:${id}` || rowKey.startsWith(`md:${id}.`);
       });
 
       if (pipelineIndex < 0) {
@@ -203,14 +275,18 @@ export function TranscriptList({
     onHandle?.({ scrollToLatest, followNextGrowth, revealRow });
   }, [followNextGrowth, onHandle, revealRow, scrollToLatest]);
 
-  const showEmpty = hydrated && !running && rows.length === 0;
+  const showEmpty = hydrated && !running && !historyRows.length && rows.length === 0;
+  const displayRows = useMemo(
+    () => (historyRows.length ? [...historyRows, ...rows] : rows),
+    [historyRows, rows],
+  );
 
   return (
     <View style={{ flex: '1 1', overflow: 'hidden', paddingTop: headerInset }}>
       <TranscriptScrollView
         hasEarlier={hasEarlier}
         headerInset={headerInset}
-        rows={rows}
+        rows={displayRows}
         strip={running ? <WorkingStrip session={session} /> : null}
         renderRow={(row, helpers) => (
           <TranscriptRowFrame
@@ -221,10 +297,13 @@ export function TranscriptList({
             rewindTurns={rewindTurns}
             row={row}
             seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
+            sessionMentions={sessionMentions}
             veils={veils}
             onForkTurn={onForkTurn}
+            onLoadEarlier={bossHistory?.onLoad}
             onRewindTurn={onRewindTurn}
             onToggleFold={toggleFold}
+            onToggleTrigger={toggleTrigger}
           />
         )}
         onExtendTail={extendTail}
@@ -233,7 +312,7 @@ export function TranscriptList({
       {showEmpty && (
         <Absolute
           style={{ bottom: 0, left: 0, right: 0, top: 0, alignItems: 'center', justifyContent: 'center' }}>
-          <SessionEmpty error={null} loading={false} missing={false} />
+          <SessionEmpty boss={boss} error={null} loading={false} missing={false} />
         </Absolute>
       )}
     </View>
@@ -262,7 +341,10 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   markdownStyles,
   rewindTurns,
   forkTurns,
+  sessionMentions,
   onToggleFold,
+  onToggleTrigger,
+  onLoadEarlier,
   onRewindTurn,
   onForkTurn,
 }: {
@@ -274,7 +356,10 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   markdownStyles: MarkdownStyles;
   rewindTurns?: ReadonlySet<string>;
   forkTurns?: ReadonlySet<string>;
+  sessionMentions?: readonly BossSessionMention[];
   onToggleFold: (turnId: string) => void;
+  onToggleTrigger?: (eventId: string) => void;
+  onLoadEarlier?: () => void;
   onRewindTurn?: (turnId: string) => void;
   onForkTurn?: (turnId: string) => void;
 }) {
@@ -289,10 +374,13 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
           rewindTurns={rewindTurns}
           row={row}
           seeded={seeded}
+          sessionMentions={sessionMentions}
           veils={veils}
           onForkTurn={onForkTurn}
+          onLoadEarlier={onLoadEarlier}
           onRewindTurn={onRewindTurn}
           onToggleFold={onToggleFold}
+          onToggleTrigger={onToggleTrigger}
         />
       </RowAnchorProvider>
     </View>

@@ -3,6 +3,7 @@ import { setBossChatReady } from '@/lib/boss-secondary-store';
 import { BossAutomationHistory } from './boss-automation-history';
 import { BossPinnedTerminals } from './boss-secondary';
 import { atomVisibleText } from '@waku/client/transcript-presentation';
+import type { AgentSession } from '@waku/client';
 import { bossEmployeeLifecycle } from '@waku/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
 import {
@@ -24,6 +25,7 @@ import {
 
 import {
   BossAssignmentSheet,
+  BossAvatar,
   BossCapacitySheet,
   EmployeeExpiredCard,
   EmployeeStatusCard,
@@ -55,11 +57,13 @@ import {
 import { useTaskDrawer } from '@/components/task-drawer';
 import {
   TranscriptList,
+  type BossChatHistory,
   type TranscriptListHandle,
 } from '@/components/transcript-list';
 
 import { SessionEmpty } from '@/components/transcript-rows';
 import { useBossState, useProviderModels, useSession, useTaskState } from '@/lib/daemon-queries';
+import { bossChatPredecessor } from '@waku/client/boss-chat';
 import { bossEmployeeForSession, bossQueueRanks } from '@/lib/boss';
 import { bossGoalsUnreadCount } from '@/lib/goals';
 import { useKeyboardPadding } from '@/lib/use-keyboard-padding';
@@ -68,7 +72,7 @@ import { useHasUnseenReplies } from '@/lib/use-unseen-replies';
 import { Radius } from '@/lib/theme-colors';
 import { useDaemon } from '@/lib/daemon-hooks';
 import { useAttentionItems } from '@/components/attention-strip';
-import { listSessionTurnRefs } from '@/lib/daemon-api';
+import { hydrateSession, listSessionTurnRefs } from '@/lib/daemon-api';
 import { sessionBusy, sessionCwd } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/use-runtime';
 import { showAlert, confirmDestructive } from '@/lib/alert';
@@ -176,6 +180,10 @@ export function SessionView({
     setFindOpen(false);
     setFindQuery('');
     setFindIndex(0);
+    setHistoryLoaded({});
+    setHistoryPendingId(null);
+    setHistoryError(null);
+    historyAttempted.current = new Set();
     lastFindQuery.current = '';
   }, [session?.id]);
 
@@ -322,6 +330,128 @@ export function SessionView({
 
   // The Goals sheet (task menu → Goals) stamps `goals_viewed_at` on open —
   // strip cards for finishes retire through that contract, not on chat view.
+
+  // A rotated-away boss chat is an earlier conversation: archived, no
+  // roster record, no longer the current boss chat — read-only.
+  const isRotatedBossChat = Boolean(
+    session
+    && session.boss_managed
+    && session.archived_at != null
+    && !employee
+    && !isBossChat,
+  );
+
+  // Boss surfaces resolve bare roster names in prose to session chips —
+   // the boss chat, its planning sessions, deliverable pages. Desktop keys
+  // the pool off the boss's minted project; planning sessions stay out of
+  // it on purpose.
+  const sessionMentions = useMemo(() => {
+    if (!bossData || !project || project.id !== bossData.identity.id) {return undefined;}
+    return bossData.employees.map((item) => ({
+      name: item.identity.name,
+      session: item.sessionId,
+    }));
+  }, [bossData, project]);
+
+  // Rotation history: the daemon links a boss chat to its predecessor with
+  // a hidden marker row. The immediate link loads eagerly; deeper links load
+  // on demand through the transcript's boundary affordance. History is
+  // keyed by predecessor id and reset on session change.
+  const [historyLoaded, setHistoryLoaded] = useState<Readonly<Record<string, AgentSession>>>({});
+  const [historyPendingId, setHistoryPendingId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyAttempted = useRef(new Set<string>());
+
+  const loadEarlier = useCallback((id: string) => {
+    const client = daemon.client;
+    if (!client) {return;}
+    setHistoryPendingId(id);
+    setHistoryError(null);
+    void hydrateSession(client, id)
+      .then((loaded) => {
+        if (!loaded) {setHistoryError('This earlier conversation is no longer available');}
+        else {setHistoryLoaded((current) => ({ ...current, [id]: loaded }));}
+      })
+      .catch((cause) => {
+        setHistoryError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => setHistoryPendingId(null));
+  }, [daemon.client]);
+
+  const bossHistory = useMemo<BossChatHistory | null>(() => {
+    if (!isBossChat || !session) {return null;}
+    const sessions: AgentSession[] = [];
+    const seen = new Set([session.id]);
+    let cursor: AgentSession = session;
+    let pending: string | null = null;
+    for (;;) {
+      const next = bossChatPredecessor(cursor);
+      // Cycles and other daemons' chats stop the walk; an unloaded link is
+      // the boundary the affordance offers.
+      if (!next || seen.has(next)) {break;}
+      const loaded = historyLoaded[next];
+      if (!loaded || loaded.project_id !== bossData?.identity.id) {
+        pending = next;
+        break;
+      }
+
+      sessions.push(loaded);
+      seen.add(next);
+      cursor = loaded;
+    }
+
+    sessions.reverse();
+    return {
+      sessions,
+      pending,
+      loading: historyPendingId === pending && pending != null,
+      error: historyError,
+      onLoad: () => {
+        if (pending) {loadEarlier(pending);}
+      },
+    };
+  }, [bossData?.identity.id, historyError, historyLoaded, historyPendingId, isBossChat, loadEarlier, session]);
+
+  // The immediate predecessor arrives without a tap — the desktop loads it
+  // eagerly; deeper links stay behind the affordance, so the chain walk
+  // never drives this.
+  useEffect(() => {
+    if (!isBossChat || !session || daemon.phase !== 'connected') {return;}
+    const id = bossChatPredecessor(session);
+    if (!id || historyLoaded[id] || historyAttempted.current.has(id)) {return;}
+    historyAttempted.current.add(id);
+    loadEarlier(id);
+  }, [daemon.phase, historyLoaded, isBossChat, loadEarlier, session]);
+
+  // Rotation auto-follow: while this screen shows the boss chat and the
+  // daemon names a different current session, follow to the new one. A
+  // deliberately opened predecessor (the id never matched) stays put.
+  const bossSessionIdRef = useRef<string | null>(bossData?.sessionId ?? null);
+  useEffect(() => {
+    const next = bossData?.sessionId ?? null;
+    const previous = bossSessionIdRef.current;
+    if (next) {bossSessionIdRef.current = next;}
+    if (!previous || !next || previous === next) {return;}
+    if (session?.id === previous) {
+      pushRoute({ stack: 'root', name: 'session/:id', params: { id: next } });
+    }
+  }, [bossData?.sessionId, session?.id]);
+
+  // A viewed planning session hands off to the boss chat when its design
+  // finalizes — desktop's `viewed_plan_just_finalized` follow. The first
+  // observed value is the baseline: a plan opened already-finalized stays.
+  const finalizedRef = useRef<{ armed: boolean; value: number | null | undefined }>(
+    { armed: false, value: undefined },
+  );
+  useEffect(() => {
+    const next = session?.planning?.finalizedAt;
+    const { armed, value: previous } = finalizedRef.current;
+    finalizedRef.current = { armed: true, value: next };
+    if (armed && previous == null && next != null && bossData?.sessionId) {
+      pushRoute({ stack: 'root', name: 'session/:id', params: { id: bossData.sessionId } });
+    }
+  }, [bossData?.sessionId, session?.planning?.finalizedAt]);
+
   // A deliverable row's click arms this chat's composer: the chip shows the
   // freshest record for the armed id, a dismissed record disarms silently,
   // and viewing another session retires the arm — the desktop's
@@ -425,8 +555,18 @@ export function SessionView({
       const text = atomVisibleText(message.display_content ?? message.content).toLowerCase();
       if (message.hidden || !text.includes(needle)) {continue;}
       if (message.role === 'user') {matches.push({ key: `user:${message.id}`, turnId: message.turn_id });}
-      else if (message.role === 'system') {matches.push({ key: `system:${message.id}`, turnId: message.turn_id });}
-      else if (message.role === 'assistant') {matches.push({ key: `md:${message.id}.0`, turnId: message.turn_id });}
+      else if (message.role === 'system') {
+        matches.push({
+          key: message.notice ? `notice:${message.id}` : `system:${message.id}`,
+          turnId: message.turn_id,
+        });
+      } else if (message.role === 'assistant') {
+        const noticed = message.notice?.type === 'status' || message.notice?.type === 'transferReceived';
+        matches.push({
+          key: noticed ? `notice:${message.id}` : `md:${message.id}.0`,
+          turnId: message.turn_id,
+        });
+      }
     }
 
     return matches;
@@ -462,8 +602,17 @@ export function SessionView({
     lastFindQuery.current = '';
   }, []);
 
-  const subtitleParts = [project?.name, daemon.activeProfile?.name].filter(Boolean);
-  const title = session ? displaySessionTitle(session) : 'Task';
+  // The boss chat's header row is the daemon's boss identity — the sidebar
+  // row's "Boss" line plus the host — not the rotated-away transcript's
+  // own title.
+  const subtitleParts = isBossChat
+    ? ['Boss', daemon.activeProfile?.name].filter(Boolean)
+    : [project?.name, daemon.activeProfile?.name].filter(Boolean);
+
+  const title = isBossChat && bossData
+    ? bossData.identity.name
+    : session ? displaySessionTitle(session) : 'Task';
+
   // The bar's subtitle doubles as the quiet link indicator, the way messaging
   // apps do it; the banner below only steps in when the outage persists.
   const linkSubtitle = daemon.phase === 'reconnecting'
@@ -570,15 +719,27 @@ export function SessionView({
             <View style={{ borderRadius: 3, height: 6, width: 6, backgroundColor: theme.info }} />
           ) : null}
         </Pressable>
-        <View style={{ flex: '1 1', minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text numberOfLines={1} style={{ fontSize: 11.5, color: theme.textTertiary }}>
-              {subtitle}
-            </Text>
-          ) : null}
+        <View style={{ alignItems: 'center', flex: '1 1', flexDirection: 'row', gap: 7, minWidth: 0 }}>
+          {isBossChat && bossData ? <BossAvatar identity={bossData.identity} size={24} /> : null}
+          <View style={{ flex: '1 1', minWidth: 0 }}>
+            <View style={{ alignItems: 'center', flexDirection: 'row', gap: 5 }}>
+              {session?.planning ? (
+                <AppSymbol
+                  name={{ ios: 'safari', android: 'explore', web: 'explore' }}
+                  size={13}
+                  tintColor={theme.textTertiary}
+                />
+              ) : null}
+              <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
+                {title}
+              </Text>
+            </View>
+            {subtitle ? (
+              <Text numberOfLines={1} style={{ fontSize: 11.5, color: theme.textTertiary }}>
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
         </View>
         {hasSession ? (
           <>
@@ -619,12 +780,15 @@ export function SessionView({
           <ActivitySheetHost session={session}>
             <TranscriptList
               onHandle={(h) => { listRef.current = h; }}
+              boss={isBossChat ? bossData?.identity : null}
               forkTurns={forkTurns}
               headerInset={headerInset}
+              bossHistory={bossHistory}
               hydrated={!query.isPending}
               rewindTurns={rewindTurns}
               running={running}
               session={session}
+              sessionMentions={sessionMentions}
               onForkTurn={forkTurn}
               onRewindTurn={confirmRewind}
             />
@@ -737,7 +901,34 @@ export function SessionView({
         </Absolute>
       </View>
       {session && (
-        session.planning ? <PlanningComposer key={session.id} session={session} onSubmitted={() => listRef.current?.followNextGrowth()} /> : <MobileComposer
+        isRotatedBossChat ? (
+          <Pressable
+            accessibilityHint="Opens the daemon's current boss chat"
+            accessibilityRole="button"
+            onPress={() => {
+              if (bossData?.sessionId) {
+                pushRoute({ stack: 'root', name: 'session/:id', params: { id: bossData.sessionId } });
+              }
+            }}
+            style={{
+              alignItems: 'center',
+              borderTopColor: theme.border,
+              borderTopWidth: 0.5,
+              flexDirection: 'row',
+              gap: 6,
+              justifyContent: 'center',
+              paddingVertical: 14,
+            }}>
+            <AppSymbol
+              name={{ ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }}
+              size={13}
+              tintColor={theme.textSecondary}
+            />
+            <Text style={{ fontSize: 13, color: theme.textSecondary }}>
+              This boss chat rotated — open the current one
+            </Text>
+          </Pressable>
+        ) : session.planning ? <PlanningComposer key={session.id} session={session} onSubmitted={() => listRef.current?.followNextGrowth()} /> : <MobileComposer
           boss={employee && bossData
             ? { employee, identity: bossData.identity }
             : null}

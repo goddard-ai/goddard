@@ -36,6 +36,11 @@ import {
 } from '@octane-xplat/ui';
 
 import { openUrl } from '@/lib/open-url';
+import {
+  findBossSessionMentions,
+  type BossSessionMention,
+} from '@waku/client/boss-chat';
+
 import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
 import { splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
@@ -70,6 +75,9 @@ export interface MarkdownStyles {
   tableHeadText: Style & { color: string };
   hr: Style;
   image: Style;
+  /** A bare employee name resolved to a session — desktop paints an avatar
+   * chip; the span here takes accent ink on a tinted wash instead. */
+  sessionMention: Style & { color: string; backgroundColor: string };
 }
 
 export interface RenderContext {
@@ -82,14 +90,22 @@ export interface RenderContext {
   /** True once any element of the current block produced active spans. */
   hadSpans: boolean;
   onOpenLink: (url: string) => void;
+  /** Bare names prose resolves to task chips — populated on boss surfaces,
+   * empty elsewhere. Mirrors the desktop ctx's `session_mentions`. */
+  mentions?: readonly BossSessionMention[];
 }
 
 interface InlineContext {
   block: RenderContext;
   spans: readonly VeilSpan[];
   cursor: { value: number };
+  /** The element's flattened text — mention matching needs the character
+   * before this leaf's position. */
+  flat: string;
   /** Effective foreground color, for fading pieces that inherit it. */
   ink: string;
+  /** Runs inside a link keep their own meaning — no mention chips. */
+  inLink?: boolean;
 }
 
 const TASK_LINK_PREFIX = 'goddard://task/';
@@ -165,7 +181,7 @@ function inlineContext(
   flat: string,
   ink: string,
 ): InlineContext {
-  return { block: ctx, spans: beginTextElement(ctx, flat), cursor: { value: 0 }, ink };
+  return { block: ctx, spans: beginTextElement(ctx, flat), cursor: { value: 0 }, flat, ink };
 }
 
 /** The veil-split pieces of one leaf run — data, not elements, so the JSX
@@ -198,18 +214,65 @@ function leafPieces(
   });
 }
 
-/** Materialize a leaf run inside a formatted string. */
+/** Materialize a leaf run inside a formatted string. Word-bounded
+ * roster-name hits in plain prose split into tappable mention spans —
+ * desktop's `SessionMention` chips; code and link runs never match. */
 function RenderLeaf({
   value,
   ictx,
   style,
+  allowMentions = true,
 }: {
   value: string;
   ictx: InlineContext;
   style?: Style & { color?: string; backgroundColor?: string };
+  allowMentions?: boolean;
 }) {
-  return leafPieces(value, ictx, style).map((piece) => (
-    <RichTextSpan text={piece.text} style={piece.style} />
+  const mentions = allowMentions && !ictx.inLink ? ictx.block.mentions : undefined;
+  const hits = mentions?.length && value
+    ? findBossSessionMentions(
+        value,
+        mentions,
+        ictx.cursor.value > 0
+          ? /[\p{L}\p{N}_]/u.test(ictx.flat[ictx.cursor.value - 1] ?? '')
+          : false,
+      )
+    : [];
+
+  if (!hits.length) {
+    return leafPieces(value, ictx, style).map((piece) => (
+      <RichTextSpan text={piece.text} style={piece.style} />
+    ));
+  }
+
+  const pieces: Array<{ piece: LeafPiece; session: string | null }> = [];
+  let position = 0;
+  for (const hit of [...hits, { start: value.length, end: value.length, session: null }]) {
+    if (hit.start > position) {
+      const plain = value.slice(position, hit.start);
+      for (const piece of leafPieces(plain, ictx, style)) {
+        pieces.push({ piece, session: null });
+      }
+    }
+
+    if (hit.session != null) {
+      const named = value.slice(hit.start, hit.end);
+      for (const piece of leafPieces(named, ictx, style)) {
+        pieces.push({ piece, session: hit.session });
+      }
+    }
+
+    position = hit.end;
+  }
+
+  return pieces.map(({ piece, session }) => (
+    <RichTextSpan
+      text={piece.text}
+      style={session ? [piece.style, ictx.block.styles.sessionMention] : piece.style}
+      onPress={session
+        ? () => pushRoute({ stack: 'root', name: 'session/:id', params: { id: session } })
+        : undefined}
+    />
   ));
 }
 
@@ -229,6 +292,7 @@ function RenderInline({
       case 'inlineCode':
         return (
           <RenderLeaf
+            allowMentions={false}
             value={node.value}
             ictx={{ ...ictx, ink: styles.codespan.color }}
             style={styles.codespan}
@@ -267,7 +331,7 @@ function RenderInline({
           >
             <RenderInline
               nodes={node.children}
-              ictx={{ ...ictx, ink: styles.link.color }}
+              ictx={{ ...ictx, ink: styles.link.color, inLink: true }}
             />
           </RichTextSpan>
         );
@@ -415,6 +479,7 @@ function RenderCode({
     block: ctx,
     spans,
     cursor: { value: 0 },
+    flat: value,
     ink: styles.codeLine.color,
   };
 

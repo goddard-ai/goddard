@@ -9,6 +9,7 @@ import type {
   TranscriptBlock,
 } from '@waku/client';
 
+import { bossTriggerGroups, type BossTriggerGroup } from '@waku/client/boss-chat';
 import { activitiesForBlock } from '@waku/client/event-reducer';
 import {
   isContextCompaction,
@@ -90,7 +91,40 @@ export type TranscriptRow =
       expanded: boolean;
       topGap: number;
     }
-  | { kind: 'changed'; key: string; turnId: string | null; checkpoint: Checkpoint; topGap: number };
+  | { kind: 'changed'; key: string; turnId: string | null; checkpoint: Checkpoint; topGap: number }
+  | {
+      /** A report-trigger marker: the quiet row naming the employee report or
+       * plan handoff that woke a turn, or the burst header a run collapses
+       * into. Desktop's `BossTrigger` row. */
+      kind: 'bossTrigger';
+      key: string;
+      turnId: string | null;
+      group: BossTriggerGroup;
+      expanded: boolean;
+      topGap: number;
+    }
+  | {
+      /** A message carrying a structured `notice` — status pill, landed card,
+       * provider switch, transfer receipt. `role` decides the presentation. */
+      kind: 'notice';
+      key: string;
+      turnId: string | null;
+      message: Message;
+      /** The owning session's provider — the model-switch glyph's mark. */
+      provider: ProviderKind;
+      topGap: number;
+    }
+  | {
+      /** The "Load earlier conversation" affordance at the head of a rotated
+       * boss chat's transcript — chrome, not session data. */
+      kind: 'historyBoundary';
+      key: string;
+      turnId: null;
+      predecessorId: string;
+      loading: boolean;
+      error: string | null;
+      topGap: number;
+    };
 
 /** Spacing tokens: first row, message boundaries, tool boundaries,
  * sibling markdown blocks of one message. */
@@ -347,7 +381,8 @@ export type TranscriptPipelineRow =
   | { kind: 'message'; key: string; turnId: string | null; message: Message; footerTimestamp: number | null }
   | { kind: 'activities'; key: string; turnId: string | null; block: TranscriptBlock; blockIndex: number; live: boolean }
   | { kind: 'fold'; key: string; turnId: string | null; turn: AgentTurn; label: string; expanded: boolean }
-  | { kind: 'changed'; key: string; turnId: string | null; checkpoint: Checkpoint };
+  | { kind: 'changed'; key: string; turnId: string | null; checkpoint: Checkpoint }
+  | { kind: 'bossTrigger'; key: string; turnId: string | null; group: BossTriggerGroup; expanded: boolean };
 
 interface TaggedRow {
   row: TranscriptPipelineRow;
@@ -376,9 +411,13 @@ function isTranscriptReceiptBlock(block: TranscriptBlock): boolean {
 export function buildTranscriptPipeline(
   session: AgentSession,
   expandedFolds: ReadonlySet<string> = new Set(),
+  expandedTriggers: ReadonlySet<string> = new Set(),
 ): TranscriptPipelineRow[] {
   const runningTurnId = session.turns.find((turn) => turn.status === 'running')?.id ?? null;
   const latestBlock = session.transcript_blocks.at(-1);
+  const triggers = new Map(
+    bossTriggerGroups(session).map((group) => [group.anchorId, group]),
+  );
 
   const blocksByAnchor = new Map<number, Array<{ block: TranscriptBlock; index: number }>>();
   session.transcript_blocks.forEach((block, index) => {
@@ -424,7 +463,31 @@ export function buildTranscriptPipeline(
 
     const message = session.messages[messageIndex];
     // A hidden prompt stays in `session.messages` so every client's
-    // projection names the same ids — it just renders no row.
+    // projection names the same ids — it just renders no row. A hidden
+    // prompt carrying a report trigger renders the marker instead: the
+    // first member of its group anchors the row, the rest stay silent.
+    if (message?.hidden && message.report_trigger) {
+      const group = triggers.get(message.id);
+      if (group) {
+        tag({
+          row: {
+            kind: 'bossTrigger',
+            key: `trigger:${message.id}`,
+            turnId: message.turn_id,
+            group,
+            expanded: expandedTriggers.has(group.triggers[0]?.eventId ?? ''),
+          },
+          turnId: message.turn_id,
+          // The marker is the transcript's turn-trigger record — never
+          // folded away with the work around it.
+          foldable: false,
+          answerText: false,
+        });
+      }
+
+      continue;
+    }
+
     if (message && !message.hidden) {
       tag({
         row: {
@@ -503,7 +566,12 @@ export function buildTranscriptRows(
   expandedFolds: ReadonlySet<string> = new Set(),
   md: TranscriptMarkdownCache = new TranscriptMarkdownCache(),
 ): TranscriptRow[] {
-  return expandTranscriptRows(buildTranscriptPipeline(session, expandedFolds), md, 0);
+  return expandTranscriptRows(
+    buildTranscriptPipeline(session, expandedFolds),
+    md,
+    session.provider,
+    0,
+  );
 }
 
 /**
@@ -515,13 +583,14 @@ export function buildTranscriptRows(
 export function expandTranscriptRows(
   pipeline: readonly TranscriptPipelineRow[],
   md: TranscriptMarkdownCache,
+  provider: ProviderKind,
   start = 0,
 ): TranscriptRow[] {
   const from = Math.max(0, Math.min(start, pipeline.length));
   const out: TranscriptRow[] = [];
   const liveIds = new Set<string>();
   for (let ix = from; ix < pipeline.length; ix += 1) {
-    expandPipelineRow(pipeline[ix]!, md, liveIds, out);
+    expandPipelineRow(pipeline[ix]!, md, provider, liveIds, out);
   }
 
   // The nearest earlier row sets the first gap (an assistant message with
@@ -529,7 +598,7 @@ export function expandTranscriptRows(
   let previous: TranscriptRow | undefined;
   for (let ix = from - 1; ix >= 0 && !previous; ix -= 1) {
     const expanded: TranscriptRow[] = [];
-    expandPipelineRow(pipeline[ix]!, md, liveIds, expanded);
+    expandPipelineRow(pipeline[ix]!, md, provider, liveIds, expanded);
     previous = expanded[expanded.length - 1];
   }
 
@@ -546,6 +615,7 @@ export function expandTranscriptRows(
 function expandPipelineRow(
   row: TranscriptPipelineRow,
   md: TranscriptMarkdownCache,
+  provider: ProviderKind,
   liveIds: Set<string>,
   out: TranscriptRow[],
 ) {
@@ -555,6 +625,30 @@ function expandPipelineRow(
   }
 
   const message = row.message;
+  // A structured notice replaces the message's ordinary presentation —
+  // `content` already carries the plain-text form, so the notice row keeps
+  // it as the label/fallback. The variant×role split mirrors the desktop:
+  // system rows surface every notice, the assistant column only its status
+  // and transfer rows; anything else keeps the markdown body.
+  const noticed = message.role === 'system'
+    ? message.notice != null
+    : message.role === 'assistant'
+      ? message.notice?.type === 'status' || message.notice?.type === 'transferReceived'
+      : false;
+
+  if (noticed) {
+    out.push({
+      kind: 'notice',
+      key: `notice:${message.id}`,
+      turnId: row.turnId,
+      message,
+      provider,
+      topGap: 0,
+    });
+
+    return;
+  }
+
   if (message.role === 'user') {
     out.push({ kind: 'user', key: `user:${message.id}`, turnId: row.turnId, message, topGap: 0 });
     return;
@@ -593,12 +687,17 @@ function topGap(row: TranscriptRow, previous: TranscriptRow | undefined): number
     return GAP_BLOCK;
   }
 
+  // An opening report stands in for the prompt that opened the turn — it
+  // takes the turn-boundary gap that prompt would have.
+  if (row.kind === 'bossTrigger' && row.group.boundary === 'opening') {return GAP_TURN;}
+
   // Tool stacks, folds, and change cards are denser than prose — one group
   // step on both boundaries, matching the desktop.
-  if (row.kind !== 'user' && row.kind !== 'system' && row.kind !== 'md') {return GAP_GROUP;}
-  if (previous.kind !== 'user' && previous.kind !== 'system' && previous.kind !== 'md') {
-    return GAP_GROUP;
-  }
+  const textFamily = (kind: TranscriptRow['kind']) =>
+    kind === 'user' || kind === 'system' || kind === 'md' || kind === 'notice';
+
+  if (!textFamily(row.kind)) {return GAP_GROUP;}
+  if (!textFamily(previous.kind)) {return GAP_GROUP;}
 
   return GAP_TURN;
 }
@@ -642,6 +741,21 @@ function shallowEqualRow(a: TranscriptRow, b: TranscriptRow): boolean {
   if (keys.length !== Object.keys(right).length) {return false;}
   for (const key of keys) {
     if (key === 'node' && a.kind === 'md') {continue;}
+    // Trigger groups rebuild on every pipeline pass — compare their members
+    // by event id rather than object identity so a stream commit reuses the
+    // marker row instead of repainting it.
+    if (key === 'group' && a.kind === 'bossTrigger' && b.kind === 'bossTrigger') {
+      const ag = a.group;
+      const bg = b.group;
+      if (ag.anchorId !== bg.anchorId || ag.boundary !== bg.boundary
+        || ag.triggers.length !== bg.triggers.length
+        || ag.triggers.some((trigger, index) => trigger.eventId !== bg.triggers[index]!.eventId)) {
+        return false;
+      }
+
+      continue;
+    }
+
     if (left[key] !== right[key]) {return false;}
   }
 

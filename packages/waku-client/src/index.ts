@@ -18,6 +18,7 @@ export {
 } from "./client";
 export * from "./generated";
 export * from "./boss";
+export * from "./boss-chat";
 export * from "./event-reducer";
 export * from "./transcript-presentation";
 export * from "./composer-annotations";

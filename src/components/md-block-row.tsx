@@ -122,6 +122,12 @@ export function useMarkdownStyles(): MarkdownStyles {
         height: 200,
         width: '100%',
       },
+      // A bare employee name in boss prose — the chip desktop paints as
+      // avatar + accent text reads here as accent ink on its tinted wash.
+      sessionMention: {
+        color: theme.accent,
+        backgroundColor: theme.accentSoft,
+      },
     };
   }, [theme]);
 }
@@ -145,7 +151,10 @@ export class VeilRegistry {
   }
 }
 
-function staticContext(styles: MarkdownStyles): RenderContext {
+function staticContext(
+  styles: MarkdownStyles,
+  mentions?: RenderContext['mentions'],
+): RenderContext {
   return {
     styles,
     veil: null,
@@ -153,6 +162,7 @@ function staticContext(styles: MarkdownStyles): RenderContext {
     ordinal: { value: 0 },
     hadSpans: false,
     onOpenLink: openLinkExternally,
+    mentions,
   };
 }
 
@@ -188,14 +198,18 @@ export const MdBlockSettled = memo(
   function MdBlockSettled({
     node,
     styles,
+    mentions,
   }: {
     node: MarkdownBlock['node'];
     source: string;
     styles: MarkdownStyles;
+    mentions?: RenderContext['mentions'];
   }) {
-    return <RenderBlock ctx={staticContext(styles)} node={node} />;
+    return <RenderBlock ctx={staticContext(styles, mentions)} node={node} />;
   },
-  (previous, next) => previous.source === next.source && previous.styles === next.styles,
+  (previous, next) => previous.source === next.source
+    && previous.styles === next.styles
+    && previous.mentions === next.mentions,
 );
 
 /**
@@ -212,6 +226,7 @@ export function MdBlockLive({
   veils,
   seeded,
   styles,
+  mentions,
 }: {
   rowKey: string;
   messageId: string;
@@ -221,6 +236,7 @@ export function MdBlockLive({
   veils: VeilRegistry;
   seeded: boolean;
   styles: MarkdownStyles;
+  mentions?: RenderContext['mentions'];
 }) {
   const [, bump] = useReducer((count: number) => count + 1, 0);
   const reducedMotion = useReducedMotion();
@@ -238,6 +254,7 @@ export function MdBlockLive({
     ordinal: { value: 0 },
     hadSpans: false,
     onOpenLink: openLinkExternally,
+    mentions,
   };
 
   veil?.beginFrame();

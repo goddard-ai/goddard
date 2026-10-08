@@ -250,6 +250,7 @@ export default function NewTaskScreen() {
     provider,
     root: selectedProject?.path ?? null,
     contextKey: selectedProject?.id ?? 'new-task',
+    project: selectedProject,
   });
 
   function pick(apply: () => void) {

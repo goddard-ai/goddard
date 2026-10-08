@@ -89,6 +89,24 @@ export function useBossState(): DaemonQueryResult<BossState | null> {
   );
 }
 
+/** The daemon's automation definitions — queried lazily (composer mention
+ * pool, history sheets), not on the task-state notifier's refresh path. */
+export function useAutomations(enabled: boolean): DaemonQueryResult<import('@waku/client').Automation[]> {
+  const { activeProfile, client, phase } = useDaemon();
+  return useDaemonQuery(
+    [...daemonKeys.bossState(activeProfile?.id ?? 'disconnected'), 'automations'],
+    async () => {
+      const response = await requireClient(client).request({ type: 'getAutomations' });
+      if (response.type !== 'automations') {throw new Error('Unexpected automations response');}
+      return response.state.automations;
+    },
+    {
+      enabled: enabled && phase === 'connected' && Boolean(activeProfile && client),
+      staleTime: 30_000,
+    },
+  );
+}
+
 export function useDaemonSettings(): DaemonQueryResult<import('@waku/client').DaemonSettings> {
   const { activeProfile, client, phase } = useDaemon();
   return useDaemonQuery(

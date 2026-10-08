@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./boss": "./src/boss.ts",
+    "./boss-chat": "./src/boss-chat.ts",
     "./event-reducer": "./src/event-reducer.ts",
     "./transcript-presentation": "./src/transcript-presentation.ts",
     "./composer-annotations": "./src/composer-annotations.ts",

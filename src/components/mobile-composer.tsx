@@ -303,6 +303,7 @@ export function MobileComposer({
     root: project ? sessionCwd(session, project) : null,
     reported: session.available_commands,
     contextKey: session.id,
+    session,
   });
 
   const localCommands = useComposerLocalCommands({

@@ -64,6 +64,28 @@ export function insertComposerItem(
   return { text: before + insert + after, cursor: before.length + insert.length };
 }
 
+/** Insert a picked mention's display text at the caret, replacing a
+ * partially typed `@partial` the way `insertComposerItem` does for files.
+ * Callers compose the mention text itself — a `goddard://` link for
+ * navigable refs, a `[kind "name" (key: target)]` token for boss operands. */
+export function insertComposerMention(
+  text: string,
+  selection: ComposerSelection,
+  mention: string,
+): { text: string; cursor: number } {
+  let start = Math.max(0, Math.min(selection.start, text.length));
+  const end = Math.max(start, Math.min(selection.end, text.length));
+  if (start === end) {
+    const partial = text.slice(0, start).match(/(?:^|\s)(@\S*)$/u);
+    if (partial) {start -= partial[1]!.length;}
+  }
+
+  const before = text.slice(0, start);
+  const insert = `${before && !/\s$/u.test(before) ? ' ' : ''}${mention} `;
+  const after = text.slice(end).replace(/^ /u, '');
+  return { text: before + insert + after, cursor: before.length + insert.length };
+}
+
 /** Native selection notifications may arrive before or after text changes.
  * Infer the new caret from the edit until the next selection event arrives.
  * All offsets stay in UTF-16, like TextInput and the shared JS matcher. */
