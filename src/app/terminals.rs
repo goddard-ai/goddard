@@ -1638,13 +1638,22 @@ impl Waku {
         });
         let (detail_icon, detail) = match repo {
             Some((cwd, root)) => {
-                let name = root
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .to_owned();
+                let project = self
+                    .state
+                    .projects
+                    .iter()
+                    .filter(|project| cwd.starts_with(&project.path))
+                    .max_by_key(|project| project.path.components().count());
+                let name = project.map(Project::display_name).unwrap_or_else(|| {
+                    root.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default()
+                        .to_owned()
+                });
+                let relative_root =
+                    project.map_or(root.as_path(), |project| project.path.as_path());
                 let label = cwd
-                    .strip_prefix(&root)
+                    .strip_prefix(relative_root)
                     .ok()
                     .filter(|rel| !rel.as_os_str().is_empty())
                     .map(|rel| format!("{name}/{}", rel.display()))
