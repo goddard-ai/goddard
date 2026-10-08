@@ -1,9 +1,9 @@
 const hairline = 0.5;
 
 import type { AgentSession, Checkpoint, Message } from '@waku/client';
-import { atomVisibleText, formatMessageTime } from '@waku/client/transcript-presentation';
+import { atomSegments, atomVisibleText, formatMessageTime } from '@waku/client/transcript-presentation';
 import { memo, useEffect, useState } from 'octane';
-import { ActivityIndicator, Pressable, Text, View } from '@octane-xplat/ui';
+import { ActivityIndicator, Pressable, RichText, RichTextSpan, Text, pushRoute, View } from '@octane-xplat/ui';
 
 import { setStringAsync as copyToClipboard } from '@/lib/clipboard';
 import { Haptics } from '@/lib/haptics';
@@ -179,7 +179,11 @@ function FoldRow({
 
 function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: () => void }) {
   const theme = useTheme();
-  const content = atomVisibleText(message.display_content ?? message.content);
+  const segments = atomSegments(message.display_content ?? message.content, message.atoms);
+  const hasAtoms = segments.some((segment) => segment.kind === 'atom');
+  const content = hasAtoms
+    ? ''
+    : atomVisibleText(message.display_content ?? message.content);
 
   async function copy() {
     await copyToClipboard(message.content);
@@ -207,12 +211,20 @@ function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: (
           ))}
         </View>
       ) : null}
-      {content ? (
+      {segments.length ? (
         <Pressable
           accessibilityHint="Long press to copy"
                    onLongPress={() => void copy()}
           style={[styles.userBubble, { backgroundColor: theme.raised }]}>
-          <Text style={[styles.userText, { color: theme.text }]}>{content}</Text>
+          {hasAtoms ? (
+            <RichText style={[styles.userText, { color: theme.text }]}>
+              {segments.map((segment) => segment.kind === 'text'
+                ? <RichTextSpan text={segment.text} />
+                : <AtomChip label={segment.label} sessionId={segment.sessionId} />)}
+            </RichText>
+          ) : (
+            <Text style={[styles.userText, { color: theme.text }]}>{content}</Text>
+          )}
         </Pressable>
       ) : null}
       {onRewind && (
@@ -240,9 +252,29 @@ const UserBubble = memo(
     previous.message.content === next.message.content &&
     previous.message.display_content === next.message.display_content &&
     previous.message.attachments === next.message.attachments &&
+    previous.message.atoms === next.message.atoms &&
     previous.message.sent_by_task === next.message.sent_by_task &&
     (previous.onRewind != null) === (next.onRewind != null),
 );
+
+/** A submitted inline atom — the desktop paints an accent-washed chip with an
+ * icon slot and links session atoms to their task. Spans can't hold a view,
+ * so the chip is the tinted label alone; a task reference still navigates. */
+function AtomChip({ label, sessionId }: { label: string; sessionId: string | null }) {
+  const theme = useTheme();
+  return (
+    <RichTextSpan
+      text={` ${label} `}
+      onPress={sessionId
+        ? () => pushRoute({ stack: 'root', name: 'session/:id', params: { id: sessionId } })
+        : undefined}
+      style={{
+        backgroundColor: theme.accentSoft,
+        color: theme.accent,
+      }}
+    />
+  );
+}
 
 function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   const theme = useTheme();
@@ -359,6 +391,11 @@ export function EarlierIndicator() {
   );
 }
 
+// U0 seam — the boss chat's empty state is the per-daemon boss identity plus
+// the desktop greeting ("What should we do today?", `boss.greeting`), not the
+// generic "No messages yet". That needs the boss surface (which session is
+// the boss + its name) that a parallel unit lands in @waku/client; wire a
+// `boss` variant in here rather than stubbing it now.
 export function SessionEmpty({
   loading,
   error,

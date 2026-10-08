@@ -132,6 +132,128 @@ export function atomPayloadContent(displayContent: string, atoms: MessageAtom[] 
   return out + rest
 }
 
+/**
+ * `display_content` split at atom spans — text runs interleaved with chip
+ * segments a renderer can make interactive. A session reference's chip
+ * carries the decoded id, so a tap can open the task — the same
+ * `goddard://task/` route a markdown link takes. The span encoding is the
+ * source of truth; the parallel `atoms` list fills in when the encoding is
+ * absent (a folded paste carries no id in text).
+ */
+export type AtomSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'atom'; label: string; sessionId: string | null }
+
+export function atomSegments(
+  text: string,
+  atoms?: readonly MessageAtom[],
+): AtomSegment[] {
+  const segments: AtomSegment[] = []
+  if (!text.includes(MESSAGE_ATOM_OPEN)) {
+    return text ? [{ kind: 'text', text }] : []
+  }
+
+  const queue = atoms ? [...atoms] : []
+  const chars = [...text]
+  let run = ''
+  let label = ''
+  let sessionId: string | null = null
+  let inAtom = false
+
+  const flushRun = () => {
+    if (run) segments.push({ kind: 'text', text: run })
+    run = ''
+  }
+
+  let index = 0
+  while (index < chars.length) {
+    const ch = chars[index]!
+    if (ch === MESSAGE_ATOM_OPEN) {
+      // A second opener mid-span abandons the first — its text stays literal,
+      // the same recovery `atomVisibleText` applies.
+      if (inAtom) {
+        run += label
+      } else {
+        flushRun()
+      }
+      inAtom = true
+      label = ''
+      sessionId = null
+      // A session id encodes as exactly 32 variation selectors; a shorter
+      // run is label text (an emoji's own selector, for instance) and stays.
+      let count = 0
+      while (count < 33 && index + 1 + count < chars.length && isAtomIdChar(chars[index + 1 + count]!.codePointAt(0)!)) {
+        count += 1
+      }
+      if (count === 32) {
+        sessionId = decodeAtomSessionId(chars.slice(index + 1, index + 33))
+        index += 33
+      } else {
+        index += 1
+      }
+      continue
+    }
+    if (ch === MESSAGE_ATOM_END) {
+      inAtom = false
+      index += 1
+      const record = queue.shift()
+      segments.push({
+        kind: 'atom',
+        label,
+        sessionId: sessionId ?? record?.session_id ?? null,
+      })
+      continue
+    }
+    // Inside a span, `\` escapes the writer added to keep the label literal
+    // under markdown unwrap back to the character.
+    if (inAtom && ch === '\\') {
+      const next = chars[index + 1]
+      if (next !== undefined && isAtomLabelEscape(next)) {
+        label += next
+        index += 2
+      } else {
+        label += ch
+        index += 1
+      }
+      continue
+    }
+    if (inAtom) {
+      label += ch
+    } else {
+      run += ch
+    }
+    index += 1
+  }
+  // An unterminated span keeps its label as plain text.
+  if (inAtom) run += label
+  flushRun()
+  // Reopened and unterminated spans can leave adjacent text runs; merge them
+  // so a renderer sees the minimal segmentation.
+  return segments.filter((segment) => segment.kind !== 'text' || segment.text)
+    .reduce<AtomSegment[]>((merged, segment) => {
+      const last = merged.at(-1)
+      if (segment.kind === 'text' && last?.kind === 'text') {
+        last.text += segment.text
+      } else {
+        merged.push(segment)
+      }
+      return merged
+    }, [])
+}
+
+/** 32 variation selectors → the UUID they nibble-encode. Callers slice the
+ * selector run; mirrors `decode_atom_session_id` in waku-protocol's model. */
+function decodeAtomSessionId(chars: string[]): string | null {
+  if (chars.length !== 32) return null
+  let hex = ''
+  for (let index = 0; index < 32; index += 2) {
+    const hi = chars[index]!.codePointAt(0)! - 0xfe00
+    const lo = chars[index + 1]!.codePointAt(0)! - 0xfe00
+    hex += ((hi << 4) | lo).toString(16).padStart(2, '0')
+  }
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export function userMessageRewindTurnCount(
   session: AgentSession,
   message: AgentSession['messages'][number],

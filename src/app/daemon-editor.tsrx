@@ -4,9 +4,8 @@ import { DaemonEditor } from '../components/daemon-picker-sheet';
 import { useTheme } from '../lib/use-theme';
 import { useDaemon } from '../lib/daemon-hooks';
 
-/** Standalone daemon editor — same form as the picker's inline editor.
- * TODO(port): the reference's PairingSection (paired-device approvals and
- * revocation against the active client) is not yet ported. */
+/** Standalone daemon editor — same form as the picker's inline editor,
+ * including the pairing section when this profile is the active daemon. */
 export default function DaemonEditorScreen(props: { id?: string }) {
   const theme = useTheme();
   const daemon = useDaemon();

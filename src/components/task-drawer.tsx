@@ -13,7 +13,6 @@ import {
   Absolute,
   ActivityIndicator,
   createStore,
-  Drawer,
   Pressable,
   pushRoute,
   Text,
@@ -23,6 +22,10 @@ import {
   useStore,
   View,
 } from '@octane-xplat/ui';
+
+import { useWindowSize } from '@octane-xplat/platform';
+
+import { TaskDrawerSurface } from './task-drawer-surface';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { BossSection } from '@/components/boss-roster';
@@ -71,6 +74,10 @@ const SearchDockGap = 14;
 
 /** FlashList has no section API, so groups flatten into header/session rows;
  * `getItemType` keeps the two shapes in separate recycling pools. */
+// U0 seam — the desktop sidebar carries a `SidebarRow::Boss` per daemon host
+// above its task rows (boss identity, unread badges, planning rows). That
+// needs the boss-state surface landing in @waku/client; the boss row belongs
+// at the head of these flattened rows once it exists.
 type DrawerListRow =
   | { kind: 'header'; key: string; title: string }
   | { kind: 'session'; key: string; item: SessionListItem };
@@ -107,13 +114,28 @@ const taskDrawerControls = createStore<TaskDrawerContextValue>({
 export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const daemon = useDaemon();
   const route = useRoute('root');
+  const { width } = useWindowSize();
   const [open, setOpen] = useState(false);
-  const [listRefreshTick] = useState(0);
-  const drawerWidth = 316;
+  const [listRefreshTick, setListRefreshTick] = useState(0);
+  const drawerWidth = Math.max(0, Math.min(360, width - 44));
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
+  // Full-screen swipe only applies on top-level routes — a deeper screen's
+  // own gestures would fight the drawer pan.
+  const swipeEnabled = drawerEnabled && (
+    route?.name === 'index' || route?.name === 'new-task' || route?.name === 'session/:id'
+  );
+
+  const refreshTaskList = useCallback(
+    () => setListRefreshTick((tick) => tick + 1),
+    [],
+  );
+
   const openTaskDrawer = useCallback(() => {
-    if (drawerEnabled) {setOpen(true);}
-  }, [drawerEnabled]);
+    if (drawerEnabled) {
+      refreshTaskList();
+      setOpen(true);
+    }
+  }, [drawerEnabled, refreshTaskList]);
 
   const closeTaskDrawer = useCallback(() => setOpen(false), []);
   const controls = useMemo(
@@ -130,29 +152,30 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
     ? (route.params as { id?: string }).id ?? null
     : null;
 
-  useEffect(() => setOpen(false), [drawerEnabled]);
+  // Close the drawer on navigation and when it is disabled.
+  useEffect(() => setOpen(false), [drawerEnabled, route?.name]);
 
-  // The reference used a full-screen edge swipe + a card-lift reveal; the
-  // shared Drawer only supports backdrop dismissal (flagged).
+  // The surface stays mounted even while disabled — swapping wrappers would
+  // remount the whole route tree whenever the daemon phase settles.
   return (
-    <>
-      {children}
-      {drawerEnabled && (
-        <Drawer
+    <TaskDrawerSurface
+      open={open && drawerEnabled}
+      swipeEnabled={swipeEnabled}
+      drawerWidth={drawerWidth}
+      onGestureStart={refreshTaskList}
+      onOpenChange={setOpen}
+      drawerContent={(
+        <TaskDrawerContent
+          drawerWidth={drawerWidth}
           open={open}
-          onDismiss={closeTaskDrawer}
-          drawer={(
-            <TaskDrawerContent
-              drawerWidth={drawerWidth}
-              open={open}
-              refreshTick={listRefreshTick}
-              selectedSessionId={selectedSessionId}
-              onClose={closeTaskDrawer}
-            />
-          )}
+          refreshTick={listRefreshTick}
+          selectedSessionId={selectedSessionId}
+          onClose={closeTaskDrawer}
         />
       )}
-    </>
+    >
+      {children}
+    </TaskDrawerSurface>
   );
 }
 

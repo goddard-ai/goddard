@@ -85,8 +85,14 @@ export function useComposerPicker({ text, onChangeText, provider, root, reported
     open(next: ComposerTriggerKind) {
       if (!enabled) {return;}
       // Native menu / keyboard dismissal can move the field's selection.
-      // Keep the insertion point the user had when opening the picker.
-      insertionPoint.current = { text, selection };
+      // Keep the insertion point the user had when opening the picker —
+      // read the live caret, since selection events don't fire on every
+      // platform and a tap-move may never have been reported.
+      insertionPoint.current = {
+        text,
+        selection: inputRef.current?.getSelection?.() ?? selection,
+      };
+
       dismissKeyboard();
       setQuery('');
       setKind(next);

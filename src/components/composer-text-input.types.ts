@@ -23,4 +23,7 @@ export interface ComposerTextInputProps {
 
 export interface ComposerTextInputHandle {
   focus: () => void;
+  /** Live caret — selection events don't fire on every platform, so the
+   * picker reads this at the moment it opens. */
+  getSelection?: () => ComposerSelection | null;
 }

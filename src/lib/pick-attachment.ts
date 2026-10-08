@@ -56,8 +56,9 @@ interface AndroidCursor {
 
 /** The picker returns plain paths on iOS (import mode copies into the app
  * inbox) and below-30 Android; on newer Android it is a `content://` URI
- * whose display name and size live in the provider's OpenableColumns. */
-function describeDocument(uri: string): LocalAttachmentFile {
+ * whose display name and size live in the provider's OpenableColumns.
+ * Clipboard-pasted content URIs resolve through the same descriptor. */
+export function describeDocument(uri: string): LocalAttachmentFile {
   const fallback = {
     uri,
     name: localFileName(uri, 'Attachment'),

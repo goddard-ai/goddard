@@ -1,5 +1,6 @@
 import { Haptics } from '@/lib/haptics';
-import { useMemo, useRef, useState } from 'octane';
+import { useEffect, useMemo, useRef, useState } from 'octane';
+import type { PairedClientInfo, PairingState, PairRequestInfo, WakuClient } from '@waku/client';
 import {
   ActivityIndicator,
   Row,
@@ -13,9 +14,10 @@ import {
 import { AppSymbol } from '@/components/app-symbol';
 import { DaemonList } from '@/components/daemon-list';
 import { Sheet, SheetRow } from '@/components/sheet';
-import { confirmDestructive } from '@/lib/alert';
+import { confirmDestructive, showAlert } from '@/lib/alert';
 import { NativeTint } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
+import { relativeSessionTime } from '@/lib/session-presentation';
 import { useTheme } from '@/lib/use-theme';
 import { useDaemon } from '@/lib/daemon-hooks';
 import {
@@ -340,6 +342,10 @@ export function DaemonEditor({
         </Pressable>
       </Row>
 
+      {profile && profile.id === daemon.activeProfile?.id && daemon.client && (
+        <PairingSection client={daemon.client} />
+      )}
+
       {profile && (
         <Pressable
           accessibilityRole="button"
@@ -360,6 +366,255 @@ export function DaemonEditor({
             {removing ? 'Removing…' : 'Remove Daemon'}
           </Text>
         </Pressable>
+      )}
+    </View>
+  );
+}
+
+/** The connected daemon's pairing document: pending approvals plus the
+ * paired-device roster with revocation. `subscribePairing` keeps it live —
+ * `pairingChanged` broadcasts land as a fresh PairingState. Approve/decline
+ * and revoke are security-sensitive, so failures surface as alerts rather
+ * than dropping silently. */
+function PairingSection({ client }: { client: WakuClient }) {
+  const theme = useTheme();
+  const [pairing, setPairing] = useState<PairingState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const unsubscribe = client.subscribePairing((state) => {
+      if (mounted) {setPairing(state);}
+    });
+
+    void client.request({ type: 'getPairing' }).then((response) => {
+      if (mounted && response.type === 'pairing') {setPairing(response.state);}
+    }).catch((cause) => {
+      if (mounted) {setError(cause instanceof Error ? cause.message : String(cause));}
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [client]);
+
+  async function respond(request: PairRequestInfo, accept: boolean) {
+    setBusyId(request.requestId);
+    setError(null);
+    try {
+      await client.request({
+        type: 'respondPairRequest',
+        requestId: request.requestId,
+        accept,
+      });
+
+      await Haptics.notificationAsync(
+        accept
+          ? Haptics.NotificationFeedbackType.Success
+          : Haptics.NotificationFeedbackType.Warning,
+      );
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      await showAlert('Pairing failed', message);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function revoke(entry: PairedClientInfo) {
+    const confirmed = await confirmDestructive(
+      `Revoke ${entry.name}?`,
+      'The device loses access to this daemon and must pair again.',
+      'Revoke',
+    );
+
+    if (!confirmed) {return;}
+    setBusyId(entry.clientId);
+    setError(null);
+    try {
+      await client.request({ type: 'revokePairedClient', clientId: entry.clientId });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      await showAlert('Revoke failed', message);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <View style={{ marginTop: 20 }}>
+      {pairing?.pending.length ? (
+        <View>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: '600',
+              letterSpacing: 0.4,
+              marginBottom: 6,
+              marginHorizontal: 12,
+              textTransform: 'uppercase',
+              color: theme.textSecondary,
+            }}
+          >
+            Pair requests
+          </Text>
+          <View style={{ borderRadius: Radius.medium, overflow: 'hidden', backgroundColor: theme.overlay }}>
+            {pairing.pending.map((request, index) => (
+              <View>
+                {index > 0 && (
+                  <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
+                )}
+                <Row style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+                  <View style={{ flex: '1 1' }}>
+                    <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
+                      {request.deviceName}
+                    </Text>
+                    <Text style={{ fontSize: 13.5, lineHeight: '17px', marginTop: 1, color: theme.textTertiary }}>
+                      Wants to connect
+                    </Text>
+                  </View>
+                  {busyId === request.requestId ? (
+                    <ActivityIndicator busy />
+                  ) : (
+                    <>
+                      <Pressable
+                        accessibilityLabel={`Deny ${request.deviceName}`}
+                        accessibilityRole="button"
+                        disabled={busyId != null}
+                        onPress={() => void respond(request, false)}
+                        className="vx-pressable"
+                        style={{
+                          borderRadius: Radius.small,
+                          justifyContent: 'center',
+                          minHeight: 36,
+                          paddingHorizontal: 12,
+                          backgroundColor: theme.overlayStrong,
+                          opacity: busyId != null ? 0.35 : 1,
+                        }}
+                      >
+                        <Text style={{ fontSize: 14.5, fontWeight: '500', color: theme.textSecondary }}>Deny</Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel={`Approve ${request.deviceName}`}
+                        accessibilityRole="button"
+                        disabled={busyId != null}
+                        onPress={() => void respond(request, true)}
+                        className="vx-pressable"
+                        style={{
+                          borderRadius: Radius.small,
+                          justifyContent: 'center',
+                          minHeight: 36,
+                          paddingHorizontal: 12,
+                          backgroundColor: String(NativeTint),
+                          opacity: busyId != null ? 0.35 : 1,
+                        }}
+                      >
+                        <Text style={{ fontSize: 14.5, fontWeight: '600', color: '#ffffff' }}>Approve</Text>
+                      </Pressable>
+                    </>
+                  )}
+                </Row>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      <Text
+        style={{
+          fontSize: 13,
+          fontWeight: '600',
+          letterSpacing: 0.4,
+          marginBottom: 6,
+          marginHorizontal: 12,
+          marginTop: pairing?.pending.length ? 16 : 0,
+          textTransform: 'uppercase',
+          color: theme.textSecondary,
+        }}
+      >
+        Paired devices
+      </Text>
+      <View style={{ borderRadius: Radius.medium, overflow: 'hidden', backgroundColor: theme.overlay }}>
+        {!pairing ? (
+          <Text
+            style={{
+              fontSize: 14.5,
+              paddingHorizontal: 12,
+              paddingVertical: 14,
+              color: theme.textTertiary,
+            }}
+          >
+            {error ? 'Could not load pairing state.' : 'Loading paired devices…'}
+          </Text>
+        ) : pairing.clients.length === 0 ? (
+          <Text
+            style={{
+              fontSize: 14.5,
+              paddingHorizontal: 12,
+              paddingVertical: 14,
+              color: theme.textTertiary,
+            }}
+          >
+            No devices paired.
+          </Text>
+        ) : (
+          pairing.clients.map((entry, index) => (
+            <View>
+              {index > 0 && (
+                <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
+              )}
+              <Row style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+                <View style={{ flex: '1 1' }}>
+                  <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
+                    {entry.name}
+                  </Text>
+                  <Text style={{ fontSize: 13.5, lineHeight: '17px', marginTop: 1, color: theme.textTertiary }}>
+                    {`Paired ${relativeSessionTime(Math.floor(entry.addedAtMs / 1_000))}`}
+                  </Text>
+                </View>
+                {busyId === entry.clientId ? (
+                  <ActivityIndicator busy />
+                ) : (
+                  <Pressable
+                    accessibilityLabel={`Revoke ${entry.name}`}
+                    accessibilityRole="button"
+                    disabled={busyId != null}
+                    onPress={() => void revoke(entry)}
+                    className="vx-pressable"
+                    style={{
+                      borderRadius: Radius.small,
+                      justifyContent: 'center',
+                      minHeight: 36,
+                      paddingHorizontal: 12,
+                      backgroundColor: theme.dangerSoft,
+                      opacity: busyId != null ? 0.35 : 1,
+                    }}
+                  >
+                    <Text style={{ fontSize: 14.5, fontWeight: '500', color: theme.danger }}>Revoke</Text>
+                  </Pressable>
+                )}
+              </Row>
+            </View>
+          ))
+        )}
+      </View>
+
+      {error && (
+        <Row accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+          <AppSymbol
+            name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }}
+            size={14}
+            tintColor={theme.danger}
+          />
+          <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color: theme.danger }}>{error}</Text>
+        </Row>
       )}
     </View>
   );
