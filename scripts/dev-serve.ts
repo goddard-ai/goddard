@@ -13,7 +13,7 @@
 //                           (default: 8976)
 
 import { $ } from "bun";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { generateAppcast } from "./appcast";
@@ -245,7 +245,7 @@ export async function startDevServe(options: {
       await resignBundle(appBundle, root);
 
       // Build each publication off to the side. The live directory contains
-      // immutable archives plus one atomically replaced appcast, so readers
+      // the current archive plus one atomically replaced appcast, so readers
       // never observe a partially written ZIP or feed.
       const stagingDir = join(workDir, `.staging-${buildNumber}`);
       await rm(stagingDir, { force: true, recursive: true });
@@ -255,8 +255,8 @@ export async function startDevServe(options: {
         await $`ditto -c -k --keepParent ${appBundle} ${join(stagingDir, zipName)}`;
         await generateAppcast(stagingDir, `https://${hostname}/`);
         // The archive is immutable and must exist before the feed starts
-        // advertising it. Keeping prior archives also lets an in-flight
-        // download from the previous feed finish across a deployment.
+        // advertising it. Retire previous archives only after publishing the
+        // new feed so a failed deployment preserves the working update.
         await rename(join(stagingDir, zipName), join(updatesDir, zipName));
         await rename(
           join(stagingDir, "appcast.xml"),
@@ -271,6 +271,23 @@ export async function startDevServe(options: {
         return false;
       } finally {
         await rm(stagingDir, { force: true, recursive: true });
+      }
+      // Cleanup failure must not roll back an already published feed or
+      // remove the archive it advertises. Retry cleanup on the next deploy.
+      try {
+        for (const entry of await readdir(updatesDir)) {
+          if (
+            entry.startsWith("Goddard-") &&
+            entry.endsWith(".zip") &&
+            entry !== zipName
+          ) {
+            await rm(join(updatesDir, entry), { force: true });
+          }
+        }
+      } catch (error) {
+        log(
+          `Could not remove old dev updates: ${error instanceof Error ? error.message : error}`,
+        );
       }
       log(`Deployed ${zipName} as build ${buildNumber} to ${appcastUrl}.`);
       return true;

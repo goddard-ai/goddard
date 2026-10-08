@@ -2,6 +2,7 @@
 
 import { $ } from "bun";
 import { bundleComputerUse } from "./cua-driver";
+import { wakuCacheDir } from "./cache-dir";
 import { startDevServe, type DevServe } from "./dev-serve";
 import {
   cpSync,
@@ -1886,12 +1887,10 @@ process.on("SIGTERM", () => void cleanup());
 startWatchers();
 if (serveMode) {
   try {
-    // The feed lives under the dev data dir, not target/: target is an mbx
-    // symlink whose destination may not exist yet, and mkdir -p cannot
-    // traverse a dangling symlink.
+    // Update archives are disposable build outputs, separate from app data.
     serve = await startDevServe({
       root,
-      workDir: join(developmentDataDir, "dev-serve"),
+      workDir: join(wakuCacheDir(), "dev-serve"),
     });
   } catch (error) {
     console.error("[goddard-dev] Could not start the update feed:", error);
