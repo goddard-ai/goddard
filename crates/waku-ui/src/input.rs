@@ -900,6 +900,10 @@ pub struct TextInput {
     /// Row count an auto-height field grows to before its text scrolls, in
     /// place of [`AUTO_HEIGHT_MAX`].
     max_lines: Option<usize>,
+    /// Surface color for edge fades on overflowing content. The fades are
+    /// hidden while this field has visual focus so they never wash over the
+    /// caret or the text being edited.
+    overflow_fade_surface: Option<Hsla>,
     /// Shortest an auto-height field renders, however little content it
     /// holds.
     min_height: Pixels,
@@ -1030,6 +1034,7 @@ impl TextInput {
             wrap_selection: false,
             auto_height: false,
             max_lines: None,
+            overflow_fade_surface: None,
             min_height: px(24.),
             font_size: 13.5,
             line_height: 22.0,
@@ -1251,6 +1256,13 @@ impl TextInput {
     /// text before it scrolls, rather than [`AUTO_HEIGHT_MAX`].
     pub fn max_lines(mut self, lines: usize) -> Self {
         self.max_lines = Some(lines);
+        self
+    }
+
+    /// Fade overflowing rows into `surface` while this field is unfocused.
+    /// Intended for fields whose parent supplies the matching opaque surface.
+    pub fn fade_overflow(mut self, surface: Hsla) -> Self {
+        self.overflow_fade_surface = Some(surface);
         self
     }
 
@@ -4095,7 +4107,7 @@ impl Element for InputElement {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
         let input = cx.entity();
         let context_menu_input = input.clone();
@@ -4106,6 +4118,23 @@ impl Render for TextInput {
         let scrollbar = self
             .auto_height
             .then(|| scrollbar::vertical(&self.scroll_handle, &self.scrollbar_state));
+        let fades = self
+            .overflow_fade_surface
+            .filter(|_| !self.is_visually_focused(window))
+            .map(|surface| {
+                [
+                    scrollbar::edge_fade(
+                        self.scroll_handle.clone(),
+                        scrollbar::FadeEdge::Top,
+                        surface,
+                    ),
+                    scrollbar::edge_fade(
+                        self.scroll_handle.clone(),
+                        scrollbar::FadeEdge::Bottom,
+                        surface,
+                    ),
+                ]
+            });
         let field = div()
             .key_context("TextInput")
             // Every TextInput needs its own stable node. A shared id
@@ -4223,7 +4252,12 @@ impl Render for TextInput {
             .child(InputElement { input });
 
         context_menu(
-            div().w_full().child(field).children(scrollbar),
+            div()
+                .w_full()
+                .relative()
+                .child(field)
+                .children(scrollbar)
+                .children(fades.into_iter().flatten()),
             "composer-context-menu",
             &self.context_menu,
             move |cx| {
@@ -4376,6 +4410,7 @@ impl ComposerInput {
                 .auto_height()
                 .min_height(px(36.0))
                 .text_metrics(14.0, 24.0)
+                .fade_overflow(Theme::current(cx).composer)
                 .media_paste()
                 .list_continuation()
                 .wrap_selection()
@@ -4705,6 +4740,18 @@ mod tests {
         cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
         cx.run_until_parked();
         (composer, cx)
+    }
+
+    #[gpui::test]
+    fn composer_fades_overflow_without_changing_its_height_cap(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+
+        cx.read_entity(&composer, |composer, cx| {
+            let input = composer.input.read(cx);
+            assert!(input.auto_height);
+            assert_eq!(input.max_lines, None);
+            assert!(input.overflow_fade_surface.is_some());
+        });
     }
 
     #[gpui::test]
