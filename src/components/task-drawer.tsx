@@ -28,6 +28,7 @@ import { useWindowSize } from '@octane-xplat/platform';
 import { TaskDrawerSurface } from './task-drawer-surface';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { BossSecondaryHost } from './boss-secondary';
 import { BossSection } from '@/components/boss-roster';
 import { ordinarySessions } from '@/lib/shell';
 import { DeliverablesSection } from '@/components/deliverables';
@@ -173,6 +174,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
       )}
     >
       {children}
+      <BossSecondaryHost />
     </TaskDrawerSurface>
   );
 }

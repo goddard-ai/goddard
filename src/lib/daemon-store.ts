@@ -1,4 +1,5 @@
 import { WakuClient } from '@waku/client';
+import { bindBossSecondary } from './boss-secondary-store';
 import { createStore } from '@octane-xplat/ui';
 import { subscribeAppForeground } from './app-foreground';
 
@@ -80,6 +81,7 @@ let generation = 0;
 let unsubscribeLink: (() => void) | null = null;
 let unsubscribeTaskState: (() => void) | null = null;
 let unsubscribeSettings: (() => void) | null = null;
+let unsubscribeBossSecondary: (() => void) | null = null;
 let bootstrapped = false;
 
 function setStatus(status: { phase: ConnectionPhase; error: string | null; outage: DaemonOutage | null; connections: number }) {
@@ -104,6 +106,8 @@ function closeCurrentLink(updateState = true) {
   unsubscribeTaskState = null;
   unsubscribeSettings?.();
   unsubscribeSettings = null;
+  unsubscribeBossSecondary?.();
+  unsubscribeBossSecondary = null;
   const current = linkRef;
   linkRef = null;
   if (updateState) {daemonState.set((prev) => ({ ...prev, client: null }));}
@@ -234,6 +238,7 @@ async function activate(profileId: string, candidates = profilesRef): Promise<bo
     setDaemonQueryData(daemonKeys.settings(profile.id), normalizeDaemonSettings(settings));
   });
 
+  unsubscribeBossSecondary = bindBossSecondary(next, profile.id);
   const connected = await link.open();
   return generation === attempt && linkRef === link && connected;
 }

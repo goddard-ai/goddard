@@ -27,6 +27,7 @@ export function TerminalView({
   onReady,
   bind,
   style,
+  className,
 }: {
   bridgeId: string;
   theme: TerminalTheme;
@@ -37,6 +38,7 @@ export function TerminalView({
   onReady?: () => void;
   bind?: (handle: TerminalViewHandle) => void;
   style?: unknown;
+  className?: string;
 }) {
   const propsRef = useRef({ onInput, onResize, onReady });
   propsRef.current = { onInput, onResize, onReady };
@@ -93,6 +95,7 @@ export function TerminalView({
         });
       }}
       html={html}
+      className={className}
       style={style}
     />
   );

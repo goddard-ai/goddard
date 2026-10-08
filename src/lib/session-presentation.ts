@@ -356,9 +356,10 @@ interface TaggedRow {
   answerText: boolean;
 }
 
-function isCompactionBlock(block: TranscriptBlock): boolean {
+function isTranscriptReceiptBlock(block: TranscriptBlock): boolean {
   const activities = activitiesForBlock(block);
-  return activities.length > 0 && activities.every(isContextCompaction);
+  return (activities.length === 1 && activities[0]?.title === 'Spoken aloud')
+    || (activities.length > 0 && activities.every(isContextCompaction));
 }
 
 /**
@@ -414,10 +415,9 @@ export function buildTranscriptPipeline(
           ),
         },
         turnId: block.turn_id,
-        // A compaction block is the transcript's only record that `/compact`
-        // ran — folding it behind a generic "Worked for …" row erases the
-        // evidence, so it keeps its own row.
-        foldable: !isCompactionBlock(block),
+        // Compaction and spoken receipts remain visible independently of
+        // the generic work fold — these rows are the durable event record.
+        foldable: !isTranscriptReceiptBlock(block),
         answerText: false,
       });
     }

@@ -93,3 +93,16 @@ body {
 .link {
 	opacity: 0.7;
 }
+
+/* Boss secondary surfaces share phone-sized sheet and banner geometry. */
+.boss-secondary-banner { padding: 12px; }
+.boss-secondary-pins { padding: 10px; }
+.boss-secondary-pin { padding: 8px; }
+.boss-secondary-sheet { flex: 1 1; min-height: 0; padding: 12px; }
+.boss-automation-sheet { flex: 1 1; min-height: 0; padding: 16px; }
+.boss-secondary-actions { flex-direction: row; gap: 20px; padding-top: 12px; padding-bottom: 12px; }
+.boss-secondary-fill { flex: 1 1; min-height: 0; }
+.boss-secondary-heading { font-weight: 600; }
+.boss-secondary-done { padding-top: 12px; padding-bottom: 12px; }
+.boss-automation-run { padding-top: 12px; padding-bottom: 12px; border-bottom-width: 0.5px; }
+.boss-secondary-pin-row { flex-direction: row; gap: 8px; }

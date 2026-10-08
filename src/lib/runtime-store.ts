@@ -2,6 +2,7 @@
 
 import type {
   AgentSession,
+  BossSpeechRequest,
   GoalOperation,
   MessageAttachment,
   PendingPermission,
@@ -12,6 +13,7 @@ import type {
 } from '@waku/client';
 
 import {
+  bossTerminalIntent,
   continuationPrompt,
   managedGoalDecision,
   managedGoalEvaluation,
@@ -23,6 +25,8 @@ import {
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import { randomUUID } from './uuid';
+import { spokenBlock } from './boss-secondary';
+import { pinBossTerminal } from './boss-secondary-store';
 import { createStore } from '@octane-xplat/ui';
 import { daemonState } from './daemon-store';
 import {
@@ -601,6 +605,19 @@ const managedGoalSettleRef: { current: ((session: AgentSession) => Promise<void>
 
     const unsubscribe = client.subscribe(session.id, runtimeId, (event) => {
       if (entries.current.get(session.id) !== entry) {return;}
+      const intent = bossTerminalIntent(event.event);
+      if (intent) {
+        const profileId = daemon.activeProfile?.id;
+        const boss = profileId ? getDaemonQueryData<{ sessionId: string | null }>(daemonKeys.bossState(profileId)) : null;
+        if (boss?.sessionId === session.id) {
+          const taskState = profileId ? getDaemonQueryData<TaskState>(daemonKeys.taskState(profileId)) : null;
+          const project = taskState?.projects.find((item) => item.id === entry.session.project_id);
+          pinBossTerminal(intent, session.id, `${event.epoch}:${event.runtimeId}:${event.sequence}`, project?.path ?? null);
+        }
+
+        return;
+      }
+
       entry.pending.push(event);
       if (!deferrableEvent(event)) {
         if (entry.flushTimer) {
@@ -1331,6 +1348,26 @@ sendPromptRef.current = sendPrompt;
     await persistOrdered(next);
   };
 
+  const recordBossSpeech = async (sessionId: string, request: BossSpeechRequest) => {
+    const profileId = daemon.activeProfile?.id;
+    const client = daemon.client;
+    const hydrated = await loadFullSession(sessionId);
+    if (!profileId || client !== daemon.client || profileId !== daemon.activeProfile?.id) {
+      throw new Error('The daemon changed before the spoken receipt could be saved');
+    }
+
+    const current = getDaemonQueryData<AgentSession>(daemonKeys.session(profileId, sessionId)) ?? hydrated;
+    if (current.transcript_blocks.some((block) => block.content.kind === 'activities'
+      && block.content.data.some((item) => item.id === request.requestId))) {
+      await persistOrdered(current);
+      return;
+    }
+
+    const next = { ...current, transcript_blocks: [...current.transcript_blocks, spokenBlock(current, request)] };
+    cacheSession(next);
+    await persistOrdered(next);
+  };
+
   const dismissError = (sessionId: string) => {
     setErrors((values) => removeKey(values, sessionId));
   };
@@ -1468,6 +1505,7 @@ function withDaemonCheckpoints(latest: AgentSession, saved: AgentSession): Agent
 /** Action surface — the RuntimeContextValue without the provider. */
 export const runtime = {
   attachSession,
+  recordBossSpeech,
   sendPrompt,
   steerPrompt,
   createTask,

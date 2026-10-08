@@ -1,4 +1,7 @@
 import { PlanningComposer } from '@/components/plans';
+import { setBossChatReady } from '@/lib/boss-secondary-store';
+import { BossAutomationHistory } from './boss-automation-history';
+import { BossPinnedTerminals } from './boss-secondary';
 import { atomVisibleText } from '@waku/client/transcript-presentation';
 import { bossEmployeeLifecycle } from '@waku/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
@@ -123,6 +126,7 @@ export function SessionView({
   const [turnRefs, setTurnRefs] = useState<ReadonlySet<number> | null>(null);
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [capacityOpen, setCapacityOpen] = useState(false);
+  const [automationHistoryOpen, setAutomationHistoryOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findIndex, setFindIndex] = useState(0);
@@ -266,6 +270,8 @@ export function SessionView({
         openTaskSurface(command);
       } else if (command === 'assignment') {
         setAssignmentOpen(true);
+      } else if (command === 'automation-history') {
+        setAutomationHistoryOpen(true);
       } else if (command === 'capacity') {
         setCapacityOpen(true);
       } else if (command === 'model') {
@@ -299,6 +305,9 @@ export function SessionView({
   const bossData = bossState.data;
   const employee = bossEmployeeForSession(bossData, session?.id);
   const isBossChat = Boolean(bossData?.sessionId && bossData.sessionId === session?.id);
+  useEffect(() => {
+    if (isBossChat && session?.id === mountedTranscriptSessionId) {setBossChatReady(session?.id ?? null);}
+  }, [isBossChat, session?.id, mountedTranscriptSessionId]);
 
   // A deliverable row's click arms this chat's composer: the chip shows the
   // freshest record for the armed id, a dismissed record disarms silently,
@@ -476,6 +485,11 @@ export function SessionView({
         : []),
       ...(isBossChat && bossData
         ? [{
+            key: 'automation-history',
+            label: 'Automation history',
+            icon: 'clock',
+            onSelect: () => handleTaskMenuCommand('automation-history'),
+          }, {
             key: 'capacity',
             label: 'Capacity',
             icon: 'gauge',
@@ -700,6 +714,8 @@ export function SessionView({
         />
       )}
 
+      {isBossChat ? <BossAutomationHistory visible={automationHistoryOpen} onDismiss={() => setAutomationHistoryOpen(false)} /> : null}
+      {isBossChat && session ? <BossPinnedTerminals sessionId={session.id} /> : null}
       {session && (
         <TaskSurfaceSheet
           onDismiss={() => {

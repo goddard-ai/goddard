@@ -298,6 +298,7 @@ export function activityGroupIsLive(
 }
 
 export function activityHeaderTitle(activities: ActivityItem[], liveGroup: boolean, t?: Translator) {
+  if (activities.length === 1 && activities[0].title === 'Spoken aloud') return activityDisplayTitle(activities[0], t)
   const latest = liveGroup ? activities.at(-1) : undefined
   if (latest) return latest.reasoning ? reasoningTitle(latest, t) : activityDisplayTitle(latest, t)
   // A pure compaction block's own label ("Compacted context") is the
