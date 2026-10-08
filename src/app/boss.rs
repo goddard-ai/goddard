@@ -961,6 +961,17 @@ impl Waku {
                 }
             }
         }
+        if let Some(key) = finalized_plan_host
+            && let Some(session_id) = self
+                .boss_ui
+                .states
+                .get(&key)
+                .and_then(|state| state.session_id)
+        {
+            // Finalizing a plan returns to the boss chat at its latest
+            // message, regardless of the reader's normal scroll preference.
+            self.transcript_scroll_positions.remove(&session_id);
+        }
         if let Some(key) = rotated_chat_host.or(finalized_plan_host) {
             self.chat_with_boss(key, cx);
         }
