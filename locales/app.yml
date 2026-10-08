@@ -1071,6 +1071,10 @@ experiments.voice_scratchpad_title:
   en: VoicePad
 experiments.voice_scratchpad_description:
   en: A VP button beside send opens a dictation scratchpad that transcribes your mic into a message — Enter sends the transcript, Esc discards it. Uses the Vercel AI Gateway credential under Inference providers.
+experiments.voice_scratchpad_margin_double_click_title:
+  en: Double-click chat margins to toggle VoicePad
+experiments.voice_scratchpad_margin_double_click_description:
+  en: Double-click the blank space beside chat content to show or hide an open VoicePad. Off by default.
 experiments.memory_title:
   en: Project memory
 experiments.composer_drafts_title:

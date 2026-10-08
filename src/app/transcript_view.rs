@@ -433,6 +433,25 @@ impl Waku {
                     window.focus(&this.transcript_focus, cx);
                 }),
             )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    let bounds = this.active_transcript_rows().viewport_bounds();
+                    let content_width = px(CONTENT_MAX_WIDTH).min(bounds.size.width);
+                    let content_left =
+                        bounds.left() + (bounds.size.width - content_width).max(px(0.0)) / 2.0;
+                    let content_right = content_left + content_width;
+                    if super::voice_scratchpad::voicepad_margin_double_click(
+                        this.state.voice_scratchpad_margin_double_click_enabled,
+                        event.click_count,
+                        event.position.x,
+                        content_left,
+                        content_right,
+                    ) {
+                        this.toggle_voice_scratchpad_visibility(window, cx);
+                    }
+                }),
+            )
             // Painted before any row, so the frame's selection registry holds
             // exactly the text elements this frame put on screen, in order.
             .child(md::render::frame_reset(self.transcript_selection.clone()))

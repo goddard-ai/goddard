@@ -79,6 +79,16 @@ const DISCARD_CONFIRM_PARAGRAPHS: usize = 2;
 const DISCARD_CONFIRM_CHARS: usize = 280;
 /// The scratchpad card matches the composer card's width.
 const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
+
+pub(super) fn voicepad_margin_double_click(
+    enabled: bool,
+    click_count: usize,
+    click_x: Pixels,
+    content_left: Pixels,
+    content_right: Pixels,
+) -> bool {
+    enabled && click_count == 2 && (click_x < content_left || click_x > content_right)
+}
 const CARD_RADIUS: f32 = 24.0;
 /// The gradient cover's rise above the composer card's top edge — the
 /// frame's 178px cover hides ~95px behind the card and clears it by ~83.
@@ -3136,6 +3146,24 @@ impl Waku {
         }
     }
 
+    pub(super) fn toggle_voice_scratchpad_visibility(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(scratchpad) = self.selected_voice_scratchpad_mut() else {
+            return;
+        };
+        scratchpad.hidden = !scratchpad.hidden;
+        if scratchpad.hidden {
+            let focus = self.composer_focus(cx);
+            window.focus(&focus, cx);
+        } else if let Some(scratchpad) = self.selected_voice_scratchpad_mut() {
+            scratchpad.follow_tail = true;
+        }
+        cx.notify();
+    }
+
     /// Start a session on the composer's chat. The panel opens immediately —
     /// permission and connection failures become its inline error state —
     /// and capture begins behind it when the chat is selected. A composer
@@ -4122,6 +4150,25 @@ impl Waku {
             .min_h_0()
             .w_full()
             .px(px(20.0 - COMPOSER_OVERHANG))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    let viewport_width = px(this.chat_viewport_width(window));
+                    let content_width = px(CARD_MAX_WIDTH).min(viewport_width);
+                    let content_left =
+                        px(this.sidebar_rendered_width) + (viewport_width - content_width) / 2.0;
+                    let content_right = content_left + content_width;
+                    if voicepad_margin_double_click(
+                        this.state.voice_scratchpad_margin_double_click_enabled,
+                        event.click_count,
+                        event.position.x,
+                        content_left,
+                        content_right,
+                    ) {
+                        this.toggle_voice_scratchpad_visibility(window, cx);
+                    }
+                }),
+            )
             // The card runs through the composer lane: the negative margin
             // pulls the slot's height over the lane's, and the lane —
             // painted after — sits on top of the card's bottom edge.
@@ -5658,6 +5705,36 @@ fn scratchpad_cleanup_spinner(text_size: f32, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn margin_double_click_only_accepts_enabled_double_clicks_outside_content() {
+        let left = px(100.0);
+        let right = px(800.0);
+        assert!(!voicepad_margin_double_click(
+            false,
+            2,
+            px(20.0),
+            left,
+            right
+        ));
+        assert!(!voicepad_margin_double_click(
+            true,
+            1,
+            px(20.0),
+            left,
+            right
+        ));
+        assert!(!voicepad_margin_double_click(true, 2, left, left, right));
+        assert!(!voicepad_margin_double_click(true, 2, right, left, right));
+        assert!(voicepad_margin_double_click(true, 2, px(99.0), left, right));
+        assert!(voicepad_margin_double_click(
+            true,
+            2,
+            px(801.0),
+            left,
+            right
+        ));
+    }
 
     #[test]
     fn next_command_splits_on_word_pairs() {

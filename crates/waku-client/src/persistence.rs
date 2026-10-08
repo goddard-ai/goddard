@@ -1466,6 +1466,8 @@ pub struct AppSettings {
     /// that transcribes mic audio into a sendable message. Off by default,
     /// including debug builds.
     pub voice_scratchpad_enabled: bool,
+    /// Double-clicking the blank transcript margins toggles an open VoicePad.
+    pub voice_scratchpad_margin_double_click_enabled: bool,
     /// The pinned microphone's CoreAudio device UID — empty follows the
     /// system default input.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -1613,6 +1615,7 @@ impl Default for AppSettings {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_scratchpad_enabled: false,
+            voice_scratchpad_margin_double_click_enabled: false,
             voice_input_device_uid: String::new(),
             voice_briefing_gateway_key: String::new(),
             voice_briefing_provider: default_voice_briefing_provider(),
@@ -2189,6 +2192,9 @@ pub struct PersistedState {
     /// default, including debug builds.
     #[serde(default)]
     pub voice_scratchpad_enabled: bool,
+    /// Double-clicking the blank transcript margins toggles an open VoicePad.
+    #[serde(default)]
+    pub voice_scratchpad_margin_double_click_enabled: bool,
     /// The pinned microphone's CoreAudio device UID — empty follows the
     /// system default input. App-owned like the scratchpad.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -2637,6 +2643,7 @@ impl PersistedState {
             guided_reading_opacity: default_guided_reading_opacity(),
             voice_briefing_enabled: default_experiment_enabled(),
             voice_scratchpad_enabled: false,
+            voice_scratchpad_margin_double_click_enabled: false,
             voice_input_device_uid: String::new(),
             voice_briefing_gateway_key: String::new(),
             voice_briefing_provider: default_voice_briefing_provider(),
@@ -3114,6 +3121,8 @@ impl PersistedState {
             guided_reading_opacity: self.guided_reading_opacity,
             voice_briefing_enabled: self.voice_briefing_enabled,
             voice_scratchpad_enabled: self.voice_scratchpad_enabled,
+            voice_scratchpad_margin_double_click_enabled: self
+                .voice_scratchpad_margin_double_click_enabled,
             voice_input_device_uid: self.voice_input_device_uid.clone(),
             voice_briefing_gateway_key: self.voice_briefing_gateway_key.clone(),
             voice_briefing_provider: self.voice_briefing_provider,
@@ -3283,6 +3292,8 @@ impl PersistedState {
         self.guided_reading_opacity = settings.guided_reading_opacity.min(100);
         self.voice_briefing_enabled = settings.voice_briefing_enabled;
         self.voice_scratchpad_enabled = settings.voice_scratchpad_enabled;
+        self.voice_scratchpad_margin_double_click_enabled =
+            settings.voice_scratchpad_margin_double_click_enabled;
         self.voice_input_device_uid = settings.voice_input_device_uid;
         self.voice_briefing_gateway_key = settings.voice_briefing_gateway_key;
         self.voice_briefing_provider = settings.voice_briefing_provider;
@@ -5072,6 +5083,31 @@ mod tests {
         assert_eq!(restored.terminal_font_size, None);
         restored.code_font_size = 18.0;
         assert_eq!(restored.terminal_font_size(), 18.0);
+    }
+
+    #[test]
+    fn voice_scratchpad_margin_double_click_defaults_off_and_persists_as_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.voice_scratchpad_margin_double_click_enabled);
+
+        let mut state = PersistedState::empty();
+        assert!(!state.voice_scratchpad_margin_double_click_enabled);
+        state.voice_scratchpad_margin_double_click_enabled = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(
+            settings["voice_scratchpad_margin_double_click_enabled"],
+            true
+        );
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("voice_scratchpad_margin_double_click_enabled")
+                .is_none()
+        );
+
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.voice_scratchpad_margin_double_click_enabled);
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- **VoicePad:** Enable double-clicking the blank chat margins to show or hide an open VoicePad. This setting is off by default.

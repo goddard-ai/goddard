@@ -5544,6 +5544,17 @@ impl Waku {
                 tuning: None,
             },
             ExperimentDef {
+                group: ExperimentGroup::Sessions,
+                id: "voice-scratchpad-margin-double-click-toggle",
+                icon: "icons/mouse-pointer-2.svg",
+                title_key: "experiments.voice_scratchpad_margin_double_click_title",
+                description_key: "experiments.voice_scratchpad_margin_double_click_description",
+                enabled: self.state.voice_scratchpad_margin_double_click_enabled,
+                set: Self::set_voice_scratchpad_margin_double_click_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
                 group: ExperimentGroup::Git,
                 id: "git-panel-experiment-toggle",
                 icon: "icons/panel-right.svg",
@@ -8141,6 +8152,16 @@ impl Waku {
             self.end_all_voice_scratchpads(cx);
         }
         self.state.voice_scratchpad_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_voice_scratchpad_margin_double_click_enabled(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.voice_scratchpad_margin_double_click_enabled = enabled;
         self.save();
         cx.notify();
     }
