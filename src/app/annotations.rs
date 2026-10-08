@@ -2064,7 +2064,9 @@ impl Waku {
                     .items
                     .iter()
                     .find(|annotation| annotation.id == editor.annotation_id)
-                    .and_then(history_annotation_label)
+                    .and_then(|annotation| {
+                        annotation_editor_provenance(&editor.target, annotation)
+                    })
             })
         });
         let card = div()
@@ -3420,6 +3422,20 @@ fn history_annotation_label(annotation: &TranscriptAnnotation) -> Option<String>
     Some(label)
 }
 
+/// Transcript annotations use the same floating input regardless of whether
+/// their message came from this session or an earlier Boss chat. Keep history
+/// provenance for committed-annotation tooltips, but out of the editor card.
+fn annotation_editor_provenance(
+    target: &AnnotationTarget,
+    annotation: &TranscriptAnnotation,
+) -> Option<String> {
+    if matches!(target, AnnotationTarget::Transcript) {
+        None
+    } else {
+        history_annotation_label(annotation)
+    }
+}
+
 /// The annotation whose highlight contains `position`, consulting the frame's
 /// painted geometry.
 fn annotation_hit_at(selection: &TranscriptSelection, position: Point<Pixels>) -> Option<u64> {
@@ -3568,6 +3584,24 @@ mod tests {
             created_at: None,
         });
         pinned
+    }
+
+    #[test]
+    fn transcript_annotation_editor_hides_rotated_chat_provenance() {
+        let annotation = history_annotation(
+            1,
+            Uuid::from_u128(7),
+            Uuid::from_u128(9),
+            Some(3),
+            "earlier answer",
+            "check this",
+        );
+
+        assert!(history_annotation_label(&annotation).is_some());
+        assert_eq!(
+            annotation_editor_provenance(&AnnotationTarget::Transcript, &annotation),
+            None,
+        );
     }
 
     /// A file annotation as `annotate_file_selection` builds it: one span
