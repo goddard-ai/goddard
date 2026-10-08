@@ -418,7 +418,7 @@ impl BackgroundWorkRegistry {
         for key in dirty {
             if let Some(output) = self.items.get(&key).and_then(|item| item.output.as_deref()) {
                 self.rendered_output
-                    .insert(key.clone(), SharedString::from(strip_ansi(output)));
+                    .insert(key.clone(), SharedString::from(render_output_text(output)));
                 if let Some(viewport) = self.output_viewports.get(&key) {
                     viewport.scroll_handle.scroll_to_bottom();
                 }
@@ -458,21 +458,55 @@ fn bound_output(item: &mut BackgroundWorkItem) {
     item.output_truncated = true;
 }
 
-fn strip_ansi(text: &str) -> String {
+// Project redraws into the cached display only; retain the original byte stream.
+fn render_output_text(text: &str) -> String {
     let mut clean = String::with_capacity(text.len());
+    let mut line = Vec::new();
+    let mut column = 0;
     let mut chars = text.chars().peekable();
     while let Some(character) = chars.next() {
         if character == '\u{1b}' && chars.peek() == Some(&'[') {
             chars.next();
+            let mut parameters = String::new();
             for next in chars.by_ref() {
                 if ('@'..='~').contains(&next) {
+                    if next == 'K' {
+                        match parameters.as_str() {
+                            "" | "0" => line.truncate(column),
+                            "1" => {
+                                for cell in line.iter_mut().take(column + 1) {
+                                    *cell = ' ';
+                                }
+                            }
+                            "2" => line.clear(),
+                            _ => {}
+                        }
+                    }
                     break;
                 }
+                parameters.push(next);
             }
         } else {
-            clean.push(character);
+            match character {
+                '\r' => column = 0,
+                '\n' => {
+                    clean.extend(line.drain(..));
+                    clean.push('\n');
+                    column = 0;
+                }
+                character => {
+                    if column < line.len() {
+                        line[column] = character;
+                    } else {
+                        line.resize(column, ' ');
+                        line.push(character);
+                    }
+                    column += 1;
+                }
+            }
         }
     }
+    clean.extend(line);
     clean
 }
 
@@ -2571,6 +2605,42 @@ mod tests {
         registry.append_output(&key, "[31mred\u{1b}[0m");
         assert!(registry.refresh_output_cache());
         assert_eq!(registry.rendered_output[&key].as_ref(), "red");
+    }
+
+    #[test]
+    fn output_cache_projects_progress_redraws_across_chunks() {
+        let mut registry = BackgroundWorkRegistry::default();
+        let key = BackgroundWorkKey::new(BackgroundWorkKind::Process, "one");
+        registry.upsert(item("one", BackgroundWorkStatus::Running, true));
+        registry.append_output(&key, "Compiling crate\r\nBuilding 10%");
+        assert!(registry.refresh_output_cache());
+        assert_eq!(
+            registry.rendered_output[&key].as_ref(),
+            "Compiling crate\nBuilding 10%"
+        );
+        registry.append_output(&key, "\r\u{1b}[");
+        registry.append_output(&key, "KBuilding 100%\r\u{1b}[2KFinished\r");
+        registry.append_output(&key, "\nwarning: example\n");
+        registry.last_output_cache_refresh = None;
+        assert!(registry.refresh_output_cache());
+        assert_eq!(
+            registry.rendered_output[&key].as_ref(),
+            "Compiling crate\nFinished\nwarning: example\n"
+        );
+        assert!(
+            registry.items[&key]
+                .output
+                .as_ref()
+                .unwrap()
+                .contains("Building 10%")
+        );
+    }
+
+    #[test]
+    fn output_redraw_preserves_unerased_suffix_and_unicode() {
+        assert_eq!(render_output_text("abcdef\rxy"), "xycdef");
+        assert_eq!(render_output_text("éclair\rÉ\u{1b}[K"), "É");
+        assert_eq!(render_output_text("a\nb\r\nc\n"), "a\nb\nc\n");
     }
 
     #[test]

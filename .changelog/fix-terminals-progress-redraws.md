@@ -1,0 +1,1 @@
+- Background command output now updates carriage-return progress lines in place instead of displaying repeated redraws.
