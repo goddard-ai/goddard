@@ -18,8 +18,12 @@ import {
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { AppSymbol } from '@/components/app-symbol';
 import {
+  AttentionJumpButton,
+  BossAttentionStrip,
+} from '@/components/attention-strip';
+
+import {
   BossAssignmentSheet,
-  BossBlockerNotice,
   BossCapacitySheet,
   EmployeeExpiredCard,
   EmployeeStatusCard,
@@ -63,6 +67,7 @@ import { useTheme } from '@/lib/use-theme';
 import { useHasUnseenReplies } from '@/lib/use-unseen-replies';
 import { Radius } from '@/lib/theme-colors';
 import { useDaemon } from '@/lib/daemon-hooks';
+import { useAttentionItems } from '@/components/attention-strip';
 import { listSessionTurnRefs } from '@/lib/daemon-api';
 import { sessionBusy, sessionCwd } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/use-runtime';
@@ -315,6 +320,8 @@ export function SessionView({
     if (isBossChat && session?.id === mountedTranscriptSessionId) {setBossChatReady(session?.id ?? null);}
   }, [isBossChat, session?.id, mountedTranscriptSessionId]);
 
+  // The Goals sheet (task menu → Goals) stamps `goals_viewed_at` on open —
+  // strip cards for finishes retire through that contract, not on chat view.
   // A deliverable row's click arms this chat's composer: the chip shows the
   // freshest record for the armed id, a dismissed record disarms silently,
   // and viewing another session retires the arm — the desktop's
@@ -468,6 +475,13 @@ export function SessionView({
   const subtitle = linkSubtitle ?? (subtitleParts.length ? subtitleParts.join(' · ') : null);
   const hasSession = Boolean(session);
   const unseenReplies = useHasUnseenReplies(sessionId);
+  // The drawer's entry dot also covers the boss pull set — a badge on the
+  // "task history" affordance is what makes a blocker visible from a task.
+  const attentionItems = useAttentionItems();
+  const attentionPending = attentionItems.some(
+    (item) => !(item.target.type === 'session' && item.target.sessionId === sessionId),
+  );
+
   const renameRequest = session ? runtime.renameRequests[session.id] : undefined;
   const transcriptMounted = Boolean(
     session && mountedTranscriptSessionId === session.id,
@@ -552,7 +566,7 @@ export function SessionView({
             size={19}
             tintColor={theme.text}
           />
-          {unseenReplies ? (
+          {unseenReplies || attentionPending ? (
             <View style={{ borderRadius: 3, height: 6, width: 6, backgroundColor: theme.info }} />
           ) : null}
         </Pressable>
@@ -568,6 +582,9 @@ export function SessionView({
         </View>
         {hasSession ? (
           <>
+            {/* The ⌘D sweep's mobile form — jumps to the next thing needing
+                attention; renders only while something does. */}
+            <AttentionJumpButton />
             <Pressable
               accessibilityLabel="New task"
               accessibilityRole="button"
@@ -649,7 +666,8 @@ export function SessionView({
         ) : null}
         {isBossChat && bossData ? (
           <Absolute style={{ left: 12, right: 12, top: headerInset + 8 }}>
-            <BossBlockerNotice
+            <BossAttentionStrip
+              sessions={taskState?.sessions ?? []}
               state={bossData}
               onOpen={(id) => pushRoute({ stack: 'root', name: 'session/:id', params: { id } })}
             />

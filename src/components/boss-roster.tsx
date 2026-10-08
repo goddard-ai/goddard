@@ -26,7 +26,6 @@ import {
   bossEmployeeStatusLabel,
   bossEmployeeSymbol,
   bossModelCapacity,
-  bossOpenBlockers,
   bossQueueDetail,
   bossQueueRanks,
   bossRosterSplit,
@@ -42,6 +41,7 @@ import type { TaskState } from '@/lib/daemon-api';
 import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
 import { daemonKeys } from '@/lib/daemon-api';
 import { useProviderCatalog } from '@/lib/daemon-queries';
+import { bossAttentionCounts, collectAttentionItems } from '@/lib/attention';
 import { useTheme } from '@/lib/use-theme';
 import { displayHost } from '@/lib/daemon-profile';
 import { showAlert } from '@/lib/alert';
@@ -136,7 +136,6 @@ export function BossSection({
 
   const ranks = useMemo(() => bossQueueRanks(state), [state]);
   const roster = useMemo(() => bossRosterSplit(state, sessionCreatedAt), [state, sessionCreatedAt]);
-  const blockers = useMemo(() => bossOpenBlockers(state), [state]);
   // The daemon's goals-viewed stamp: a goal finished since the user last
   // opened the surface reads as unread here — the sidebar-row badge the
   // `markGoalsViewed` contract backs.
@@ -144,6 +143,25 @@ export function BossSection({
   const bossSession = state.sessionId ? sessions.get(state.sessionId) : undefined;
   const bossUnseen = (bossSession ? sessionHasUnseenReply(bossSession, watermarks) : false)
     || goalsUnread > 0;
+
+  // The boss row's badge: decisions (blockers, parked asks) first, then
+  // arrivals with their own seen contract (deliverables, goal/plan finishes).
+  const attention = useMemo(
+    () => bossAttentionCounts(
+      collectAttentionItems({
+        state,
+        sessions: taskState?.sessions ?? [],
+        watermarks,
+      }),
+    ),
+    [state, taskState?.sessions, watermarks],
+  );
+
+  const attentionLabel = attention.needsYou
+    ? `${attention.needsYou} need${attention.needsYou === 1 ? 's' : ''} attention`
+    : attention.fresh
+      ? `${attention.fresh} new`
+      : daemon.activeProfile ? displayHost(daemon.activeProfile.address) : 'Boss';
 
   const openChat = useCallback(async () => {
     const client = daemon.client;
@@ -203,7 +221,7 @@ export function BossSection({
       <View style={{ alignItems: 'stretch', flexDirection: 'row' }}>
         <Pressable
           accessibilityHint="Opens the boss chat"
-          accessibilityLabel={`${state.identity.name}, boss${blockers.length ? `, ${blockers.length} needs attention` : ''}`}
+          accessibilityLabel={`${state.identity.name}, boss${attention.needsYou || attention.fresh ? `, ${attentionLabel}` : ''}`}
           accessibilityRole="button"
           className="vx-pressable"
           onPress={() => void openChat()}
@@ -224,12 +242,15 @@ export function BossSection({
             <Text numberOfLines={1} style={{ color: theme.text, fontSize: 15, fontWeight: '600' }}>
               {state.identity.name}
             </Text>
-            <Text numberOfLines={1} style={{ color: blockers.length ? theme.warning : theme.textTertiary, fontSize: 12.5, marginTop: 1 }}>
-              {blockers.length
-                ? `${blockers.length} need${blockers.length === 1 ? 's' : ''} attention`
-                : goalsUnread > 0
-                  ? `${goalsUnread} goal${goalsUnread === 1 ? '' : 's'} finished`
-                  : daemon.activeProfile ? displayHost(daemon.activeProfile.address) : 'Boss'}
+            <Text
+              numberOfLines={1}
+              style={{
+                color: attention.needsYou ? theme.warning : attention.fresh ? theme.info : theme.textTertiary,
+                fontSize: 12.5,
+                marginTop: 1,
+              }}
+            >
+              {attentionLabel}
             </Text>
           </View>
           {openingChat ? <ActivityIndicator busy /> : null}
@@ -341,9 +362,14 @@ function PlanRow({
   const theme = useTheme();
   const outcome = planOutcomeLabel(plan.outcome);
   const sessionStatus = session?.status ?? 'connecting';
-  const status = plan.finalizedAt == null
-    ? `Planning · ${sessionStatus.charAt(0).toUpperCase()}${sessionStatus.slice(1)}`
-    : outcome ?? 'Finalized';
+  // A parked finalize card marks the planning session waiting — the
+  // desktop's amber "Waiting for approval".
+  const needsApproval = plan.finalizedAt == null && session?.status === 'waiting';
+  const status = needsApproval
+    ? 'Needs approval'
+    : plan.finalizedAt == null
+      ? `Planning · ${sessionStatus.charAt(0).toUpperCase()}${sessionStatus.slice(1)}`
+      : outcome ?? 'Finalized';
 
   return (
     <Pressable
@@ -373,7 +399,10 @@ function PlanRow({
         <Text numberOfLines={1} style={{ color: theme.text, fontSize: 14.5 }}>
           {plan.idea.trim() || (session ? displaySessionTitle(session) : 'Plan')}
         </Text>
-        <Text numberOfLines={1} style={{ color: theme.textTertiary, fontSize: 12, marginTop: 1 }}>
+        <Text
+          numberOfLines={1}
+          style={{ color: needsApproval ? theme.warning : theme.textTertiary, fontSize: 12, marginTop: 1 }}
+        >
           {status}
         </Text>
       </View>
@@ -707,69 +736,6 @@ function ticketResourceSummary(resources: ResourceSet, reserved: boolean): strin
   if (!parts.length) {return null;}
   const detail = parts.join(' · ');
   return reserved ? `Reserved: ${detail}` : `Requested: ${detail}`;
-}
-
-/** The boss chat's actionable blocker notice — one row per employee that
- * raised a blocker, tapping opens that employee (where the composer still
- * addresses the boss). */
-export function BossBlockerNotice({
-  state,
-  onOpen,
-}: {
-  state: BossState;
-  onOpen: (sessionId: string) => void;
-}) {
-  const theme = useTheme();
-  const blockers = bossOpenBlockers(state);
-  if (!blockers.length) {return null;}
-  return (
-    <View
-      style={{
-        backgroundColor: theme.warningSoft,
-        borderColor: theme.warning,
-        borderRadius: Radius.large,
-        borderWidth: 1,
-        gap: 2,
-        paddingVertical: 8,
-      }}
-    >
-      {blockers.map((employee) => (
-        <Pressable
-          accessibilityHint="Opens the blocked employee"
-          accessibilityLabel={`${employee.identity.name} reported a blocker: ${employee.blocker}`}
-          accessibilityRole="button"
-          className="vx-pressable"
-          onPress={() => onOpen(employee.sessionId)}
-          style={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            gap: 8,
-            minHeight: 34,
-            paddingHorizontal: 12,
-          }}
-        >
-          <AppSymbol
-            name={{ ios: 'exclamationmark.triangle', android: 'warning', web: 'warning' }}
-            size={14}
-            tintColor={theme.warning}
-          />
-          <View style={{ flex: '1 1', minWidth: 0 }}>
-            <Text numberOfLines={1} style={{ color: theme.text, fontSize: 13.5, fontWeight: '600' }}>
-              {employee.identity.name} reported a blocker
-            </Text>
-            <Text numberOfLines={1} style={{ color: theme.textSecondary, fontSize: 12.5 }}>
-              {employee.blocker}
-            </Text>
-          </View>
-          <AppSymbol
-            name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-            size={12}
-            tintColor={theme.textTertiary}
-          />
-        </Pressable>
-      ))}
-    </View>
-  );
 }
 
 /** The "this job is done" card an expired employee's view renders —

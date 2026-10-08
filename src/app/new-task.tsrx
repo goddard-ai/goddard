@@ -9,6 +9,7 @@ import {
 
 import { useEffect, useMemo, useRef, useState } from 'octane';
 import {
+  Absolute,
   ActivityIndicator,
   Pressable,
   pushRoute,
@@ -18,6 +19,7 @@ import {
 } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { AttentionJumpButton } from '@/components/attention-strip';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
 import { ComposerAddMenu } from '@/components/composer-add-menu';
 import { ComposerContextPicker } from '@/components/composer-context-picker';
@@ -413,6 +415,11 @@ export default function NewTaskScreen() {
       {/* Title and back button sit in the header strip; keep clear of it. */}
       <View style={{ height: headerInset }} />
       <View style={{ flex: '1 1' }} />
+
+      {/* The next-attention gesture — mirrors the session header's bell. */}
+      <Absolute style={{ right: 12, top: insets.top + 10 }}>
+        <AttentionJumpButton />
+      </Absolute>
 
       <View style={{ gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three }}>
         <SelectorRow

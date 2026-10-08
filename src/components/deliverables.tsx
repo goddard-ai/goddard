@@ -354,6 +354,9 @@ export function DeliverablesSection({
 
   const visible = showMore ? live : live.slice(0, DELIVERABLE_RECENT_VISIBLE);
   const hiddenCount = live.length - visible.length;
+  // The section-level badge — the per-row dots carry detail, the header
+  // carries the count so it's scannable with the drawer half-seen.
+  const unreadCount = state.deliverables.filter(deliverableUnread).length;
 
   const openLibrary = useCallback(() => {
     onClose();
@@ -389,8 +392,14 @@ export function DeliverablesSection({
           accessibilityLabel="See all deliverables"
           accessibilityRole="button"
           onPress={openLibrary}
-          style={{ alignItems: 'center', flexDirection: 'row', gap: 2 }}
+          style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}
         >
+          {unreadCount > 0 ? (
+            <>
+              <View style={{ backgroundColor: theme.info, borderRadius: 3, height: 6, width: 6 }} />
+              <Text style={{ color: theme.info, fontSize: 12.5, fontWeight: '600' }}>{unreadCount}</Text>
+            </>
+          ) : null}
           <Text style={{ color: theme.textTertiary, fontSize: 12.5 }}>See all</Text>
           <AppSymbol
             name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}

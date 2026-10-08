@@ -3,6 +3,7 @@ import { useEffect, useState } from 'octane';
 
 import { daemonState, bootstrapDaemon, reconnect, saveProfile, selectProfile, removeProfile, disconnect } from './daemon-store';
 import { daemonQueryEntry, getDaemonQueryData } from './daemon-data';
+import { installAttentionFeed } from './attention-feed';
 
 /** The reference app's useDaemon() context value, minus provider plumbing:
  * actions are module functions, state is the shared store. */
@@ -23,6 +24,8 @@ export function useDaemon() {
 export function useDaemonBootstrap() {
   useEffect(() => {
     bootstrapDaemon();
+    // The backgrounded-notification feed rides the same query stream.
+    installAttentionFeed();
   }, []);
 }
 

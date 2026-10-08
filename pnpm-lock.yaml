@@ -65,6 +65,9 @@ importers:
       '@nativescript/imagepicker':
         specifier: 5.0.0
         version: 5.0.0
+      '@nativescript/local-notifications':
+        specifier: 7.0.0
+        version: 7.0.0
       '@nativescript/mlkit-barcode-scanning':
         specifier: 3.0.4
         version: 3.0.4
@@ -818,6 +821,9 @@ packages:
   '@nativescript-community/perms@2.3.6':
     resolution: {integrity: sha512-KtAyY2fCjKL19HQ3AslQKH4h+Sao0u4G4AgoF+SkRcAMGxqQd8covjpJ2hN3AFm8TDkqbSm3o0NDMR1dYVr/3A==}
 
+  '@nativescript-community/perms@3.0.12':
+    resolution: {integrity: sha512-pNRawjbDlRho3SnVB/HlpyHLHoAAxRZpIh/OaL2qP6QyYBdle1KFY+cyHEq2GpT47u/MAGUUiQ546uMewpHI4A==}
+
   '@nativescript-community/ui-document-picker@1.1.29':
     resolution: {integrity: sha512-msmjSnDB76AG6xae6NCFIhVMDScbaj+U5guIaSBTYahwlFPKA/kC6aM42LE5Ucs6nLRllWPa66+tSwCFdNFhfA==}
 
@@ -855,6 +861,9 @@ packages:
   '@nativescript/ios@9.1.0':
     resolution: {integrity: sha512-rdSmL+oOL+iyLYoSBM/cS0bOMAKzzOax6SpR4WmIHpmpa7TrFrrmzekuPSkwTZGeA7NTXnXD6K45rFvCHm6kOA==}
 
+  '@nativescript/local-notifications@7.0.0':
+    resolution: {integrity: sha512-LpxXqCxu3Nx04j7CKxicGpxWdXLP/M/r3zQNSI1hTn3LBsmGVpnX+1gr6/gLxQyIR3xzD/MxRWgO3qdSCCieeg==}
+
   '@nativescript/mlkit-barcode-scanning@3.0.4':
     resolution: {integrity: sha512-Oq4x69wU9EHMBSjRfkNluICJEZ1WlxRmE2Vz3mD+l86Y+XTwFBCNESLXGCk/1hPRCLG7Qttg1+ieM4LGTlfmDA==}
 
@@ -863,6 +872,9 @@ packages:
 
   '@nativescript/secure-storage@4.0.2':
     resolution: {integrity: sha512-4sWU4tmvGjh9ZfuApt0enwcT3tGN88dR5IeOuQsYqUSeUQbxK7Xo2JTF1dy7KIxnh0Fnxrs5O61x7hp9JBn/kw==}
+
+  '@nativescript/shared-notification-delegate@1.0.2':
+    resolution: {integrity: sha512-Wh6F1WH9Aj23K+nyolA5MrA6MXku/5rSPt9r20ekbyx2FkRpBr0stjg4uD6KSyUvWY8YT+KQ9WlOUzhq7g7Ycw==}
 
   '@nativescript/social-share@2.3.0':
     resolution: {integrity: sha512-9ldEOH6cnYJNEihQfk/2iOHfNlrvSCUl2bCrZsh8qauMHJEqqV/GPUzN3kh4sDgG4eCffonEF0ySlGSKOU8FmA==}
@@ -4497,6 +4509,8 @@ snapshots:
 
   '@nativescript-community/perms@2.3.6': {}
 
+  '@nativescript-community/perms@3.0.12': {}
+
   '@nativescript-community/ui-document-picker@1.1.29':
     dependencies:
       '@nativescript-community/perms': 2.3.6
@@ -4555,11 +4569,18 @@ snapshots:
 
   '@nativescript/ios@9.1.0': {}
 
+  '@nativescript/local-notifications@7.0.0':
+    dependencies:
+      '@nativescript-community/perms': 3.0.12
+      '@nativescript/shared-notification-delegate': 1.0.2
+
   '@nativescript/mlkit-barcode-scanning@3.0.4': {}
 
   '@nativescript/mlkit-core@3.0.4': {}
 
   '@nativescript/secure-storage@4.0.2': {}
+
+  '@nativescript/shared-notification-delegate@1.0.2': {}
 
   '@nativescript/social-share@2.3.0': {}
 
