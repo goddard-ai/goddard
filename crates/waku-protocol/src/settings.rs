@@ -89,10 +89,6 @@ pub struct DaemonSettings {
     /// Context fraction that makes a settled Boss session eligible to rotate.
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
-    /// Per-provider prompt-cache TTL in seconds; zero means the provider has
-    /// no reusable prompt cache. Missing entries use the five-minute policy.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub boss_rotation_cache_ttl_secs: HashMap<ProviderKind, u64>,
     /// Experimental opt-in for cross-session composer drafts. Defaults on in
     /// development builds and off in release builds.
     #[serde(default = "default_experiment_enabled")]
@@ -191,7 +187,6 @@ impl Default for DaemonSettings {
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
-            boss_rotation_cache_ttl_secs: HashMap::new(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),
@@ -238,6 +233,9 @@ impl DaemonSettings {
             // The former opt-in is inert; only the explicit opt-out above
             // disables the default-on runtime path.
             "boss_rotation_enabled",
+            // Prompt-cache TTLs no longer gate rotation; a settled chat
+            // rotates as soon as its context crosses the threshold.
+            "boss_rotation_cache_ttl_secs",
         ] {
             self.extra.remove(key);
         }

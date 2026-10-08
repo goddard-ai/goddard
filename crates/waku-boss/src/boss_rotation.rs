@@ -1,82 +1,40 @@
 //! Store-independent policy and durable intent records for Boss rotation.
 //!
 //! Rotation defaults on: a settled Boss session rotates once its context
-//! crosses the configured threshold and the provider's prompt cache has gone
-//! cold. The daemon owns provider session creation; this module makes the
-//! trigger and the journal decision deterministic and restart-readable.
+//! crosses the configured threshold. The daemon owns provider session
+//! creation; this module makes the trigger and the journal decision
+//! deterministic and restart-readable.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use waku_protocol::model::ProviderKind;
-
-/// Snapshot of the daemon settings used by Boss rotation policy.
-pub trait BossRotationSettings {
-    fn boss_rotation_context_threshold(&self) -> f64;
-    fn boss_rotation_cache_ttls(&self) -> Vec<(ProviderKind, u64)>;
-}
-
-const DEFAULT_CACHE_TTL_SECS: u64 = 5 * 60;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BossRotationConfig {
     /// Rotate once context reaches this fraction of the reported window.
     pub context_threshold: f64,
-    /// Provider cache TTLs in seconds. A value of zero means no prompt cache.
-    pub provider_cache_ttl_secs: HashMap<ProviderKind, u64>,
 }
 
 impl Default for BossRotationConfig {
     fn default() -> Self {
         Self {
             context_threshold: 0.8,
-            provider_cache_ttl_secs: HashMap::new(),
         }
     }
 }
 
 impl BossRotationConfig {
-    pub fn from_settings(settings: &impl BossRotationSettings) -> Self {
-        Self {
-            context_threshold: settings.boss_rotation_context_threshold(),
-            provider_cache_ttl_secs: settings.boss_rotation_cache_ttls().into_iter().collect(),
-        }
-    }
-
-    pub fn should_rotate(
-        &self,
-        provider: ProviderKind,
-        context_tokens: u64,
-        context_window: Option<u64>,
-        cache_key_matches: bool,
-        last_cache_refresh_at: Option<u64>,
-        now: u64,
-    ) -> bool {
+    pub fn should_rotate(&self, context_tokens: u64, context_window: Option<u64>) -> bool {
         if !self.context_threshold.is_finite() {
             return false;
         }
         let Some(window) = context_window.filter(|window| *window > 0) else {
             return false;
         };
-        if context_tokens as f64 / window as f64 <= self.context_threshold.clamp(0.0, 1.0) {
-            return false;
-        }
-        let ttl = self
-            .provider_cache_ttl_secs
-            .get(&provider)
-            .copied()
-            .unwrap_or(DEFAULT_CACHE_TTL_SECS);
-        if ttl == 0 {
-            return true;
-        }
-        let Some(refreshed) = last_cache_refresh_at.filter(|at| *at <= now) else {
-            return true;
-        };
-        !cache_key_matches || now.saturating_sub(refreshed) >= ttl
+        context_tokens as f64 / window as f64 > self.context_threshold.clamp(0.0, 1.0)
     }
 }
 
@@ -186,25 +144,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trigger_requires_threshold_and_cold_cache() {
-        let provider = ProviderKind::Codex;
+    fn trigger_requires_threshold_crossing_only() {
         let config = BossRotationConfig::default();
-        assert!(!config.should_rotate(provider, 79, Some(100), false, None, 500));
-        assert!(!config.should_rotate(provider, 90, Some(100), true, Some(400), 500));
-        assert!(config.should_rotate(provider, 90, Some(100), true, None, 500));
-        assert!(config.should_rotate(provider, 90, Some(100), true, Some(200), 500));
-        assert!(config.should_rotate(provider, 90, Some(100), false, Some(400), 500));
-    }
-
-    #[test]
-    fn provider_can_disable_cache_or_override_ttl() {
-        let provider = ProviderKind::Codex;
-        let mut config = BossRotationConfig::default();
-        config.provider_cache_ttl_secs.insert(provider, 0);
-        assert!(config.should_rotate(provider, 90, Some(100), true, Some(499), 500));
-        config.provider_cache_ttl_secs.insert(provider, 30);
-        assert!(!config.should_rotate(provider, 90, Some(100), true, Some(480), 500));
-        assert!(config.should_rotate(provider, 90, Some(100), true, Some(470), 500));
+        assert!(!config.should_rotate(79, Some(100)));
+        assert!(!config.should_rotate(80, Some(100)));
+        assert!(config.should_rotate(81, Some(100)));
+        assert!(!config.should_rotate(90, None));
+        assert!(!config.should_rotate(90, Some(0)));
+        let disabled = BossRotationConfig {
+            context_threshold: f64::NAN,
+        };
+        assert!(!disabled.should_rotate(100, Some(100)));
     }
 
     #[test]

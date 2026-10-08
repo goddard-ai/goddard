@@ -2374,8 +2374,6 @@ pub struct PersistedState {
     pub boss_rotation_disabled: bool,
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
-    #[serde(skip)]
-    pub boss_rotation_cache_ttl_secs: std::collections::HashMap<ProviderKind, u64>,
     /// Experimental: whether cross-session composer drafts are enabled.
     /// Daemon-owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -2706,7 +2704,6 @@ impl PersistedState {
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
-            boss_rotation_cache_ttl_secs: Default::default(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: Default::default(),
             eval: None,
@@ -2985,7 +2982,6 @@ impl PersistedState {
             boss_experiment_enabled: self.boss_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
-            boss_rotation_cache_ttl_secs: self.boss_rotation_cache_ttl_secs.clone(),
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             title_models: self.title_models.clone(),
             custom_commands: self.custom_commands.clone(),
@@ -3024,7 +3020,6 @@ impl PersistedState {
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
-        self.boss_rotation_cache_ttl_secs = settings.boss_rotation_cache_ttl_secs;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.title_models = settings.title_models;
         self.custom_commands = settings.custom_commands;

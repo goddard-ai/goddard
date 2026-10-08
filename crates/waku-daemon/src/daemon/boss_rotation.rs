@@ -3,9 +3,9 @@ use crate::boss_rotation::{BossRotationConfig, RotationJournal};
 use crate::model::MessageRole;
 
 impl WakuBackend {
-    /// The Boss scheduler checks settled chats, including after restart and
-    /// after a quiet provider cache expires. Fresh chats use the same durable
-    /// initialization and lazy provider launch as BossOperation::Open.
+    /// The Boss scheduler checks settled chats, including after restart.
+    /// Fresh chats use the same durable initialization and lazy provider
+    /// launch as BossOperation::Open.
     pub(super) fn reconcile_boss_rotation(&self, now: u64) -> anyhow::Result<()> {
         let settings = self.settings.get();
         if !settings.boss_experiment_enabled || !self.boss.is_active() {
@@ -38,23 +38,13 @@ impl WakuBackend {
                 return Ok(());
             };
             let policy = BossRotationConfig::from_settings(settings);
-            // The settled turn's activity time is a conservative cache
-            // refresh estimate. No cache-key change is assumed: waiting
-            // out the TTL also covers providers that do not report keys.
-            if !policy.should_rotate(
-                old.provider,
-                usage.tokens,
-                usage.window,
-                true,
-                old.last_reply_at,
-                now,
-            ) {
+            if !policy.should_rotate(usage.tokens, usage.window) {
                 return Ok(());
             }
             journal.active_session_id = Some(active);
             journal.begin(identity.id, active, Uuid::new_v4(), now)?;
             eprintln!(
-                "Boss session rotation: boss_id={} old_session_id={} new_session_id={} boss_rotation_context_threshold={} context_tokens={} context_window={}; provider prompt cache cold",
+                "Boss session rotation: boss_id={} old_session_id={} new_session_id={} boss_rotation_context_threshold={} context_tokens={} context_window={}",
                 identity.id,
                 active,
                 journal
@@ -67,7 +57,7 @@ impl WakuBackend {
                 usage.window.unwrap_or_default(),
             );
             journal.intent.as_mut().expect("begun rotation").reason = Some(format!(
-                "boss_rotation_context_threshold={} exceeded (context_tokens={}, context_window={}); provider prompt cache cold",
+                "boss_rotation_context_threshold={} exceeded (context_tokens={}, context_window={})",
                 policy.context_threshold,
                 usage.tokens,
                 usage.window.unwrap_or_default(),

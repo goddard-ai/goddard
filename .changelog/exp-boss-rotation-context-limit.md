@@ -1,0 +1,1 @@
+- Boss sessions rotate to a fresh chat as soon as settled context usage crosses the configured threshold — a provider prompt cache that is still warm no longer delays the swap, so a boss that hits its context limit recovers on the next scheduler pass instead of sitting stuck for minutes.

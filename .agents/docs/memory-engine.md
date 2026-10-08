@@ -225,26 +225,15 @@ change invalidates the artifact. Never truncate a fact into an altered assertion
 
 ## Rotation: first client
 
-Rotate when **context usage exceeds the configured threshold AND the provider
-prompt cache is cold**, at a safe idle boundary. Cache-capable providers use a
-five-minute default TTL with a per-provider override. Providers without caching
-rotate immediately once over threshold at that boundary. The TTL is Goddard's
-policy estimate, not a guaranteed vendor cache lifetime.
+Rotate when **context usage exceeds the configured threshold**, at a safe idle
+boundary. Prompt-cache warmth does not defer rotation: a settled chat over
+threshold rotates on the next scheduler pass regardless of cache state, so a
+provider context-limit hit can never strand the Boss waiting out a TTL.
 
-Track `provider/model/cache_key`, `last_cache_refresh_at`, cache capability, TTL,
-and observation quality. A cache hit or confirmed prefix cache write refreshes
-the clock; unrelated activity does not. Without usable telemetry, estimate from
-the latest request that could refresh the same prefix. Missing timestamp means
-cold. A prefix/model change invalidates warmth. Cached token counts alone do not
-prove future cache availability. Persist wall-clock observations; use monotonic
-deadlines within a run, and treat invalid/future timestamps as unknown/cold.
-
-At turn settle, on a new prompt, or on the cold deadline, reevaluate the trigger.
-An active tool call, permission decision, or open turn blocks rotation until it
-settles. High continuous activity can keep the cache warm and defer rotation;
-provider context-limit protection remains a separate safety path, with an explicit
-reason if it must override the cache preference. Recompute thresholds for the
-target model's usable context budget, reserving output and tool overhead.
+At turn settle or on a new prompt, reevaluate the trigger. An active tool call,
+permission decision, or open turn blocks rotation until it settles. Recompute
+thresholds for the target model's usable context budget, reserving output and
+tool overhead.
 
 New session input has: current persona and tool surface; deterministic handoff
 (objective, constraints, accepted decisions, active employee/worktree refs and

@@ -96,11 +96,6 @@ boss_rotation_disabled: boolean,
  */
 boss_rotation_context_threshold: number,
 /**
- * Per-provider prompt-cache TTL in seconds; zero means the provider has
- * no reusable prompt cache. Missing entries use the five-minute policy.
- */
-boss_rotation_cache_ttl_secs?: { [key in ProviderKind]?: number },
-/**
  * Experimental opt-in for cross-session composer drafts. Defaults on in
  * development builds and off in release builds.
  */

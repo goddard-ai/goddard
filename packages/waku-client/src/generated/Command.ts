@@ -150,7 +150,7 @@ title?: string | null,
 reasoningEffort?: string | null, serviceTier?: string | null, contextWindow?: string | null, } | { "type": "agentPrompt",
 /**
  * Waku task id. Exactly one of `task_id` and `thread_id` is
- * required.
+ * required, except for employees addressing their supervisor.
  */
 taskId?: string | null,
 /**

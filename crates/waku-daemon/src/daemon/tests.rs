@@ -10722,13 +10722,9 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
         .unwrap()
         .last_reply_at
         .unwrap();
-    backend.reconcile_boss_rotation(refreshed + 299).unwrap();
-    assert_eq!(
-        backend.boss.identity_and_session().1,
-        Some(old),
-        "warm caches never rotate"
-    );
-    backend.reconcile_boss_rotation(refreshed + 300).unwrap();
+    // A settled chat that just crossed the threshold rotates on the next
+    // reconcile — a still-warm provider prompt cache must not defer it.
+    backend.reconcile_boss_rotation(refreshed).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(old, next);
     assert_eq!(*capture.shutdowns.lock(), 1);
@@ -10876,10 +10872,6 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
             .unwrap()
             .boss_rotation_disabled
     );
-    settings
-        .boss_rotation_cache_ttl_secs
-        .insert(ProviderKind::Codex, 0);
-    backend.settings.replace(settings.clone()).unwrap();
     {
         let mut state = backend.task_state.lock();
         let session = state.session_mut(old).unwrap();
@@ -10940,7 +10932,7 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         };
         let now = crate::model::unix_time();
         journal.begin(identity.id, old, next, now).unwrap();
-        journal.intent.as_mut().unwrap().reason = Some("boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100); provider prompt cache cold".into());
+        journal.intent.as_mut().unwrap().reason = Some("boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100)".into());
         journal.persist(&root.join("boss/rotation.json")).unwrap();
         if boundary >= 1 {
             let mut state = backend.task_state.lock();
@@ -10982,7 +10974,7 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
             old_session
                 .messages
                 .iter()
-                .filter(|message| message.content.starts_with("Boss session rotated:"))
+                .filter(|message| message.content == "Boss session rotated.")
                 .count(),
             1
         );
