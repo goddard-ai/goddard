@@ -794,6 +794,17 @@ impl Waku {
             {
                 rotated_chat_host = Some(key);
             }
+            // Rotation re-keys the boss's chat whether or not the swap
+            // redirects this client — a voice pad parked on the retired
+            // session moves to its replacement either way.
+            let rotated_session = self
+                .boss_ui
+                .states
+                .get(&key)
+                .filter(|previous| previous.identity.id == state.identity.id)
+                .and_then(|previous| previous.session_id)
+                .zip(state.session_id)
+                .filter(|(old, new)| old != new);
             let queue_rank = boss_queue_ranks(&state);
             let rows = Arc::new(
                 state
@@ -837,6 +848,9 @@ impl Waku {
             // once the file holds real contents.
             let planning = state.planning.clone();
             self.boss_ui.states.insert(key, state);
+            if let Some((from, to)) = rotated_session {
+                self.migrate_voice_scratchpad(from, to);
+            }
             for plan in planning {
                 self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, true, cx);
             }
@@ -1674,12 +1688,22 @@ impl Waku {
                             {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
-                                if session.planning.is_none()
-                                    && let Some(state) = this.boss_ui.states.get_mut(&key)
-                                {
-                                    state.session_id = Some(session.id);
-                                }
+                                let rotated_from = if session.planning.is_none() {
+                                    this.boss_ui
+                                        .states
+                                        .get_mut(&key)
+                                        .and_then(|state| state.session_id.replace(session.id))
+                                        .filter(|old| *old != session.id)
+                                } else {
+                                    None
+                                };
                                 let id = session.id;
+                                if let Some(from) = rotated_from {
+                                    // An Open answer can beat the pushed
+                                    // state to the swap — carry the pad over
+                                    // here too so no ordering strands it.
+                                    this.migrate_voice_scratchpad(from, id);
+                                }
                                 this.daemons.claim_session(id, key);
                                 if let Some(existing) =
                                     this.state.sessions.iter_mut().find(|entry| entry.id == id)

@@ -1,0 +1,1 @@
+- **VoicePad:** A VoicePad open on a Boss chat now survives session rotation — its transcript carries over to the replacement chat, landing muted, instead of staying behind on the archived one.

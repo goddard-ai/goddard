@@ -579,6 +579,40 @@ enum CaptureDirective {
     Resume { detach_sink: bool },
 }
 
+/// Boss rotation swaps the chat's session id and archives the old row
+/// rather than deleting it, so nothing else carries the pad across. The
+/// transcript and panel flags move to the replacement session unchanged;
+/// a live pad pauses the way a chat switch pauses it and lands muted —
+/// an unmute on the new chat resumes it. An occupied destination keeps
+/// its own pad: the archived chat's dies with its row rather than
+/// clobbering a real session. Returns whether the moved pad held the
+/// tap, so the caller can detach the sink.
+fn migrate_scratchpad_to_session(
+    pads: &mut HashMap<Uuid, VoiceScratchpad>,
+    from: Uuid,
+    to: Uuid,
+) -> bool {
+    if from == to || pads.contains_key(&to) {
+        return false;
+    }
+    let Some(mut scratchpad) = pads.remove(&from) else {
+        return false;
+    };
+    // Cleanup answers still in flight carry the retired session id and
+    // now land nowhere — re-queue them so the next drain respawns them
+    // under the new key and their spinner clears.
+    scratchpad
+        .transcript
+        .cleanup_requests
+        .append(&mut scratchpad.transcript.cleanup_inflight);
+    let detach = matches!(
+        scratchpad.apply_mute(true),
+        CaptureDirective::Muted { detach_sink: true }
+    );
+    pads.insert(to, scratchpad);
+    detach
+}
+
 /// A cleanup transition in flight on one buffer: `new` must still match
 /// the painted text — a mismatch means the buffer moved past the answer
 /// and the morph is stale.
@@ -3823,6 +3857,14 @@ impl Waku {
         }
     }
 
+    /// A Boss rotation re-keyed its chat's session — the pad follows the
+    /// chat rather than staying parked on the archived row.
+    pub(super) fn migrate_voice_scratchpad(&mut self, from: Uuid, to: Uuid) {
+        if migrate_scratchpad_to_session(&mut self.voice_scratchpads, from, to) {
+            self.detach_voice_sink();
+        }
+    }
+
     /// Mirror the mic's availability into every scratchpad — one engine
     /// feeds them all. The status row shows it; the tap itself rebinds
     /// inside the platform layer when the device returns.
@@ -6119,6 +6161,77 @@ mod tests {
             assert_eq!(pad.transcript.to_message(), "still forming");
             assert!(stop.load(Ordering::Relaxed));
         });
+    }
+
+    #[gpui::test]
+    fn rotation_rekeys_a_live_pad_with_its_transcript(cx: &mut gpui::TestAppContext) {
+        // Boss rotation archives the old chat rather than deleting it, so
+        // the re-key is the whole persistence boundary — nothing else
+        // carries the pad to the replacement session. A pad holding the
+        // mic lands muted like a chat switch leaves it.
+        let holder = cx.new(|_| ());
+        let mut live = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        live.transcript.append_finalized("kept words");
+        live.capture_live = true;
+        // A cleanup answer in flight when the swap lands carries the
+        // retired id — the pad re-queues it so it respawns under the new
+        // key instead of holding a spinner forever.
+        live.transcript.cleanup_inflight.push(CleanupRequest {
+            target: CleanTarget::Annotation,
+            start: 0,
+            raw: "kept words".to_owned(),
+            edit: None,
+        });
+        let stop = live.stop.clone();
+        let generation = live.generation;
+        let from = Uuid::new_v4();
+        let to = Uuid::new_v4();
+        let mut pads = HashMap::from([(from, live)]);
+        assert!(migrate_scratchpad_to_session(&mut pads, from, to));
+        assert!(!pads.contains_key(&from));
+        let moved = pads.get(&to).expect("the pad moved to the new session");
+        assert!(moved.muted);
+        assert!(!moved.capture_live);
+        assert_eq!(moved.generation, generation + 1);
+        assert!(stop.load(Ordering::Relaxed));
+        assert_eq!(moved.transcript.to_message(), "kept words");
+        assert!(moved.transcript.cleanup_inflight.is_empty());
+        assert_eq!(moved.transcript.cleanup_requests.len(), 1);
+    }
+
+    #[gpui::test]
+    fn rotation_keeps_a_parked_pad_and_never_clobbers(cx: &mut gpui::TestAppContext) {
+        let holder = cx.new(|_| ());
+        let mut parked = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        parked.muted = true;
+        parked.hidden = true;
+        parked.transcript.append_finalized("parked draft");
+        let from = Uuid::new_v4();
+        let to = Uuid::new_v4();
+        let mut pads = HashMap::from([(from, parked)]);
+        // Nothing held the tap — no sink detach is owed.
+        assert!(!migrate_scratchpad_to_session(&mut pads, from, to));
+        let moved = &pads[&to];
+        assert!(moved.muted && moved.hidden);
+        assert_eq!(moved.transcript.to_message(), "parked draft");
+        // An occupied destination keeps its own pad — the retired chat's
+        // stays behind rather than overwriting a real session.
+        let mut own = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        own.transcript.append_finalized("new chat pad");
+        pads.insert(to, own);
+        pads.insert(
+            from,
+            holder.update(cx, |_, cx| VoiceScratchpad::new(cx)),
+        );
+        assert!(!migrate_scratchpad_to_session(&mut pads, from, to));
+        assert_eq!(pads[&to].transcript.to_message(), "new chat pad");
+        assert!(pads.contains_key(&from));
+        // A missing source is a no-op.
+        assert!(!migrate_scratchpad_to_session(
+            &mut pads,
+            Uuid::new_v4(),
+            Uuid::new_v4()
+        ));
     }
 
     #[test]
