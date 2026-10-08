@@ -9758,11 +9758,10 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// A boss caller approves `finalizePlan` through a parked request card
-/// — the same contract `agentProposeArchive` uses — and a denial leaves
-/// the document unfrozen.
+/// Agent finalization freezes the plan and reports it without parking a
+/// permission request, just like the human Finalize plan button.
 #[test]
-fn a_boss_caller_finalizes_through_a_parked_request_card() {
+fn a_boss_caller_finalizes_directly_without_an_approval_card() {
     use waku_protocol::boss::BossOperation;
     let root = std::env::temp_dir().join(format!("boss-plan-card-{}", Uuid::new_v4()));
     let (backend, boss) = surface_test_backend(&root);
@@ -9805,11 +9804,9 @@ fn a_boss_caller_finalizes_through_a_parked_request_card() {
                 .is_err()
         );
     }
-    let finalize = |plan_file: &'static str| {
-        let backend = &backend;
-        let events = events.clone();
-        move || {
-            backend.handle_boss_operation(
+    for plan_file in ["auth.md", "billing.md"] {
+        let result = backend
+            .handle_boss_operation(
                 Some(boss),
                 BossOperation::FinalizePlan {
                     plan_file: Some(plan_file.into()),
@@ -9817,68 +9814,42 @@ fn a_boss_caller_finalizes_through_a_parked_request_card() {
                 },
                 &events,
             )
-        }
-    };
-    std::thread::scope(|scope| {
-        let call = scope.spawn(finalize("auth.md"));
-        let request_id = loop {
-            if let Some(request_id) = backend.agent.parked_permission_request(boss) {
-                break request_id;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        assert!(request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX));
-        backend.agent.resolve_permission(
-            boss,
-            &Command::Respond {
-                request_id: request_id.clone(),
-                option_id: "finalize".into(),
-            },
-        );
-        assert!(call.join().unwrap().is_ok());
-        assert_eq!(
+            .unwrap();
+        assert!(matches!(
+            result,
+            waku_protocol::boss::BossResult::PlanFinalized { .. }
+        ));
+        assert!(backend.agent.parked_permission_request(boss).is_none());
+        let file = format!("plans/{plan_file}");
+        assert!(
             backend
                 .boss
-                .plan_for_file("plans/auth.md")
+                .plan_for_file(&file)
                 .unwrap()
                 .finalized_at
-                .is_some(),
-            true
+                .is_some()
         );
-        // Approval handed implementation to the boss chat — the
-        // handoff prompt drained straight into its idle runtime.
-        let prompts = boss_capture.prompts.lock().clone();
+        assert!(
+            backend
+                .boss
+                .handle(
+                    None,
+                    BossOperation::WriteFile {
+                        path: file.clone(),
+                        content: "changed".into()
+                    }
+                )
+                .is_err(),
+            "finalization freezes the document"
+        );
+        let prompts = boss_capture.prompts.lock();
         assert!(
             prompts
                 .iter()
-                .any(|prompt| prompt.contains("finalized its design")
-                    && prompt.contains("plans/auth.md")),
+                .any(|prompt| prompt.contains("finalized its design") && prompt.contains(&file)),
             "the boss chat received the implementation handoff"
         );
-        let call = scope.spawn(finalize("billing.md"));
-        let request_id = loop {
-            if let Some(request_id) = backend.agent.parked_permission_request(boss) {
-                break request_id;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        backend.agent.resolve_permission(
-            boss,
-            &Command::Respond {
-                request_id,
-                option_id: "deny".into(),
-            },
-        );
-        assert!(call.join().unwrap().is_err());
-        assert!(
-            backend
-                .boss
-                .plan_for_file("plans/billing.md")
-                .unwrap()
-                .finalized_at
-                .is_none()
-        );
-    });
+    }
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

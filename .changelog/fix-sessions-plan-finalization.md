@@ -1,0 +1,1 @@
+- Finalize a plan directly without an extra approval request; the frozen plan is reported to the boss and the planning session archives after its grace period.

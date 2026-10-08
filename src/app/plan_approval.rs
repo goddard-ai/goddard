@@ -113,8 +113,6 @@ impl Waku {
     /// hangs it off the composer card's top edge in the same place.
     /// Clicking sends the human's `finalizePlan` request directly, so this
     /// action is the approval and does not ask the user to confirm it again.
-    /// An agent-initiated `finalizePlan` still uses its separate permission
-    /// card.
     pub(super) fn plan_approval_chip(
         &self,
         window: &Window,

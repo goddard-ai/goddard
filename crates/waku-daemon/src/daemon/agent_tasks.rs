@@ -470,62 +470,6 @@ impl WakuBackend {
                 bail!("planning session for {} is gone", plan.plan_file);
             }
         }
-        // The approver: a human caller already is one; a boss caller parks
-        // a card on its own session — live, because the call is mid-turn.
-        if let Some(caller) = caller {
-            let runtime_id = self
-                .sessions
-                .lock()
-                .get(&caller)
-                .map(|entry| entry.runtime_id)
-                .ok_or_else(|| {
-                    anyhow!("session {caller} has no running runtime to show the request")
-                })?;
-            let request_id = format!(
-                "{}{}",
-                waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX,
-                Uuid::new_v4()
-            );
-            let (title_text, title_i18n) = localized!("boss.plan_finalize_title");
-            let (detail_text, detail_i18n) = localized!(
-                "boss.plan_finalize_detail",
-                file = plan.plan_file.clone(),
-                idea = plan.idea,
-            );
-            let wire = event_to_wire(DriverEvent::Permission {
-                request_id: request_id.clone(),
-                title: title_text,
-                title_i18n: Some(title_i18n),
-                detail: detail_text,
-                detail_i18n: Some(detail_i18n),
-                options: vec![
-                    PermissionOption::keyed("finalize", localized!("boss.plan_finalize"), true),
-                    PermissionOption::keyed("deny", localized!("common.deny"), false),
-                ],
-            })?;
-            let (settled, settle_rx) = crossbeam_channel::bounded(1);
-            // One parked request per session — same card contract as the
-            // archive proposal.
-            if !self
-                .agent
-                .try_park_permission(caller, request_id.clone(), settled)
-            {
-                bail!("session {caller} already has a request waiting on the user");
-            }
-            let events = events.for_session(caller, runtime_id);
-            if let Err(error) = events.send(wire) {
-                self.agent.remove_permission(caller, &request_id);
-                return Err(error);
-            }
-            let option = settle_rx.recv().unwrap_or_default();
-            self.agent.remove_permission(caller, &request_id);
-            let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
-            match option.as_deref() {
-                Some("finalize") => {}
-                Some(_) => bail!("the plan finalization was declined"),
-                None => bail!("the finalization request went unanswered"),
-            }
-        }
         let finalized =
             self.boss
                 .finalize_plan(&plan.plan_file, items, crate::model::unix_time())?;
