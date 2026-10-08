@@ -34,6 +34,7 @@ import {
   planOutcomeLabel,
 } from '@/lib/boss';
 
+import { planFilter } from '@/lib/plans';
 import { relativeSessionTime, displaySessionTitle } from '@/lib/session-presentation';
 import type { TaskState } from '@/lib/daemon-api';
 import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
@@ -243,7 +244,7 @@ export function BossSection({
         </Pressable>
       </View>
 
-      {state.planning.map((plan) => (
+      {state.planning.filter((plan) => planFilter(plan, sessions.get(plan.sessionId)) === 'active').map((plan) => (
         <PlanRow
           now={now}
           plan={plan}
@@ -330,7 +331,11 @@ function PlanRow({
 }) {
   const theme = useTheme();
   const outcome = planOutcomeLabel(plan.outcome);
-  const status = plan.finalizedAt == null ? 'Planning' : outcome ?? 'Finalized';
+  const sessionStatus = session?.status ?? 'connecting';
+  const status = plan.finalizedAt == null
+    ? `Planning · ${sessionStatus.charAt(0).toUpperCase()}${sessionStatus.slice(1)}`
+    : outcome ?? 'Finalized';
+
   return (
     <Pressable
       accessibilityHint="Opens the planning session"
@@ -351,7 +356,7 @@ function PlanRow({
       }}
     >
       <AppSymbol
-        name={{ ios: 'doc.text.magnifyingglass', android: 'plagiarism', web: 'plagiarism' }}
+        name={{ ios: 'safari', android: 'explore', web: 'explore' }}
         size={15}
         tintColor={theme.textTertiary}
       />

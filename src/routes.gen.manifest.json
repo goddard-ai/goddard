@@ -12,6 +12,8 @@
 		"index",
 		"new-task",
 		"notifications",
+		"plans",
+		"plans/:id",
 		"session/:id"
 	],
 	"routes": [
@@ -107,6 +109,32 @@
 				""
 			],
 			"source": "src/app/notifications.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "plans",
+			"path": "plans",
+			"params": [],
+			"layouts": [
+				""
+			],
+			"source": "src/app/plans.tsrx",
+			"loader": false,
+			"guard": false,
+			"head": false
+		},
+		{
+			"name": "plans/:id",
+			"path": "plans/:id",
+			"params": [
+				"id"
+			],
+			"layouts": [
+				""
+			],
+			"source": "src/app/plans/[id].tsrx",
 			"loader": false,
 			"guard": false,
 			"head": false

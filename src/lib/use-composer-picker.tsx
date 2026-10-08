@@ -1,10 +1,11 @@
-import type { FileEntry, ProviderKind, ReportedCommand, SlashCommand } from '@waku/client';
+import type { BossPlan, FileEntry, ProviderKind, ReportedCommand, SlashCommand } from '@waku/client';
 import { mergeComposerCommands, withManagedGoalCommand, type ComposerAutocompleteRow, type ComposerTriggerKind } from '@waku/client/composer-autocomplete';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
 import { dismissKeyboard } from './keyboard';
 
 import type { ComposerTextInputHandle } from '@/components/composer-text-input.types';
-import { useDaemonSettings } from './daemon-queries';
+import { insertPlanMention } from './plans';
+import { useBossState, useDaemonSettings } from './daemon-queries';
 import { composerPickerSearchState, insertComposerItem, searchComposerRows, selectionAfterComposerEdit, type ComposerPickerResults, type ComposerSelection } from './composer-completion';
 import { daemonKeys, discoverComposerCommands, listComposerFiles } from './daemon-api';
 import { daemonQueryEntry } from './daemon-data';
@@ -27,6 +28,7 @@ export function useComposerPicker({ text, onChangeText, provider, root, reported
 }) {
   const daemon = useDaemon();
   const settings = useDaemonSettings();
+  const boss = useBossState();
   const inputRef = useRef<ComposerTextInputHandle | null>(null);
   const setInputRef = useCallback((input: ComposerTextInputHandle | null) => { inputRef.current = input; }, []);
   const [kind, setKind] = useState<ComposerTriggerKind | null>(null);
@@ -135,6 +137,17 @@ export function useComposerPicker({ text, onChangeText, provider, root, reported
       query,
       onQueryChange: setQuery,
       rows: search.rows,
+      plans: kind === 'file' ? (boss.data?.planning ?? []).filter((plan) => `${plan.idea} ${plan.planFile}`.toLowerCase().includes(query.toLowerCase())).slice(0, 32) : [],
+      onSelectPlan: (plan: BossPlan) => {
+        const target = insertionPoint.current?.text === text ? insertionPoint.current.selection : selection;
+        const replacement = insertPlanMention(text, target, plan);
+        const nextSelection = { start: replacement.cursor, end: replacement.cursor };
+        setCaret({ text: replacement.text, selection: nextSelection });
+        setForcedSelection(nextSelection);
+        onChangeText(replacement.text);
+        focusAfterDismiss.current = true;
+        setVisible(false);
+      },
       hasResults: search.hasResults,
       loading: !error && (source.isFetching || (kind === 'command' && settings.isPending) || search.pending),
       error: error ? (error instanceof Error ? error.message : String(error)) : null,

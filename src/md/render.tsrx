@@ -1,4 +1,5 @@
 /** @jsxImportSource @nativescript-community/octane */
+import { planReferenceId } from '@/lib/plans';
 /**
  * mdast → xplat elements, with the streaming veil applied as paint-only
  * color fades.
@@ -96,6 +97,12 @@ const TASK_LINK_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function openLinkExternally(url: string) {
+  const planId = planReferenceId(url);
+  if (planId) {
+    pushRoute({ stack: 'root', name: 'plans/:id', params: { id: planId } });
+    return;
+  }
+
   // `[title](goddard://task/<id>)` — the same task-link format the desktop
   // renders — navigates to the task instead of opening a browser.
   const taskId = url.startsWith(TASK_LINK_PREFIX)

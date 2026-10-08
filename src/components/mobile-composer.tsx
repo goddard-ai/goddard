@@ -223,6 +223,7 @@ export function MobileComposer({
   boss,
   deliverable,
   onSubmitted,
+  onPermissionRespond,
 }: {
   session: AgentSession;
   /** Set when the viewed session is a boss employee: every submission is
@@ -237,6 +238,7 @@ export function MobileComposer({
   /** Fires as the submission begins — before the runtime round-trip — so the
    * transcript can pin to the tail the moment the message lands. */
   onSubmitted?: () => void;
+  onPermissionRespond?: (optionId: string) => Promise<void>;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -533,7 +535,7 @@ export function MobileComposer({
       {permission && !userInput && (
         <PermissionPanel
           permission={permission}
-          onRespond={(optionId) => runtime.respond(session.id, permission.requestId, optionId)}
+          onRespond={onPermissionRespond ?? ((optionId) => runtime.respond(session.id, permission.requestId, optionId))}
         />
       )}
       {userInput && (

@@ -503,6 +503,9 @@ function TaskDrawerContent({
               onClose={onClose}
             />
           ) : null}
+          {bossState.data ? <Pressable accessibilityRole="button" onPress={() => { onClose(); pushRoute({ stack: 'root', name: 'plans', params: {} }); }} style={{ paddingHorizontal: 24, paddingVertical: 12 }}>
+            <Text style={{ color: theme.textSecondary }}>Brain · Plans</Text>
+          </Pressable> : null}
           {rows.map(renderRow)}
         </View>
       </ScrollView>

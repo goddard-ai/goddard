@@ -1,3 +1,4 @@
+import { PlanningComposer } from '@/components/plans';
 import { atomVisibleText } from '@waku/client/transcript-presentation';
 import { bossEmployeeLifecycle } from '@waku/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
@@ -689,7 +690,7 @@ export function SessionView({
         </Absolute>
       </View>
       {session && (
-        <MobileComposer
+        session.planning ? <PlanningComposer key={session.id} session={session} onSubmitted={() => listRef.current?.followNextGrowth()} /> : <MobileComposer
           boss={employee && bossData
             ? { employee, identity: bossData.identity }
             : null}

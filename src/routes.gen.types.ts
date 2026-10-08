@@ -9,6 +9,8 @@ export type RouteName =
 	| 'index'
 	| 'new-task'
 	| 'notifications'
+	| 'plans'
+	| 'plans/:id'
 	| 'session/:id'
 
 export interface RouteParams {
@@ -20,6 +22,8 @@ export interface RouteParams {
 	'index': {  }
 	'new-task': {  }
 	'notifications': {  }
+	'plans': {  }
+	'plans/:id': { id: string }
 	'session/:id': { id: string }
 }
 
