@@ -3250,6 +3250,23 @@ impl Waku {
         }
     }
 
+    /// The experimental Git panel is available in employee sessions, whose
+    /// strip otherwise follows the managed-session surface rules. The boss's
+    /// own chat remains restricted to its managed panel surfaces.
+    pub(super) fn git_panel_owner_allowed(&self) -> bool {
+        if !self.managed_panel_owner() {
+            return true;
+        }
+        let RightPanelOwner::Session(id) = self.active_right_panel_owner() else {
+            return false;
+        };
+        self.state
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .is_some_and(|session| self.session_is_employee(session))
+    }
+
     /// What the current owner lets into its strip: sessions and main-area
     /// terminals take everything except Boss-only goals, employees take the
     /// same surfaces as other sessions except goals, a project page takes its
@@ -3262,7 +3279,7 @@ impl Waku {
                 return session_panel_surface(surface);
             }
         }
-        if self.managed_panel_owner() {
+        if self.managed_panel_owner() && !self.git_panel_owner_allowed() {
             return match surface {
                 RightPanelSurface::Goals => {
                     self.boss_ui.page.is_none() && self.boss_chat_key().is_some()
@@ -3299,7 +3316,7 @@ impl Waku {
         // A strip parked before its owner became managed — or written by a
         // build without the gate — sheds whatever managed sessions cannot
         // host rather than re-mounting a disallowed tab.
-        if self.managed_panel_owner() {
+        if self.managed_panel_owner() && !self.git_panel_owner_allowed() {
             let active = state
                 .active_surface
                 .and_then(|index| state.surfaces.get(index).cloned());
@@ -4247,7 +4264,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .when(
-                self.state.git_panel_enabled && !self.managed_panel_owner(),
+                self.state.git_panel_enabled && self.git_panel_owner_allowed(),
                 |element| element.child(self.render_git_panel_toggle(cx)),
             )
             .child(self.render_right_panel_toggle(cx))

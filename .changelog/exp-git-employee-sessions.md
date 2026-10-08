@@ -1,0 +1,1 @@
+- Open the Git panel in an employee chat to review and manage that employee's worktree when the Git panel experiment is enabled.

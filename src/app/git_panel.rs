@@ -555,9 +555,9 @@ impl Waku {
         if self.git_panel_visible == visible {
             return;
         }
-        // Experimental — the Git panel only opens while its opt-in is on,
-        // and never for a managed session: their strip hosts no code review.
-        if visible && (!self.state.git_panel_enabled || self.managed_panel_owner()) {
+        // Experimental — employee sessions can host the panel in their own
+        // checkout, while the boss's managed chat remains restricted.
+        if visible && (!self.state.git_panel_enabled || !self.git_panel_owner_allowed()) {
             return;
         }
         if visible {
