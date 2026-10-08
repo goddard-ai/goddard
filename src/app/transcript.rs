@@ -1414,6 +1414,13 @@ pub(super) fn transcript_rows_fingerprint(
         hash = mix_turn_id(hash, block.turn_id);
     }
 
+    // A parked steer shares its queue entry's id with a preview message;
+    // queue membership moves that message's row to the transcript's end.
+    hash = mix(hash, session.queued_messages.len() as u64);
+    for queued in &session.queued_messages {
+        hash = mix_uuid(hash, queued.id);
+    }
+
     hash = mix(hash, session.turns.len() as u64);
     for turn in &session.turns {
         hash = mix_uuid(hash, turn.id);
@@ -1537,6 +1544,15 @@ pub(super) fn folded_transcript_row_kinds(
     // steer run shares one row only while no boss output separates it.
     let mut opened_trigger_turns = HashSet::new();
     let mut steer_run_open = false;
+    // A steer parked behind a live turn keeps a preview — a user message
+    // carrying the queue entry's id. Its row leaves the message flow and
+    // trails the working indicator at the transcript's end instead.
+    let queued_ids: HashSet<Uuid> = session
+        .queued_messages
+        .iter()
+        .map(|queued| queued.id)
+        .collect();
+    let mut pending_steer_rows = Vec::new();
     for row in raw_rows {
         // A hidden prompt stays in `session.messages` so every client's
         // projection names the same ids — it just renders no row. An
@@ -1570,6 +1586,15 @@ pub(super) fn folded_transcript_row_kinds(
             continue;
         }
         steer_run_open = false;
+        if let TranscriptRowKind::Message(message_index) = row
+            && session
+                .messages
+                .get(message_index)
+                .is_some_and(|message| queued_ids.contains(&message.id))
+        {
+            pending_steer_rows.push(row);
+            continue;
+        }
         if let Some(turn_id) = fold_anchors.get(&row).copied() {
             rows.push(TranscriptRowKind::TurnFold(turn_id));
         }
@@ -1585,6 +1610,8 @@ pub(super) fn folded_transcript_row_kinds(
     if session.status.is_busy() && session.active_turn_id().is_some() {
         rows.push(TranscriptRowKind::WorkingIndicator);
     }
+    // Pending steers close the transcript, stacked in the order they parked.
+    rows.extend(pending_steer_rows);
 
     // A response with copyable assistant text renders its file summary inside
     // the footer row. Only turns without a footer need a standalone row;

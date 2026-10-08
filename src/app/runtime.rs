@@ -45,6 +45,20 @@ pub(super) fn append_queued_steer_preview(
     true
 }
 
+/// Whether this queue entry is a parked steer: a steer the provider could
+/// not take mid-turn waits in the follow-up queue behind a transcript
+/// preview — the user message carrying the entry's id. That preview renders
+/// at the transcript's end, so the entry stays out of the queue card.
+pub(super) fn queued_message_is_pending_steer(
+    session: &AgentSession,
+    queued: &QueuedMessage,
+) -> bool {
+    session
+        .messages
+        .iter()
+        .any(|message| message.id == queued.id)
+}
+
 /// Whether a daemon-restart loss can auto-resume this session: a live
 /// provider turn was in flight and the provider session can be reloaded
 /// from its persisted cursor. A `Connecting` turn the provider never
@@ -6904,11 +6918,14 @@ impl Waku {
             }
             // A hidden queue entry is provider-facing text, not a follow-up
             // the user can steer — its own drain still delivers it. Same for
-            // a daemon-owned agent prompt: its delivery is the daemon's.
-            let message = session
-                .queued_messages
-                .iter()
-                .find(|message| !message.hidden && !message.is_agent_owned())?;
+            // a daemon-owned agent prompt: its delivery is the daemon's. A
+            // parked steer is not a queue row either — its preview trails
+            // the transcript until the turn's drain delivers it.
+            let message = session.queued_messages.iter().find(|message| {
+                !message.hidden
+                    && !message.is_agent_owned()
+                    && !queued_message_is_pending_steer(session, message)
+            })?;
             Some((session.id, message.id))
         }) else {
             return;

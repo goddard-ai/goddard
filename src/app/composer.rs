@@ -5053,9 +5053,11 @@ impl Waku {
 
     /// The pending follow-up queue between the transcript and the composer: a
     /// single card tucked against the composer's top edge, one row per queued
-    /// message plus a labelled row for the parked continue nudge. A follow-up
-    /// row pulls its text back into the composer on click and carries
-    /// steer/remove/more controls on the right; the nudge row only removes.
+    /// message plus a labelled row for the parked continue nudge. A steer
+    /// parked mid-turn is not a row — its preview trails the transcript's
+    /// working indicator until delivery claims it. A follow-up row pulls its
+    /// text back into the composer on click and carries steer/remove/more
+    /// controls on the right; the nudge row only removes.
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
         // The composer card's floating chips and the autocomplete popup
         // anchor off the card's top edge; the probe lets them clear the
@@ -5102,11 +5104,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let session_id = session.id;
-        if !session
-            .queued_messages
-            .iter()
-            .any(|message| !message.hidden || queued_message_is_continue(message))
-        {
+        if !session.queued_messages.iter().any(|message| {
+            // A steer parked mid-turn renders at the transcript's end, not
+            // in this card.
+            !super::runtime::queued_message_is_pending_steer(session, message)
+                && (!message.hidden || queued_message_is_continue(message))
+        }) {
             return None;
         }
         let theme = Theme::current(cx);
@@ -5168,6 +5171,11 @@ impl Waku {
                 continue;
             }
             if message.hidden {
+                continue;
+            }
+            // A parked steer's preview trails the working indicator at the
+            // transcript's end — it is not a queue card row.
+            if super::runtime::queued_message_is_pending_steer(session, message) {
                 continue;
             }
             // A daemon-owned agent prompt is a parked delivery, not a draft:

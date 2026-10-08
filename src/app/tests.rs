@@ -423,6 +423,55 @@ fn queued_steer_preview_follows_streaming_text_and_is_idempotent() {
     assert_eq!(session.messages.len(), 3);
 }
 
+/// A steer parked while text streams leaves the message flow and the queue
+/// card: its preview row trails the working indicator at the transcript's
+/// end, stacking in park order. Clearing the parked entries returns the
+/// previews to plain message rows, so queue membership is a fold input the
+/// fingerprint must cover.
+#[test]
+fn parked_steer_previews_trail_the_working_indicator() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("inspect the project");
+    session.status = SessionStatus::Working;
+    session.push_message(MessageRole::Assistant, "still streaming");
+    session.messages.last_mut().unwrap().streaming = true;
+
+    let first = QueuedMessage::new("first steer");
+    let second = QueuedMessage::new("second steer");
+    assert!(append_queued_steer_preview(&mut session, &first));
+    assert!(append_queued_steer_preview(&mut session, &second));
+    session.queued_messages = vec![first, second];
+
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![
+            Message(0),
+            Message(1),
+            WorkingIndicator,
+            Message(2),
+            Message(3)
+        ]
+    );
+
+    let parked_fingerprint = transcript_rows_fingerprint(&session, &HashSet::new(), None);
+    session.queued_messages.clear();
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new(), None),
+        vec![
+            Message(0),
+            Message(1),
+            Message(2),
+            Message(3),
+            WorkingIndicator
+        ]
+    );
+    assert_ne!(
+        transcript_rows_fingerprint(&session, &HashSet::new(), None),
+        parked_fingerprint,
+        "dropping the parked steers moved the rows but not the fingerprint"
+    );
+}
+
 #[test]
 fn steer_results_are_only_accepted_into_a_running_turn() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
