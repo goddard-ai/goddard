@@ -20,7 +20,7 @@ import { daemonConnectLink } from '../lib/daemon-profile';
 /** Handles `goddard://connect?address=…&token=…` — the link inside the
  * desktop daemon settings QR — whether it arrives from the system camera,
  * another app's scanner, or the in-app scanner route. Saves the profile,
- * activates it, and lands on the task list. */
+ * activates it, and lands in the boss chat. */
 export default function ConnectScreen(props: {
   address?: string;
   token?: string;

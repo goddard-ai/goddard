@@ -40,6 +40,7 @@ import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
 import { daemonKeys } from '@/lib/daemon-api';
 import { useProviderCatalog } from '@/lib/daemon-queries';
 import { useTheme } from '@/lib/use-theme';
+import { displayHost } from '@/lib/daemon-profile';
 import { showAlert } from '@/lib/alert';
 import { sessionHasUnseenReply, type UnseenReplyWatermarks } from '@/lib/unseen-replies';
 
@@ -138,7 +139,12 @@ export function BossSection({
 
   const openChat = useCallback(async () => {
     const client = daemon.client;
-    if (!client || openingChat) {return;}
+    if (state.sessionId) {
+      onSelectSession(state.sessionId);
+      return;
+    }
+
+    if (!client || daemon.phase !== 'connected' || openingChat) {return;}
     setOpeningChat(true);
     try {
       // Provider/mode only matter when this call creates the chat — reuse
@@ -159,7 +165,7 @@ export function BossSection({
     } finally {
       setOpeningChat(false);
     }
-  }, [catalog.providers, daemon.client, onClose, onSelectSession, openingChat]);
+  }, [catalog.providers, daemon.client, daemon.phase, state.sessionId, onClose, onSelectSession, openingChat]);
 
   const openEmployee = useCallback(
     (sessionId: string) => {
@@ -182,7 +188,7 @@ export function BossSection({
           textTransform: 'uppercase',
         }}
       >
-        Boss
+        {`Boss · ${daemon.activeProfile?.name ?? 'Host'}${daemon.phase === 'connected' ? '' : ' · Stale'}`}
       </Text>
 
       {/* The boss chat row — destination of every supervision message. */}
@@ -213,7 +219,7 @@ export function BossSection({
             <Text numberOfLines={1} style={{ color: blockers.length ? theme.warning : theme.textTertiary, fontSize: 12.5, marginTop: 1 }}>
               {blockers.length
                 ? `${blockers.length} need${blockers.length === 1 ? 's' : ''} attention`
-                : 'Boss'}
+                : daemon.activeProfile ? displayHost(daemon.activeProfile.address) : 'Boss'}
             </Text>
           </View>
           {openingChat ? <ActivityIndicator busy /> : null}

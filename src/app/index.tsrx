@@ -1,12 +1,10 @@
 /** @jsxImportSource @nativescript-community/octane */
 import { useState } from 'octane';
-import { View } from '@octane-xplat/ui';
 
+import { BossHome } from '@/components/boss-home';
 import { DaemonOnboarding } from '@/components/daemon-onboarding';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import { useDaemon } from '@/lib/daemon-hooks';
-
-import NewTaskScreen from './new-task.tsrx';
 
 export default function HomeScreen() {
   const daemon = useDaemon();
@@ -17,7 +15,7 @@ export default function HomeScreen() {
   return (
     <>
       {daemon.profiles.length ? (
-        <NewTaskScreen />
+        <BossHome key={daemon.activeProfile?.id} />
       ) : (
         <DaemonOnboarding onAddDaemon={() => setDaemonPickerOpen(true)} />
       )}

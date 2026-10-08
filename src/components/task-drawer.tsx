@@ -29,6 +29,7 @@ import { TaskDrawerSurface } from './task-drawer-surface';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { BossSection } from '@/components/boss-roster';
+import { ordinarySessions } from '@/lib/shell';
 import { DeliverablesSection } from '@/components/deliverables';
 import {
   ConnectionBanner,
@@ -74,10 +75,6 @@ const SearchDockGap = 14;
 
 /** FlashList has no section API, so groups flatten into header/session rows;
  * `getItemType` keeps the two shapes in separate recycling pools. */
-// U0 seam — the desktop sidebar carries a `SidebarRow::Boss` per daemon host
-// above its task rows (boss identity, unread badges, planning rows). That
-// needs the boss-state surface landing in @waku/client; the boss row belongs
-// at the head of these flattened rows once it exists.
 type DrawerListRow =
   | { kind: 'header'; key: string; title: string }
   | { kind: 'session'; key: string; item: SessionListItem };
@@ -114,6 +111,7 @@ const taskDrawerControls = createStore<TaskDrawerContextValue>({
 export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const daemon = useDaemon();
   const route = useRoute('root');
+  const homeBoss = useBossState();
   const { width } = useWindowSize();
   const [open, setOpen] = useState(false);
   const [listRefreshTick, setListRefreshTick] = useState(0);
@@ -122,7 +120,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   // Full-screen swipe only applies on top-level routes — a deeper screen's
   // own gestures would fight the drawer pan.
   const swipeEnabled = drawerEnabled && (
-    route?.name === 'index' || route?.name === 'new-task' || route?.name === 'session/:id'
+    !route || route.name === '/' || route.name === 'index' || route.name === 'new-task' || route?.name === 'session/:id'
   );
 
   const refreshTaskList = useCallback(
@@ -150,7 +148,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
 
   const selectedSessionId = route?.name === 'session/:id'
     ? (route.params as { id?: string }).id ?? null
-    : null;
+    : (!route || route.name === '/' || route.name === 'index') ? homeBoss.data?.sessionId ?? null : null;
 
   // Close the drawer on navigation and when it is disabled.
   useEffect(() => setOpen(false), [drawerEnabled, route?.name]);
@@ -330,10 +328,10 @@ function TaskDrawerContent({
     () => frame.data
       ? groupSessions(
           frame.data.projects,
-          visibleSessions.filter((session) => session.boss_managed !== true),
+          ordinarySessions(visibleSessions, bossState.data),
         )
       : [],
-    [frame.data, visibleSessions],
+    [frame.data, visibleSessions, bossState.data],
   );
 
   const rows = useMemo(() => drawerRows(sections), [sections]);
@@ -342,7 +340,7 @@ function TaskDrawerContent({
   const _emptyShown = !hasRows && !(notice && notice.kind !== 'restored');
   const showNewTask = useCallback(() => {
     onClose();
-    pushRoute({ stack: 'root', name: 'index', params: {} });
+    pushRoute({ stack: 'root', name: 'new-task', params: {} });
   }, [onClose]);
 
   const showSession = useCallback((sessionId: string) => {

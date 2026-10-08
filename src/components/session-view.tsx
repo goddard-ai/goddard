@@ -541,7 +541,7 @@ export function SessionView({
             <Pressable
               accessibilityLabel="New task"
               accessibilityRole="button"
-              onPress={() => pushRoute({ stack: 'root', name: 'index', params: {} })}
+              onPress={() => pushRoute({ stack: 'root', name: 'new-task', params: {} })}
               style={{ alignItems: 'center', justifyContent: 'center', minHeight: 36, minWidth: 36 }}>
               <AppSymbol
                 name={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}

@@ -26,7 +26,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
           color: theme.text,
         }}
       >
-        Your agents, everywhere.
+        Talk to your Boss.
       </Text>
       <Text
         style={{
@@ -37,8 +37,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
           color: theme.textSecondary,
         }}
       >
-        Connect to Goddard running on your Mac, workstation, or private server. Add more than one and
-        switch whenever you need.
+        You talk to the Boss; the Boss runs the rest.
       </Text>
       <Pressable
         accessibilityLabel="Add a daemon"
@@ -61,7 +60,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
           size={17}
           tintColor={theme.onInverse}
         />
-        <Text style={{ fontSize: 17, fontWeight: '700', color: theme.onInverse }}>Add a daemon</Text>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: theme.onInverse }}>Connect your Boss</Text>
       </Pressable>
       <Row
         style={{

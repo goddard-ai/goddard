@@ -36,7 +36,11 @@ export function daemonQueryEntry<T>(
 ): DaemonQueryEntry<T> {
   const id = serializedKey(key);
   const existing = entries.get(id) as DaemonQueryEntry<T> | undefined;
-  if (existing) {return existing;}
+  if (existing) {
+    existing.fetcher = fetcher;
+    existing.staleTime = staleTime;
+    return existing;
+  }
 
   let generation = 0;
   let listeners = new Set<() => void>();
