@@ -310,7 +310,13 @@ pub fn work_context(
     // fleet tallies no project line can carry. It points at the `context`
     // operation so a gate miss still leaves the boss a path to the detail.
     let unmapped_employees = live_employees().count() - mapped_employees;
-    let has_fleet = unmapped_employees > 0 || !automations.automations.is_empty();
+    let open_tasks = boss.outcomes.iter().filter(|task| !task.terminal()).count();
+    let pending_handoffs: usize = boss
+        .outcomes
+        .iter()
+        .map(|task| task.pending_handoffs().count())
+        .sum();
+    let has_fleet = unmapped_employees > 0 || !automations.automations.is_empty() || open_tasks > 0;
     let mut header = String::new();
     if !header_lines.is_empty() || has_fleet {
         header.push_str("Work overview — the `context` operation returns the full digest.\n");
@@ -329,6 +335,12 @@ pub fn work_context(
     }
     if unmapped_employees > 0 {
         header.push_str(&format!("employees: {unmapped_employees} live\n"));
+    }
+    if open_tasks > 0 {
+        header.push_str(&format!(
+            "tasks: {open_tasks} open ({pending_handoffs} handoff{} awaiting a decision)\n",
+            if pending_handoffs == 1 { "" } else { "s" }
+        ));
     }
     if !automations.automations.is_empty() {
         header.push_str(&format!(
@@ -359,6 +371,51 @@ pub fn work_context(
         }
         if extra > 0 {
             digest.push_str(&format!("  - …{extra} more employees\n"));
+        }
+    }
+    if !boss.outcomes.is_empty() {
+        // Durable task records ride the digest so a rotated boss session
+        // still discovers the handoffs it owes decisions on — the record
+        // outlives whichever chat delivered the result.
+        digest.push_str("## Tasks\n");
+        for task in &boss.outcomes {
+            let status = if task.terminal() {
+                task.state.label()
+            } else if task.needs_attention(&boss.employees) {
+                "needs attention"
+            } else {
+                "open"
+            };
+            let pending = task.pending_handoffs().count();
+            digest.push_str(&format!(
+                "  - \"{}\" — {status} · {}\n",
+                truncate_chars(&task.outcome, TITLE_CAP),
+                task.id
+            ));
+            for handoff in task.handoffs.iter().filter(|handoff| handoff.pending()) {
+                let assignment = boss
+                    .employees
+                    .iter()
+                    .chain(boss.retired_employees.iter())
+                    .find(|entry| entry.session_id == handoff.assignment);
+                let label = assignment
+                    .map(|entry| format!("{} ({})", entry.identity.name, entry.job_title))
+                    .unwrap_or_else(|| handoff.assignment.to_string());
+                digest.push_str(&format!(
+                    "    handoff {} pending — {label} · intent: {}\n",
+                    handoff.id,
+                    truncate_chars(&handoff.intent, TITLE_CAP)
+                ));
+            }
+            if pending == 0 && task.completion_conflict.is_none() {
+                continue;
+            }
+            if let Some(conflict) = &task.completion_conflict {
+                digest.push_str(&format!(
+                    "    closure conflict — {}\n",
+                    truncate_chars(&conflict.reason, TITLE_CAP)
+                ));
+            }
         }
     }
     if !automations.automations.is_empty() {
@@ -584,6 +641,7 @@ mod tests {
             retired_employees: Vec::new(),
             deliverables: Vec::new(),
             planning: Vec::new(),
+            outcomes: Vec::new(),
             goals_viewed_at: None,
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
@@ -658,6 +716,7 @@ mod tests {
             request_fingerprint: None,
             plan_id: None,
             item_id: None,
+            assignment: None,
         }
     }
 

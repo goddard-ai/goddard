@@ -600,6 +600,11 @@ pub struct WakuBackend {
 /// (a freed device, an external release) no daemon event announces.
 const SUMMON_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How often the scheduler pass scans outcome records for unattended-task
+/// reminders — far finer than the fifteen-minute grace needs, and the
+/// idle-park bound while any outcome exists.
+const OUTCOME_REMINDER_TICK: u64 = 60;
+
 fn resource_set_empty(set: &waku_protocol::resources::ResourceSet) -> bool {
     set.exclusive.is_empty()
         && set.resident_devices == 0

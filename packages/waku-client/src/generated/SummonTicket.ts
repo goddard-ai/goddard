@@ -66,10 +66,11 @@ groupId?: string,
  */
 priority?: number,
 /**
- * The daemon-owned goal this assignment projects onto, when the
- * summoner linked one.
+ * The daemon-owned [`BossOutcome`] this assignment serves as an
+ * assignment, when the summoner linked one — the same link
+ * `BossEmployee::assignment` carries.
  */
-goalId?: string,
+outcomeId?: string,
 /**
  * The broker reservation holding this admission's claims once
  * granted — released exactly once when the generation expires.

@@ -6,8 +6,12 @@ import type { BossPersonaUpsert } from "./BossPersonaUpsert";
 import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeControl } from "./EmployeeControl";
 import type { EmployeeGoal } from "./EmployeeGoal";
+import type { HandoffDecision } from "./HandoffDecision";
 import type { MemoryOperation } from "./MemoryOperation";
 import type { ModelLimit } from "./ModelLimit";
+import type { NewOutcome } from "./NewOutcome";
+import type { OutcomeState } from "./OutcomeState";
+import type { OutcomeWait } from "./OutcomeWait";
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { PlanItemInput } from "./PlanItemInput";
 import type { PlanItemState } from "./PlanItemState";
@@ -87,18 +91,49 @@ groupId?: string,
  */
 priority?: number,
 /**
- * Link the assignment to a daemon-owned goal projection — the
- * Goals page shows it as pending work before any provider thread
- * exists.
+ * Link the assignment to a daemon-owned [`BossOutcome`] as one of
+ * its assignments — an unknown or closed task fails the summon.
+ * Ordinary assignment finishes leave a durable handoff on the task;
+ * `finishes_outcome` and `after_success` fix the completion
+ * behavior. Mutually exclusive with `new_outcome`.
  */
-goalId?: string,
+outcomeId?: string,
+/**
+ * Create the parent task in the same admission — the outcome
+ * and success criteria the first assignment serves. The creation
+ * is atomic with this assignment: a failed summon leaves no
+ * orphan task behind. Mutually exclusive with `outcome_id`.
+ */
+newOutcome?: NewOutcome,
+/**
+ * What the boss should decide or do with this assignment's result —
+ * captured now, delivered with the finish report, and kept on
+ * the durable handoff. Ordinary assignments only: a `finishes_outcome`
+ * summon carrying intent is rejected, and an omitted intent
+ * stores [`DEFAULT_AFTER_SUCCESS`].
+ */
+afterSuccess?: string,
+/**
+ * Designate this assignment the task's finisher — on success it
+ * completes the task without notifying the boss instead of
+ * leaving a handoff. Requires `outcome_id` or `new_outcome`, explicit
+ * success criteria on the task, and no other live finisher.
+ */
+finishesOutcome: boolean,
+/**
+ * Sibling assignments (employee session ids on the same task) whose
+ * accepted success must land before this assignment dispatches.
+ * A fresh `new_outcome` has no siblings to name — combine it with
+ * an existing `outcome_id` only.
+ */
+prerequisites?: Array<string>,
 /**
  * Tag the assignment to a plan — the `BossPlan::id`, its
  * planning-session id, or its `plans/<file>.md` path. An unknown
  * plan or a plan with a closed outcome fails the summon rather
  * than landing untagged; a still-open draft tags fine. The tag
  * is the durable, user-visible grouping — orthogonal to
- * `work_goal`, `goal_id`, and `group_id`.
+ * `work_goal`, `outcome_id`, and `group_id`.
  */
 plan?: string,
 /**
@@ -127,4 +162,52 @@ plan: string, items: Array<PlanItemInput>, } | { "type": "setPlanItemState", pla
 /**
  * The `PlanItem::id` to update.
  */
-item: string, state: PlanItemState, } | { "type": "setPlanOutcome", plan: string, outcome: PlanOutcome, } | { "type": "setProjectSubmissions", project: string, enabled: boolean, } | { "type": "setProjectQaBranch", project: string, branch: string | null, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "resume", sessionId: string, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "setAvatarStyle", sessionId: string | null, avatarStyle: AvatarStyle, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, reference: boolean, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };
+item: string, state: PlanItemState, } | { "type": "setPlanOutcome", plan: string, outcome: PlanOutcome, } | { "type": "createOutcome",
+/**
+ * The outcome the assignments work toward — the row's title.
+ */
+outcome: string,
+/**
+ * What "done" means — a `finishesOutcome` summon refuses the task
+ * while this is empty.
+ */
+successCriteria: string, } | { "type": "setOutcomeState",
+/**
+ * The `BossOutcome::id`.
+ */
+outcome: string, state: OutcomeState,
+/**
+ * Required for `completed` — the recorded result evidence;
+ * optional for `cancelled` and `open` as the reason note.
+ */
+evidence?: string, } | { "type": "resolveHandoff",
+/**
+ * The `BossOutcome::id`.
+ */
+outcome: string,
+/**
+ * The `OutcomeHandoff::id` to settle.
+ */
+handoff: string, decision: HandoffDecision, } | { "type": "setOutcomeWaiting",
+/**
+ * The `BossOutcome::id`.
+ */
+outcome: string,
+/**
+ * `until` waits suppress reminders until the timestamp; a
+ * `dependency` wait suppresses them until cleared.
+ */
+waiting?: OutcomeWait,
+/**
+ * Sleep reminders until this timestamp — `null` clears.
+ */
+snoozedUntil?: number, } | { "type": "attachPlan",
+/**
+ * The `BossOutcome::id`.
+ */
+outcome: string,
+/**
+ * The `BossPlan::id`, its planning-session id, or its
+ * `plans/<file>.md` path to attach.
+ */
+plan: string, } | { "type": "setProjectSubmissions", project: string, enabled: boolean, } | { "type": "setProjectQaBranch", project: string, branch: string | null, } | { "type": "control", sessionId: string, action: EmployeeControl, } | { "type": "resume", sessionId: string, } | { "type": "reportBlocker", message: string, } | { "type": "transcript", sessionId: string, turn: number | null, } | { "type": "rename", name: string, } | { "type": "renameEmployee", sessionId: string, name: string, } | { "type": "regenerateAvatar", sessionId: string | null, } | { "type": "setAvatarStyle", sessionId: string | null, avatarStyle: AvatarStyle, } | { "type": "upsertPersona", persona: BossPersonaUpsert, } | { "type": "setEmployeeIcon", sessionId: string, icon: CustomCommandIcon | null, } | { "type": "listFiles", path: string, } | { "type": "readFile", path: string, } | { "type": "writeFile", path: string, content: string, } | { "type": "createFolder", path: string, } | { "type": "speak", parts: Array<string>, } | { "type": "publishDeliverable", path: string, name: string | null, reference: boolean, } | { "type": "dismissDeliverable", id: string, } | { "type": "memory", operation: MemoryOperation, } | { "type": "pinDeliverable", id: string, pinned: boolean, } | { "type": "sweepDeliverable", id: string, dormant: boolean, } | { "type": "archiveDeliverable", id: string, archived: boolean, } | { "type": "eval", script: string, } | { "type": "markDeliverableViewed", id: string, } | { "type": "markGoalsViewed" };

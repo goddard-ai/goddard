@@ -3103,7 +3103,7 @@ session.archived_chip: アーカイブ済み
 terminal.boss_directory_fallback: "ターミナルのディレクトリ %{requested} は利用できません。代わりに %{fallback} を使用します。"
 terminal.boss_directory_unavailable: 要求されたディレクトリ、プロジェクトルート、ホームディレクトリはいずれも利用できません。
 terminal.boss_create_failed: 要求されたターミナルを作成できませんでした。
-right_panel.goals: ゴール
+right_panel.goals: タスク
 right_panel.goals_description: 進行中および完了した従業員の作業を追跡
 files.preview_wireframe: ワイヤーフレームをプレビュー
 files.wireframe_empty: このワイヤーフレームには画面がありません
@@ -3134,7 +3134,7 @@ boss.record_question: 質問
 boss.record_summary: 要約
 boss.goals_in_progress: 進行中
 boss.goals_completed: 完了
-boss.goals_empty: ゴールはまだありません
+boss.goals_empty: タスクはまだありません
 boss.goals_status_active: 進行中
 boss.goals_status_starting: 開始中
 boss.goals_status_working: 作業中
@@ -3158,14 +3158,14 @@ boss.goals_show_older: "さらに表示（あと %{count} 件）"
 boss.goals_show_less: 表示を減らす
 boss.goals_needs_attention: "%{count} 件が対応待ち"
 boss.goals_updated_ago: "%{ago}前"
-boss.goals_empty_title: ゴールはまだありません
-boss.goals_empty_body: ボスにゴールの割り当てを依頼してください。完了したゴールもここに残ります。
-boss.goals_loading: ゴールを読み込み中…
+boss.goals_empty_title: タスクはまだありません
+boss.goals_empty_body: ボスにタスクの割り当てを依頼してください。完了したタスクもここに残ります。
+boss.goals_loading: タスクを読み込み中…
 boss.goals_loading_body: ボスのスナップショットを待っています。
-boss.goals_unavailable: ゴールを取得できません
+boss.goals_unavailable: タスクを取得できません
 boss.goals_unavailable_body: ボスのスナップショットを取得できません——ホストへの接続を確認してください。
 boss.goals_offline: オフライン · 最後の既知の状態
-boss.goals_untitled: 無題のゴール
+boss.goals_untitled: 無題のタスク
 boss.goals_task_unavailable: タスクを利用できません
 boss.goals_project_unavailable: プロジェクトを利用できません
 boss.goals_queue_admission: 割り当て待ち

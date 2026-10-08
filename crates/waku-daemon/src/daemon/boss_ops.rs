@@ -471,7 +471,11 @@ impl WakuBackend {
                 allow_burst,
                 group_id,
                 priority,
-                goal_id,
+                outcome_id,
+                new_outcome,
+                after_success,
+                finishes_outcome,
+                prerequisites,
                 plan,
                 item,
                 request_id,
@@ -495,7 +499,11 @@ impl WakuBackend {
                     allow_burst,
                     group_id,
                     priority,
-                    goal_id,
+                    outcome_id,
+                    new_outcome,
+                    after_success,
+                    finishes_outcome,
+                    prerequisites,
                     plan,
                     item,
                     request_id,
@@ -809,6 +817,47 @@ impl WakuBackend {
                 self.wake_summon_queue();
                 Ok(BossResult::ResourcePolicySet { policy })
             }),
+            BossOperation::SetOutcomeState {
+                outcome,
+                state,
+                evidence,
+            } => self.boss.with_operation_lock(|| {
+                let (record, stop) = self
+                    .boss
+                    .set_outcome_state(caller, outcome, state, evidence)?;
+                // A cancelled outcome stops its remaining work — the
+                // cancel mark lands before teardown so the settles
+                // classify as intentional, and late results stay
+                // history that cannot revive the record.
+                for session_id in stop {
+                    self.boss.mark_cancelled(session_id)?;
+                    record_daemon_interrupt(
+                        &self.task_state,
+                        &self.task_store,
+                        session_id,
+                        Some("Outcome cancelled"),
+                    )?;
+                    self.finish_boss_employee(
+                        session_id,
+                        false,
+                        waku_protocol::boss::EmployeeSettle::Stopped,
+                    )?;
+                }
+                // A reopened outcome can un-gate a waiting finishing
+                // assignment — re-run dispatch either way.
+                self.wake_summon_queue();
+                let _ = record;
+                Ok(BossResult::State {
+                    state: self.boss.document(),
+                })
+            }),
+            // A settled handoff can unblock a waiting finishing
+            // assignment — re-run the dispatch pass after the decision.
+            op @ BossOperation::ResolveHandoff { .. } => {
+                let result = self.boss.handle(caller, op)?;
+                self.wake_summon_queue();
+                Ok(result)
+            }
             BossOperation::SetProjectSubmissions { project, enabled } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can configure project submissions");
@@ -1170,9 +1219,19 @@ impl WakuBackend {
         // A cancelled record expired on a supervisor's stop — intentional,
         // already visible on the record, and not a failure. It never wakes
         // the supervisor: whoever stopped it already knows.
+        let assignment_finish = self.boss.assignment_finished(&employee)?;
         let continuation = self.boss.plan_continuation_context(&employee);
+        // A linked assignment's success semantics sit above the work-kind
+        // switch: an ordinary success always hands off with its intent, a
+        // completion conflict always reports, and an accepted finish is
+        // silent even when the kind or settings would report.
         let reports = !employee.cancelled
-            && (employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
+            && !matches!(assignment_finish, crate::boss::AssignmentFinish::Completed)
+            && (matches!(
+                assignment_finish,
+                crate::boss::AssignmentFinish::Handoff { .. }
+                    | crate::boss::AssignmentFinish::Conflict { .. }
+            ) || employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
                 || continuation.is_some()
                 || employee.blocker.is_some()
                 || failed
@@ -1247,6 +1306,41 @@ impl WakuBackend {
             prompt.push_str(&format!(
                 " Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}"
             ));
+            match &assignment_finish {
+                crate::boss::AssignmentFinish::Handoff { id, intent } => {
+                    let outcome_id = employee
+                        .assignment
+                        .as_ref()
+                        .map(|assignment| assignment.outcome_id)
+                        .unwrap_or_default();
+                    prompt.push_str(&format!(
+                        "\n\nOutcome handoff {id} is pending — the assignment served outcome {outcome_id}. Planned after success: \"{intent}\" Resolve it explicitly with goddard-agent boss '{{\"type\":\"resolveHandoff\",\"outcome\":\"{outcome_id}\",\"handoff\":\"{id}\",\"decision\":{{\"type\":\"assign\",\"assignment\":\"<employee sessionId>\"}} | {{\"type\":\"dismiss\"}} | {{\"type\":\"completeOutcome\",\"evidence\":\"...\"}}}}' — reading this report does not settle it."
+                    ));
+                }
+                crate::boss::AssignmentFinish::Conflict { reason } => {
+                    let outcome_id = employee
+                        .assignment
+                        .as_ref()
+                        .map(|assignment| assignment.outcome_id)
+                        .unwrap_or_default();
+                    prompt.push_str(&format!(
+                        "\n\nIt was the finishing assignment for outcome {outcome_id}, but completion was refused: {reason}. The outcome is unfinished — resolve the outstanding items, then complete it explicitly or assign a new finishing assignment."
+                    ));
+                }
+                _ if employee
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| !assignment.finishes_outcome) =>
+                {
+                    let intent = employee
+                        .assignment
+                        .as_ref()
+                        .map(|assignment| assignment.after_success.as_str())
+                        .unwrap_or_default();
+                    prompt.push_str(&format!("\n\nPlanned after success: \"{intent}\""));
+                }
+                _ => {}
+            }
             if let Some(continuation) = continuation {
                 prompt.push_str(&continuation);
             }

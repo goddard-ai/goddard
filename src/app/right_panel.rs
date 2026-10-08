@@ -1292,6 +1292,20 @@ impl RightPanelSurface {
     }
 }
 
+/// The Tasks tab's content fingerprint: which assignments it would
+/// list. Stable across status churn inside a row; changes when work
+/// arrives or leaves so a dismissed auto-show re-arms on real change.
+fn boss_tasks_content_signature(rows: &[crate::app::boss::BossGoalRow]) -> u64 {
+    if rows.is_empty() {
+        return 0;
+    }
+    let mut ids: Vec<Uuid> = rows.iter().map(|row| row.session_id).collect();
+    ids.sort();
+    ids.iter().fold(rows.len() as u64, |signature, id| {
+        signature.wrapping_mul(31).wrapping_add(id.as_u128() as u64)
+    })
+}
+
 fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Option<&str>) -> String {
     let label = match surface {
         RightPanelSurface::Files => files_selected_path
@@ -2877,6 +2891,71 @@ mod tests {
             (BossGoalBucket::Running, BossGoalStatus::Unavailable)
         );
     }
+
+    /// The auto-show's content fingerprint: no rows means nothing to
+    /// surface, identical row sets fingerprint the same regardless of
+    /// order or status churn, and a row arriving or leaving re-arms a
+    /// dismissed panel exactly when the Tasks content actually changed.
+    #[test]
+    fn boss_tasks_signature_tracks_row_identity_not_status() {
+        use waku_protocol::boss::EmployeeLifecycle;
+
+        let row = |id: Uuid, lifecycle, blocker: Option<&str>| boss::BossGoalRow {
+            session_id: id,
+            name: "Nina".into(),
+            job_title: "Reviewer".into(),
+            lifecycle,
+            blocker: blocker.map(str::to_owned),
+            created_at: Some(100),
+            expired_at: None,
+            queued_at: None,
+            queued_objective: None,
+            queued_project: None,
+            queue_rank: None,
+            group_id: None,
+        };
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+
+        // Empty content never signs — the tab stays a manual surface.
+        assert_eq!(boss_tasks_content_signature(&[]), 0);
+
+        // The same assignments sign identically in any order and across
+        // lifecycle churn — a dismissal outlives status updates.
+        let quiet = row(first, EmployeeLifecycle::Working, None);
+        let settled = row(first, EmployeeLifecycle::Expired, Some("a blocker"));
+        assert_eq!(
+            boss_tasks_content_signature(&[quiet.clone()]),
+            boss_tasks_content_signature(&[settled]),
+        );
+        assert_eq!(
+            boss_tasks_content_signature(&[
+                quiet.clone(),
+                row(second, EmployeeLifecycle::Queued, None),
+            ]),
+            boss_tasks_content_signature(&[
+                row(second, EmployeeLifecycle::Expired, None),
+                quiet.clone(),
+            ]),
+        );
+
+        // Work arriving or leaving changes the signature — a dismissed
+        // auto-show re-arms only here.
+        assert_ne!(
+            boss_tasks_content_signature(&[quiet.clone()]),
+            boss_tasks_content_signature(&[
+                quiet.clone(),
+                row(second, EmployeeLifecycle::Queued, None),
+            ]),
+        );
+        assert_ne!(
+            boss_tasks_content_signature(&[
+                quiet.clone(),
+                row(second, EmployeeLifecycle::Queued, None),
+            ]),
+            boss_tasks_content_signature(&[quiet]),
+        );
+    }
 }
 
 impl Waku {
@@ -3269,7 +3348,7 @@ impl Waku {
         }
         let owner = self.active_right_panel_owner();
         if owner == self.right_panel_live_owner {
-            self.initialize_boss_goals_panel(cx);
+            self.sync_boss_tasks_panel(cx);
             return;
         }
         let parked = self.take_active_right_panel_state();
@@ -3278,21 +3357,63 @@ impl Waku {
         let incoming = RightPanelSessionState::take_or_closed(&mut self.right_panel_states, owner);
         self.right_panel_live_owner = owner;
         self.restore_right_panel_state(incoming, cx);
-        self.initialize_boss_goals_panel(cx);
+        self.sync_boss_tasks_panel(cx);
     }
 
-    /// Apply the boss chat's default once per daemon, leaving explicit tabs
-    /// and later visibility choices intact. Boss pages do not claim it.
-    fn initialize_boss_goals_panel(&mut self, cx: &mut Context<Self>) {
+    /// Fingerprint of the daemon's Tasks content — which assignment rows
+    /// the tab would show. A change re-arms the auto-show after a manual
+    /// dismissal; a mere status update inside a row does not.
+    fn boss_tasks_signature(&self, key: waku_client::DaemonKey) -> u64 {
+        let Some(rows) = self.boss_ui.goal_rows.get(&key) else {
+            return 0;
+        };
+        boss_tasks_content_signature(rows)
+    }
+
+    /// Record the user's choice to keep the panel hidden or the tab
+    /// closed for the task content currently on offer — the auto-show
+    /// respects it until new content changes the signature.
+    pub(super) fn dismiss_boss_tasks_panel(&mut self) {
         let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
             return;
         };
-        if !self.boss_ui.goals_panel_initialized.insert(key) {
+        let signature = self.boss_tasks_signature(key);
+        if signature != 0 {
+            self.boss_ui.goals_panel_dismissed.insert(key, signature);
+        }
+    }
+
+    /// Show the boss chat's Tasks tab when the panel is hidden and the
+    /// daemon has real task content to surface. A dismissed signature
+    /// stays dismissed, an already-mounted tab is left alone, and a
+    /// visible strip holding other tabs is the user's arrangement — the
+    /// tab never inserts itself over it. A panel the user never resized
+    /// opens at the narrowest usable width; a resized one keeps its
+    /// width. Boss pages do not claim it.
+    pub(super) fn sync_boss_tasks_panel(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
+            return;
+        };
+        if self
+            .right_panel_surfaces
+            .contains(&RightPanelSurface::Goals)
+        {
             return;
         }
-        if self.right_panel_surfaces.is_empty() && !self.git_panel_visible {
-            self.add_right_panel_surface(RightPanelSurface::Goals, true, cx);
+        let signature = self.boss_tasks_signature(key);
+        if signature == 0 || self.boss_ui.goals_panel_dismissed.get(&key) == Some(&signature) {
+            return;
         }
+        if self.right_panel_visible && !self.right_panel_surfaces.is_empty() {
+            return;
+        }
+        if self.git_panel_visible {
+            return;
+        }
+        if self.right_panel_width == DEFAULT_RIGHT_PANEL_WIDTH {
+            self.right_panel_width = RIGHT_PANEL_MIN_WIDTH;
+        }
+        self.add_right_panel_surface(RightPanelSurface::Goals, true, cx);
     }
 
     /// Whether the live strip belongs to a boss-managed session — an
@@ -4198,6 +4319,9 @@ impl Waku {
             RightPanelSurface::SideChat(id) => Some(id),
             _ => None,
         };
+        if self.right_panel_surfaces[index] == RightPanelSurface::Goals {
+            self.dismiss_boss_tasks_panel();
+        }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None

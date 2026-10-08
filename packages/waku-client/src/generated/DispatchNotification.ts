@@ -5,4 +5,4 @@ import type { ProviderKind } from "./ProviderKind";
  * A dispatch notification the daemon owes a supervisor — durable so a
  * restart neither drops nor duplicates it. Delivery dedupes on `id`.
  */
-export type DispatchNotification = { id: number, sessionId: string, generation: number, provider: ProviderKind, model: string, goalId?: string, createdAt: number, deliveredAt?: number, };
+export type DispatchNotification = { id: number, sessionId: string, generation: number, provider: ProviderKind, model: string, outcomeId?: string, createdAt: number, deliveredAt?: number, };

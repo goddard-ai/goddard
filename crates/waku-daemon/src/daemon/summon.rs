@@ -17,6 +17,7 @@ impl WakuBackend {
         let _ = std::thread::Builder::new()
             .name("summon-scheduler".into())
             .spawn(move || {
+                let mut last_reminder_scan = 0u64;
                 loop {
                     let Some(backend) = backend.upgrade() else {
                         return;
@@ -28,6 +29,18 @@ impl WakuBackend {
                             eprintln!("could not rotate Boss chat: {error:#}");
                         }
                         backend.run_summon_scheduler();
+                        let now = crate::model::unix_time();
+                        // Unattended-outcome reminders run on the queue's
+                        // clock, throttled — eligibility turns purely on
+                        // time, so a busy queue must not re-scan every pass.
+                        if backend.boss.has_outcomes()
+                            && now >= last_reminder_scan + OUTCOME_REMINDER_TICK
+                        {
+                            last_reminder_scan = now;
+                            if let Err(error) = backend.deliver_outcome_reminders(now) {
+                                eprintln!("could not deliver outcome reminders: {error:#}");
+                            }
+                        }
                     }
                     let queued = backend.boss.identity_and_session().1.is_some()
                         || !backend.boss.queued_heads().is_empty()
@@ -37,9 +50,13 @@ impl WakuBackend {
                     let mut signaled = lock.lock();
                     // Queued tickets get a bounded tick so broker-side changes
                     // no daemon event announces — a freed device, an external
-                    // release — still reach the queue. An idle queue parks.
+                    // release — still reach the queue. An idle queue parks;
+                    // outcome records keep it on the reminder cadence so a
+                    // time-driven eligibility crossing still delivers.
                     let timeout = if queued {
                         SUMMON_RECONCILE_INTERVAL
+                    } else if backend.boss.has_outcomes() {
+                        std::time::Duration::from_secs(OUTCOME_REMINDER_TICK)
                     } else {
                         std::time::Duration::from_secs(3600)
                     };
@@ -128,6 +145,52 @@ impl WakuBackend {
                 eprintln!("could not deliver settled employee update for {target}: {error:#}");
             }
         }
+    }
+
+    /// One batched prompt to the boss chat covering every outcome whose
+    /// unattended reminder came due. Delivery precedes the reminded mark
+    /// so a failed enqueue retries next pass instead of losing the nudge;
+    /// no boss session (mid-rotation or none yet) skips delivery unmarked
+    /// and a later pass collapses the wait into one reminder.
+    fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
+        let due = self.boss.scan_outcome_reminders(now)?;
+        if due.is_empty() {
+            return Ok(());
+        }
+        let Some(session) = self.boss.identity_and_session().1 else {
+            return Ok(());
+        };
+        let document = self.boss.document();
+        let lines: Vec<String> = due
+            .iter()
+            .filter_map(|id| document.outcomes.iter().find(|task| task.id == *id))
+            .map(|task| {
+                let latest = task
+                    .handoffs
+                    .last()
+                    .map(|handoff| format!("latest: {}", handoff.intent))
+                    .unwrap_or_else(|| "no work assigned yet".to_string());
+                let unattended = task
+                    .unattended_since
+                    .map(|since| {
+                        outcome_reminder_duration(
+                            now.saturating_sub(since.max(task.last_activity_at)),
+                        )
+                    })
+                    .unwrap_or_else(|| "a while".to_string());
+                format!("• {} — unattended {unattended}; {latest}", task.outcome)
+            })
+            .collect();
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let prompt = format!(
+            "These tasks have no active assignment or recorded waiting reason:\n{}",
+            lines.join("\n")
+        );
+        let events = self.event_source.lock().clone();
+        self.queue_agent_prompt(session, prompt, None, &events)?;
+        self.boss.mark_outcomes_reminded(&due, now)
     }
 
     /// The host resource broker — or the test-rooted ledger a backend was
@@ -327,6 +390,27 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
+        // A linked assignment holds at the queue head until its readiness
+        // lands — the finishing assignment waits on the outcome's
+        // completion conditions, an ordinary one on its prerequisites.
+        // Each pass re-evaluates; the hold reads as ordinary Waiting work.
+        if !self.boss.assignment_ready(employee) {
+            self.boss.record_blocked(
+                session_id,
+                vec![waku_protocol::boss::AdmissionBlocker::OutcomeWait {
+                    detail: if employee
+                        .assignment
+                        .as_ref()
+                        .is_some_and(|assignment| assignment.finishes_outcome)
+                    {
+                        "waiting for the outcome's remaining work and handoff decisions".to_owned()
+                    } else {
+                        "waiting on prerequisite assignments".to_owned()
+                    },
+                }],
+            )?;
+            return Ok(false);
+        }
         let claim = self.admission_claim(&ticket);
         // The reservation key is stable per generation, so a retry after a
         // lost response or a restart re-issues instead of double-claiming.
@@ -799,7 +883,11 @@ impl WakuBackend {
         allow_burst: bool,
         group_id: Option<String>,
         priority: Option<i64>,
-        goal_id: Option<Uuid>,
+        outcome_id: Option<Uuid>,
+        new_outcome: Option<waku_protocol::boss::NewOutcome>,
+        after_success: Option<String>,
+        finishes_outcome: bool,
+        prerequisites: Vec<Uuid>,
         plan: Option<String>,
         item: Option<Uuid>,
         request_id: Option<Uuid>,
@@ -830,7 +918,9 @@ impl WakuBackend {
             "permissions": permissions,
             "workGoal": work_goal, "icon": icon, "resources": resources,
             "allowBurst": allow_burst, "groupId": group_id,
-            "priority": priority, "goalId": goal_id,
+            "priority": priority, "outcomeId": outcome_id, "newOutcome": new_outcome,
+            "afterSuccess": after_success, "finishesOutcome": finishes_outcome,
+            "prerequisites": prerequisites,
             "plan": plan, "item": item,
         }))?;
         if let Some(request_id) = request_id
@@ -855,6 +945,19 @@ impl WakuBackend {
             (None, Some(_)) => bail!("a summon item tag requires a plan"),
             (None, None) => None,
         };
+        // The assignment link resolves the same way: unknown or closed tasks,
+        // a second live finisher, the finisher/intent conflict, an
+        // out-of-task prerequisite, and new work during the finishing
+        // phase all fail at admission. A `newOutcome` summon creates its
+        // parent atomically with this assignment.
+        let assignment = self.boss.assignment_admission(
+            outcome_id,
+            new_outcome,
+            finishes_outcome,
+            after_success,
+            prerequisites,
+            plan_tag.map(|(plan_id, _)| plan_id),
+        )?;
         if let Some(adopt) = &adopt_worktree {
             self.resolve_worktree_adoption(Path::new(&project), adopt, None)?;
         }
@@ -911,7 +1014,7 @@ impl WakuBackend {
             pending_prompts: Vec::new(),
             group_id,
             priority,
-            goal_id,
+            outcome_id: assignment.as_ref().map(|assignment| assignment.outcome_id),
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -927,6 +1030,7 @@ impl WakuBackend {
             employee.plan_id = Some(plan_id);
             employee.item_id = item_id;
         }
+        employee.assignment = assignment.clone();
         let employee_name = employee.identity.name.clone();
         let employee_title = employee.job_title.clone();
         // The summon marker freezes the identity the card shows — name,
@@ -962,6 +1066,15 @@ impl WakuBackend {
         if let Err(error) = self.boss.enqueue_ticket(employee, ticket) {
             self.remove_session_shell(session_id);
             return Err(error);
+        }
+        // The task's finishing pointer lands once the employee exists —
+        // admission already proved the designation is free to take.
+        if let Some(assignment) = assignment
+            .as_ref()
+            .filter(|assignment| assignment.finishes_outcome)
+        {
+            self.boss
+                .designate_finisher(assignment.outcome_id, session_id)?;
         }
         // The summon marker lands in the supervisor's transcript now —
         // the card reads the roster for live status and shows its queued
@@ -1573,7 +1686,7 @@ impl WakuBackend {
                 pending_prompts: Vec::new(),
                 group_id: None,
                 priority: None,
-                goal_id: None,
+                outcome_id: None,
                 reservation: None,
                 pending_resources: None,
                 pending_reservation: None,
@@ -1708,5 +1821,17 @@ impl WakuBackend {
             report_trigger,
             events,
         )
+    }
+}
+
+/// A compact "for 2h 5m"-style label for a reminder's unattended stretch.
+fn outcome_reminder_duration(seconds: u64) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    match (hours, minutes) {
+        (0, 0) => "under a minute".to_string(),
+        (0, minutes) => format!("for {minutes}m"),
+        (hours, 0) => format!("for {hours}h"),
+        (hours, minutes) => format!("for {hours}h {minutes}m"),
     }
 }

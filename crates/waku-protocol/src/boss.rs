@@ -466,11 +466,12 @@ pub struct SummonTicket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub priority: Option<i64>,
-    /// The daemon-owned goal this assignment projects onto, when the
-    /// summoner linked one.
+    /// The daemon-owned [`BossOutcome`] this assignment serves as an
+    /// assignment, when the summoner linked one — the same link
+    /// `BossEmployee::assignment` carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub goal_id: Option<Uuid>,
+    pub outcome_id: Option<Uuid>,
     /// The broker reservation holding this admission's claims once
     /// granted — released exactly once when the generation expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -533,6 +534,10 @@ pub enum AdmissionBlocker {
     ModelLimit { used: u32, limit: u32 },
     /// A declared host resource set cannot be granted right now.
     HostResources { detail: String },
+    /// A linked assignment's readiness has not landed — the finishing
+    /// assignment waits on the outcome's completion conditions, an
+    /// ordinary one on its prerequisites.
+    OutcomeWait { detail: String },
 }
 
 /// Admission status attached to `Summoned` and control results — the
@@ -594,7 +599,7 @@ pub struct DispatchNotification {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub goal_id: Option<Uuid>,
+    pub outcome_id: Option<Uuid>,
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -757,7 +762,48 @@ pub struct BossEmployee {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub item_id: Option<Uuid>,
+    /// The task this assignment serves as a assignment of, plus the completion
+    /// behavior captured at summon. `None` makes the employee a
+    /// standalone job — its finish follows `work_goal` alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub assignment: Option<Assignment>,
 }
+
+/// An employee's membership in a [`BossOutcome`] — the assignment identity plus
+/// the completion behavior fixed when the assignment started. A resume
+/// is a new attempt under the same assignment; it inherits this capture
+/// unchanged. Changing it means stopping and reassigning the work.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Assignment {
+    /// The `BossOutcome::id` the assignment serves.
+    pub outcome_id: Uuid,
+    /// What the boss should decide or do with the result — delivered
+    /// with the finish report and kept on the durable handoff. The
+    /// summon supplies it for ordinary assignments; the visible default is
+    /// [`DEFAULT_AFTER_SUCCESS`]. Finishing assignments carry no intent — a
+    /// `finishesOutcome` summon with `afterSuccess` fails.
+    #[serde(default)]
+    pub after_success: String,
+    /// The task's designated finisher: a successful finish completes the
+    /// task without notifying the boss, provided the completion
+    /// conditions still hold at acceptance.
+    #[serde(default)]
+    pub finishes_outcome: bool,
+    /// Sibling assignments (employee session ids, same task) whose accepted
+    /// success must land before this assignment starts. Readiness is
+    /// admission, not ordering: a waiting assignment holds its slot until
+    /// every prerequisite succeeds. One level, so a fresh leaf cannot
+    /// close a cycle — but a cancelled prerequisite leaves the wait
+    /// standing until the boss replaces it with a new assignment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prerequisites: Vec<Uuid>,
+}
+
+/// The follow-up intent an ordinary assignment carries when its summon names
+/// none — keeps every success actionable without inventing intent.
+pub const DEFAULT_AFTER_SUCCESS: &str = "Review the result and decide the next step.";
 
 impl BossEmployee {
     /// Move the employee to `lifecycle`, keeping the `expired` wire
@@ -1087,6 +1133,10 @@ pub struct BossState {
     /// finalization and archive — the freeze they carry is permanent.
     #[serde(default)]
     pub planning: Vec<BossPlan>,
+    /// Daemon-owned outcomes — the durable records assignments serve,
+    /// including their handoffs and finishing designations.
+    #[serde(default)]
+    pub outcomes: Vec<BossOutcome>,
     /// The daemon clock when the user last had the Goals page open —
     /// a goal finished since then reads as unread in the sidebar, the
     /// same contract `BossDeliverable::viewed_at` gives its row.
@@ -1213,6 +1263,450 @@ impl BossState {
             .collect::<Vec<_>>();
         groups.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
         groups
+    }
+}
+
+/// A task's stored lifecycle — set by an explicit audited act (a
+/// finishing assignment's accepted success or an owner's `setOutcomeState`),
+/// never derived from assignments finishing. `Open` doubles as the reopen target.
+/// `NeedsAttention` is deliberately absent: attention derives from live
+/// assignment and handoff state, so it can never disagree with it.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OutcomeState {
+    #[default]
+    Open,
+    Completed,
+    Cancelled,
+}
+
+impl OutcomeState {
+    pub fn terminal(&self) -> bool {
+        !matches!(self, OutcomeState::Open)
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            OutcomeState::Open => "open",
+            OutcomeState::Completed => "completed",
+            OutcomeState::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// One entry in a task's audit trail — the outcome a transition entered,
+/// when, and who moved it. A `Completed`/`Cancelled` followed by `Open`
+/// is a reopen.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeTransition {
+    pub state: OutcomeState,
+    pub at: u64,
+    pub actor: PlanActor,
+}
+
+/// The boss's decision on a pending handoff, as `resolveHandoff` takes
+/// it. `assign` references the follow-up assignment the boss already
+/// summoned; `completeOutcome` accepts the assignment's result as the outcome
+/// and records `evidence` — an explicit completion that notifies nobody.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum HandoffDecision {
+    /// Follow-up work was assigned — the new assignment's employee session id.
+    Assign { assignment: Uuid },
+    /// The result needed no follow-up.
+    Dismiss,
+    /// The result already achieved the outcome — complete the task with
+    /// this evidence.
+    CompleteOutcome { evidence: String },
+}
+
+/// A settled handoff — the boss's decision and when it landed.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffResolution {
+    pub decision: HandoffDecision,
+    pub at: u64,
+}
+
+/// A successful ordinary assignment's durable claim on the boss: the result
+/// plus the follow-up intent captured at assignment. It survives boss
+/// session rotation — the record is daemon-owned, and a rotated session
+/// sees it through `view` and the work digest. Resolution is explicit;
+/// reading the delivered report alone never settles one.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeHandoff {
+    pub id: Uuid,
+    /// The assignment's employee session id.
+    pub assignment: Uuid,
+    /// The ticket generation whose success produced it — the attempt
+    /// identity, so a re-driven finish cannot write a second handoff.
+    #[serde(default)]
+    pub attempt: u64,
+    /// The follow-up intent captured at assignment — `Assignment`'s
+    /// `after_success` verbatim.
+    #[serde(default)]
+    pub intent: String,
+    pub created_at: u64,
+    /// `None` while the boss's decision is still owed — a pending
+    /// handoff counts as unresolved task work and blocks completion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolution: Option<HandoffResolution>,
+}
+
+impl OutcomeHandoff {
+    pub fn pending(&self) -> bool {
+        self.resolution.is_none()
+    }
+}
+
+/// A finishing assignment's success that the completion conditions
+/// refused — the durable issue the task's attention state reports until
+/// the boss resolves it. The assignment's result is retained; the task is
+/// unfinished.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionConflict {
+    /// The finishing assignment's employee session id.
+    pub assignment: Uuid,
+    /// The ticket generation whose success conflicted.
+    #[serde(default)]
+    pub attempt: u64,
+    /// The specific outstanding items at acceptance — unfinished assignments,
+    /// unresolved failures, or pending handoffs.
+    pub reason: String,
+    pub at: u64,
+}
+
+/// The panel-facing task status — the stored outcome plus derived
+/// attention. Never persisted; it recomputes from live assignment state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutcomeStatus {
+    Open,
+    NeedsAttention,
+    Completed,
+    Cancelled,
+}
+
+/// A daemon-owned outcome: the durable record assignments serve. One
+/// level of nesting — assignments are employees linked by
+/// `Assignment::outcome_id`; at most one of them is the designated finishing
+/// assignment at a time. Nothing about the record notifies the boss: a
+/// finishing success updates it silently, while failures, blockers, and
+/// completion conflicts surface through the assignment's ordinary report
+/// path.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossOutcome {
+    pub id: Uuid,
+    /// What the assignments should achieve — the row's outcome text.
+    pub outcome: String,
+    /// What "done" means — a `finishesOutcome` summon refuses an
+    /// outcome whose criteria are not explicit.
+    #[serde(default)]
+    pub success_criteria: String,
+    /// The stored lifecycle — attention and per-assignment states stay
+    /// derived. Set only through `setOutcomeState` or an accepted
+    /// finishing success.
+    #[serde(default)]
+    pub state: OutcomeState,
+    /// The designated finishing assignment's employee session id — the only
+    /// assignment whose success may complete the task. A cancelled finisher
+    /// clears it; an expired one's replacement overwrites it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finishing_assignment: Option<Uuid>,
+    /// Every ordinary-assignment success handoff, in creation order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handoffs: Vec<OutcomeHandoff>,
+    /// The unresolved closure conflict, when a closing success could not
+    /// close. Cleared by an accepted close, an explicit outcome change,
+    /// or a replacement closer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub completion_conflict: Option<CompletionConflict>,
+    /// The evidence recorded at completion — the finishing assignment's
+    /// transcript index or the owner's completion note.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub evidence: Option<String>,
+    /// The approved plan attached to this task — a `BossPlan::id` set by
+    /// `attachPlan` or a `newOutcome` summon carrying `plan`. The plan
+    /// describes the approach; the task alone owns execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_id: Option<Uuid>,
+    /// A tracked wait the boss recorded — a date or dependency that
+    /// explains the pause. Its presence suppresses unattended reminders
+    /// until it clears.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waiting: Option<OutcomeWait>,
+    /// Reminders for this task sleep until this timestamp — a snooze
+    /// with an expiry, never an indefinite untracked promise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snoozed_until: Option<u64>,
+    /// The last meaningful activity: assignment, result, or a recorded
+    /// decision. The unattended grace clock starts here — merely viewing
+    /// the task does not move it.
+    #[serde(default)]
+    pub last_activity_at: u64,
+    /// When the task first entered reminder eligibility — open, idle,
+    /// and with no pending handoff or issue covering it. The reminder
+    /// scan maintains it: `None` whenever eligibility conditions fail,
+    /// so a new eligible stretch starts a fresh grace period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unattended_since: Option<u64>,
+    /// The last delivered reminder for the current unattended period —
+    /// which period it covered and when it went out, so repeats hold to
+    /// the daily cadence and a reopened period reminds afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub last_reminder: Option<OutcomeReminder>,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub completed_at: Option<u64>,
+    /// Audited outcome transitions — closes, cancels, and reopens in
+    /// order, each with actor and time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<OutcomeTransition>,
+}
+
+/// A tracked pause on a task — why nothing is assigned right now. A
+/// reminder skips a waiting task until the wait clears: a `until` wait
+/// clears at its timestamp, a `dependency` wait clears when the boss
+/// clears it or the named work resolves.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum OutcomeWait {
+    /// Waiting until a point in time — a deliberate deferral, not an
+    /// unattended task.
+    Until { at: u64 },
+    /// Waiting on a tracked dependency described in `note` — another
+    /// task or external event the boss can point at.
+    Dependency { note: String },
+}
+
+/// One delivered unattended-task reminder: which unattended period it
+/// covered (`unattended_since` value at send time) and when it went out.
+/// A period repeats at most once per day; a fresh period re-arms the
+/// first-reminder path.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeReminder {
+    pub unattended_since: u64,
+    pub at: u64,
+}
+
+/// The daemon clock's grace and repeat cadence for unattended-task
+/// reminders — fifteen minutes of quiet before the first batched
+/// reminder, then at most one per day per uninterrupted period.
+pub const OUTCOME_UNATTENDED_GRACE: u64 = 15 * 60;
+pub const OUTCOME_REMINDER_INTERVAL: u64 = 24 * 60 * 60;
+
+/// The `newOutcome` summon input — the parent outcome and success criteria
+/// created atomically with the assignment's first assignment.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NewOutcome {
+    /// The outcome the assignments work toward — the row's title.
+    pub outcome: String,
+    /// What "done" means — required up front so a `finishesOutcome`
+    /// assignment can be assigned into the task without a second step.
+    #[serde(default)]
+    pub success_criteria: String,
+}
+
+impl BossOutcome {
+    /// Closed outcomes refuse new work until reopened.
+    pub fn terminal(&self) -> bool {
+        self.state.terminal()
+    }
+
+    /// Handoffs still owed a boss decision — they count as unresolved
+    /// goal work and block closure.
+    pub fn pending_handoffs(&self) -> impl Iterator<Item = &OutcomeHandoff> {
+        self.handoffs.iter().filter(|handoff| handoff.pending())
+    }
+
+    /// The assignment's outcome for completion purposes: an accepted success is
+    /// an expired record with a clean finish and no flagged blocker;
+    /// cancelled assignments count for nothing.
+    pub fn assignment_succeeded(employee: &BossEmployee) -> bool {
+        employee.expired
+            && !employee.cancelled
+            && employee.blocker.is_none()
+            && employee
+                .expiry
+                .as_ref()
+                .map(|expiry| expiry.cause == ExpiryCause::Finished)
+                // Records predating `expiry` carry no settle — an expired
+                // row reads as finished rather than as a phantom failure.
+                .unwrap_or(true)
+    }
+
+    /// An unresolved failure or intervention blocker on this assignment —
+    /// the task's needs-attention source besides a completion conflict.
+    /// A cancelled assignment's issue is resolved by the cancel itself; a
+    /// retried or resumed one returns to active work when re-admission
+    /// clears its expiry and blocker.
+    pub fn assignment_unresolved(employee: &BossEmployee) -> bool {
+        if employee.cancelled {
+            return false;
+        }
+        employee.blocker.is_some()
+            || (employee.expired
+                && employee
+                    .expiry
+                    .as_ref()
+                    .is_some_and(|expiry| expiry.cause.reports()))
+    }
+
+    /// Whether an unresolved failure, intervention blocker, or closure
+    /// conflict exists — the derived half of [`OutcomeStatus`]. Pending
+    /// handoffs are "awaiting follow-up" — Open, not attention.
+    pub fn needs_attention(&self, employees: &[BossEmployee]) -> bool {
+        self.completion_conflict.is_some()
+            || employees.iter().any(|employee| {
+                employee
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == self.id)
+                    && Self::assignment_unresolved(employee)
+            })
+    }
+
+    /// The renderable status — stored outcome, or attention over open.
+    pub fn status(&self, employees: &[BossEmployee]) -> OutcomeStatus {
+        match self.state {
+            OutcomeState::Completed => OutcomeStatus::Completed,
+            OutcomeState::Cancelled => OutcomeStatus::Cancelled,
+            OutcomeState::Open if self.needs_attention(employees) => OutcomeStatus::NeedsAttention,
+            OutcomeState::Open => OutcomeStatus::Open,
+        }
+    }
+
+    /// Whether the recorded wait or snooze still suppresses reminders at
+    /// `now` — an expired `until` wait or elapsed snooze stops shielding
+    /// the task so a forgotten deferral cannot hide it forever.
+    pub fn wait_shields(&self, now: u64) -> bool {
+        if self.snoozed_until.is_some_and(|until| until > now) {
+            return true;
+        }
+        match &self.waiting {
+            Some(OutcomeWait::Until { at }) => *at > now,
+            Some(OutcomeWait::Dependency { .. }) => true,
+            None => false,
+        }
+    }
+
+    /// A assignment this task's reminders treat as live work — not expired
+    /// and not cancelled. Queued, dispatching, and working all count:
+    /// capacity waiting is already-visible Waiting work.
+    fn live_assignment(employee: &BossEmployee) -> bool {
+        !employee.expired && !employee.cancelled
+    }
+
+    /// Whether the task currently qualifies for an unattended reminder:
+    /// open, no live assignment, no pending handoff, no intervention issue —
+    /// and not shielded by a recorded wait or snooze. A task covered by
+    /// its own pending delivery is never "missing coordination."
+    pub fn reminder_eligible(&self, employees: &[BossEmployee], now: u64) -> bool {
+        !self.terminal()
+            && !self.wait_shields(now)
+            && self.completion_conflict.is_none()
+            && self.pending_handoffs().next().is_none()
+            && !employees.iter().any(|employee| {
+                employee
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == self.id)
+                    && (Self::live_assignment(employee) || Self::assignment_unresolved(employee))
+            })
+    }
+
+    /// When the current unattended stretch became reminder-eligible —
+    /// the grace clock's start. `unattended_since` marks entry into
+    /// eligibility; `last_activity_at` marks the last meaningful event,
+    /// and the reminder waits past both.
+    fn grace_started(&self) -> Option<u64> {
+        self.unattended_since
+            .map(|since| since.max(self.last_activity_at))
+    }
+
+    /// Whether a reminder should deliver at `now` — the grace period has
+    /// lapsed and either this unattended period has never reminded or the
+    /// daily interval has elapsed since its last delivery.
+    pub fn reminder_due(&self, now: u64) -> bool {
+        let Some(start) = self.grace_started() else {
+            return false;
+        };
+        if now < start + OUTCOME_UNATTENDED_GRACE {
+            return false;
+        }
+        match &self.last_reminder {
+            None => true,
+            Some(reminder) => {
+                reminder.unattended_since != self.unattended_since.unwrap_or(0)
+                    || now >= reminder.at + OUTCOME_REMINDER_INTERVAL
+            }
+        }
+    }
+
+    /// The specific items standing between the outcome and accepting
+    /// `closer`'s success — unfinished non-cancelled assignments, unresolved
+    /// failures, and pending handoffs, named for the conflict report or
+    /// a waiting closer's detail. Closure also re-checks these, so a
+    /// state that could not dispatch never settles as completed.
+    pub fn completion_outstanding(
+        &self,
+        employees: &[BossEmployee],
+        retired: &[BossEmployee],
+        closer: Uuid,
+    ) -> Vec<String> {
+        let mut outstanding = Vec::new();
+        for employee in employees.iter().chain(retired.iter()) {
+            let belongs = employee
+                .assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.outcome_id == self.id);
+            if !belongs || employee.session_id == closer || employee.cancelled {
+                continue;
+            }
+            if !employee.expired {
+                outstanding.push(format!(
+                    "assignment \"{}\" ({}) is still working",
+                    employee.job_title, employee.identity.name
+                ));
+            } else if !Self::assignment_succeeded(employee) {
+                outstanding.push(format!(
+                    "assignment \"{}\" ({}) has an unresolved failure or blocker",
+                    employee.job_title, employee.identity.name
+                ));
+            }
+        }
+        let pending = self.pending_handoffs().count();
+        if pending > 0 {
+            outstanding.push(format!(
+                "{pending} handoff{} await{} a decision",
+                if pending == 1 { "" } else { "s" },
+                if pending == 1 { "s" } else { "" }
+            ));
+        }
+        outstanding
     }
 }
 
@@ -1373,18 +1867,47 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         priority: Option<i64>,
-        /// Link the assignment to a daemon-owned goal projection — the
-        /// Goals page shows it as pending work before any provider thread
-        /// exists.
+        /// Link the assignment to a daemon-owned [`BossOutcome`] as one of
+        /// its assignments — an unknown or closed task fails the summon.
+        /// Ordinary assignment finishes leave a durable handoff on the task;
+        /// `finishes_outcome` and `after_success` fix the completion
+        /// behavior. Mutually exclusive with `new_outcome`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
-        goal_id: Option<Uuid>,
+        outcome_id: Option<Uuid>,
+        /// Create the parent task in the same admission — the outcome
+        /// and success criteria the first assignment serves. The creation
+        /// is atomic with this assignment: a failed summon leaves no
+        /// orphan task behind. Mutually exclusive with `outcome_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        new_outcome: Option<NewOutcome>,
+        /// What the boss should decide or do with this assignment's result —
+        /// captured now, delivered with the finish report, and kept on
+        /// the durable handoff. Ordinary assignments only: a `finishes_outcome`
+        /// summon carrying intent is rejected, and an omitted intent
+        /// stores [`DEFAULT_AFTER_SUCCESS`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        after_success: Option<String>,
+        /// Designate this assignment the task's finisher — on success it
+        /// completes the task without notifying the boss instead of
+        /// leaving a handoff. Requires `outcome_id` or `new_outcome`, explicit
+        /// success criteria on the task, and no other live finisher.
+        #[serde(default)]
+        finishes_outcome: bool,
+        /// Sibling assignments (employee session ids on the same task) whose
+        /// accepted success must land before this assignment dispatches.
+        /// A fresh `new_outcome` has no siblings to name — combine it with
+        /// an existing `outcome_id` only.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        prerequisites: Vec<Uuid>,
         /// Tag the assignment to a plan — the `BossPlan::id`, its
         /// planning-session id, or its `plans/<file>.md` path. An unknown
         /// plan or a plan with a closed outcome fails the summon rather
         /// than landing untagged; a still-open draft tags fine. The tag
         /// is the durable, user-visible grouping — orthogonal to
-        /// `work_goal`, `goal_id`, and `group_id`.
+        /// `work_goal`, `outcome_id`, and `group_id`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         plan: Option<String>,
@@ -1446,6 +1969,73 @@ pub enum BossOperation {
         plan: String,
         outcome: PlanOutcome,
     },
+    /// Create a daemon-owned outcome assignments can be assigned to via
+    /// summon's `outcomeId`. The outcome opens with no assignments — it
+    /// completes only through an accepted finishing assignment or an
+    /// explicit `setOutcomeState`, never from an empty or finished
+    /// assignment list. Boss/human only.
+    CreateOutcome {
+        /// The outcome the assignments work toward — the row's title.
+        outcome: String,
+        /// What "done" means — a `finishesOutcome` summon refuses the task
+        /// while this is empty.
+        #[serde(default)]
+        success_criteria: String,
+    },
+    /// Move an outcome between `open`, `completed`, and `cancelled`:
+    /// `completed` requires `evidence` and no pending handoffs,
+    /// `cancelled` abandons the outcome and stops its live assignments,
+    /// and `open` reopens a closed outcome — a cancelled outcome's late
+    /// results cannot revive it. Every transition lands on the audit
+    /// trail and notifies nobody. Boss/human only.
+    SetOutcomeState {
+        /// The `BossOutcome::id`.
+        outcome: Uuid,
+        state: OutcomeState,
+        /// Required for `completed` — the recorded result evidence;
+        /// optional for `cancelled` and `open` as the reason note.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        evidence: Option<String>,
+    },
+    /// Resolve one pending handoff on an outcome — the boss's explicit
+    /// decision on the assignment's result. `completeOutcome` completes
+    /// the outcome silently with the given evidence; the other pending
+    /// handoffs, if any, still block it. Boss/human only.
+    ResolveHandoff {
+        /// The `BossOutcome::id`.
+        outcome: Uuid,
+        /// The `OutcomeHandoff::id` to settle.
+        handoff: Uuid,
+        decision: HandoffDecision,
+    },
+    /// Record a tracked wait or snooze on an outcome — how the boss
+    /// explains a deliberate pause so unattended reminders leave it
+    /// alone. A `null` clears the field. Boss/human only.
+    SetOutcomeWaiting {
+        /// The `BossOutcome::id`.
+        outcome: Uuid,
+        /// `until` waits suppress reminders until the timestamp; a
+        /// `dependency` wait suppresses them until cleared.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        waiting: Option<OutcomeWait>,
+        /// Sleep reminders until this timestamp — `null` clears.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        snoozed_until: Option<u64>,
+    },
+    /// Attach an approved plan to an outcome — the approach record the
+    /// assignments execute against. Attaching supersedes any previous
+    /// attachment; it never changes outcome state or starts work.
+    /// Boss/human only.
+    AttachPlan {
+        /// The `BossOutcome::id`.
+        outcome: Uuid,
+        /// The `BossPlan::id`, its planning-session id, or its
+        /// `plans/<file>.md` path to attach.
+        plan: String,
+    },
     /// Toggle `merge submit` landings for a registered project — off by
     /// default, so the boss opts a project in before its employees can
     /// submit. `project` is a registered project's name, id, or root path.
@@ -1503,7 +2093,9 @@ pub enum BossOperation {
     RegenerateAvatar {
         session_id: Option<Uuid>,
     },
-    /// Change the generator without re-rolling the seed. Human-only.
+    /// Change the avatar generator without re-rolling seeds. The style is
+    /// global — it applies to the boss and every employee at once, so
+    /// `session_id` is retained for compatibility and ignored. Human-only.
     SetAvatarStyle {
         session_id: Option<Uuid>,
         avatar_style: AvatarStyle,
@@ -2030,7 +2622,7 @@ mod tests {
                     && overrides.computer_use == Some(true)
                     && overrides.integration_ids.is_none()
                     && reasoning_effort.as_deref() == Some("high")
-                    // An omitted kind is an errand: its finish reports.
+                    // An omitted kind is an assignment: its finish reports.
                     && work_goal == super::EmployeeGoal::Errand
         ));
         let goal: super::BossOperation = serde_json::from_value(serde_json::json!({

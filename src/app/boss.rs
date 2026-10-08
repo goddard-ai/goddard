@@ -191,7 +191,10 @@ pub(super) struct BossUi {
     pub(super) goals_ongoing_signature: Option<u64>,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
     pub(super) goals_history_expanded: HashSet<DaemonKey>,
-    pub(super) goals_panel_initialized: HashSet<DaemonKey>,
+    /// The task-content signature the user last dismissed for this daemon —
+    /// a manual hide or tab close suppresses the auto-show until the
+    /// Tasks surface's content actually changes.
+    pub(super) goals_panel_dismissed: HashMap<DaemonKey, u64>,
     pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
@@ -347,7 +350,7 @@ impl Default for BossUi {
             goals_ongoing_signature: None,
             goals_collapsed: HashSet::new(),
             goals_history_expanded: HashSet::new(),
-            goals_panel_initialized: HashSet::new(),
+            goals_panel_dismissed: HashMap::new(),
             projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),
@@ -759,7 +762,9 @@ fn viewed_plan_just_finalized(
 
 /// Plan affiliation belongs on Goals regardless of finish-reporting semantics.
 fn employee_belongs_on_goals(employee: &waku_protocol::boss::BossEmployee) -> bool {
-    employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal || employee.plan_id.is_some()
+    employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
+        || employee.plan_id.is_some()
+        || employee.assignment.is_some()
 }
 
 impl Waku {
@@ -995,6 +1000,9 @@ impl Waku {
             self.chat_with_boss(key, cx);
         }
         self.pump_boss_avatars(cx);
+        if changed {
+            self.sync_boss_tasks_panel(cx);
+        }
         changed
     }
 
@@ -2553,6 +2561,9 @@ impl Waku {
         );
     }
 
+    /// The generator style is a global Boss setting — the menu lives on
+    /// whichever managed session the user opened, and every selection
+    /// applies to the boss and all employees at once.
     fn set_managed_avatar_style(
         &mut self,
         session_id: Uuid,
@@ -2562,11 +2573,10 @@ impl Waku {
         let Some((key, ..)) = self.managed_session_meta(session_id) else {
             return;
         };
-        let employee = (!self.managed_session_is_boss(key, session_id)).then_some(session_id);
         self.boss_request(
             key,
             BossOperation::SetAvatarStyle {
-                session_id: employee,
+                session_id: None,
                 avatar_style,
             },
             BossReply::List,
@@ -7296,7 +7306,8 @@ fn boss_queue_detail(
             used = used,
             limit = limit
         ),
-        Some(waku_protocol::boss::AdmissionBlocker::HostResources { detail }) => detail.clone(),
+        Some(waku_protocol::boss::AdmissionBlocker::HostResources { detail })
+        | Some(waku_protocol::boss::AdmissionBlocker::OutcomeWait { detail }) => detail.clone(),
         None => {
             if rank == Some(1) {
                 tr!("boss.goals_queue_admission")
@@ -7761,6 +7772,7 @@ mod tests {
             request_fingerprint: None,
             plan_id: None,
             item_id: None,
+            assignment: None,
         }
     }
 
@@ -7909,7 +7921,7 @@ mod tests {
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
-            goal_id: None,
+            outcome_id: None,
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -7955,6 +7967,7 @@ mod tests {
             request_fingerprint: None,
             plan_id: None,
             item_id: None,
+            assignment: None,
         }
     }
 
@@ -8218,6 +8231,7 @@ mod tests {
             deliverables: Vec::new(),
             goals_viewed_at: None,
             planning: Vec::new(),
+            outcomes: Vec::new(),
             resource_policy: waku_protocol::boss::BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,

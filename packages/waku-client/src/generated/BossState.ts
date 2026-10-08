@@ -2,6 +2,7 @@
 import type { BossDeliverable } from "./BossDeliverable";
 import type { BossEmployee } from "./BossEmployee";
 import type { BossIdentity } from "./BossIdentity";
+import type { BossOutcome } from "./BossOutcome";
 import type { BossPersona } from "./BossPersona";
 import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
@@ -24,6 +25,11 @@ deliverables: Array<BossDeliverable>,
  * finalization and archive — the freeze they carry is permanent.
  */
 planning: Array<BossPlan>,
+/**
+ * Daemon-owned outcomes — the durable records assignments serve,
+ * including their handoffs and finishing designations.
+ */
+outcomes: Array<BossOutcome>,
 /**
  * The daemon clock when the user last had the Goals page open —
  * a goal finished since then reads as unread in the sidebar, the

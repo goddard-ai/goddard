@@ -3054,8 +3054,8 @@ session.archived_chip: 已归档
 terminal.boss_directory_fallback: "终端目录 %{requested} 不可用；改用 %{fallback}。"
 terminal.boss_directory_unavailable: 所请求的目录、项目根目录和主目录均不可用。
 terminal.boss_create_failed: 无法创建所请求的终端。
-right_panel.goals: 目标
-right_panel.goals_description: 跟踪进行中与已完成的员工工作
+right_panel.goals: 任务
+right_panel.goals_description: 跟踪进行中与已完成的员工任务
 files.preview_wireframe: 预览线框图
 files.wireframe_empty: 此线框图没有任何界面
 transcript.interrupted_after: "%{duration}后中断"
@@ -3085,7 +3085,7 @@ boss.record_question: 问题
 boss.record_summary: 摘要
 boss.goals_in_progress: 进行中
 boss.goals_completed: 已完成
-boss.goals_empty: 暂无目标
+boss.goals_empty: 暂无任务
 boss.goals_status_active: 进行中
 boss.goals_status_starting: 启动中
 boss.goals_status_working: 工作中
@@ -3109,14 +3109,14 @@ boss.goals_show_older: "显示更多（还有 %{count} 条）"
 boss.goals_show_less: 收起
 boss.goals_needs_attention: "%{count} 项需要关注"
 boss.goals_updated_ago: "%{ago}前"
-boss.goals_empty_title: 暂无目标
-boss.goals_empty_body: 请让老板分配一个目标。目标完成后仍会保留在这里。
-boss.goals_loading: 正在加载目标…
+boss.goals_empty_title: 暂无任务
+boss.goals_empty_body: 请让 Boss 分配任务。任务完成后仍会保留在这里。
+boss.goals_loading: 正在加载任务…
 boss.goals_loading_body: 正在等待老板的快照送达。
-boss.goals_unavailable: 目标不可用
+boss.goals_unavailable: 任务不可用
 boss.goals_unavailable_body: 老板的快照不可用——请检查与主机的连接。
 boss.goals_offline: 离线 · 最近一次已知状态
-boss.goals_untitled: 未命名目标
+boss.goals_untitled: 未命名任务
 boss.goals_task_unavailable: 任务不可用
 boss.goals_project_unavailable: 项目不可用
 boss.goals_queue_admission: 等待准入

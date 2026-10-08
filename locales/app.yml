@@ -4102,7 +4102,7 @@ right_panel.files_description:
 right_panel.diff_description:
   en: Review file changes
 right_panel.goals:
-  en: Goals
+  en: Tasks
 right_panel.goals_description:
   en: Track employee work in progress and completed work
 right_panel.terminal_unavailable:
@@ -6211,7 +6211,7 @@ boss.goals_in_progress:
 boss.goals_completed:
   en: Completed
 boss.goals_empty:
-  en: No goals yet
+  en: No tasks yet
 boss.goals_status_active:
   en: In progress
 boss.goals_status_starting:
@@ -6259,21 +6259,21 @@ boss.goals_needs_attention:
 boss.goals_updated_ago:
   en: "%{ago} ago"
 boss.goals_empty_title:
-  en: No goals yet
+  en: No tasks yet
 boss.goals_empty_body:
-  en: Ask your Boss to assign a goal. Goals stay here after they finish.
+  en: Ask your Boss to assign a task. Tasks stay here after they finish.
 boss.goals_loading:
-  en: Loading goals…
+  en: Loading tasks…
 boss.goals_loading_body:
   en: Waiting for the Boss snapshot to arrive.
 boss.goals_unavailable:
-  en: Goals unavailable
+  en: Tasks unavailable
 boss.goals_unavailable_body:
   en: The Boss snapshot is unavailable — check the host connection.
 boss.goals_offline:
   en: Offline · last known state
 boss.goals_untitled:
-  en: Untitled goal
+  en: Untitled task
 boss.goals_task_unavailable:
   en: Task unavailable
 boss.goals_project_unavailable:

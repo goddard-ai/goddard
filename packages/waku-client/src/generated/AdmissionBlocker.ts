@@ -4,4 +4,4 @@
  * Why an accepted ticket cannot dispatch yet — a wait reason, never an
  * RPC error.
  */
-export type AdmissionBlocker = { "kind": "modelLimit", used: number, limit: number, } | { "kind": "hostResources", detail: string, };
+export type AdmissionBlocker = { "kind": "modelLimit", used: number, limit: number, } | { "kind": "hostResources", detail: string, } | { "kind": "outcomeWait", detail: string, };

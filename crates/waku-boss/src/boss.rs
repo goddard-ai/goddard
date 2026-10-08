@@ -11,14 +11,36 @@ use uuid::Uuid;
 #[cfg(test)]
 use waku_protocol::boss::BossPersonaUpsert;
 use waku_protocol::boss::{
-    AdmissionBlocker, BossDeliverable, BossEmployee, BossFile, BossIdentity, BossOperation,
-    BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState, BossWave,
-    DispatchNotification, EmployeeExpiry, EmployeeGoal, EmployeeLifecycle, EmployeeSettle,
-    ExpiryCause, INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate,
-    MemoryMigrationReport, ModelLimit, PermissionOverrides, PersonaPermissions, PlanActor,
-    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition,
-    SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification,
+    AdmissionBlocker, Assignment, BossDeliverable, BossEmployee, BossFile, BossIdentity,
+    BossOperation, BossOutcome, BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState,
+    BossWave, CompletionConflict, DEFAULT_AFTER_SUCCESS, DispatchNotification, EmployeeExpiry,
+    EmployeeGoal, EmployeeLifecycle, EmployeeSettle, ExpiryCause, HandoffResolution,
+    INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate, MemoryMigrationReport,
+    ModelLimit, NewOutcome, OutcomeHandoff, OutcomeReminder, OutcomeState, OutcomeTransition,
+    OutcomeWait, PermissionOverrides, PersonaPermissions, PlanActor, PlanItem, PlanItemInput,
+    PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition, SummonTicket, WaveMember,
+    WaveMemberOutcome, WaveNotification,
 };
+
+/// What an employee's settle did to its task — the daemon's finish tail
+/// reads it to decide the report. `Quiet` leaves the ordinary work-kind
+/// rules in charge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssignmentFinish {
+    /// Nothing task-shaped applied — a standalone job, a settle the
+    /// success semantics do not claim, a late result on a closed task,
+    /// or a superseded finisher.
+    Quiet,
+    /// An ordinary assignment's accepted success left a durable handoff —
+    /// the report carries its id and captured intent.
+    Handoff { id: Uuid, intent: String },
+    /// The designated finisher satisfied the completion conditions — the task
+    /// is completed and the finish owes nobody a report.
+    Completed,
+    /// The designated closer succeeded but could not close — the report
+    /// carries the recorded conflict's reason.
+    Conflict { reason: String },
+}
 use waku_protocol::model::ProviderKind;
 
 pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
@@ -522,6 +544,12 @@ impl BossService {
 
     pub fn document(&self) -> BossState {
         self.state.lock().clone()
+    }
+
+    /// Whether any outcome records exist — the scheduler's cheap check
+    /// before it pays for a reminder pass.
+    pub fn has_outcomes(&self) -> bool {
+        !self.state.lock().outcomes.is_empty()
     }
 
     /// The pair `BossOperation::Open` needs — identity plus chat session id —
@@ -1067,6 +1095,673 @@ impl BossService {
         Ok(updated.unwrap())
     }
 
+    /// `createOutcome` — open a daemon-owned outcome assignments can be
+    /// assigned to. An empty outcome stays open: completion is always an
+    /// explicit act, never an inference from an empty assignment list.
+    pub fn create_outcome(
+        &self,
+        caller: Option<Uuid>,
+        title: &str,
+        success_criteria: &str,
+    ) -> anyhow::Result<BossOutcome> {
+        self.require_owner(caller)?;
+        let task = Self::new_outcome_record(title, success_criteria)?;
+        self.update(|state| {
+            state.outcomes.push(task.clone());
+            Ok(())
+        })?;
+        Ok(task)
+    }
+
+    /// The shared outcome-record builder — `createOutcome` and a
+    /// `newOutcome` summon both produce the same zero-activity open row.
+    fn new_outcome_record(title: &str, success_criteria: &str) -> anyhow::Result<BossOutcome> {
+        let title = title.trim();
+        anyhow::ensure!(!title.is_empty(), "a task needs a title");
+        let now = waku_protocol::model::unix_time();
+        Ok(BossOutcome {
+            id: Uuid::new_v4(),
+            outcome: title.to_owned(),
+            success_criteria: success_criteria.trim().to_owned(),
+            state: OutcomeState::Open,
+            finishing_assignment: None,
+            handoffs: Vec::new(),
+            completion_conflict: None,
+            evidence: None,
+            plan_id: None,
+            waiting: None,
+            snoozed_until: None,
+            last_activity_at: now,
+            unattended_since: None,
+            last_reminder: None,
+            created_at: now,
+            completed_at: None,
+            history: Vec::new(),
+        })
+    }
+
+    /// `setOutcomeState` — the audited task lifecycle: `open` tasks close
+    /// to `completed`/`cancelled`, and a closed task reopens to `open`.
+    /// Completion requires evidence and settles only once every handoff
+    /// is resolved — a task never finishes while the boss still holds an
+    /// unanswered result. Silent in every direction: transitions update
+    /// the record and notify nobody. A `cancelled` transition reports the
+    /// live assignments the daemon should stop.
+    pub fn set_outcome_state(
+        &self,
+        caller: Option<Uuid>,
+        outcome: Uuid,
+        state: OutcomeState,
+        evidence: Option<String>,
+    ) -> anyhow::Result<(BossOutcome, Vec<Uuid>)> {
+        self.require_owner(caller)?;
+        let actor = self.plan_actor(caller);
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        let mut stop = Vec::new();
+        self.update(|doc| {
+            let entry = doc
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome)
+                .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
+            if entry.state == state {
+                bail!("outcome {} is already {}", entry.id, state.label());
+            }
+            let allowed = matches!(
+                (entry.state, state),
+                (
+                    OutcomeState::Open,
+                    OutcomeState::Completed | OutcomeState::Cancelled
+                ) | (
+                    OutcomeState::Completed | OutcomeState::Cancelled,
+                    OutcomeState::Open,
+                )
+            );
+            anyhow::ensure!(
+                allowed,
+                "outcome {} is {}; reopen it before setting another state",
+                entry.id,
+                entry.state.label()
+            );
+            if state == OutcomeState::Completed {
+                let evidence = evidence
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty());
+                anyhow::ensure!(
+                    evidence.is_some(),
+                    "completing an outcome requires recorded evidence"
+                );
+                let pending = entry.pending_handoffs().count();
+                anyhow::ensure!(
+                    pending == 0,
+                    "outcome {} has {pending} unresolved handoff{}",
+                    entry.id,
+                    if pending == 1 { "" } else { "s" }
+                );
+                entry.evidence = evidence.map(str::to_owned);
+                entry.completed_at = Some(now);
+            }
+            if state == OutcomeState::Cancelled {
+                // Parent cancelled during work — remaining work stops;
+                // late results become history that cannot revive it.
+                stop = doc
+                    .employees
+                    .iter()
+                    .filter(|employee| {
+                        !employee.expired
+                            && !employee.cancelled
+                            && employee
+                                .assignment
+                                .as_ref()
+                                .is_some_and(|assignment| assignment.outcome_id == outcome)
+                    })
+                    .map(|employee| employee.session_id)
+                    .collect();
+            }
+            entry.state = state;
+            entry.completion_conflict = None;
+            entry.last_activity_at = now;
+            entry.history.push(OutcomeTransition {
+                state,
+                at: now,
+                actor,
+            });
+            updated = Some(entry.clone());
+            Ok(())
+        })?;
+        Ok((updated.unwrap(), stop))
+    }
+
+    /// `resolveHandoff` — settle one pending handoff with the boss's
+    /// decision: an assigned follow-up assignment, a dismissal, or a silent
+    /// outcome completion with evidence. `completeOutcome` enforces the
+    /// same bar `setOutcomeState` does — every other handoff resolved
+    /// first.
+    pub fn resolve_handoff(
+        &self,
+        caller: Option<Uuid>,
+        outcome: Uuid,
+        handoff: Uuid,
+        decision: waku_protocol::boss::HandoffDecision,
+    ) -> anyhow::Result<BossOutcome> {
+        use waku_protocol::boss::HandoffDecision;
+        self.require_owner(caller)?;
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let entry = state
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome)
+                .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
+            anyhow::ensure!(
+                !entry.terminal(),
+                "outcome {} is {}; reopen it before resolving its handoffs",
+                entry.id,
+                entry.state.label()
+            );
+            let position = entry
+                .handoffs
+                .iter()
+                .position(|known| known.id == handoff)
+                .ok_or_else(|| anyhow!("unknown handoff {handoff}"))?;
+            anyhow::ensure!(
+                entry.handoffs[position].pending(),
+                "handoff {handoff} is already resolved"
+            );
+            if let HandoffDecision::Assign { assignment } = &decision {
+                let linked = state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .any(|employee| {
+                        employee.session_id == *assignment
+                            && employee
+                                .assignment
+                                .as_ref()
+                                .is_some_and(|link| link.outcome_id == outcome)
+                    });
+                anyhow::ensure!(
+                    linked,
+                    "assigned employee {assignment} has no assignment on outcome {outcome}"
+                );
+            }
+            entry.handoffs[position].resolution = Some(HandoffResolution {
+                decision: decision.clone(),
+                at: now,
+            });
+            entry.last_activity_at = now;
+            if let HandoffDecision::CompleteOutcome { evidence } = &decision {
+                let evidence = evidence.trim();
+                anyhow::ensure!(
+                    !evidence.is_empty(),
+                    "completing a task requires recorded evidence"
+                );
+                let pending = entry.pending_handoffs().count();
+                anyhow::ensure!(
+                    pending == 0,
+                    "task {} still has {pending} unresolved handoff{}",
+                    entry.id,
+                    if pending == 1 { "" } else { "s" }
+                );
+                entry.state = OutcomeState::Completed;
+                entry.completed_at = Some(now);
+                entry.completion_conflict = None;
+                entry.evidence = Some(evidence.to_owned());
+                entry.history.push(OutcomeTransition {
+                    state: OutcomeState::Completed,
+                    at: now,
+                    actor: self.plan_actor(caller),
+                });
+            }
+            updated = Some(entry.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
+    }
+
+    /// `setOutcomeWaiting` — record a tracked wait or snooze so unattended
+    /// reminders leave a deliberately paused task alone. Clearing both
+    /// returns it to ordinary eligibility with a fresh grace period.
+    pub fn set_outcome_waiting(
+        &self,
+        caller: Option<Uuid>,
+        outcome: Uuid,
+        waiting: Option<OutcomeWait>,
+        snoozed_until: Option<u64>,
+    ) -> anyhow::Result<BossOutcome> {
+        self.require_owner(caller)?;
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let entry = state
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome)
+                .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
+            entry.waiting = waiting;
+            entry.snoozed_until = snoozed_until;
+            entry.last_activity_at = now;
+            updated = Some(entry.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
+    }
+
+    /// `attachPlan` — point a task at an approved plan. The plan stays a
+    /// description of the approach; attaching changes no execution state.
+    pub fn attach_plan(
+        &self,
+        caller: Option<Uuid>,
+        outcome: Uuid,
+        plan: &str,
+    ) -> anyhow::Result<BossOutcome> {
+        self.require_owner(caller)?;
+        let reference = {
+            let state = self.state.lock();
+            let plan = find_plan(&state.planning, plan)
+                .ok_or_else(|| anyhow!("unknown plan \"{plan}\""))?;
+            anyhow::ensure!(
+                plan.finalized_at.is_some() && !plan.terminal(),
+                "plan \"{}\" is not an approved open plan",
+                plan.plan_file
+            );
+            plan.id
+        };
+        let now = waku_protocol::model::unix_time();
+        let mut updated = None;
+        self.update(|state| {
+            let entry = state
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome)
+                .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
+            entry.plan_id = Some(reference);
+            entry.last_activity_at = now;
+            updated = Some(entry.clone());
+            Ok(())
+        })?;
+        Ok(updated.unwrap())
+    }
+
+    /// The summon-time half of a assignment link: validate the task (or
+    /// create it for a `newOutcome` summon), the finisher designation, and
+    /// the captured completion behavior, then return the `Assignment` the
+    /// employee record carries. A `newOutcome` summon creates its parent
+    /// atomically with the assignment — validation failures happen
+    /// before the write, so no orphan task survives a rejected summon.
+    /// The task's `finishing_assignment` pointer lands later through
+    /// [`BossService::designate_finisher`], once the employee id exists.
+    pub fn assignment_admission(
+        &self,
+        outcome_id: Option<Uuid>,
+        new_outcome: Option<NewOutcome>,
+        finishes_outcome: bool,
+        after_success: Option<String>,
+        prerequisites: Vec<Uuid>,
+        plan: Option<Uuid>,
+    ) -> anyhow::Result<Option<Assignment>> {
+        if new_outcome.is_some() {
+            anyhow::ensure!(
+                outcome_id.is_none(),
+                "outcomeId and newOutcome name different parents — pass one"
+            );
+            anyhow::ensure!(
+                prerequisites.is_empty(),
+                "a new task has no sibling assignments to wait on"
+            );
+        }
+        let resolved_id;
+        {
+            // The `newOutcome` write and its first link commit in one update:
+            // validation runs first, so a rejected assignment leaves no
+            // orphan parent behind.
+            let mut state = self.state.lock();
+            if let Some(input) = &new_outcome {
+                let mut task = Self::new_outcome_record(&input.outcome, &input.success_criteria)?;
+                task.plan_id = plan;
+                anyhow::ensure!(
+                    !finishes_outcome || !task.success_criteria.is_empty(),
+                    "a finishing assignment requires the task's success criteria to be explicit"
+                );
+                resolved_id = task.id;
+                state.outcomes.push(task);
+            } else {
+                resolved_id = outcome_id.unwrap_or_default();
+            }
+            if outcome_id.is_none() && new_outcome.is_none() {
+                anyhow::ensure!(
+                    !finishes_outcome,
+                    "a finishing assignment requires a task — pass outcomeId or newOutcome"
+                );
+                anyhow::ensure!(
+                    after_success.is_none(),
+                    "afterSuccess applies only to task assignments — pass outcomeId"
+                );
+                anyhow::ensure!(
+                    prerequisites.is_empty(),
+                    "prerequisites apply only to task assignments — pass outcomeId"
+                );
+                return Ok(None);
+            }
+            let outcome_id = resolved_id;
+            let task = state
+                .outcomes
+                .iter()
+                .find(|task| task.id == outcome_id)
+                .ok_or_else(|| anyhow!("unknown task {outcome_id}"))?;
+            anyhow::ensure!(
+                !task.terminal(),
+                "task {outcome_id} is {}; reopen it before assigning new assignments",
+                task.state.label()
+            );
+            let finisher = task.finishing_assignment.and_then(|session| {
+                state
+                    .employees
+                    .iter()
+                    .find(|employee| employee.session_id == session)
+            });
+            let finisher_live =
+                finisher.is_some_and(|employee| !employee.expired && !employee.cancelled);
+            if finishes_outcome {
+                anyhow::ensure!(
+                    after_success.is_none(),
+                    "a finishing assignment completes the task silently — it cannot also carry follow-up intent"
+                );
+                anyhow::ensure!(
+                    !task.success_criteria.trim().is_empty(),
+                    "a finishing assignment requires the task's success criteria to be explicit"
+                );
+                anyhow::ensure!(
+                    !finisher_live,
+                    "task {outcome_id} already has a finishing assignment — cancel it or let it settle before designating another"
+                );
+            } else {
+                // The finishing phase keeps its completion contract
+                // stable — new ordinary work waits until the attempt
+                // resolves or is stopped.
+                anyhow::ensure!(
+                    !finisher_live,
+                    "task {outcome_id} is in its finishing phase — stop the finishing assignment before assigning more work"
+                );
+            }
+            // Prerequisites must be sibling assignments on this task. A new
+            // leaf cannot close a cycle — nothing declared dependents on
+            // an employee that does not exist yet.
+            for prerequisite in &prerequisites {
+                let sibling = state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .find(|employee| employee.session_id == *prerequisite)
+                    .ok_or_else(|| anyhow!("unknown prerequisite assignment {prerequisite}"))?;
+                let belongs = sibling
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == outcome_id);
+                anyhow::ensure!(
+                    belongs,
+                    "prerequisite {prerequisite} is not a assignment of task {outcome_id}"
+                );
+                anyhow::ensure!(
+                    !sibling.cancelled,
+                    "prerequisite {prerequisite} is cancelled — replace it with a new assignment"
+                );
+            }
+            // Meaningful activity: an assignment restarts the task's
+            // unattended clock.
+            if let Some(entry) = state
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome_id)
+            {
+                entry.last_activity_at = waku_protocol::model::unix_time();
+                entry.unattended_since = None;
+            }
+            if let Some(input_plan) = plan
+                && let Some(entry) = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|entry| entry.id == outcome_id)
+                && entry.plan_id.is_none()
+            {
+                entry.plan_id = Some(input_plan);
+            }
+            Ok(Some(Assignment {
+                outcome_id,
+                after_success: if finishes_outcome {
+                    String::new()
+                } else {
+                    let intent = after_success.unwrap_or_default();
+                    let intent = intent.trim();
+                    if intent.is_empty() {
+                        DEFAULT_AFTER_SUCCESS.to_owned()
+                    } else {
+                        intent.to_owned()
+                    }
+                },
+                finishes_outcome,
+                prerequisites,
+            }))
+        }
+    }
+
+    /// Point a task's finishing designation at an admitted assignment — the
+    /// second half of a `finishesOutcome` summon, written after the employee
+    /// record exists. A fresh designation supersedes the previous
+    /// completion conflict: the boss has chosen the next attempt.
+    pub fn designate_finisher(&self, outcome_id: Uuid, assignment: Uuid) -> anyhow::Result<()> {
+        self.update(|state| {
+            if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
+                task.finishing_assignment = Some(assignment);
+                task.completion_conflict = None;
+            }
+            Ok(())
+        })
+    }
+
+    /// Whether an admitted ticket may start now under task readiness —
+    /// a finishing assignment waits for the completion conditions, an
+    /// ordinary one for its prerequisites' accepted successes. A held
+    /// assignment keeps its queued state; the next settle or decision
+    /// re-evaluates.
+    pub fn assignment_ready(&self, employee: &BossEmployee) -> bool {
+        let Some(assignment) = &employee.assignment else {
+            return true;
+        };
+        let state = self.state.lock();
+        let Some(task) = state
+            .outcomes
+            .iter()
+            .find(|task| task.id == assignment.outcome_id)
+        else {
+            return true;
+        };
+        if task.terminal() {
+            return false;
+        }
+        if assignment.finishes_outcome {
+            return task
+                .completion_outstanding(
+                    &state.employees,
+                    &state.retired_employees,
+                    employee.session_id,
+                )
+                .is_empty();
+        }
+        assignment.prerequisites.iter().all(|prerequisite| {
+            state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|sibling| sibling.session_id == *prerequisite)
+                .is_some_and(BossOutcome::assignment_succeeded)
+        })
+    }
+
+    /// The task bookkeeping an employee's settle performs, after
+    /// `complete_expiry` committed the record. Called once per winning
+    /// finish — a re-driven tail for the same attempt returns `Quiet`.
+    pub fn assignment_finished(&self, employee: &BossEmployee) -> anyhow::Result<AssignmentFinish> {
+        let Some(assignment) = &employee.assignment else {
+            return Ok(AssignmentFinish::Quiet);
+        };
+        let outcome_id = assignment.outcome_id;
+        // An accepted success is the only settle the task cares about:
+        // clean finish, no flagged blocker, not cancelled. Failures and
+        // blockers take the ordinary report path instead — the task's
+        // attention state derives them from the record itself.
+        let succeeded = employee.expired
+            && !employee.cancelled
+            && employee.blocker.is_none()
+            && employee
+                .expiry
+                .as_ref()
+                .is_some_and(|expiry| expiry.cause == ExpiryCause::Finished);
+        let now = waku_protocol::model::unix_time();
+        if !succeeded {
+            // A result still counts as activity — but only one the task
+            // surface can see, so failures keep their needs-attention
+            // mark without pretending coordination happened.
+            self.update(|state| {
+                if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
+                    task.last_activity_at = now;
+                }
+                Ok(())
+            })?;
+            return Ok(AssignmentFinish::Quiet);
+        }
+        let attempt = employee
+            .ticket
+            .as_ref()
+            .map(|ticket| ticket.generation)
+            .unwrap_or(0);
+        let mut outcome = AssignmentFinish::Quiet;
+        self.update(|state| {
+            let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) else {
+                return Ok(());
+            };
+            // A late success on a completed or cancelled task is history —
+            // no handoff, no transition, and no power to revive it.
+            if task.terminal() {
+                return Ok(());
+            }
+            if !assignment.finishes_outcome {
+                if task.handoffs.iter().any(|handoff| {
+                    handoff.assignment == employee.session_id && handoff.attempt == attempt
+                }) {
+                    return Ok(());
+                }
+                let id = Uuid::new_v4();
+                task.handoffs.push(OutcomeHandoff {
+                    id,
+                    assignment: employee.session_id,
+                    attempt,
+                    intent: assignment.after_success.clone(),
+                    created_at: now,
+                    resolution: None,
+                });
+                outcome = AssignmentFinish::Handoff {
+                    id,
+                    intent: assignment.after_success.clone(),
+                };
+                return Ok(());
+            }
+            // Only the live designation completes — a replaced or
+            // abandoned finisher's success preserves its result without
+            // a transition.
+            if task.finishing_assignment != Some(employee.session_id) {
+                return Ok(());
+            }
+            let outstanding = task.completion_outstanding(
+                &state.employees,
+                &state.retired_employees,
+                employee.session_id,
+            );
+            if outstanding.is_empty() {
+                task.state = OutcomeState::Completed;
+                task.completed_at = Some(now);
+                task.completion_conflict = None;
+                task.evidence = Some(format!(
+                    "Finishing assignment {} ({}) finished with the task's criteria met.",
+                    employee.identity.name, employee.session_id
+                ));
+                task.history.push(OutcomeTransition {
+                    state: OutcomeState::Completed,
+                    at: now,
+                    actor: PlanActor::Boss,
+                });
+                outcome = AssignmentFinish::Completed;
+                return Ok(());
+            }
+            let reason = outstanding.join("; ");
+            task.completion_conflict = Some(CompletionConflict {
+                assignment: employee.session_id,
+                attempt,
+                reason: reason.clone(),
+                at: now,
+            });
+            outcome = AssignmentFinish::Conflict { reason };
+            Ok(())
+        })?;
+        // Meaningful activity on any accepted result — the task's
+        // unattended clock restarts when a result lands, whether or not
+        // it closed anything.
+        self.update(|state| {
+            if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
+                task.last_activity_at = now;
+            }
+            Ok(())
+        })?;
+        Ok(outcome)
+    }
+
+    /// The reminder scan's eligibility maintenance: refresh every task's
+    /// `unattended_since` — set when the task first enters an eligible
+    /// stretch, cleared when it leaves — then return the tasks whose
+    /// reminder is due for delivery. Callers deliver and then call
+    /// [`BossService::mark_outcomes_reminded`] so repeats respect the daily
+    /// cadence and a new period re-arms.
+    pub fn scan_outcome_reminders(&self, now: u64) -> anyhow::Result<Vec<Uuid>> {
+        let mut due = Vec::new();
+        self.update(|state| {
+            for task in state.outcomes.iter_mut() {
+                let eligible = task.reminder_eligible(&state.employees, now);
+                match (eligible, task.unattended_since) {
+                    (true, None) => task.unattended_since = Some(now),
+                    (false, Some(_)) => task.unattended_since = None,
+                    _ => {}
+                }
+                if eligible && task.reminder_due(now) {
+                    due.push(task.id);
+                }
+            }
+            Ok(())
+        })?;
+        Ok(due)
+    }
+
+    /// Record that `tasks` were included in a delivered reminder — pins
+    /// the covered unattended period so the next reminder for the same
+    /// stretch waits the daily interval while a new period re-arms.
+    pub fn mark_outcomes_reminded(&self, tasks: &[Uuid], now: u64) -> anyhow::Result<()> {
+        self.update(|state| {
+            for id in tasks {
+                if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == *id)
+                    && let Some(unattended_since) = task.unattended_since
+                {
+                    task.last_reminder = Some(OutcomeReminder {
+                        unattended_since,
+                        at: now,
+                    });
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Whether `path` — a files-root-relative Boss path — names a finalized
     /// plan document. Frozen plans reject writes; reads stay open.
     fn plan_file_frozen(&self, path: &str) -> bool {
@@ -1273,7 +1968,7 @@ impl BossService {
                 id,
                 name,
                 avatar_seed: id.to_string(),
-                avatar_style: Default::default(),
+                avatar_style: state.identity.avatar_style,
             },
             job_title: job_title.trim().to_owned(),
             persona_id,
@@ -1294,6 +1989,7 @@ impl BossService {
             request_fingerprint: None,
             plan_id: None,
             item_id: None,
+            assignment: None,
         })
     }
 
@@ -1541,7 +2237,7 @@ impl BossService {
         };
         let role = if let Some(employee) = employee {
             // The kind the summon fixed decides what the finish does —
-            // an errand reports to its supervisor while a goal lands on
+            // an assignment reports to its supervisor while a goal lands on
             // the human's Goals page without prompting anyone.
             let finish = match employee.work_goal {
                 EmployeeGoal::Errand => {
@@ -1843,15 +2539,26 @@ impl BossService {
     }
 
     /// A supervisor stop marked the employee before teardown — the wave
-    /// tally counts the member as cancelled rather than finished.
+    /// tally counts the member as cancelled rather than finished. A
+    /// cancelled finishing assignment also releases its task's designation
+    /// so the task can receive a replacement.
     pub fn mark_cancelled(&self, session: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
-            if let Some(entry) = state
+            let assignment = state
                 .employees
                 .iter_mut()
                 .find(|entry| entry.session_id == session)
+                .and_then(|entry| {
+                    entry.cancelled = true;
+                    entry.assignment.clone()
+                });
+            if assignment.is_some_and(|assignment| assignment.finishes_outcome)
+                && let Some(task) = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|task| task.finishing_assignment == Some(session))
             {
-                entry.cancelled = true;
+                task.finishing_assignment = None;
             }
             Ok(())
         })
@@ -2547,7 +3254,7 @@ impl BossService {
         generation: u64,
         provider: ProviderKind,
         model: String,
-        goal_id: Option<Uuid>,
+        outcome_id: Option<Uuid>,
     ) -> anyhow::Result<u64> {
         let now = waku_protocol::model::unix_time();
         let mut id = 0;
@@ -2560,7 +3267,7 @@ impl BossService {
                 generation,
                 provider,
                 model,
-                goal_id,
+                outcome_id,
                 created_at: now,
                 delivered_at: None,
             });
@@ -2818,6 +3525,51 @@ impl BossService {
                     state: self.document(),
                 })
             }
+            BossOperation::CreateOutcome {
+                outcome,
+                success_criteria,
+            } => {
+                self.create_outcome(caller, &outcome, &success_criteria)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::SetOutcomeState {
+                outcome,
+                state,
+                evidence,
+            } => {
+                self.set_outcome_state(caller, outcome, state, evidence)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::ResolveHandoff {
+                outcome,
+                handoff,
+                decision,
+            } => {
+                self.resolve_handoff(caller, outcome, handoff, decision)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::SetOutcomeWaiting {
+                outcome,
+                waiting,
+                snoozed_until,
+            } => {
+                self.set_outcome_waiting(caller, outcome, waiting, snoozed_until)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::AttachPlan { outcome, plan } => {
+                self.attach_plan(caller, outcome, &plan)?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
             BossOperation::View => {
                 let mut state = self.document();
                 if let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) {
@@ -2839,6 +3591,16 @@ impl BossService {
                                 .members
                                 .iter()
                                 .any(|member| member.session_id == caller)
+                    });
+                    // Tasks scope to the caller's assignment tree: its own
+                    // memberships plus the tasks its reports serve.
+                    state.outcomes.retain(|task| {
+                        state.employees.iter().any(|entry| {
+                            entry
+                                .assignment
+                                .as_ref()
+                                .is_some_and(|assignment| assignment.outcome_id == task.id)
+                        })
                     });
                 }
                 Ok(BossResult::State { state })
@@ -2892,22 +3654,23 @@ impl BossService {
                 })
             }
             BossOperation::SetAvatarStyle {
-                session_id,
+                session_id: _,
                 avatar_style,
             } => {
                 anyhow::ensure!(caller.is_none(), "only a human can select avatar styles");
                 self.update(|state| {
-                    let identity = if session_id.is_none() || session_id == state.session_id {
-                        &mut state.identity
-                    } else {
-                        &mut state
-                            .employees
-                            .iter_mut()
-                            .find(|entry| Some(entry.session_id) == session_id)
-                            .ok_or_else(|| anyhow!("not a Boss employee"))?
-                            .identity
-                    };
-                    identity.avatar_style = avatar_style;
+                    // One global generator style — every managed identity
+                    // draws from the same set, so the write covers the boss
+                    // and each employee record, retired ones included, to
+                    // keep historical rows consistent.
+                    state.identity.avatar_style = avatar_style;
+                    for employee in state
+                        .employees
+                        .iter_mut()
+                        .chain(state.retired_employees.iter_mut())
+                    {
+                        employee.identity.avatar_style = avatar_style;
+                    }
                     Ok(())
                 })?;
                 Ok(BossResult::State {
@@ -4703,6 +5466,7 @@ fn fresh_state() -> BossState {
         retired_employees: Vec::new(),
         deliverables: Vec::new(),
         planning: Vec::new(),
+        outcomes: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
@@ -4730,6 +5494,7 @@ fn disabled_state() -> BossState {
         retired_employees: Vec::new(),
         deliverables: Vec::new(),
         planning: Vec::new(),
+        outcomes: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
@@ -5091,7 +5856,7 @@ mod tests {
     /// row's unread dot compares goal finishes against it, so only an owner
     /// may stamp.
     #[test]
-    fn mark_goals_viewed_stamps_the_clock_and_is_owner_only() {
+    fn mark_tasks_viewed_stamps_the_clock_and_is_owner_only() {
         let root = std::env::temp_dir().join(format!("boss-viewed-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         assert_eq!(service.document().goals_viewed_at, None);
@@ -5207,6 +5972,7 @@ mod tests {
                     request_fingerprint: None,
                     plan_id: None,
                     item_id: None,
+                    assignment: None,
                 });
                 state
                     .employees
@@ -5278,6 +6044,7 @@ mod tests {
                     request_fingerprint: None,
                     plan_id: None,
                     item_id: None,
+                    assignment: None,
                 });
                 Ok(())
             })
@@ -5606,6 +6373,7 @@ mod tests {
                     request_fingerprint: None,
                     plan_id: None,
                     item_id: None,
+                    assignment: None,
                 });
                 Ok(())
             })
@@ -6069,6 +6837,7 @@ mod tests {
                     request_fingerprint: None,
                     plan_id: None,
                     item_id: None,
+                    assignment: None,
                 });
                 Ok(())
             })
@@ -6667,6 +7436,7 @@ mod tests {
                     request_fingerprint: None,
                     plan_id: None,
                     item_id: None,
+                    assignment: None,
                 });
                 Ok(())
             })
@@ -6732,7 +7502,9 @@ mod tests {
             state.employees[0].identity.avatar_style,
             waku_protocol::boss::AvatarStyle::Blobby
         );
-        // Boss style is independent of its seed and cannot be changed by agents.
+        // The style is one global setting: setting it anywhere rewrites
+        // every managed identity — boss, live employees, and retirees —
+        // while seeds stay per-identity. Agents cannot change it.
         let boss_session = Uuid::new_v4();
         service
             .update(|state| {
@@ -6750,13 +7522,16 @@ mod tests {
                 .is_err()
         );
         service.handle(None, style_op).unwrap();
+        let document = service.document();
         assert_eq!(
-            service.document().identity.avatar_style,
+            document.identity.avatar_style,
             waku_protocol::boss::AvatarStyle::AgentAvatars
         );
+        assert_eq!(document.identity.avatar_seed, state.identity.avatar_seed);
         assert_eq!(
-            service.document().identity.avatar_seed,
-            state.identity.avatar_seed
+            document.employees[0].identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::AgentAvatars,
+            "a global style applies to every employee"
         );
         // A missing target — or the boss's own session — re-rolls the boss.
         let boss_seed = state.identity.avatar_seed;
@@ -7799,7 +8574,7 @@ mod memory_op_tests {
             pending_prompts: Vec::new(),
             group_id: Some("wave".into()),
             priority: None,
-            goal_id: None,
+            outcome_id: None,
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -7911,7 +8686,7 @@ mod memory_op_tests {
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
-            goal_id: None,
+            outcome_id: None,
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -8172,7 +8947,7 @@ mod memory_op_tests {
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
-            goal_id: None,
+            outcome_id: None,
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -8798,6 +9573,673 @@ mod memory_op_tests {
         let groups = groups.plan_groups();
         assert_eq!(groups[0].plan.id, approved_id);
         let _ = abandoned_id;
+        fs::remove_dir_all(root).unwrap();
+    }
+    // ---- Outcome assignments: the durable task model ----
+
+    /// A service with a boss session and helpers for admitted employees —
+    /// the daemon's summon path splits admission, employee record, and
+    /// finisher designation the same way.
+    fn outcome_fixture(root: &std::path::Path) -> (BossService, Uuid) {
+        let service = BossService::open(root.to_path_buf()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        (service, boss)
+    }
+
+    fn admit(
+        service: &BossService,
+        boss: Uuid,
+        title: &str,
+        assignment: Option<Assignment>,
+    ) -> BossEmployee {
+        let mut employee = service
+            .prepare_employee(
+                boss,
+                service.document().personas[0].id,
+                title.into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.assignment = assignment;
+        service
+            .update(|state| {
+                state.employees.push(employee.clone());
+                Ok(())
+            })
+            .unwrap();
+        employee
+    }
+
+    fn admit_on(
+        service: &BossService,
+        boss: Uuid,
+        outcome: Uuid,
+        finishes: bool,
+        intent: Option<&str>,
+    ) -> BossEmployee {
+        let assignment = service
+            .assignment_admission(
+                Some(outcome),
+                None,
+                finishes,
+                intent.map(str::to_owned),
+                Vec::new(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        let employee = admit(service, boss, "Assignment", Some(assignment));
+        if finishes {
+            service
+                .designate_finisher(outcome, employee.session_id)
+                .unwrap();
+        }
+        employee
+    }
+
+    fn settle_ok(service: &BossService, session: Uuid) -> BossEmployee {
+        service
+            .begin_finishing(session, false, false, ExpiryCause::Finished)
+            .unwrap();
+        service.complete_expiry(session, None).unwrap();
+        service.employee(session).unwrap()
+    }
+
+    fn outcome(service: &BossService, id: Uuid) -> BossOutcome {
+        service
+            .document()
+            .outcomes
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
+            .unwrap()
+    }
+
+    /// An outcome opens with no assignments and stays open until an
+    /// explicit completion — zero assignments never infers success, and
+    /// the record survives a service reopen.
+    #[test]
+    fn an_outcome_opens_empty_and_closes_only_on_explicit_evidence() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-empty-{}", Uuid::new_v4()));
+        let (service, _boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(
+                None,
+                "Make transfers fail cleanly",
+                "every failure names a cause",
+            )
+            .unwrap();
+        assert_eq!(task.state, OutcomeState::Open);
+        assert!(task.handoffs.is_empty());
+        // Completion is an explicit act: evidence is required.
+        assert!(
+            service
+                .set_outcome_state(None, task.id, OutcomeState::Completed, None)
+                .is_err()
+        );
+        assert_eq!(outcome(&service, task.id).state, OutcomeState::Open);
+        let (closed, stop) = service
+            .set_outcome_state(
+                None,
+                task.id,
+                OutcomeState::Completed,
+                Some("verified in the QA app".into()),
+            )
+            .unwrap();
+        assert_eq!(closed.state, OutcomeState::Completed);
+        assert!(stop.is_empty());
+        assert_eq!(closed.evidence.as_deref(), Some("verified in the QA app"));
+        drop(service);
+        let reopened = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            outcome(&reopened, task.id).state,
+            OutcomeState::Completed,
+            "the durable record outlives the service that wrote it"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An ordinary success writes exactly one durable handoff carrying
+    /// the authored intent — the same attempt can never write two, and
+    /// the record survives a daemon restart.
+    #[test]
+    fn an_ordinary_success_leaves_one_durable_handoff() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-handoff-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "")
+            .unwrap();
+        let employee = admit_on(
+            &service,
+            boss,
+            task.id,
+            false,
+            Some("Use the diagnosis to assign the repair"),
+        );
+        let employee = settle_ok(&service, employee.session_id);
+        let finish = service.assignment_finished(&employee).unwrap();
+        let AssignmentFinish::Handoff { id, intent } = finish else {
+            panic!("expected a handoff, got {finish:?}")
+        };
+        assert_eq!(intent, "Use the diagnosis to assign the repair");
+        let handoff = outcome(&service, task.id)
+            .handoffs
+            .into_iter()
+            .find(|handoff| handoff.id == id)
+            .unwrap();
+        assert!(handoff.pending());
+        assert_eq!(handoff.intent, intent);
+        // A re-driven finish for the same attempt writes no second handoff.
+        let again = service.assignment_finished(&employee).unwrap();
+        assert_eq!(again, AssignmentFinish::Quiet);
+        assert_eq!(outcome(&service, task.id).handoffs.len(), 1);
+        drop(service);
+        let reopened = BossService::open(root.clone()).unwrap();
+        let stored = outcome(&reopened, task.id);
+        assert_eq!(stored.handoffs.len(), 1, "the handoff survives rotation");
+        assert!(stored.handoffs[0].pending());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The designated finishing assignment completes its outcome without
+    /// a handoff, a report, or any other notice — the transition and
+    /// evidence land on the durable record alone.
+    #[test]
+    fn a_finishing_success_completes_silently() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-finish-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(
+                None,
+                "Make transfers fail cleanly",
+                "every failure names a cause",
+            )
+            .unwrap();
+        // Intent on a finisher is a conflict the admission must refuse.
+        assert!(
+            service
+                .assignment_admission(
+                    Some(task.id),
+                    None,
+                    true,
+                    Some("tell the boss".into()),
+                    Vec::new(),
+                    None,
+                )
+                .is_err()
+        );
+        let employee = admit_on(&service, boss, task.id, true, None);
+        let employee = settle_ok(&service, employee.session_id);
+        let finish = service.assignment_finished(&employee).unwrap();
+        assert_eq!(finish, AssignmentFinish::Completed);
+        let task = outcome(&service, task.id);
+        assert_eq!(task.state, OutcomeState::Completed);
+        assert!(task.completed_at.is_some());
+        assert!(task.evidence.is_some());
+        assert!(task.handoffs.is_empty(), "a finisher leaves no handoff");
+        assert!(task.completion_conflict.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The finisher cannot dispatch while work or decisions are
+    /// outstanding, and a success that lands anyway — the completion
+    /// conditions failed at acceptance — records a conflict rather than
+    /// a transition.
+    #[test]
+    fn a_finisher_waits_then_conflicts_on_outstanding_work() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-conflict-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(
+                None,
+                "Make transfers fail cleanly",
+                "every failure names a cause",
+            )
+            .unwrap();
+        let worker = admit_on(&service, boss, task.id, false, None);
+        let finisher = admit_on(&service, boss, task.id, true, None);
+        assert!(
+            !service.assignment_ready(&finisher),
+            "a live sibling holds the finisher"
+        );
+        // Finish the sibling but leave its handoff pending — the decision
+        // is still outstanding work.
+        let worker = settle_ok(&service, worker.session_id);
+        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&worker).unwrap()
+        else {
+            panic!("expected a handoff")
+        };
+        assert!(
+            !service.assignment_ready(&finisher),
+            "a pending handoff holds the finisher"
+        );
+        // A success landing while unmet records the conflict, not a close.
+        let finisher = settle_ok(&service, finisher.session_id);
+        let finish = service.assignment_finished(&finisher).unwrap();
+        let AssignmentFinish::Conflict { reason } = finish else {
+            panic!("expected a conflict, got {finish:?}")
+        };
+        assert!(reason.contains("handoff"), "{reason}");
+        let task = outcome(&service, task.id);
+        assert_eq!(task.state, OutcomeState::Open);
+        assert!(task.completion_conflict.is_some());
+        // A fresh designation supersedes the conflict; the handoff can
+        // still be resolved and the outcome completed explicitly.
+        service
+            .resolve_handoff(
+                None,
+                task.id,
+                id,
+                waku_protocol::boss::HandoffDecision::Dismiss,
+            )
+            .unwrap();
+        assert_eq!(outcome(&service, task.id).pending_handoffs().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// One live finisher per outcome: a second designation is refused at
+    /// admission, a cancelled finisher hands the designation back, and a
+    /// stale attempt that finishes anyway cannot move the outcome.
+    #[test]
+    fn the_finishing_designation_is_exclusive_and_recoverable() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-finisher-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        let finisher = admit_on(&service, boss, task.id, true, None);
+        // While the designation is live, a second finisher and any new
+        // ordinary work are both refused — the finishing phase holds its
+        // completion contract stable.
+        assert!(
+            service
+                .assignment_admission(Some(task.id), None, true, None, Vec::new(), None)
+                .is_err()
+        );
+        assert!(
+            service
+                .assignment_admission(Some(task.id), None, false, None, Vec::new(), None)
+                .is_err()
+        );
+        // Cancelling the finisher clears the designation; the outcome
+        // stays open until a replacement or an explicit completion.
+        service.mark_cancelled(finisher.session_id).unwrap();
+        let task = outcome(&service, task.id);
+        assert!(task.finishing_assignment.is_none());
+        assert_eq!(task.state, OutcomeState::Open);
+        // The cancelled attempt's own settle cannot revive the flag.
+        service
+            .begin_finishing(finisher.session_id, false, true, ExpiryCause::Stopped)
+            .unwrap();
+        service.complete_expiry(finisher.session_id, None).unwrap();
+        let settled = service.employee(finisher.session_id).unwrap();
+        assert_eq!(
+            service.assignment_finished(&settled).unwrap(),
+            AssignmentFinish::Quiet
+        );
+        assert!(outcome(&service, task.id).finishing_assignment.is_none());
+        // A replacement admits and completes.
+        let replacement = admit_on(&service, boss, task.id, true, None);
+        let replacement = settle_ok(&service, replacement.session_id);
+        assert_eq!(
+            service.assignment_finished(&replacement).unwrap(),
+            AssignmentFinish::Completed
+        );
+        assert_eq!(outcome(&service, task.id).state, OutcomeState::Completed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Handoffs gate explicit completion: `completeOutcome` inside a
+    /// resolution settles the record with evidence, while `setOutcomeState`
+    /// refuses until every handoff is decided.
+    #[test]
+    fn pending_handoffs_block_completion() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-gate-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        let employee = admit_on(&service, boss, task.id, false, Some("verify next"));
+        let employee = settle_ok(&service, employee.session_id);
+        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&employee).unwrap()
+        else {
+            panic!("expected a handoff")
+        };
+        assert!(
+            service
+                .set_outcome_state(None, task.id, OutcomeState::Completed, Some("done".into()))
+                .is_err(),
+            "a pending handoff blocks completion"
+        );
+        // The decision that accepts the result completes the outcome with
+        // its evidence — a second notification would duplicate nothing.
+        service
+            .resolve_handoff(
+                None,
+                task.id,
+                id,
+                waku_protocol::boss::HandoffDecision::CompleteOutcome {
+                    evidence: "the result already achieved the outcome".into(),
+                },
+            )
+            .unwrap();
+        let task = outcome(&service, task.id);
+        assert_eq!(task.state, OutcomeState::Completed);
+        assert_eq!(
+            task.evidence.as_deref(),
+            Some("the result already achieved the outcome")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `newOutcome` creates the parent atomically with its first
+    /// assignment — a validation failure leaves no orphan record behind.
+    #[test]
+    fn a_new_outcome_summon_creates_its_parent_atomically() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-atomic-{}", Uuid::new_v4()));
+        let (service, _boss) = outcome_fixture(&root);
+        let new_outcome = |criteria: &str| NewOutcome {
+            outcome: "Make transfers fail cleanly".into(),
+            success_criteria: criteria.into(),
+        };
+        // A finisher on a criteria-less parent fails before any write.
+        assert!(
+            service
+                .assignment_admission(None, Some(new_outcome("")), true, None, Vec::new(), None,)
+                .is_err()
+        );
+        assert!(
+            service.document().outcomes.is_empty(),
+            "the rejected admission left no orphan outcome"
+        );
+        // outcomeId and newOutcome are mutually exclusive.
+        assert!(
+            service
+                .assignment_admission(
+                    Some(Uuid::new_v4()),
+                    Some(new_outcome("criteria")),
+                    false,
+                    None,
+                    Vec::new(),
+                    None,
+                )
+                .is_err()
+        );
+        let assignment = service
+            .assignment_admission(
+                None,
+                Some(new_outcome("every failure names a cause")),
+                false,
+                None,
+                Vec::new(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        let task = outcome(&service, assignment.outcome_id);
+        assert_eq!(task.outcome, "Make transfers fail cleanly");
+        assert_eq!(task.success_criteria, "every failure names a cause");
+        assert_eq!(task.state, OutcomeState::Open);
+        assert_eq!(assignment.after_success, DEFAULT_AFTER_SUCCESS);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Prerequisites admit only sibling assignments and gate dispatch
+    /// until each one's success is accepted — a late result on a
+    /// cancelled outcome is history that cannot revive it.
+    #[test]
+    fn prerequisites_gate_work_and_terminal_outcomes_stay_closed() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-prereq-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        // A stranger cannot be a prerequisite.
+        let stranger = admit(&service, boss, "Stranger", None);
+        assert!(
+            service
+                .assignment_admission(
+                    Some(task.id),
+                    None,
+                    false,
+                    None,
+                    vec![stranger.session_id],
+                    None,
+                )
+                .is_err()
+        );
+        let worker = admit_on(&service, boss, task.id, false, None);
+        let dependent = {
+            let assignment = service
+                .assignment_admission(
+                    Some(task.id),
+                    None,
+                    false,
+                    None,
+                    vec![worker.session_id],
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            admit(&service, boss, "Dependent", Some(assignment))
+        };
+        assert!(!service.assignment_ready(&dependent));
+        let worker = settle_ok(&service, worker.session_id);
+        service.assignment_finished(&worker).unwrap();
+        // The prerequisite succeeded — the dependent may dispatch even
+        // while the handoff is still pending.
+        assert!(service.assignment_ready(&dependent));
+        // Cancelling the outcome names the still-live assignment to stop,
+        // and a success landing afterwards cannot revive the record.
+        let (cancelled, stop) = service
+            .set_outcome_state(
+                None,
+                task.id,
+                OutcomeState::Cancelled,
+                Some("replaced".into()),
+            )
+            .unwrap();
+        assert_eq!(cancelled.state, OutcomeState::Cancelled);
+        assert_eq!(stop, vec![dependent.session_id]);
+        service.mark_cancelled(dependent.session_id).unwrap();
+        service
+            .begin_finishing(dependent.session_id, false, true, ExpiryCause::Stopped)
+            .unwrap();
+        service.complete_expiry(dependent.session_id, None).unwrap();
+        let settled = service.employee(dependent.session_id).unwrap();
+        assert_eq!(
+            service.assignment_finished(&settled).unwrap(),
+            AssignmentFinish::Quiet
+        );
+        assert_eq!(outcome(&service, task.id).state, OutcomeState::Cancelled);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The reminder scan: eligibility requires an open outcome with no
+    /// live work, pending handoff, conflict, or active wait — the grace
+    /// period then delivers once, and the mark sleeps the period a day.
+    #[test]
+    fn unattended_reminders_scan_mark_and_suppress() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-remind-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let now = waku_protocol::model::unix_time();
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        // The first scan starts the grace clock — nothing is due yet.
+        assert!(service.scan_outcome_reminders(now).unwrap().is_empty());
+        assert_eq!(outcome(&service, task.id).unattended_since, Some(now));
+        assert!(
+            service
+                .scan_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE - 1)
+                .unwrap()
+                .is_empty()
+        );
+        // Grace expired — the outcome makes the batch once.
+        let due = service
+            .scan_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 1)
+            .unwrap();
+        assert_eq!(due, vec![task.id]);
+        // A delivered mark sleeps repeats for the daily interval.
+        service
+            .mark_outcomes_reminded(
+                &due,
+                now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 1,
+            )
+            .unwrap();
+        assert!(
+            service
+                .scan_outcome_reminders(now + 3600)
+                .unwrap()
+                .is_empty()
+        );
+        let due = service
+            .scan_outcome_reminders(
+                now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE
+                    + waku_protocol::boss::OUTCOME_REMINDER_INTERVAL
+                    + 2,
+            )
+            .unwrap();
+        assert_eq!(due, vec![task.id], "the same period re-reminds daily");
+        // A live assignment ends eligibility outright — no reminder.
+        let _employee = admit_on(&service, boss, task.id, false, None);
+        assert!(
+            service
+                .scan_outcome_reminders(
+                    now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE
+                        + waku_protocol::boss::OUTCOME_REMINDER_INTERVAL
+                        + 3,
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            outcome(&service, task.id).unattended_since,
+            None,
+            "live work clears the unattended stamp"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Waits and snoozes shield an unattended outcome; a wait's expiry
+    /// starts a fresh grace period, and a pending handoff keeps its own
+    /// delivery channel instead of a second reminder.
+    #[test]
+    fn waits_snoozes_and_handoffs_suppress_reminders() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-waits-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let now = waku_protocol::model::unix_time();
+        let task = service
+            .create_outcome(None, "Review notifications", "criteria")
+            .unwrap();
+        service
+            .set_outcome_waiting(
+                None,
+                task.id,
+                Some(OutcomeWait::Until { at: now + 7200 }),
+                None,
+            )
+            .unwrap();
+        assert!(
+            service
+                .scan_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 60)
+                .unwrap()
+                .is_empty(),
+            "a tracked wait suppresses the reminder"
+        );
+        // The wait lapses — the next scan re-enters eligibility fresh.
+        service.scan_outcome_reminders(now + 8000).unwrap();
+        assert_eq!(
+            outcome(&service, task.id).unattended_since,
+            Some(now + 8000)
+        );
+        // A snooze shields while it lasts; clearing it re-arms.
+        service
+            .set_outcome_waiting(None, task.id, None, Some(now + 9000))
+            .unwrap();
+        assert!(
+            service
+                .scan_outcome_reminders(now + 8500)
+                .unwrap()
+                .is_empty()
+        );
+        // A pending handoff has its own delivery channel — no reminder.
+        service
+            .set_outcome_waiting(None, task.id, None, None)
+            .unwrap();
+        let employee = admit_on(&service, boss, task.id, false, None);
+        let employee = settle_ok(&service, employee.session_id);
+        service.assignment_finished(&employee).unwrap();
+        service.scan_outcome_reminders(now + 10_000).unwrap();
+        let _ = service.scan_outcome_reminders(now + 20_000).unwrap();
+        assert!(
+            outcome(&service, task.id).unattended_since.is_none(),
+            "a pending handoff is never 'missing coordination'"
+        );
+        // Completion before delivery suppresses the pending reminder.
+        let other = service
+            .create_outcome(None, "Repair file transfers", "criteria")
+            .unwrap();
+        service.scan_outcome_reminders(now + 30_000).unwrap();
+        let due = service
+            .scan_outcome_reminders(
+                now + 30_000 + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 1,
+            )
+            .unwrap();
+        assert!(due.contains(&other.id));
+        service
+            .set_outcome_state(None, other.id, OutcomeState::Completed, Some("done".into()))
+            .unwrap();
+        assert!(
+            !service
+                .scan_outcome_reminders(
+                    now + 30_000 + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 2
+                )
+                .unwrap()
+                .contains(&other.id),
+            "completion suppresses the pending reminder silently"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Owner-only bookkeeping: employees cannot create, transition,
+    /// resolve, or annotate outcomes — the boss and the human can.
+    #[test]
+    fn outcome_bookkeeping_is_owner_only() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-owner-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service.create_outcome(None, "Repair", "criteria").unwrap();
+        let employee = admit(&service, boss, "Worker", None);
+        for result in [
+            service
+                .create_outcome(Some(employee.session_id), "Sneaky", "criteria")
+                .map(|_| ()),
+            service
+                .set_outcome_state(
+                    Some(employee.session_id),
+                    task.id,
+                    OutcomeState::Cancelled,
+                    None,
+                )
+                .map(|_| ()),
+            service
+                .set_outcome_waiting(Some(employee.session_id), task.id, None, None)
+                .map(|_| ()),
+        ] {
+            assert!(result.is_err(), "an employee mutated outcome records");
+        }
+        // The boss principal and the human may.
+        service
+            .create_outcome(Some(boss), "Legitimate", "criteria")
+            .unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -2131,7 +2131,7 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
             task,
             &[
                 "prompt",
-                r#"{"task_id":"00000000-0000-0000-0000-000000000001","prompt":"no"}"#
+                r#"{"outcome_id":"00000000-0000-0000-0000-000000000001","prompt":"no"}"#
             ],
             None
         )
@@ -2636,9 +2636,9 @@ fn a_scoped_read_reaches_self_and_a_side_chats_parent() {
     let (backend, session_id, side_id) = read_scope_test_backend(&root);
 
     // Self-read works with the task-tools flag off, addressed or bare.
-    for (task_id, thread_id) in [(Some(session_id), None), (None, None)] {
+    for (outcome_id, thread_id) in [(Some(session_id), None), (None, None)] {
         let read = backend
-            .agent_read_session(Some(session_id), task_id, thread_id, None, None)
+            .agent_read_session(Some(session_id), outcome_id, thread_id, None, None)
             .expect("a self read is always in scope");
         let ResponsePayload::AgentSessionTranscript { transcript } = read else {
             panic!("expected a transcript");
@@ -5411,7 +5411,11 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
             allow_burst: false,
             group_id: None,
             priority: None,
-            goal_id: None,
+            outcome_id: None,
+            new_outcome: None,
+            prerequisites: Vec::new(),
+            after_success: None,
+            finishes_outcome: false,
             plan: None,
             item: None,
             request_id: None,
@@ -5491,7 +5495,11 @@ fn boss_summon_marker_freezes_the_card_identity() {
             allow_burst: false,
             group_id: None,
             priority: None,
-            goal_id: None,
+            outcome_id: None,
+            new_outcome: None,
+            prerequisites: Vec::new(),
+            after_success: None,
+            finishes_outcome: false,
             plan: None,
             item: None,
             request_id: None,
@@ -5628,7 +5636,11 @@ impl AdoptFixture {
                 allow_burst: false,
                 group_id: None,
                 priority: None,
-                goal_id: None,
+                outcome_id: None,
+                new_outcome: None,
+                prerequisites: Vec::new(),
+                after_success: None,
+                finishes_outcome: false,
                 plan: None,
                 item: None,
                 request_id: None,
@@ -5936,7 +5948,11 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
                 allow_burst: false,
                 group_id: None,
                 priority: None,
-                goal_id: None,
+                outcome_id: None,
+                new_outcome: None,
+                prerequisites: Vec::new(),
+                after_success: None,
+                finishes_outcome: false,
                 plan: None,
                 item: None,
                 request_id: None,
@@ -6092,7 +6108,11 @@ fn summon_op(
         allow_burst: false,
         group_id: None,
         priority: None,
-        goal_id: None,
+        outcome_id: None,
+        new_outcome: None,
+        prerequisites: Vec::new(),
+        after_success: None,
+        finishes_outcome: false,
         plan: None,
         item: None,
         request_id: None,
@@ -8217,7 +8237,11 @@ fn queued_tickets_survive_restart_with_their_goals() {
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
 
-    let goal = Uuid::new_v4();
+    let goal = backend
+        .boss
+        .create_outcome(None, "Keep the queue durable", "tickets survive")
+        .unwrap()
+        .id;
     let mut op = summon_op(
         &backend,
         &root,
@@ -8226,13 +8250,13 @@ fn queued_tickets_survive_restart_with_their_goals() {
         Some("gpt-5.5"),
     );
     if let BossOperation::Summon {
-        goal_id,
+        outcome_id,
         group_id,
         priority,
         ..
     } = &mut op
     {
-        *goal_id = Some(goal);
+        *outcome_id = Some(goal);
         *group_id = Some("wave-1".into());
         *priority = Some(5);
     }
@@ -8261,7 +8285,7 @@ fn queued_tickets_survive_restart_with_their_goals() {
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
     assert!(!employee.expired);
     let ticket = employee.ticket.as_ref().unwrap();
-    assert_eq!(ticket.goal_id, Some(goal));
+    assert_eq!(ticket.outcome_id, Some(goal));
     assert_eq!(ticket.group_id.as_deref(), Some("wave-1"));
     assert_eq!(ticket.priority, Some(5));
     assert_eq!(ticket.pending_prompts, vec!["queued follow-up".to_owned()]);
@@ -9860,28 +9884,16 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Scoped planning requests wait on the boss chat. Neither agent answers,
-/// generic allow options nor losing the runtime count as human approval.
+/// Plan finalization is the human's call alone: a scoped caller — the
+/// boss agent, the planning session itself, any other session — is
+/// refused outright, parks no approval request, and leaves the plan a
+/// draft. The user's own call still lands.
 #[test]
-fn plan_finalization_requires_an_explicit_human_answer() {
-    use waku_protocol::boss::{BossOperation, PlanOutcome};
-    let root = std::env::temp_dir().join(format!("boss-plan-card-{}", Uuid::new_v4()));
+fn plan_finalization_is_user_only() {
+    use waku_protocol::boss::BossOperation;
+    let root = std::env::temp_dir().join(format!("boss-plan-user-only-{}", Uuid::new_v4()));
     let (backend, boss) = surface_test_backend(&root);
     backend.boss.set_session_id(boss).unwrap();
-    let runtime_id = Uuid::new_v4();
-    let boss_capture = Arc::new(CaptureDriver::default());
-    backend.sessions.lock().insert(
-        boss,
-        RuntimeEntry {
-            runtime_id,
-            driver: DriverHandle::from_control(boss_capture.clone()),
-            last_active: std::time::Instant::now(),
-            resumable: false,
-            computer_use_available: false,
-            provider: ProviderKind::Codex,
-            cwd: root.join("repo"),
-        },
-    );
     let mut settings = backend.settings.get();
     settings.provider_binary_overrides.insert(
         ProviderKind::Codex,
@@ -9892,7 +9904,7 @@ fn plan_finalization_requires_an_explicit_human_answer() {
     assert!(
         backend
             .handle_boss_operation(
-                Some(boss),
+                None,
                 BossOperation::CreatePlan {
                     title: "Auth".into(),
                     plan_file: "auth.md".into(),
@@ -9910,126 +9922,41 @@ fn plan_finalization_requires_an_explicit_human_answer() {
         .plan_for_file("plans/auth.md")
         .unwrap()
         .session_id;
-    std::thread::scope(|scope| {
-        for answer in [
-            Some("deny"),
-            Some("always"),
-            Some("allow"),
-            Some("cancel"),
-            None,
-            Some("finalize"),
-        ] {
-            let backend = &backend;
-            let events = events.clone();
-            let call = scope.spawn(move || {
-                backend.handle_boss_operation(
-                    Some(planning),
+    for caller in [boss, planning, Uuid::new_v4()] {
+        for plan_file in [None, Some("plans/auth.md".into())] {
+            let error = backend
+                .handle_boss_operation(
+                    Some(caller),
                     BossOperation::FinalizePlan {
-                        plan_file: None,
+                        plan_file,
                         items: None,
                     },
                     &events,
                 )
-            });
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            let request_id = loop {
-                if let Some(id) = backend.agent.parked_permission_request(boss) {
-                    break id;
-                }
-                if std::time::Instant::now() >= deadline {
-                    backend.agent.drain_permissions(boss);
-                    backend.agent.drain_permissions(planning);
-                    panic!("approval did not park on boss chat");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            };
-            assert!(request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX));
+                .expect_err("an agent can neither finalize nor request finalization");
+            assert!(error.to_string().contains("user-only"), "{error:#}");
+            assert!(backend.agent.parked_permission_request(boss).is_none());
             assert!(backend.agent.parked_permission_request(planning).is_none());
             assert!(backend.boss.plan(planning).unwrap().finalized_at.is_none());
-            // A finished boss turn must not drop the human's card.
-            backend.agent.note_driver_event(
-                boss,
-                &DriverEvent::TurnFinished {
-                    success: true,
-                    summary: None,
-                    summary_i18n: None,
-                },
-            );
-            assert_eq!(
-                backend.agent.parked_permission_request(boss),
-                Some(request_id.clone())
-            );
-            let response = |option: &str, runtime| Request {
-                request_id: Uuid::new_v4(),
-                session_id: boss,
-                runtime_id: runtime,
-                command: Command::Respond {
-                    request_id: request_id.clone(),
-                    option_id: option.into(),
-                },
-            };
-            assert!(
-                backend
-                    .handle(
-                        response("finalize", runtime_id),
-                        EventSink::detached(),
-                        Some(planning)
-                    )
-                    .is_err()
-            );
-            assert!(
-                backend
-                    .handle(
-                        response("finalize", Uuid::new_v4()),
-                        EventSink::detached(),
-                        None
-                    )
-                    .is_err()
-            );
-            assert_eq!(
-                backend.agent.parked_permission_request(boss),
-                Some(request_id.clone())
-            );
-            if let Some(answer) = answer {
-                backend
-                    .handle(response(answer, runtime_id), EventSink::detached(), None)
-                    .unwrap();
-            } else {
-                backend
-                    .agent
-                    .note_driver_event(boss, &DriverEvent::ProcessExited);
-            }
-            let result = call.join().unwrap();
-            let plan = backend.boss.plan(planning).unwrap();
-            if answer == Some("finalize") {
-                assert!(result.is_ok());
-                assert!(plan.finalized_at.is_some());
-                assert_eq!(plan.outcome, Some(PlanOutcome::Approved));
-                assert!(
-                    boss_capture
-                        .prompts
-                        .lock()
-                        .iter()
-                        .any(|p| p.contains("finalized its design"))
-                );
-            } else {
-                assert!(result.is_err());
-                assert!(plan.finalized_at.is_none());
-                assert!(plan.outcome.is_none());
-                backend
-                    .boss
-                    .handle(
-                        None,
-                        BossOperation::WriteFile {
-                            path: "plans/auth.md".into(),
-                            content: "still editable".into(),
-                        },
-                    )
-                    .unwrap();
-            }
-            assert!(backend.agent.parked_permission_request(boss).is_none());
         }
-    });
+    }
+    // The user's own call still approves and freezes the document.
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::FinalizePlan {
+                plan_file: Some("plans/auth.md".into()),
+                items: None,
+            },
+            &events,
+        )
+        .unwrap();
+    let plan = backend.boss.plan(planning).unwrap();
+    assert!(plan.finalized_at.is_some());
+    assert_eq!(
+        plan.outcome,
+        Some(waku_protocol::boss::PlanOutcome::Approved)
+    );
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10334,7 +10261,11 @@ fn summon_with_tag(
         allow_burst: false,
         group_id: None,
         priority: None,
-        goal_id: None,
+        outcome_id: None,
+        new_outcome: None,
+        prerequisites: Vec::new(),
+        after_success: None,
+        finishes_outcome: false,
         plan,
         item,
         request_id,
@@ -10932,7 +10863,10 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         };
         let now = crate::model::unix_time();
         journal.begin(identity.id, old, next, now).unwrap();
-        journal.intent.as_mut().unwrap().reason = Some("boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100)".into());
+        journal.intent.as_mut().unwrap().reason = Some(
+            "boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100)"
+                .into(),
+        );
         journal.persist(&root.join("boss/rotation.json")).unwrap();
         if boundary >= 1 {
             let mut state = backend.task_state.lock();
@@ -11123,4 +11057,280 @@ fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
         1
     );
     std::fs::remove_dir_all(root).ok();
+}
+
+/// An outcome-backed employee ready to settle: the admission, employee
+/// record, shell session, and captures mirror `employee_finish_fixture`
+/// with an assignment attached — `finishes` designates the finisher.
+fn outcome_employee_fixture(
+    root: &Path,
+    criteria: &str,
+    finishes: bool,
+    intent: Option<&str>,
+) -> (WakuBackend, Uuid, Uuid, Uuid, Arc<CaptureDriver>) {
+    let (backend, supervisor) = surface_test_backend(root);
+    backend.boss.set_session_id(supervisor).unwrap();
+    let outcome = backend
+        .boss
+        .create_outcome(None, "Make transfers fail cleanly", criteria)
+        .unwrap();
+    let persona = backend.boss.document().personas[1].id;
+    let assignment = backend
+        .boss
+        .assignment_admission(
+            Some(outcome.id),
+            None,
+            finishes,
+            intent.map(str::to_owned),
+            Vec::new(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+    let mut employee = backend
+        .boss
+        .prepare_employee(
+            supervisor,
+            persona,
+            "Repair transfers".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    employee.assignment = Some(assignment);
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    if finishes {
+        backend
+            .boss
+            .designate_finisher(outcome.id, employee_id)
+            .unwrap();
+    }
+    let mut child = AgentSession::new(
+        backend.task_state.lock().sessions[0].project_id,
+        ProviderKind::Codex,
+    );
+    child.id = employee_id;
+    child.begin_turn("Repair transfers");
+    child.push_message(crate::model::MessageRole::Assistant, "Done");
+    child.finish_active_turn(TurnStatus::Completed);
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(child);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let parent_capture = Arc::new(CaptureDriver::default());
+    let child_capture = Arc::new(CaptureDriver::default());
+    for (id, capture) in [
+        (supervisor, parent_capture.clone()),
+        (employee_id, child_capture.clone()),
+    ] {
+        backend.sessions.lock().insert(
+            id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.to_path_buf(),
+            },
+        );
+    }
+    (backend, supervisor, employee_id, outcome.id, parent_capture)
+}
+
+/// The designated finishing assignment closes its outcome and wakes
+/// nobody — no prompt, no steer, no queued report — even on a work kind
+/// whose success would otherwise report to the supervisor.
+#[test]
+fn a_finishing_assignment_completes_its_outcome_silently() {
+    use waku_protocol::boss::EmployeeSettle;
+    let root = std::env::temp_dir().join(format!("boss-finish-silent-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee_id, outcome, parent_capture) =
+        outcome_employee_fixture(&root, "every failure names a cause", true, None);
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    let document = backend.boss.document();
+    let task = document
+        .outcomes
+        .iter()
+        .find(|entry| entry.id == outcome)
+        .unwrap();
+    assert_eq!(task.state, waku_protocol::boss::OutcomeState::Completed);
+    assert!(task.evidence.is_some());
+    assert!(task.handoffs.is_empty());
+    assert!(parent_capture.prompts.lock().is_empty());
+    assert!(parent_capture.steers.lock().is_empty());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        assert!(
+            session.queued_messages.is_empty(),
+            "silent completion parks no report for the boss"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An ordinary success keeps the outcome open, leaves the durable
+/// handoff, and reports once with the captured intent.
+#[test]
+fn an_ordinary_assignment_success_reports_its_handoff() {
+    use waku_protocol::boss::EmployeeSettle;
+    let root = std::env::temp_dir().join(format!("boss-finish-handoff-{}", Uuid::new_v4()));
+    let (backend, _supervisor, employee_id, outcome, parent_capture) =
+        outcome_employee_fixture(&root, "", false, Some("Assign the repair next"));
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    let task = backend
+        .boss
+        .document()
+        .outcomes
+        .into_iter()
+        .find(|entry| entry.id == outcome)
+        .unwrap();
+    assert_eq!(task.state, waku_protocol::boss::OutcomeState::Open);
+    assert_eq!(task.handoffs.len(), 1);
+    let prompts = parent_capture.prompts.lock();
+    assert_eq!(prompts.len(), 1, "the handoff reports once");
+    assert!(
+        prompts[0].contains("Assign the repair next"),
+        "{}",
+        prompts[0]
+    );
+    assert!(
+        prompts[0].contains(&task.handoffs[0].id.to_string()),
+        "{}",
+        prompts[0]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A finisher whose completion conditions are unmet reports the
+/// conflict and leaves the outcome open — the boss decides what
+/// remains.
+#[test]
+fn a_finishing_conflict_reports_and_leaves_the_outcome_open() {
+    use waku_protocol::boss::EmployeeSettle;
+    let root = std::env::temp_dir().join(format!("boss-finish-conflict-{}", Uuid::new_v4()));
+    // The sibling lands first — the finishing-phase lock would refuse it
+    // after the finisher's designation.
+    let (backend, supervisor, _sibling, outcome, parent_capture) =
+        outcome_employee_fixture(&root, "every failure names a cause", false, None);
+    let persona = backend.boss.document().personas[1].id;
+    let assignment = backend
+        .boss
+        .assignment_admission(Some(outcome), None, true, None, Vec::new(), None)
+        .unwrap()
+        .unwrap();
+    let mut finisher = backend
+        .boss
+        .prepare_employee(
+            supervisor,
+            persona,
+            "Verify and land".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    finisher.assignment = Some(assignment);
+    let finisher_id = finisher.session_id;
+    backend.boss.add_employee(finisher).unwrap();
+    backend
+        .boss
+        .designate_finisher(outcome, finisher_id)
+        .unwrap();
+    let mut child = AgentSession::new(
+        backend.task_state.lock().sessions[0].project_id,
+        ProviderKind::Codex,
+    );
+    child.id = finisher_id;
+    child.begin_turn("Verify and land");
+    child.push_message(crate::model::MessageRole::Assistant, "Done");
+    child.finish_active_turn(TurnStatus::Completed);
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(child);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let finisher = finisher_id;
+    backend
+        .finish_boss_employee(finisher, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    let task = backend
+        .boss
+        .document()
+        .outcomes
+        .into_iter()
+        .find(|entry| entry.id == outcome)
+        .unwrap();
+    assert_eq!(task.state, waku_protocol::boss::OutcomeState::Open);
+    assert!(task.completion_conflict.is_some());
+    let prompts = parent_capture.prompts.lock();
+    assert_eq!(prompts.len(), 1, "the conflict reaches the boss");
+    assert!(
+        prompts[0].contains("completion was refused"),
+        "{}",
+        prompts[0]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Cancelling an outcome stops its live assignments — the record lands
+/// cancelled and the in-flight work expires as stopped, never reviving
+/// the parent.
+#[test]
+fn a_cancelled_outcome_stops_its_live_assignments() {
+    use waku_protocol::boss::{BossOperation, EmployeeSettle, OutcomeState};
+    let root = std::env::temp_dir().join(format!("boss-outcome-cancel-{}", Uuid::new_v4()));
+    let (backend, _supervisor, employee_id, outcome, _parent) =
+        outcome_employee_fixture(&root, "criteria", false, None);
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::SetOutcomeState {
+                outcome,
+                state: OutcomeState::Cancelled,
+                evidence: Some("superseded".into()),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let task = document
+        .outcomes
+        .iter()
+        .find(|entry| entry.id == outcome)
+        .unwrap();
+    assert_eq!(task.state, OutcomeState::Cancelled);
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert!(employee.cancelled);
+    assert!(employee.expired, "the live assignment was stopped");
+    // A late settle cannot reopen the cancelled outcome.
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+        .ok();
+    assert_eq!(
+        backend
+            .boss
+            .document()
+            .outcomes
+            .iter()
+            .find(|entry| entry.id == outcome)
+            .unwrap()
+            .state,
+        OutcomeState::Cancelled
+    );
+    let _ = std::fs::remove_dir_all(root);
 }

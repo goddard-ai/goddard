@@ -49,7 +49,7 @@ exist only during this script invocation; use named memory buckets for durable s
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,goalId?,plan?,item?,requestId?})
+  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's
@@ -60,7 +60,14 @@ exist only during this script invocation; use named memory buckets for durable s
                                             worktree to the new employee, uncommitted
                                             state intact; summons sharing a groupId
                                             form a wave: one notice lands when every
-                                            member finishes, fails, or is cancelled
+                                            member finishes, fails, or is cancelled;
+                                            outcomeId (or a newOutcome spec) assigns the
+                                            job to a daemon-owned outcome — its success
+                                            leaves a durable handoff with afterSuccess
+                                            intent — finishesOutcome makes it the
+                                            finisher whose success completes the outcome
+                                            silently, and prerequisites holds it queued
+                                            until the named siblings finish
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
                         setWorkspace|setResources|setPlan,...})
@@ -116,7 +123,10 @@ exist only during this script invocation; use named memory buckets for durable s
                                             record/submitSummary/scan/zoomBucket; every
                                             content op names its bucket explicitly
   op(#{type,...})                           advanced escape hatch for supported
-                                            Boss operations, result returned whole
+                                            Boss operations, result returned whole —
+                                            covers createOutcome / setOutcomeState /
+                                            resolveHandoff / setOutcomeWaiting /
+                                            attachPlan for outcome bookkeeping
   help()                                    this text";
 
 /// The result of one `run` call: the script's scope when it could be

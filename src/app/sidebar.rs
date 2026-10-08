@@ -7456,6 +7456,7 @@ mod tests {
             deliverables,
             goals_viewed_at: None,
             planning: Vec::new(),
+            outcomes: Vec::new(),
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,

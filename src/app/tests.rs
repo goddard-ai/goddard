@@ -12,8 +12,8 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    append_queued_steer_preview, merge_remote_session_catalog,
-    session_accepts_immediate_steer, session_has_active_provider_turn,
+    append_queued_steer_preview, merge_remote_session_catalog, session_accepts_immediate_steer,
+    session_has_active_provider_turn,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -1633,6 +1633,7 @@ fn boss_state(
         deliverables,
         goals_viewed_at: None,
         planning: Vec::new(),
+        outcomes: Vec::new(),
         resource_policy: waku_client::boss::BossResourcePolicy::default(),
         next_sequence: 0,
         next_event_id: 0,

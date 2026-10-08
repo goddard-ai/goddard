@@ -3428,6 +3428,12 @@ impl Waku {
         // Opening the panel counts as focusing it — the surface's own
         // keybindings are live from the first keystroke.
         let opening = visible && !self.right_panel_visible;
+        if !visible {
+            // A manual hide is a dismissal of whatever the boss chat's
+            // auto-show would surface for this content — it stays hidden
+            // until the Tasks signature changes.
+            self.dismiss_boss_tasks_panel();
+        }
         if visible {
             self.request_active_terminal_focus();
             // The Git panel shares this slot: opening the right panel
