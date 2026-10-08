@@ -1212,15 +1212,18 @@ impl StateStore {
     /// Debug builds keep it in the checkout's gitignored `temp/`, so
     /// development never touches the installed app's data and a bad state is
     /// thrown away by deleting one directory. Release builds use the usual
-    /// per-user application support directory.
+    /// per-user application support directory unless the development watcher
+    /// supplies `GODDARD_DEV_DATA_DIR` for its release-profile daemon.
     pub fn default_path() -> PathBuf {
+        let variable = if cfg!(debug_assertions) {
+            "GODDARD_DATA_DIR"
+        } else {
+            "GODDARD_DEV_DATA_DIR"
+        };
+        if let Some(dir) = std::env::var_os(variable).filter(|dir| !dir.is_empty()) {
+            return PathBuf::from(dir).join("app.db");
+        }
         if cfg!(debug_assertions) {
-            // `GODDARD_DATA_DIR` lets a second debug instance run beside the
-            // first (friend-sharing smoke tests, isolated experiments)
-            // without colliding on `temp/`.
-            if let Some(dir) = std::env::var_os("GODDARD_DATA_DIR").filter(|dir| !dir.is_empty()) {
-                return PathBuf::from(dir).join("app.db");
-            }
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .and_then(Path::parent)
@@ -4216,6 +4219,66 @@ mod tests {
 
         assert_eq!(fs::read(path).unwrap(), payload);
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn development_data_directory_override() {
+        const PROBE: &str = "GODDARD_TEST_DATA_DIRECTORY";
+        if let Some(directory) = std::env::var_os(PROBE) {
+            assert_eq!(
+                StateStore::default_path(),
+                PathBuf::from(directory).join("app.db")
+            );
+            return;
+        }
+
+        // Run in a child so environment overrides cannot race other tests.
+        // This test also runs under --release to cover the dev channel daemon.
+        let directory = temporary_directory();
+        let variable = if cfg!(debug_assertions) {
+            "GODDARD_DATA_DIR"
+        } else {
+            "GODDARD_DEV_DATA_DIR"
+        };
+        let other_variable = if cfg!(debug_assertions) {
+            "GODDARD_DEV_DATA_DIR"
+        } else {
+            "GODDARD_DATA_DIR"
+        };
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "persistence::tests::development_data_directory_override",
+                "--nocapture",
+            ])
+            .env(other_variable, directory.join("wrong-profile"))
+            .env(variable, &directory)
+            .env(PROBE, &directory)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "persistence::tests::default_path_is_build_specific",
+                "--nocapture",
+            ])
+            .env(variable, "")
+            .env(other_variable, &directory)
+            .env_remove(PROBE)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

@@ -1013,6 +1013,8 @@ async function spawnDaemon(bind: string): Promise<void> {
       cwd: root,
       env: {
         ...process.env,
+        GODDARD_DATA_DIR: developmentDataDir,
+        ...(serveMode ? { GODDARD_DEV_DATA_DIR: developmentDataDir } : {}),
         GODDARD_DAEMON_TOKEN: daemonToken,
         GODDARD_APP_EXECUTABLE:
           lane === undefined
@@ -1595,6 +1597,7 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     cwd: root,
     env: {
       ...process.env,
+      GODDARD_DATA_DIR: developmentDataDir,
       ...(serveMode ? { GODDARD_DEV_DATA_DIR: developmentDataDir } : {}),
       ...(!isMacOS
         ? { GODDARD_DAEMON_PATH: process.env.GODDARD_DAEMON_PATH || daemonPath }
