@@ -1299,6 +1299,28 @@ impl BossService {
         })
     }
 
+    /// Keep a live employee's ticket in step with an in-place reconfigure
+    /// — a later resume replays the ticket, so its stored selection must
+    /// be the one the session now runs. Ticketless records have nothing
+    /// to update.
+    pub fn update_employee_ticket(
+        &self,
+        session: Uuid,
+        change: impl FnOnce(&mut SummonTicket),
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            if let Some(ticket) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+                .and_then(|entry| entry.ticket.as_mut())
+            {
+                change(ticket);
+            }
+            Ok(())
+        })
+    }
+
     /// Apply per-field grant overrides to an employee's persisted record —
     /// each `Some` replaces that grant. An employee supervisor's edits stay
     /// clamped to its own permissions; the boss and human callers are not.
@@ -1472,14 +1494,15 @@ impl BossService {
                 }
             };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Resolve style and approach choices from existing code and docs. Put useful non-blocking findings and routine completions in your finish report; do not report them as blockers. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH` — the daemon stores a copy, so the entry survives your workspace's cleanup.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Use named memory buckets explicitly through `goddard-agent memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss` to read pinned documents and retrieve employee transcripts. Native subagents are not Boss employees: delegate only with the Boss summon operation, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} To message your supervisor mid-task, run `goddard-agent prompt '{{\"task_id\":\"{}\",\"prompt\":\"<message>\"}}'` — employees report upward only, and prompts to any other task are rejected. Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss '{{\"type\":\"reportBlocker\",\"message\":\"what needs attention\"}}'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Resolve style and approach choices from existing code and docs. Put useful non-blocking findings and routine completions in your finish report; do not report them as blockers. Files you produce inside your workspace can be published to the human's sidebar with `goddard-agent boss deliverable publish ABSOLUTE_PATH` — the daemon stores a copy, so the entry survives your workspace's cleanup.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
                 serde_json::to_string(&employee.permissions).unwrap_or_default(),
                 pinned_paths(employee.pinned_files.as_slice())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                employee.supervisor_id,
             )
         } else {
             format!(
@@ -1551,9 +1574,17 @@ impl BossService {
 
     /// A provider settle ended the employee's turn — the forwarder
     /// reports how it ended so the finish can classify the expiry
-    /// legibly (`EmployeeSettle` → `ExpiryCause`).
+    /// legibly (`EmployeeSettle` → `ExpiryCause`). A queued ticket owns
+    /// no live turn, so a settle arriving for one belongs to the previous
+    /// generation's dying runtime — it is dropped, not settled.
     pub fn note_settled(&self, session: Uuid, settle: EmployeeSettle) {
-        if !self.employee(session).is_some_and(|entry| !entry.expired) {
+        // A settle from a runtime the daemon retired is stale — a ticket
+        // parked behind admission has no live turn to finish. Legacy
+        // ticketless `queued` records still own a runtime, so theirs land.
+        if !self.employee(session).is_some_and(|entry| {
+            !entry.expired
+                && !(entry.lifecycle() == EmployeeLifecycle::Queued && entry.ticket.is_some())
+        }) {
             return;
         }
         if let Some(finish) = self.finish_employee.lock().clone() {
@@ -7930,7 +7961,9 @@ mod memory_op_tests {
         let record = service.employee(stopped.session_id).unwrap();
         let expiry = record.expiry.as_ref().unwrap();
         assert_eq!(expiry.cause, ExpiryCause::Stopped);
-        assert!(!expiry.resumable);
+        // An intentional stop is still resumable — the flag is
+        // terminal only for the admission it ended.
+        assert!(expiry.resumable);
         assert!(record.ticket.as_ref().unwrap().interruptions.is_empty());
 
         // Re-admission clears the settle record with blocker/cancelled;

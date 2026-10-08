@@ -65,9 +65,35 @@ impl WakuBackend {
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
         let delivery = delivery;
+        // An employee messaging its supervisor rides the report channel —
+        // `require_control` below only governs controlling an employee
+        // record, so a prompt aimed at the sender's report target skips
+        // it. `report_target` already escalates past an expired or
+        // retired supervisor to the boss session.
+        let sender_employee = sender.and_then(|sender| self.boss.employee(sender));
+        let reports_up = sender_employee
+            .as_ref()
+            .is_some_and(|employee| self.boss.report_target(employee) == Some(target));
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
             use waku_protocol::boss::EmployeeLifecycle;
-            self.boss.require_control(sender, target)?;
+            if !reports_up && let Err(error) = self.boss.require_control(sender, target) {
+                if let Some(employee) = &sender_employee {
+                    // The roster's bare "not a Boss employee" tells an
+                    // employee nothing — it retries the same bad target.
+                    // Name the channel it can actually reach.
+                    let supervisor = self
+                        .boss
+                        .report_target(employee)
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "unavailable".into());
+                    bail!(
+                        "employees report upward only — `goddard-agent prompt` your supervisor \
+                         task ({supervisor}), `goddard-agent boss reportBlocker` when you cannot \
+                         proceed, or `goddard-agent merge submit` to land work ({error:#})"
+                    );
+                }
+                return Err(error);
+            }
             // Queue delivery to a queued ticket joins its dispatch
             // envelope; a prompt to a finished employee re-enters
             // admission and resumes the same transcript once dispatched.

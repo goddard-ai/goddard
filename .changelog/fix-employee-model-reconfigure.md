@@ -1,0 +1,1 @@
+- Boss employee model changes now apply mid-flight as one step — the open turn stops cleanly, the new provider/model/effort applies, and the employee resumes its assignment — and intentional stops no longer mark the turn failed or interrupt the supervisor chat.

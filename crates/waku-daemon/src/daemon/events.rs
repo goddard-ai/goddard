@@ -222,6 +222,54 @@ pub(super) fn record_boss_event(
     Ok(())
 }
 
+/// Record a turn's end the daemon ordered itself — a supervisor stop, a
+/// queued-ticket cancel, or a mid-flight reconfigure. The turn closes
+/// `Interrupted` attributed to the daemon, the session reads idle rather
+/// than failed, open activities complete, and `notice` — when given —
+/// lands as the transcript's interruption row. Unlike a provider-reported
+/// `TurnFinished { success: false }` nothing here reads as a failure.
+pub(super) fn record_daemon_interrupt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    notice: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|entry| entry.id == session_id)
+    else {
+        return Ok(());
+    };
+    task_store.hydrate(session)?;
+    if session.active_turn_id().is_some() {
+        session.interrupt_active_turn(crate::model::TurnInterruption::Daemon);
+    }
+    session.status = SessionStatus::Idle;
+    if let Some(notice) = notice {
+        session.push_notice_message(
+            crate::model::MessageRole::Assistant,
+            notice,
+            crate::model::TranscriptNotice::Status {
+                kind: crate::model::TranscriptNoticeStatus::Interrupted,
+            },
+        );
+    }
+    for block in &mut session.transcript_blocks {
+        for item in &mut block.activities {
+            item.complete = true;
+            if let Some(reasoning) = &mut item.reasoning {
+                reasoning.finished_at_ms = crate::model::unix_time() * 1000;
+            }
+        }
+    }
+    session.updated_at = crate::model::unix_time();
+    state.mark_session_dirty(session_id);
+    task_store.save(&mut state)?;
+    Ok(())
+}
+
 pub(super) fn forward_driver_events(
     session_id: Uuid,
     runtime_id: Uuid,
@@ -262,12 +310,51 @@ pub(super) fn forward_driver_events(
                     })
                     .is_some()
             });
-        if boss.is_managed(session_id) {
-            if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &event) {
+        let managed = boss.is_managed(session_id);
+        // Events from a runtime the session no longer owns — torn down by
+        // a requeue, a stop, or a replacement — must not rewrite the
+        // transcript or settle the employee's admission. A queued ticket
+        // owns no live runtime either: anything arriving for it is the
+        // previous generation dying.
+        let stale = managed
+            && (boss.employee_lifecycle(session_id)
+                == Some(waku_protocol::boss::EmployeeLifecycle::Queued)
+                || !sessions
+                    .lock()
+                    .get(&session_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id));
+        // A settle the daemon itself ordered — a supervisor stop's
+        // transcript write or a reconfigure's cancel — records the turn as
+        // an intentional interruption, never a failure, and never settles
+        // the employee's admission on it. A real process exit consumes the
+        // flag too: the teardown it reports is its own settle. A stale
+        // runtime's events never touch it — the flag belongs to the
+        // runtime that currently owns the session.
+        let intentional = !stale
+            && matches!(&event, DriverEvent::TurnFinished { .. })
+            && agent.take_daemon_interrupt(session_id);
+        if !stale && matches!(&event, DriverEvent::ProcessExited) {
+            agent.take_daemon_interrupt(session_id);
+        }
+        if managed && !stale {
+            // A genuinely-completed turn keeps its verdict; only a
+            // cancel-issued settle writes the intentional interruption.
+            let interrupted =
+                intentional && matches!(&event, DriverEvent::TurnFinished { success: false, .. });
+            let recorded = if interrupted {
+                record_daemon_interrupt(&task_state, &task_store, session_id, None)
+            } else {
+                record_boss_event(&task_state, &task_store, session_id, &event)
+            };
+            if let Err(error) = recorded {
                 eprintln!("could not record Boss session {session_id}: {error:#}");
             }
         }
-        let rejected_steer = agent.note_driver_event(session_id, &event);
+        let rejected_steer = if stale {
+            None
+        } else {
+            agent.note_driver_event(session_id, &event)
+        };
         automations.note_driver_event(session_id, &event);
         if let DriverEvent::TurnFinished { success, .. } = &event
             && !boss.is_managed(session_id)
@@ -436,10 +523,12 @@ pub(super) fn forward_driver_events(
         // provider exit, a marked stop, a failed delivery — still expires
         // with the leftovers counted as `parkedWork`.
         let mut keeps_working = false;
-        if matches!(
-            settle,
-            Some(waku_protocol::boss::EmployeeSettle::TurnFinished)
-        ) && boss.is_employee(session_id)
+        if !stale
+            && matches!(
+                settle,
+                Some(waku_protocol::boss::EmployeeSettle::TurnFinished)
+            )
+            && boss.is_employee(session_id)
         {
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
@@ -473,10 +562,14 @@ pub(super) fn forward_driver_events(
                 keeps_working = true;
             }
         }
-        if !keeps_working && let Some(settle) = settle {
+        if !keeps_working
+            && !stale
+            && !intentional
+            && let Some(settle) = settle
+        {
             boss.note_settled(session_id, settle);
         }
-        if drains_queue && !boss.is_employee(session_id) {
+        if drains_queue && !stale && !boss.is_employee(session_id) {
             // A restarted daemon rebuilt no in-memory queue — the session
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);

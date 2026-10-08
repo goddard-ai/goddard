@@ -578,17 +578,17 @@ impl WakuBackend {
                                     Ok(BossResult::Saved)
                                 }
                                 EmployeeControl::Stop => {
-                                    record_boss_event(
+                                    // The cancel mark lands before the
+                                    // transcript write and teardown — a
+                                    // settle racing them classifies as
+                                    // the intentional stop it is.
+                                    self.boss.mark_cancelled(session_id)?;
+                                    record_daemon_interrupt(
                                         &self.task_state,
                                         &self.task_store,
                                         session_id,
-                                        &DriverEvent::TurnFinished {
-                                            success: false,
-                                            summary: Some("Cancelled during dispatch".into()),
-                                            summary_i18n: None,
-                                        },
+                                        Some("Cancelled during dispatch"),
                                     )?;
-                                    self.boss.mark_cancelled(session_id)?;
                                     self.finish_boss_employee(
                                         session_id,
                                         false,
@@ -608,134 +608,23 @@ impl WakuBackend {
                         provider,
                         model,
                         reasoning_effort,
-                        interrupt,
                     } = &action
                     {
-                        let working = self.agent.is_working(session_id);
-                        let interrupt = interrupt.unwrap_or(false);
-                        if working && !interrupt {
-                            bail!(
-                                "wait for the employee's current turn to finish before changing its model"
-                            );
-                        }
-                        let catalog = crate::model_catalog::cached_models(*provider)
-                            .unwrap_or_else(|| crate::model_catalog::fallback_models(*provider));
-                        let selected = waku_protocol::model_catalog::packed_catalog_model(
-                            &catalog, model, *provider,
-                        )
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "model {model:?} is not listed for {}",
-                                provider.display_name()
-                            )
-                        })?;
-                        let effort = reasoning_effort
-                            .clone()
-                            .map(|effort| {
-                                if effort == "default" {
-                                    Ok(None)
-                                } else if selected
-                                    .model
-                                    .reasoning_efforts
-                                    .iter()
-                                    .any(|option| option.id == effort)
-                                {
-                                    Ok(Some(effort))
-                                } else {
-                                    Err(anyhow!(
-                                        "reasoning effort is not supported by model {model:?}"
-                                    ))
-                                }
-                            })
-                            .transpose()?
-                            .flatten();
-                        let model_id = selected.model.id.clone();
-                        let current = self
-                            .task_state
-                            .lock()
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                            .map(|session| (session.provider, session.model.clone()))
-                            .ok_or_else(|| anyhow!("employee session is missing"))?;
-                        let model_changed =
-                            current.0 != *provider || current.1.as_deref() != Some(model_id.as_str());
-                        // A different provider+model pair is a different
-                        // capacity claim — the employee re-enters admission
-                        // against the new cap rather than jumping between
-                        // pools mid-flight.
-                        if model_changed {
-                            self.requeue_employee(session_id, |ticket, _started| {
-                                ticket.provider = *provider;
-                                ticket.model = model_id;
-                                ticket.reasoning_effort = effort.clone();
-                            })?;
-                            let removed = self.sessions.lock().remove(&session_id);
-                            if let Some(entry) = &removed {
-                                entry.driver.begin_shutdown();
-                            }
-                            drop_detached(removed);
-                            self.agent.revoke_session(session_id);
-                            return Ok(BossResult::Saved);
-                        }
-                        let runtime = self
-                            .sessions
-                            .lock()
-                            .get(&session_id)
-                            .map(|entry| entry.driver.clone());
-                        if working && interrupt {
-                            if let Some(driver) = &runtime {
-                                driver.cancel();
-                            }
-                        }
-                        let applied_in_place = runtime.as_ref().is_some_and(|driver| {
-                            let mode = self
-                                .task_state
-                                .lock()
-                                .sessions
-                                .iter()
-                                .find(|session| session.id == session_id)
-                                .map(|session| session.runtime_mode)
-                                .unwrap_or_default();
-                            driver.apply_options(crate::driver::SessionOptions {
-                                mode,
-                                model: Some(model_id.clone()),
-                                reasoning_effort: effort.clone(),
-                                service_tier: None,
-                                context_window: None,
-                            })
-                        });
-                        {
-                            let mut state = self.task_state.lock();
-                            let session = state
-                                .sessions
-                                .iter_mut()
-                                .find(|session| session.id == session_id)
-                                .ok_or_else(|| anyhow!("employee session is missing"))?;
-                            session.provider = *provider;
-                            session.model = Some(model_id);
-                            session.reasoning_effort = effort;
-                            session.service_tier = None;
-                            session.context_window = None;
-                            session.auto_route = false;
-                            session.route_decision = None;
-                            session.updated_at = crate::model::unix_time();
-                            state.mark_session_dirty(session_id);
-                            self.task_store.save(&mut state)?;
-                        }
-                        if !applied_in_place {
-                            let removed = self.sessions.lock().remove(&session_id);
-                            if let Some(entry) = &removed {
-                                entry.driver.begin_shutdown();
-                            }
-                            drop_detached(removed);
-                            self.agent.revoke_session(session_id);
-                        }
-                        return Ok(BossResult::Saved);
+                        return self.control_employee_model(
+                            caller,
+                            session_id,
+                            *provider,
+                            model,
+                            reasoning_effort.clone(),
+                            events,
+                        );
                     }
                     if let EmployeeControl::SetPermissions { permissions } = &action {
-                        self.boss
-                            .set_employee_permissions(caller, session_id, permissions.clone())?;
+                        self.boss.set_employee_permissions(
+                            caller,
+                            session_id,
+                            permissions.clone(),
+                        )?;
                         // The employee's next prompt re-injects its persona
                         // block so the revised grants reach it.
                         self.boss.reset_context(session_id);
@@ -784,8 +673,7 @@ impl WakuBackend {
                                     ..
                                 } = &action
                                 {
-                                    self.boss
-                                        .set_employee_job_title(session_id, job_title)?;
+                                    self.boss.set_employee_job_title(session_id, job_title)?;
                                 }
                                 let prompt = prompt.clone();
                                 self.requeue_employee(session_id, |ticket, started| {
@@ -820,9 +708,9 @@ impl WakuBackend {
                                     Some(driver) => {
                                         self.send_agent_steer(&driver, session_id, prompt, caller)
                                     }
-                                    None => self.queue_agent_prompt(
-                                        session_id, prompt, caller, events,
-                                    )?,
+                                    None => {
+                                        self.queue_agent_prompt(session_id, prompt, caller, events)?
+                                    }
                                 },
                                 AgentPromptDelivery::Queue => {
                                     self.queue_agent_prompt(session_id, prompt, caller, events)?
@@ -847,23 +735,21 @@ impl WakuBackend {
                             // once the steer is deliverable; it is neither a
                             // prompt nor a transcript entry.
                             if let Some(job_title) = &job_title {
-                                self.boss
-                                    .set_employee_job_title(session_id, job_title)?;
+                                self.boss.set_employee_job_title(session_id, job_title)?;
                             }
                             self.send_agent_steer(&driver, session_id, prompt, caller);
                         }
                         EmployeeControl::Stop => {
-                            record_boss_event(
+                            // Same ordering as the dispatching cancel:
+                            // `cancelled` is durable intent, so it lands
+                            // before the transcript row and the finish.
+                            self.boss.mark_cancelled(session_id)?;
+                            record_daemon_interrupt(
                                 &self.task_state,
                                 &self.task_store,
                                 session_id,
-                                &DriverEvent::TurnFinished {
-                                    success: false,
-                                    summary: Some("Stopped by supervisor".into()),
-                                    summary_i18n: None,
-                                },
+                                Some("Stopped by supervisor"),
                             )?;
-                            self.boss.mark_cancelled(session_id)?;
                             self.finish_boss_employee(
                                 session_id,
                                 false,
@@ -1322,16 +1208,11 @@ impl WakuBackend {
         // with the durable queue so it can review and advance the chain.
         // An interruption reports for either kind, and so does a settle
         // that left prompts parked or an ask unanswered.
-        // Cancelled queued tickets skip `finishing` and arrive already expired.
-        // Keep their cancellation transcript and teardown, but do not wake
-        // the supervisor for work it cancelled before launch. Running stops
-        // arrive as `finishing`; legacy ticket-less employees may arrive
-        // expired too, so only queued tickets suppress the failure report.
-        let cancelled_while_queued = employee.cancelled
-            && employee.ticket.is_some()
-            && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Expired;
+        // A cancelled record expired on a supervisor's stop — intentional,
+        // already visible on the record, and not a failure. It never wakes
+        // the supervisor: whoever stopped it already knows.
         let continuation = self.boss.plan_continuation_context(&employee);
-        let reports = !cancelled_while_queued
+        let reports = !employee.cancelled
             && (employee.work_goal == waku_protocol::boss::EmployeeGoal::Errand
                 || continuation.is_some()
                 || employee.blocker.is_some()

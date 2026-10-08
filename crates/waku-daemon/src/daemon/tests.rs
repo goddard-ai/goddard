@@ -1531,6 +1531,11 @@ struct CaptureDriver {
     prompts: Mutex<Vec<String>>,
     steers: Mutex<Vec<String>>,
     shutdowns: Mutex<u32>,
+    cancels: Mutex<u32>,
+    /// Options the driver took via `apply_options` — empty when the
+    /// capture refuses them, matching providers that cannot retune live.
+    options: Mutex<Vec<crate::driver::SessionOptions>>,
+    applies_options: bool,
     surface_delivery: crate::driver::AgentSurfaceDelivery,
 }
 
@@ -1557,7 +1562,16 @@ impl crate::driver::DriverControl for CaptureDriver {
     ) -> anyhow::Result<Option<waku_protocol::model::ProviderResumeCursor>> {
         Ok(None)
     }
-    fn cancel(&self) {}
+    fn cancel(&self) {
+        *self.cancels.lock() += 1;
+    }
+    fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
+        if !self.applies_options {
+            return false;
+        }
+        self.options.lock().push(options);
+        true
+    }
 }
 
 /// A task agent's first context steer carries the `<project-memory>` block
@@ -4000,7 +4014,8 @@ fn the_settle_signal_classifies_the_expiry() {
             ExpiryCause::ExitedIdle,
             true,
         ),
-        (EmployeeSettle::Stopped, ExpiryCause::Stopped, false),
+        // An intentional stop ends the admission but stays resumable.
+        (EmployeeSettle::Stopped, ExpiryCause::Stopped, true),
         (EmployeeSettle::LaunchFailed, ExpiryCause::Failed, true),
         (EmployeeSettle::Restarted, ExpiryCause::Restarted, true),
     ] {
@@ -4701,11 +4716,25 @@ fn an_errand_employee_finish_delivers_the_index() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A supervisor stop is an intentional interruption: the record expires
+/// cancelled and resumable, the turn never reads failed, and the
+/// supervisor hears nothing — it ordered the stop itself.
 #[test]
-fn stopping_a_running_employee_still_reports_to_its_supervisor() {
-    use waku_protocol::boss::{BossOperation, EmployeeControl};
+fn a_supervisor_stop_expires_silently_without_failing_the_turn() {
+    use waku_protocol::boss::{BossOperation, EmployeeControl, ExpiryCause};
     let root = std::env::temp_dir().join(format!("boss-running-stop-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("running when the supervisor stopped it");
+        backend.task_store.save(&mut state).unwrap();
+    }
     backend
         .handle_boss_operation(
             Some(supervisor),
@@ -4716,11 +4745,27 @@ fn stopping_a_running_employee_still_reports_to_its_supervisor() {
             &EventSink::detached(),
         )
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().cancelled);
-    let prompts = parent_capture.prompts.lock();
-    assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains(&employee_id.to_string()));
-    drop(prompts);
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert!(employee.cancelled);
+    assert_eq!(
+        employee.expiry.as_ref().unwrap().cause,
+        ExpiryCause::Stopped
+    );
+    assert!(employee.expiry.as_ref().unwrap().resumable);
+    assert!(parent_capture.prompts.lock().is_empty());
+    assert!(parent_capture.steers.lock().is_empty());
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == employee_id)
+        .unwrap();
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(
+        session.turns.last().unwrap().status,
+        TurnStatus::Interrupted
+    );
+    drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -7012,7 +7057,6 @@ fn setmodel_on_a_queued_ticket_moves_its_admission_key() {
                     provider: ProviderKind::Claude,
                     model: claude_model.clone(),
                     reasoning_effort: None,
-                    interrupt: None,
                 },
             },
             &EventSink::detached(),
@@ -7031,6 +7075,426 @@ fn setmodel_on_a_queued_ticket_moves_its_admission_key() {
             .any(|blocker| matches!(blocker, AdmissionBlocker::ModelLimit { used: 1, limit: 1 })),
         "the destination pool reports its own wait reason"
     );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+/// `setModel` on a working employee is one atomic reconfigure: the open
+/// turn closes as an intentional interruption — never a failure — the
+/// ticket re-enters admission on the new pair carrying a "verify and
+/// continue" prompt, and the superseded runtime retires. The
+/// destination pool stays saturated here so the reticket is observably
+/// queued rather than dispatched.
+#[test]
+fn setmodel_on_a_working_employee_interrupts_and_requeues() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    use waku_protocol::model::TurnInterruption;
+    use waku_protocol::resources::{AdmissionClaim, ResourceSet};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-live-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    // The catalog is host-cached in tests too — pick a destination
+    // model that exists wherever the suite runs.
+    let other_model = crate::model_catalog::cached_models(ProviderKind::Codex)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(ProviderKind::Codex))
+        .into_iter()
+        .find(|model| model.id != "gpt-5.5")
+        .expect("the codex catalog has a second model")
+        .id;
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "rekey",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    // Grant by hand and walk the ticket to `working` the way the
+    // dispatch fixture does — no provider binary exists in tests.
+    let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+    let attempt = backend
+        .resource_broker()
+        .unwrap()
+        .try_admission(
+            session_id,
+            reservation,
+            ResourceSet::default(),
+            "summon dispatch".into(),
+            AdmissionClaim {
+                daemon: backend.boss.document().identity.id,
+                provider: ProviderKind::Codex.id().into(),
+                model: "gpt-5.5".into(),
+                live_limit: 1,
+                hard_cap: 2,
+                allow_burst: true,
+            },
+        )
+        .unwrap();
+    assert!(attempt.granted);
+    assert!(
+        backend
+            .boss
+            .mark_dispatching(session_id, 1, Some(reservation))
+            .unwrap()
+    );
+    assert!(backend.boss.mark_working(session_id, 1).unwrap());
+    // The runtime is live with a turn in flight.
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("Work on rekey");
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+
+    // A different provider+model pair is a different capacity claim —
+    // saturate it so the reticket waits observably instead of dispatching.
+    set_model_policy(&backend, ProviderKind::Codex, &other_model, 1, 1);
+    hold_model_slot(&backend, ProviderKind::Codex, &other_model);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider: ProviderKind::Codex,
+                    model: other_model.clone(),
+                    reasoning_effort: Some("high".into()),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    let ticket = employee.ticket.as_ref().unwrap();
+    assert_eq!(ticket.provider, ProviderKind::Codex);
+    assert_eq!(ticket.model, other_model);
+    assert_eq!(ticket.reasoning_effort.as_deref(), Some("high"));
+    assert!(
+        ticket
+            .pending_prompts
+            .iter()
+            .any(|prompt| prompt.contains(&other_model) && prompt.contains("Verify the state")),
+        "the reconfigure parks a continuation prompt: {:?}",
+        ticket.pending_prompts
+    );
+    // The superseded runtime is gone; the cut turn reads interrupted by
+    // the daemon, never failed, and the record stays uncancelled.
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    assert_eq!(*capture.shutdowns.lock(), 1);
+    assert!(!employee.cancelled);
+    assert!(!backend.agent.has_open_turn(session_id));
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    let turn = session.turns.last().unwrap();
+    assert_eq!(turn.status, TurnStatus::Interrupted);
+    assert_eq!(turn.interruption, Some(TurnInterruption::Daemon));
+    assert_ne!(session.status, SessionStatus::Failed);
+    drop(state);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A same-pair `setModel` — effort-only — retunes the live runtime in
+/// place: the driver takes the options, the open turn is cancelled so
+/// the retune applies at the next turn boundary, and a continuation
+/// prompt parks behind the settle to resume the assignment.
+#[test]
+fn setmodel_retunes_a_working_employees_runtime_in_place() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    use waku_protocol::resources::{AdmissionClaim, ResourceSet};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-place-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "retune",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+    let attempt = backend
+        .resource_broker()
+        .unwrap()
+        .try_admission(
+            session_id,
+            reservation,
+            ResourceSet::default(),
+            "summon dispatch".into(),
+            AdmissionClaim {
+                daemon: backend.boss.document().identity.id,
+                provider: ProviderKind::Codex.id().into(),
+                model: "gpt-5.5".into(),
+                live_limit: 1,
+                hard_cap: 2,
+                allow_burst: true,
+            },
+        )
+        .unwrap();
+    assert!(attempt.granted);
+    assert!(
+        backend
+            .boss
+            .mark_dispatching(session_id, 1, Some(reservation))
+            .unwrap()
+    );
+    assert!(backend.boss.mark_working(session_id, 1).unwrap());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("Work on retune");
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    let capture = Arc::new(CaptureDriver {
+        applies_options: true,
+        ..Default::default()
+    });
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider: ProviderKind::Codex,
+                    model: "gpt-5.5".into(),
+                    reasoning_effort: Some("high".into()),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+
+    // The runtime kept its slot — options and a cancel landed, no
+    // shutdown — and the continuation waits behind the settle.
+    assert_eq!(*capture.shutdowns.lock(), 0);
+    assert_eq!(*capture.cancels.lock(), 1);
+    {
+        let options = capture.options.lock();
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(options[0].reasoning_effort.as_deref(), Some("high"));
+    }
+    assert!(backend.agent.has_queued(session_id));
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    assert_eq!(
+        employee
+            .ticket
+            .as_ref()
+            .and_then(|ticket| ticket.reasoning_effort.as_deref()),
+        Some("high"),
+        "a later resume replays the ticket — its stored effort moves too"
+    );
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+    drop(state);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// `setModel` rejects what the catalog cannot serve — an unlisted model
+/// and an effort the model does not support — before touching anything.
+#[test]
+fn setmodel_validates_the_selection_before_reconfiguring() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-bad-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "validate",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let control = |provider, model: &str, effort: Option<&str>| {
+        backend.handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider,
+                    model: model.to_owned(),
+                    reasoning_effort: effort.map(str::to_owned),
+                },
+            },
+            &EventSink::detached(),
+        )
+    };
+    assert!(
+        format!(
+            "{:#}",
+            control(ProviderKind::Codex, "no-such-model", None).unwrap_err()
+        )
+        .contains("is not listed")
+    );
+    assert!(
+        format!(
+            "{:#}",
+            control(
+                ProviderKind::Codex,
+                &crate::model_catalog::cached_models(ProviderKind::Codex)
+                    .unwrap_or_else(|| {
+                        crate::model_catalog::fallback_models(ProviderKind::Codex)
+                    })
+                    .first()
+                    .expect("the codex catalog has models")
+                    .id
+                    .clone(),
+                Some("light-speed"),
+            )
+            .unwrap_err()
+        )
+        .contains("reasoning effort is not supported")
+    );
+    // Neither miss touched the queued ticket.
+    let ticket = backend.boss.employee(session_id).unwrap().ticket.unwrap();
+    assert_eq!(ticket.model, "gpt-5.5");
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// An employee's `prompt` to its supervisor is the report channel — it
+/// delivers with sender attribution. A prompt to any other task fails
+/// with the actionable channel names instead of a bare roster refusal.
+#[test]
+fn an_employee_prompt_reaches_its_supervisor_and_refuses_elsewhere() {
+    let root = std::env::temp_dir().join(format!("boss-report-channel-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend
+        .agent_prompt(
+            Some(employee_id),
+            Some(supervisor),
+            None,
+            None,
+            "status update".into(),
+            crate::protocol::AgentPromptDelivery::Queue,
+            EventSink::detached(),
+        )
+        .unwrap();
+    {
+        let prompts = parent_capture.prompts.lock();
+        assert_eq!(prompts.len(), 1, "{prompts:?}");
+        assert!(prompts[0].contains("status update"));
+    }
+    // An unrelated task is not a report target — the error names the
+    // channels the employee can actually use.
+    let project_id = backend.task_state.lock().sessions[0].project_id;
+    let other = {
+        let mut state = backend.task_state.lock();
+        let session = AgentSession::new(project_id, ProviderKind::Codex);
+        let id = session.id;
+        state.push_session(session);
+        backend.task_store.save(&mut state).unwrap();
+        id
+    };
+    let error = backend
+        .agent_prompt(
+            Some(employee_id),
+            Some(other),
+            None,
+            None,
+            "wrong channel".into(),
+            crate::protocol::AgentPromptDelivery::Queue,
+            EventSink::detached(),
+        )
+        .unwrap_err();
+    let text = format!("{error:#}");
+    assert!(text.contains("employees report upward only"), "{text}");
+    assert!(text.contains(&supervisor.to_string()), "{text}");
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

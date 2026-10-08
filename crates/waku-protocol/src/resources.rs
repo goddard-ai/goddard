@@ -131,6 +131,12 @@ pub struct Reservation {
     /// deserialize as `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admission: Option<AdmissionClaim>,
+    /// Why a parked reservation cannot grant yet — a named device running
+    /// outside the ledger, a failed inventory probe, an earlier
+    /// reservation's claims, or held capacity. The scheduler recomputes
+    /// it every transaction; it is diagnostics, never input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]

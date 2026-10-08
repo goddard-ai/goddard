@@ -1,0 +1,1 @@
+- A reservation stuck waiting for an unavailable simulator or emulator no longer starves requests behind it: satisfiable requests bypass the blocked head, and `goddard-agent resource status` names what each wait is for.

@@ -262,11 +262,11 @@ impl ExpiryCause {
         }
     }
 
-    /// Whether reviving the job makes sense — only a supervisor stop is
-    /// terminal intent; every other settle revives through `resume` or a
-    /// plain prompt.
+    /// Whether reviving the job makes sense — every expiry revives
+    /// through `resume` or a plain prompt, a supervisor stop included:
+    /// the stop is terminal only for the admission it ended.
     pub fn resumable(self) -> bool {
-        self != Self::Stopped
+        true
     }
 
     /// Whether the settle cut live work off — the wave tally counts it
@@ -1817,15 +1817,18 @@ pub enum EmployeeControl {
         #[ts(optional)]
         job_title: Option<String>,
     },
-    /// Apply a catalog-listed provider/model selection to the next turn.
+    /// Apply a catalog-listed provider/model selection as one atomic
+    /// reconfigure: a turn in flight is interrupted — recorded as an
+    /// intentional stop, not a failure — the new selection applies, and
+    /// the employee resumes its assignment on it. A provider+model change
+    /// re-enters admission against the new pool; a same-model change keeps
+    /// the runtime and continues in place. Queued tickets reticket in
+    /// place.
     SetModel {
         provider: crate::model::ProviderKind,
         model: String,
         #[serde(default)]
         reasoning_effort: Option<String>,
-        #[serde(default)]
-        #[ts(optional)]
-        interrupt: Option<bool>,
     },
     /// Replace individual grants on the employee's record — memory and
     /// delegation changes take effect immediately, while MCP server and
@@ -1896,34 +1899,32 @@ mod tests {
             "type": "setModel",
             "provider": "codex",
             "model": "gpt-5.5",
-            "reasoningEffort": "high",
+            "reasoningEffort": "high"
+        }))
+        .unwrap();
+        assert!(matches!(
+            action,
+            EmployeeControl::SetModel { provider, model, reasoning_effort }
+                if provider == crate::model::ProviderKind::Codex
+                    && model == "gpt-5.5"
+                    && reasoning_effort.as_deref() == Some("high")
+        ));
+    }
+
+    #[test]
+    fn set_model_control_tolerates_a_stale_interrupt_field() {
+        // Clients pinned to the older wire shape send `interrupt` — the
+        // flag is gone, and serde ignores it rather than rejecting.
+        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
+            "type": "setModel",
+            "provider": "codex",
+            "model": "gpt-5.5",
             "interrupt": true
         }))
         .unwrap();
         assert!(matches!(
             action,
-            EmployeeControl::SetModel { provider, model, reasoning_effort, interrupt }
-                if provider == crate::model::ProviderKind::Codex
-                    && model == "gpt-5.5"
-                    && reasoning_effort.as_deref() == Some("high")
-                    && interrupt == Some(true)
-        ));
-    }
-
-    #[test]
-    fn set_model_control_defaults_interrupt_to_false() {
-        let action: EmployeeControl = serde_json::from_value(serde_json::json!({
-            "type": "setModel",
-            "provider": "codex",
-            "model": "gpt-5.5"
-        }))
-        .unwrap();
-        assert!(matches!(
-            action,
-            EmployeeControl::SetModel {
-                interrupt: None,
-                ..
-            }
+            EmployeeControl::SetModel { model, .. } if model == "gpt-5.5"
         ));
     }
 

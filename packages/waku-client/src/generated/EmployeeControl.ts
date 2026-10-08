@@ -21,7 +21,7 @@ delivery?: AgentPromptDelivery, } | { "type": "steer", prompt: string,
  * wakes nothing, and writes no transcript entry. Omitted leaves
  * the title unchanged.
  */
-jobTitle?: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, interrupt?: boolean, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "setWorkspace", workspace: AgentWorkspace,
+jobTitle?: string, } | { "type": "setModel", provider: ProviderKind, model: string, reasoningEffort: string | null, } | { "type": "setPermissions", permissions: PermissionOverrides, } | { "type": "setWorkspace", workspace: AgentWorkspace,
 /**
  * The ref the new worktree detaches at; required when `workspace`
  * is `worktree`, ignored for `local`.

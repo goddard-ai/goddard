@@ -130,6 +130,13 @@ pub struct AgentState {
     /// runtime, cleared when its credentials are revoked.
     memory_delivered: Mutex<HashSet<Uuid>>,
     turns: Mutex<HashMap<Uuid, AgentTurn>>,
+    /// Sessions whose in-flight turn the daemon is ending on purpose — a
+    /// supervisor stop or a mid-flight reconfigure — so the settle that
+    /// reports it records an intentional interruption rather than a
+    /// failure, and never settles the employee's admission on it. The
+    /// flag is consumed by the next settle event; it never survives the
+    /// turn it armed.
+    daemon_interrupts: Mutex<HashSet<Uuid>>,
     /// Daemon-owned `agentAsk` requests parked on a session, by request id.
     /// The provider never sees these — the response commands the client
     /// sends resolve here instead of reaching the driver.
@@ -306,6 +313,7 @@ impl AgentState {
         self.queues.lock().remove(&session_id);
         self.pending_steers.lock().remove(&session_id);
         self.turns.lock().remove(&session_id);
+        self.daemon_interrupts.lock().remove(&session_id);
     }
 
     /// Forget every credential and queue. Called on daemon shutdown.
@@ -322,6 +330,7 @@ impl AgentState {
         self.memory_steers.lock().clear();
         self.memory_delivered.lock().clear();
         self.turns.lock().clear();
+        self.daemon_interrupts.lock().clear();
         for (_, asks) in std::mem::take(&mut *self.pending_asks.lock()) {
             for (_, ask) in asks {
                 let _ = ask.settled.send(AgentAskOutcome::Cancelled);
@@ -402,6 +411,21 @@ impl AgentState {
             .lock()
             .get(&session_id)
             .is_some_and(|turn| turn.open)
+    }
+
+    /// Mark the session's in-flight turn as one the daemon is ending on
+    /// purpose — call before `driver.cancel()` or runtime teardown. The
+    /// forwarder consumes the flag on the next settle event so the turn
+    /// records an intentional interruption instead of a failure and the
+    /// employee's admission does not settle on its own stop.
+    pub fn expect_daemon_interrupt(&self, session_id: Uuid) {
+        self.daemon_interrupts.lock().insert(session_id);
+    }
+
+    /// Consume a pending intentional-interrupt mark — true when the settle
+    /// being processed was ordered by the daemon itself.
+    pub fn take_daemon_interrupt(&self, session_id: Uuid) -> bool {
+        self.daemon_interrupts.lock().remove(&session_id)
     }
 
     /// Whether the provider is actively working a turn. Queue-mode prompts

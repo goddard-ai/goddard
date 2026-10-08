@@ -1105,17 +1105,16 @@ impl WakuBackend {
                 bail!("employee is queued, not running — steer needs a live turn")
             }
             EmployeeControl::Stop => {
-                record_boss_event(
+                // `cancelled` is durable intent — it lands before the
+                // transcript row and the finish so a racing settle
+                // classifies as the intentional stop it is.
+                self.boss.mark_cancelled(session_id)?;
+                record_daemon_interrupt(
                     &self.task_state,
                     &self.task_store,
                     session_id,
-                    &DriverEvent::TurnFinished {
-                        success: false,
-                        summary: Some("Cancelled while queued".into()),
-                        summary_i18n: None,
-                    },
+                    Some("Cancelled while queued"),
                 )?;
-                self.boss.mark_cancelled(session_id)?;
                 self.finish_boss_employee(
                     session_id,
                     false,
@@ -1127,12 +1126,12 @@ impl WakuBackend {
                 provider,
                 model,
                 reasoning_effort,
-                ..
             } => {
-                let effort = self.validate_employee_model(provider, &model, reasoning_effort)?;
+                let (model_id, effort) =
+                    self.validate_employee_model(provider, &model, reasoning_effort)?;
                 if !self.boss.reticket(session_id, |ticket| {
                     ticket.provider = provider;
-                    ticket.model = model.clone();
+                    ticket.model = model_id.clone();
                     ticket.reasoning_effort = effort;
                 })? {
                     bail!("employee is no longer queued");
@@ -1219,6 +1218,174 @@ impl WakuBackend {
             broker.release_admission(session_id, stale);
         }
         self.wake_summon_queue();
+        Ok(waku_protocol::boss::BossResult::Saved)
+    }
+
+    /// `setModel` on a live employee is the atomic reconfigure: an open
+    /// turn is interrupted — recorded as an intentional stop, never a
+    /// failure — the new selection applies, and the assignment resumes on
+    /// it through a "verify and continue" prompt. A different
+    /// provider+model pair is a different capacity claim, so the employee
+    /// re-enters admission against the new pool and a fresh generation's
+    /// runtime launches on the ticket's values; a same-pair change asks
+    /// the live driver to retune and only falls back to requeue when the
+    /// driver refuses mid-turn. Expired records refuse — a prompt or
+    /// steer revives first.
+    pub(super) fn control_employee_model(
+        &self,
+        caller: Option<Uuid>,
+        session_id: Uuid,
+        provider: ProviderKind,
+        model: &str,
+        reasoning_effort: Option<String>,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        if self.boss.employee(session_id).is_some_and(|e| e.expired)
+            || self
+                .boss
+                .document()
+                .retired_employees
+                .iter()
+                .any(|e| e.session_id == session_id)
+        {
+            bail!("employee has expired; prompt or steer can resume it");
+        }
+        let (model_id, effort) = self.validate_employee_model(provider, model, reasoning_effort)?;
+        let (current, runtime_mode) = {
+            let state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            (
+                (session.provider, session.model.clone()),
+                session.runtime_mode,
+            )
+        };
+        let interrupted = self.agent.has_open_turn(session_id);
+        let model_changed =
+            current.0 != provider || current.1.as_deref() != Some(model_id.as_str());
+        let continuation = format!(
+            "You were interrupted — your supervisor changed your model configuration to {} \
+             {model_id}{}. Verify the state of your partial work and continue where it left off.",
+            provider.display_name(),
+            effort
+                .as_deref()
+                .map(|effort| format!(" at {effort} effort"))
+                .unwrap_or_default(),
+        );
+        if !model_changed {
+            let runtime = self
+                .sessions
+                .lock()
+                .get(&session_id)
+                .map(|entry| entry.driver.clone());
+            // Options ride on every `turn/start`, so a driver that takes
+            // them retunes the next invocation; a refusal while a turn is
+            // open routes through admission on the same pair instead.
+            let applied_in_place = runtime.as_ref().is_some_and(|driver| {
+                driver.apply_options(crate::driver::SessionOptions {
+                    mode: runtime_mode,
+                    model: Some(model_id.clone()),
+                    reasoning_effort: effort.clone(),
+                    service_tier: None,
+                    context_window: None,
+                })
+            });
+            if applied_in_place || !interrupted {
+                // A later resume replays the ticket — keep its stored
+                // selection in step with what the session now runs.
+                self.boss.update_employee_ticket(session_id, |ticket| {
+                    ticket.provider = provider;
+                    ticket.model = model_id.clone();
+                    ticket.reasoning_effort = effort.clone();
+                })?;
+                let mut state = self.task_state.lock();
+                let session = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                    .ok_or_else(|| anyhow!("employee session is missing"))?;
+                session.provider = provider;
+                session.model = Some(model_id.clone());
+                session.reasoning_effort = effort.clone();
+                session.auto_route = false;
+                session.route_decision = None;
+                session.updated_at = crate::model::unix_time();
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+                drop(state);
+                if !applied_in_place {
+                    // An idle runtime that refused is rebuilt on the next
+                    // prompt — the stored options drive the cold start.
+                    let removed = self.sessions.lock().remove(&session_id);
+                    if let Some(entry) = &removed {
+                        entry.driver.begin_shutdown();
+                    }
+                    drop_detached(removed);
+                    self.agent.revoke_session(session_id);
+                }
+                if interrupted {
+                    // Cut the open turn so the retune takes effect now.
+                    // The daemon-interrupt mark makes its settle record
+                    // as an intentional interruption, and the parked
+                    // continuation drains right behind it.
+                    self.agent.expect_daemon_interrupt(session_id);
+                    if let Some(driver) = &runtime {
+                        driver.cancel();
+                    }
+                    self.queue_agent_prompt(session_id, continuation, caller, events)?;
+                }
+                return Ok(waku_protocol::boss::BossResult::Saved);
+            }
+        }
+        // A different pair is a different capacity claim — the ticket
+        // re-enters admission rather than jumping pools mid-flight — and
+        // a mid-turn driver refusal lands here too. Once the record reads
+        // queued, the superseded runtime's events arrive stale: they
+        // rewrite nothing and settle nothing.
+        self.requeue_employee(session_id, |ticket, started| {
+            ticket.provider = provider;
+            ticket.model = model_id.clone();
+            ticket.reasoning_effort = effort.clone();
+            // The turn this reconfigure cut answers with a continuation
+            // note behind whatever parked — a never-started shell has no
+            // turn to pick back up.
+            if started && interrupted {
+                ticket.pending_prompts.push(continuation.clone());
+            }
+        })?;
+        {
+            // The surviving session record's launch options belong to the
+            // old pair — dispatch rewrites provider/model/effort from the
+            // ticket; tier, window, and routing are cleared here.
+            let mut state = self.task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            {
+                session.service_tier = None;
+                session.context_window = None;
+                session.auto_route = false;
+                session.route_decision = None;
+                session.updated_at = crate::model::unix_time();
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+            }
+        }
+        if interrupted {
+            // Close the turn the reconfigure cut — the torn-down runtime's
+            // own settle lands stale and would leave it open forever.
+            record_daemon_interrupt(&self.task_state, &self.task_store, session_id, None)?;
+        }
+        let removed = self.sessions.lock().remove(&session_id);
+        if let Some(entry) = &removed {
+            entry.driver.begin_shutdown();
+        }
+        drop_detached(removed);
+        self.agent.revoke_session(session_id);
         Ok(waku_protocol::boss::BossResult::Saved)
     }
 
@@ -1421,13 +1588,15 @@ impl WakuBackend {
 
     /// Catalog validation shared by `setModel` on queued and working
     /// employees — the provider's catalog must list the model and any
-    /// pinned effort. Returns the normalized effort pin.
+    /// pinned effort. Returns the catalog's own model id plus the
+    /// normalized effort pin, so callers store the resolved id rather
+    /// than the caller's alias.
     pub(super) fn validate_employee_model(
         &self,
         provider: ProviderKind,
         model: &str,
         reasoning_effort: Option<String>,
-    ) -> anyhow::Result<Option<String>> {
+    ) -> anyhow::Result<(String, Option<String>)> {
         let catalog = crate::model_catalog::cached_models(provider)
             .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
         let selected =
@@ -1438,7 +1607,7 @@ impl WakuBackend {
                         provider.display_name()
                     )
                 })?;
-        reasoning_effort
+        let effort = reasoning_effort
             .map(|effort| {
                 if effort == "default" {
                     Ok(None)
@@ -1455,8 +1624,9 @@ impl WakuBackend {
                     ))
                 }
             })
-            .transpose()
-            .map(|effort| effort.flatten())
+            .transpose()?
+            .flatten();
+        Ok((selected.model.id.clone(), effort))
     }
 
     /// Interrupt delivery for an employee's report: steer into the

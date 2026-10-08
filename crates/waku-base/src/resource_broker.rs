@@ -34,6 +34,11 @@ pub struct Broker {
 #[derive(Clone, Default)]
 struct Observation {
     devices: Vec<String>,
+    /// Device-class prefixes (`ios:`, `android:`) whose inventory probe
+    /// failed or was skipped — requests naming them cannot be told apart
+    /// from user-owned devices, so they stay parked. A failure in one
+    /// class must not blind the other.
+    blind: Vec<String>,
     errors: Vec<String>,
 }
 
@@ -80,6 +85,7 @@ impl Broker {
                 operation,
                 Observation {
                     devices: Vec::new(),
+                    blind: vec!["ios:".into(), "android:".into()],
                     errors: vec!["device inventory not probed".into()],
                 },
             )
@@ -229,6 +235,7 @@ impl Broker {
                         cancelled: false,
                         released: false,
                         admission: None,
+                        waiting_on: None,
                     });
                 }
             }
@@ -282,6 +289,7 @@ impl Broker {
                             cancelled: false,
                             released: false,
                             admission: Some(claim),
+                            waiting_on: None,
                         });
                         request_id = Some(id);
                     } else {
@@ -324,7 +332,7 @@ impl Broker {
             reservation.duration_seconds =
                 now.saturating_sub(reservation.granted_at.unwrap_or(reservation.requested_at));
         }
-        let external_devices = observation
+        let external_devices: Vec<String> = observation
             .devices
             .iter()
             .filter(|device| {
@@ -335,6 +343,14 @@ impl Broker {
             })
             .cloned()
             .collect();
+        for index in 0..ledger.reservations.len() {
+            let reservation = &ledger.reservations[index];
+            let waiting_on = (reservation.granted_at.is_none()
+                && !reservation.cancelled
+                && !reservation.released)
+                .then(|| wait_reason(reservation, index, &ledger, &observation, &external_devices));
+            ledger.reservations[index].waiting_on = waiting_on;
+        }
         // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
         let temporary = self.root.join("state.next");
         let bytes = serde_json::to_vec(&ledger)?;
@@ -444,6 +460,7 @@ impl Broker {
             ResourceOperation::Release { id },
             Observation {
                 devices: vec![],
+                blind: vec!["ios:".into(), "android:".into()],
                 errors: vec!["admission release".into()],
             },
         );
@@ -462,6 +479,7 @@ impl Broker {
                             ResourceOperation::Cancel { id },
                             Observation {
                                 devices: vec![],
+                                blind: vec!["ios:".into(), "android:".into()],
                                 errors: vec!["lifecycle cleanup".into()],
                             },
                         );
@@ -622,6 +640,63 @@ fn admission_blockers(
     blockers
 }
 
+/// Whether two sets contend for the same capacity — an identical
+/// exclusive key or a draw on the same counted pool.
+fn shares_capacity(a: &ResourceSet, b: &ResourceSet) -> bool {
+    a.exclusive.iter().any(|key| b.exclusive.contains(key))
+        || (a.resident_devices > 0 && b.resident_devices > 0)
+        || (a.native_builds > 0 && b.native_builds > 0)
+        || (a.desktop_input > 0 && b.desktop_input > 0)
+}
+
+/// Whether the request names a device that cannot grant this pass — it
+/// is running outside the ledger (`external`), or its class's inventory
+/// probe failed (`blind`) so we cannot prove it free. Only the named
+/// class's failure blinds a request: an Android probe error never stalls
+/// an iOS claim, nor vice versa.
+fn device_unavailable(
+    request: &ResourceSet,
+    external: &[String],
+    observation: &Observation,
+) -> bool {
+    if request.resident_devices == 0 {
+        return false;
+    }
+    request.exclusive.iter().any(|key| {
+        external.contains(key)
+            || observation
+                .blind
+                .iter()
+                .any(|class| key.starts_with(class.as_str()))
+    })
+}
+
+/// The portion of a parked waiter's set that still reserves capacity —
+/// counted pools and exclusive keys it could actually grant on. A claim
+/// on a device that cannot grant this pass (running outside the ledger,
+/// or hidden by a failed probe) is released so a satisfiable request
+/// behind it bypasses instead of starving; the waiter's counted pools
+/// keep their place in line since capacity protection is what stops a
+/// flood of small requests from starving the head forever.
+fn claimable_while_waiting(
+    resources: &ResourceSet,
+    external: &[String],
+    observation: &Observation,
+) -> ResourceSet {
+    let mut claimable = resources.clone();
+    let before = claimable.exclusive.len();
+    claimable.exclusive.retain(|key| {
+        !external.contains(key)
+            && !observation
+                .blind
+                .iter()
+                .any(|class| key.starts_with(class.as_str()))
+    });
+    let dropped = (before - claimable.exclusive.len()) as u32;
+    claimable.resident_devices = claimable.resident_devices.saturating_sub(dropped);
+    claimable
+}
+
 /// Whether granting `request` now would leapfrog a parked `Acquire` that
 /// needs the same capacity. A pending request counts as sharing when it
 /// names an identical exclusive key or draws on the same counted pool.
@@ -630,16 +705,7 @@ fn starves_earlier_waiter(request: &ResourceSet, ledger: &Ledger) -> bool {
         .reservations
         .iter()
         .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
-        .any(|waiting| {
-            let waiting = &waiting.resources;
-            waiting
-                .exclusive
-                .iter()
-                .any(|key| request.exclusive.contains(key))
-                || (waiting.resident_devices > 0 && request.resident_devices > 0)
-                || (waiting.native_builds > 0 && request.native_builds > 0)
-                || (waiting.desktop_input > 0 && request.desktop_input > 0)
-        })
+        .any(|waiting| shares_capacity(&waiting.resources, request))
 }
 fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observation, now: u64) {
     for index in 0..ledger.reservations.len() {
@@ -674,26 +740,27 @@ fn blocked(
         .iter()
         .filter(|r| r.granted_at.is_some() && Some(r.task) != exclude)
         .collect();
-    let external: Vec<_> = observation
+    let external: Vec<String> = observation
         .devices
         .iter()
-        .filter(|key| !held.iter().any(|r| r.resources.exclusive.contains(key)))
+        .filter(|key| !held.iter().any(|r| r.resources.exclusive.contains(*key)))
+        .cloned()
         .collect();
     // An external device conflicts only with a request for that same
     // exclusive key. It is user-owned, so it does not consume our shared
     // resident-device capacity.
-    if request.resident_devices > 0
-        && (!observation.errors.is_empty()
-            || external.iter().any(|key| request.exclusive.contains(key)))
-    {
+    if device_unavailable(request, &external, observation) {
         return true;
     }
-    let claims = held.iter().map(|r| &r.resources).chain(
-        ledger.reservations[..queued_before]
-            .iter()
-            .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
-            .map(|r| &r.resources),
-    );
+    // Earlier waiters keep only the claims they could spend this pass —
+    // a head parked on an unavailable device yields the device slot so
+    // satisfiable requests behind it grant instead of starving.
+    let reduced: Vec<ResourceSet> = ledger.reservations[..queued_before]
+        .iter()
+        .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
+        .map(|r| claimable_while_waiting(&r.resources, &external, observation))
+        .collect();
+    let claims = held.iter().map(|r| &r.resources).chain(reduced.iter());
     request.exclusive.iter().any(|key| {
         claims
             .clone()
@@ -720,7 +787,58 @@ fn blocked(
                 > u64::from(policy.desktop_input))
 }
 
-pub fn waiting_title(r: &Reservation, status: &ResourceStatus) -> String {
+/// Why a parked reservation cannot grant this pass — the named device's
+/// availability first since it is what a user can fix, then the earlier
+/// reservation whose claims stand ahead, then held capacity. Stamped on
+/// the reservation as `waiting_on` so `resource status` names the wait
+/// instead of a bare queue position.
+fn wait_reason(
+    reservation: &Reservation,
+    position: usize,
+    ledger: &Ledger,
+    observation: &Observation,
+    external: &[String],
+) -> String {
+    let resources = &reservation.resources;
+    if resources.resident_devices > 0 {
+        if resources.exclusive.iter().any(|key| {
+            observation
+                .blind
+                .iter()
+                .any(|class| key.starts_with(class.as_str()))
+        }) {
+            return "device inventory could not be probed".into();
+        }
+        if let Some(device) = resources
+            .exclusive
+            .iter()
+            .find(|key| external.contains(key))
+        {
+            return format!("device {device} is running outside Goddard");
+        }
+    }
+    if let Some(earlier) = ledger.reservations[..position].iter().find(|earlier| {
+        earlier.granted_at.is_none()
+            && !earlier.cancelled
+            && !earlier.released
+            && shares_capacity(&earlier.resources, resources)
+    }) {
+        return format!("queued behind an earlier reservation ({})", earlier.id);
+    }
+    if let Some(holder) = ledger
+        .reservations
+        .iter()
+        .find(|held| held.granted_at.is_some() && shares_capacity(&held.resources, resources))
+    {
+        return format!("capacity held by task {}", holder.task);
+    }
+    "host capacity".into()
+}
+
+/// The activity-card title for a parked reservation. The scheduler stamps
+/// `waiting_on` every transaction, so rows written by older daemons are
+/// the only ones that fall back to the generic text.
+pub fn waiting_title(r: &Reservation, _status: &ResourceStatus) -> String {
     let label = if r.resources.resident_devices > 0 {
         r.resources.exclusive.join(", ")
     } else if r.resources.native_builds > 0 {
@@ -728,23 +846,8 @@ pub fn waiting_title(r: &Reservation, status: &ResourceStatus) -> String {
     } else {
         "desktop input".into()
     };
-    let owner = status.reservations.iter().find(|h| {
-        h.id != r.id
-            && h.granted_at.is_some()
-            && (h
-                .resources
-                .exclusive
-                .iter()
-                .any(|key| r.resources.exclusive.contains(key))
-                || (r.resources.resident_devices > 0 && h.resources.resident_devices > 0)
-                || (r.resources.native_builds > 0 && h.resources.native_builds > 0)
-                || (r.resources.desktop_input > 0 && h.resources.desktop_input > 0))
-    });
-    match owner {
-        Some(owner) => format!("Waiting for {label}—held by task {}", owner.task),
-        None if !status.external_devices.is_empty() && r.resources.resident_devices > 0 => {
-            format!("Waiting for {label}—user-owned device running")
-        }
+    match r.waiting_on.as_deref() {
+        Some(reason) => format!("Waiting for {label}—{reason}"),
         None => format!("Waiting for {label}—queued for host capacity"),
     }
 }
@@ -839,14 +942,18 @@ fn observe() -> Observation {
                         }
                     }
                 } else {
+                    observation.blind.push("ios:".into());
                     observation
                         .errors
                         .push("iOS device inventory unavailable".into());
                 }
             }
-            Err(_) => observation
-                .errors
-                .push("iOS device inventory unavailable; resident acquisitions blocked".into()),
+            Err(_) => {
+                observation.blind.push("ios:".into());
+                observation
+                    .errors
+                    .push("iOS device inventory unavailable; resident acquisitions blocked".into());
+            }
         }
     }
     #[cfg(unix)]
@@ -854,9 +961,12 @@ fn observe() -> Observation {
         Ok(bytes) => observation
             .devices
             .extend(android_devices(&String::from_utf8_lossy(&bytes))),
-        Err(_) => observation
-            .errors
-            .push("Android process inventory unavailable; resident acquisitions blocked".into()),
+        Err(_) => {
+            observation.blind.push("android:".into());
+            observation.errors.push(
+                "Android process inventory unavailable; resident acquisitions blocked".into(),
+            );
+        }
     }
     observation.devices.sort();
     observation.devices.dedup();
@@ -1104,6 +1214,7 @@ mod tests {
         let device_task = Uuid::new_v4();
         let observation = || Observation {
             devices: ios().exclusive,
+            blind: vec![],
             errors: vec![],
         };
         let device = h
@@ -1151,6 +1262,81 @@ mod tests {
         h.op(build_task, ResourceOperation::Release { id: id(&native) });
         let status = h.op(later_task, ResourceOperation::Status { id: None });
         assert!(granted(&status, id(&later)));
+    }
+
+    #[test]
+    fn device_blocked_head_yields_the_device_slot_and_names_its_wait() {
+        let h = Harness::new();
+        h.op(Uuid::new_v4(), ResourceOperation::Status { id: None });
+        fs::write(
+            h.broker.root.join("policy.json"),
+            serde_json::to_vec(&ResourcePolicy {
+                resident_devices: 1,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let taken_device = "ios:00000000-0000-0000-0000-000000000042".to_string();
+        let observation = || Observation {
+            devices: vec![taken_device.clone()],
+            blind: vec![],
+            errors: vec![],
+        };
+        let head_task = Uuid::new_v4();
+        // The head parks on a device running outside the ledger — it
+        // cannot grant this pass no matter what capacity is free.
+        let head = h
+            .broker
+            .transaction(
+                head_task,
+                acquisition(
+                    ResourceSet {
+                        exclusive: vec![taken_device.clone()],
+                        resident_devices: 1,
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                observation(),
+            )
+            .unwrap();
+        assert!(!granted(&head, id(&head)));
+        // A satisfiable request for a different device bypasses it —
+        // before the fix the head's resident-device claim starved it.
+        let behind = h
+            .broker
+            .transaction(
+                Uuid::new_v4(),
+                acquisition(
+                    ResourceSet {
+                        exclusive: vec!["ios:00000000-0000-0000-0000-000000000099".into()],
+                        resident_devices: 1,
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                observation(),
+            )
+            .unwrap();
+        assert!(granted(&behind, id(&behind)));
+        let status = h
+            .broker
+            .transaction(
+                head_task,
+                ResourceOperation::Status { id: None },
+                observation(),
+            )
+            .unwrap();
+        let head = status
+            .reservations
+            .iter()
+            .find(|r| r.id == id(&head))
+            .unwrap();
+        assert_eq!(
+            head.waiting_on.as_deref(),
+            Some(format!("device {taken_device} is running outside Goddard").as_str())
+        );
     }
 
     #[test]
@@ -1267,6 +1453,7 @@ mod tests {
         let first = h.acquire(a, ios());
         let observed = || Observation {
             devices: ios().exclusive,
+            blind: vec![],
             errors: vec![],
         };
         h.broker
@@ -1490,6 +1677,7 @@ mod tests {
         let b = Uuid::new_v4();
         let errors = || Observation {
             devices: vec![],
+            blind: vec!["ios:".into(), "android:".into()],
             errors: vec!["probe failed".into()],
         };
         let native = h
@@ -1602,6 +1790,7 @@ mod retention_tests {
         let device = "ios:00000000-0000-0000-0000-000000000001".to_string();
         let observation = || Observation {
             devices: vec![device.clone()],
+            blind: vec![],
             errors: vec![],
         };
         let first = broker

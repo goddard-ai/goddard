@@ -8,4 +8,11 @@ export type Reservation = { id: string, task: string, purpose: string, resources
  * `Admission`. Ledger entries written before admission tickets
  * deserialize as `None`.
  */
-admission?: AdmissionClaim | null, };
+admission?: AdmissionClaim | null,
+/**
+ * Why a parked reservation cannot grant yet — a named device running
+ * outside the ledger, a failed inventory probe, an earlier
+ * reservation's claims, or held capacity. The scheduler recomputes
+ * it every transaction; it is diagnostics, never input.
+ */
+waiting_on?: string | null, };

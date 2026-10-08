@@ -67,6 +67,14 @@ exist only during this script invocation; use named memory buckets for durable s
                                             setWorkspace takes workspace:
                                             \"local\"|\"worktree\" plus baseBranch
                                             for worktree — stops, rebinds, resumes;
+                                            setModel takes provider + model +
+                                            optional reasoningEffort — one atomic
+                                            reconfigure: an open turn stops
+                                            intentionally (never marked failed),
+                                            the selection applies, and the
+                                            assignment resumes on it; a
+                                            provider+model change re-enters
+                                            admission on the new pool;
                                             setResources takes a resource map like
                                             summon — a waiting ticket re-admits on
                                             the new set, a running employee swaps
