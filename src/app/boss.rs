@@ -3844,6 +3844,20 @@ impl Waku {
         let Some((_, deliverable_id)) = self.boss_ui.deliverable_page.take() else {
             return false;
         };
+        // The page's pad keeps its transcript but loses its transient
+        // chrome with the surface — a bubble or clear recovery bound to
+        // the closed page must not greet the next mount.
+        if let Some(scratchpad) = self.voice_scratchpads.get_mut(&deliverable_id) {
+            scratchpad.press_to_talk_bubble = None;
+            scratchpad.clear_undo = None;
+        }
+        if self
+            .press_to_talk_bubble_edit
+            .as_ref()
+            .is_some_and(|edit| edit.owner == deliverable_id)
+        {
+            self.press_to_talk_bubble_edit = None;
+        }
         let key = crate::persistence::ComposerDraftKey::Deliverable(deliverable_id);
         if !self.draft_key_incognito(key) {
             let draft = self.current_composer_draft(Some(key), cx);
@@ -3968,6 +3982,11 @@ impl Waku {
         // command to the boss with the file attached.
         self.capture_and_save_current_composer_draft(cx);
         self.boss_ui.deliverable_page = Some((key, deliverable_id));
+        // The column's VoicePad owner just changed: a covered chat's pad
+        // pauses and this deliverable's pad — if one exists — becomes the
+        // surface's. Bubbles and holds bound to the covered composer die
+        // with it.
+        self.sync_voice_scratchpad_capture(cx);
         self.restore_selected_composer_draft(cx);
         if record_visit {
             // The page mounts over the chat it parked on, so the chat is

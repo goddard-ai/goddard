@@ -1,0 +1,1 @@
+- **VoicePad:** A deliverable's preview page gets its own VoicePad — press to talk or open the pad there and its text belongs to that deliverable, never the Boss chat's underneath or a sibling deliverable's. The pending-prompt queue also tucks away while a VoicePad is open so the pad's card stays flush with the composer.

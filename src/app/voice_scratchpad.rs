@@ -675,6 +675,30 @@ fn migrate_scratchpad_to_session(
     detach
 }
 
+/// The capture sync's map pass — one entry per owner. A pad survives
+/// while `exists` says its owner is still out there — a live session or
+/// a published file deliverable alike — and keeps capture only while its
+/// surface is the one on screen; anything else pauses muted so returning
+/// shows the transcript until an unmute resumes it. Returns whether a
+/// pausing pad held the tap, so the caller can detach the sink.
+fn sync_voice_scratchpad_pads(
+    pads: &mut HashMap<Uuid, VoiceScratchpad>,
+    mut exists: impl FnMut(Uuid) -> bool,
+    on_screen: Option<Uuid>,
+) -> bool {
+    let mut detached = false;
+    pads.retain(|owner, scratchpad| {
+        let exists = exists(*owner);
+        if !exists || on_screen != Some(*owner) {
+            detached |= scratchpad.capture_live;
+            scratchpad.stop_capture();
+            scratchpad.muted = true;
+        }
+        exists
+    });
+    detached
+}
+
 /// A cleanup transition in flight on one buffer: `new` must still match
 /// the painted text — a mismatch means the buffer moved past the answer
 /// and the morph is stale.
@@ -3507,14 +3531,43 @@ fn run_whistle_transcription_worker(
 }
 
 impl Waku {
-    /// The visible chat's scratchpad — the only one that may own capture.
+    /// The VoicePad owner whose surface holds the chat column — a live
+    /// deliverable page's own pad while one is up (keyed by the
+    /// deliverable's id, a sibling of its boss chat's entry in
+    /// `voice_scratchpads`), the selected chat's pad otherwise. Only
+    /// this owner may own capture.
+    pub(super) fn surface_voice_pad_owner(&self) -> Option<press_to_talk::VoicePadOwner> {
+        self.live_deliverable_page()
+            .map(|(_, deliverable_id)| deliverable_id)
+            .or(self.state.selected_session)
+    }
+
+    /// Whether `owner`'s pad owns the chat column right now — the check
+    /// capture, chrome, and discard acts key off instead of a bare
+    /// session match, so a covered chat's pad never answers for the page
+    /// parked over it.
+    pub(super) fn voice_pad_owner_on_screen(&self, owner: press_to_talk::VoicePadOwner) -> bool {
+        self.surface_voice_pad_owner() == Some(owner)
+    }
+
+    /// The VoicePad owner the mounted composer answers to — the surface's
+    /// own pad, except while Big Picture's overlay holds the composer,
+    /// where its armed session keeps ownership.
+    pub(super) fn composer_voice_pad_owner(&self) -> Option<press_to_talk::VoicePadOwner> {
+        if self.big_picture.is_open() {
+            return self.composer_session_id();
+        }
+        self.surface_voice_pad_owner()
+    }
+
+    /// The surface's scratchpad — the only one that may own capture.
     pub(super) fn selected_voice_scratchpad(&self) -> Option<&VoiceScratchpad> {
-        self.voice_scratchpads.get(&self.state.selected_session?)
+        self.voice_scratchpads.get(&self.surface_voice_pad_owner()?)
     }
 
     fn selected_voice_scratchpad_mut(&mut self) -> Option<&mut VoiceScratchpad> {
         self.voice_scratchpads
-            .get_mut(&self.state.selected_session?)
+            .get_mut(&self.surface_voice_pad_owner()?)
     }
 
     /// Whether the scratchpad panel is the chat column's content right now:
@@ -3548,26 +3601,26 @@ impl Waku {
     }
 
     /// The VP button — a small dark pill with "VP" and a mic glyph,
-    /// immediately left of send. While this chat's session is live it
+    /// immediately left of send. While this owner's pad is live it
     /// carries the state dot.
     pub(super) fn render_voice_scratchpad_button(
         &self,
         controls: &composer::ComposerControls,
-        session_id: Option<Uuid>,
+        owner: Option<press_to_talk::VoicePadOwner>,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
         if !self.state.voice_scratchpad_enabled {
             return None;
         }
         // An open pad is its own chrome — the pill only renders when this
-        // chat's scratchpad is not on screen, and returns on close, cancel,
-        // send, and hide.
-        if self.voice_scratchpad_visible() && session_id == self.state.selected_session {
+        // surface's scratchpad is not on screen, and returns on close,
+        // cancel, send, and hide.
+        if owner.is_some_and(|owner| self.voice_scratchpad_visible_for(owner)) {
             return None;
         }
-        let state = self.voice_scratchpad_button_state(session_id);
+        let state = self.voice_scratchpad_button_state(owner);
         let theme = Theme::current(cx);
-        let enabled = session_id.is_some();
+        let enabled = owner.is_some();
         // The state dot is a pill interior element now, left of the label —
         // it reads against text where a corner badge sat over the edge.
         let dot = |color: Hsla| {
@@ -3609,10 +3662,10 @@ impl Waku {
             .child(icon("icons/mic.svg", 16.0, theme.on_inverse));
         // The click's outcome decides the tooltip: a scratchpad on screen
         // discards, a hidden one resurfaces.
-        let discards = session_id
-            .and_then(|id| self.voice_scratchpads.get(&id))
-            .is_some_and(|scratchpad| {
-                !scratchpad.hidden && self.state.selected_session == session_id
+        let discards = owner
+            .and_then(|id| self.voice_scratchpads.get(&id).map(|pad| (id, pad)))
+            .is_some_and(|(id, scratchpad)| {
+                !scratchpad.hidden && self.voice_pad_owner_on_screen(id)
             });
         let tooltip = match (state, discards) {
             (ScratchpadButtonState::Recording, true) => {
@@ -3637,16 +3690,17 @@ impl Waku {
         )
     }
 
-    /// The VP button's click: no session starts one on this chat, a hidden
-    /// session resurfaces, and a visible one discards — the same
-    /// confirm-on-substantial rule the Discard pill applies. Each chat owns
-    /// its scratchpad — pressing the button here never touches another
-    /// chat's.
+    /// The VP button's click: no session starts one on this surface, a
+    /// hidden session resurfaces, and a visible one discards — the same
+    /// confirm-on-substantial rule the Discard pill applies. Each owner
+    /// owns its scratchpad — pressing the button here never touches
+    /// another's.
     fn toggle_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(this_session) = self.composer_session_id() else {
+        let Some(owner) = self.composer_voice_pad_owner() else {
             return;
         };
-        let Some(scratchpad) = self.voice_scratchpads.get_mut(&this_session) else {
+        let on_screen = self.voice_pad_owner_on_screen(owner);
+        let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) else {
             self.start_voice_scratchpad(window, cx);
             return;
         };
@@ -3654,11 +3708,11 @@ impl Waku {
             scratchpad.hidden = false;
             scratchpad.follow_tail = true;
             cx.notify();
-        } else if self.state.selected_session == Some(this_session) {
+        } else if on_screen {
             self.request_discard_voice_scratchpad(window, cx);
         } else {
             // A scratchpad that cannot be on screen — the composer is
-            // answering for another chat — still tucks out of the way.
+            // answering for another surface — still tucks out of the way.
             scratchpad.hidden = true;
             cx.notify();
         }
@@ -3682,28 +3736,30 @@ impl Waku {
         cx.notify();
     }
 
-    /// Start a session on the composer's chat. The panel opens immediately —
-    /// permission and connection failures become its inline error state —
-    /// and capture begins behind it when the chat is selected. A composer
-    /// answering for another chat (Big Picture's target) creates the
-    /// scratchpad paused: capture only ever belongs to the visible chat.
+    /// Start a session on the composer's owner — its chat, or the
+    /// deliverable whose page holds the column. The panel opens
+    /// immediately — permission and connection failures become its
+    /// inline error state — and capture begins behind it when the owner
+    /// is on screen. A composer answering for another chat (Big
+    /// Picture's target) creates the scratchpad paused: capture only
+    /// ever belongs to the visible surface.
     fn start_voice_scratchpad(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.state.voice_scratchpad_enabled {
             return;
         }
-        let Some(session_id) = self.composer_session_id() else {
+        let Some(owner) = self.composer_voice_pad_owner() else {
             return;
         };
-        if self.voice_scratchpads.contains_key(&session_id) {
+        if self.voice_scratchpads.contains_key(&owner) {
             return;
         }
-        let selected = self.state.selected_session == Some(session_id);
+        let on_screen = self.voice_pad_owner_on_screen(owner);
         let mut scratchpad = VoiceScratchpad::new(cx);
         // Press to Talk's held chord is the only recorder — a pad opened
         // through the VP button shows its text muted in that mode.
-        scratchpad.muted = !selected || self.state.press_to_talk_enabled;
+        scratchpad.muted = !on_screen || self.state.press_to_talk_enabled;
         let edit_focus = scratchpad.edit_focus.clone();
-        self.voice_scratchpads.insert(session_id, scratchpad);
+        self.voice_scratchpads.insert(owner, scratchpad);
         cx.on_focus(&edit_focus, window, move |this, window, cx| {
             // Keyboard focus lands the caret on the append point — the
             // surface's visible focus treatment. Pointer focus arrives with
@@ -3711,7 +3767,7 @@ impl Waku {
             if !window.last_input_was_keyboard() {
                 return;
             }
-            if let Some(scratchpad) = this.voice_scratchpads.get_mut(&session_id)
+            if let Some(scratchpad) = this.voice_scratchpads.get_mut(&owner)
                 && scratchpad.transcript.caret.is_none()
             {
                 scratchpad.transcript.caret = Some(scratchpad.transcript.append_point_caret());
@@ -3720,8 +3776,8 @@ impl Waku {
             }
         })
         .detach();
-        if selected {
-            self.ensure_voice_capture(session_id, cx);
+        if on_screen {
+            self.ensure_voice_capture(owner, cx);
         }
         // Focus stays in the composer — typing, Enter-to-send, and Esc all
         // keep their composer semantics while the panel is up.
@@ -3755,16 +3811,16 @@ impl Waku {
         }
     }
 
-    /// Attach the audio sink and open the transcription stream for a
-    /// chat's session. Mic access is already granted when this runs, and
-    /// capture only ever belongs to the visible chat. Press to Talk
+    /// Attach the audio sink and open the transcription stream for an
+    /// owner's pad. Mic access is already granted when this runs, and
+    /// capture only ever belongs to the surface on screen. Press to Talk
     /// suspends every automatic stream — the held chord is the only
     /// recorder while it's on.
     fn begin_voice_capture(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.state.press_to_talk_enabled {
             return;
         }
-        if self.state.selected_session != Some(session_id) {
+        if !self.voice_pad_owner_on_screen(session_id) {
             return;
         }
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
@@ -3924,7 +3980,7 @@ impl Waku {
         if !muted && self.state.press_to_talk_enabled {
             return;
         }
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.surface_voice_pad_owner() else {
             return;
         };
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
@@ -3977,7 +4033,7 @@ impl Waku {
             return true;
         }
         self.state.voice_scratchpad_enabled
-            && self.state.selected_session.is_some()
+            && self.surface_voice_pad_owner().is_some()
             && self.composer_mounted()
             && !self.big_picture.is_open()
             && self
@@ -4310,19 +4366,19 @@ impl Waku {
     }
 
     /// Enter while the panel is up sends the whole transcript as one
-    /// message on the viewed chat and ends that session — a typed draft is
-    /// untouched. A hold still finishing on this chat blocks the send —
+    /// message and ends that owner's session — a typed draft is
+    /// untouched. A hold still finishing on this owner blocks the send —
     /// its result must land first, never under an emptied scratchpad.
     pub(super) fn submit_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(owner) = self.surface_voice_pad_owner() else {
             return;
         };
-        if self.press_to_talk.busy_for(session_id) {
+        if self.press_to_talk.busy_for(owner) {
             return;
         }
         let text = self
             .voice_scratchpads
-            .get(&session_id)
+            .get(&owner)
             .map(|scratchpad| scratchpad.transcript.to_message())
             .unwrap_or_default()
             .trim()
@@ -4334,20 +4390,20 @@ impl Waku {
         if composer.is_some() {
             self.composer.update(cx, |input, cx| input.clear(cx));
         }
-        let submission = composer::append_composer_to_voice_pad(
-            ComposerSubmission::plain(text),
-            composer,
-        );
-        self.drop_voice_scratchpad(session_id, cx);
-        self.submit_composer_submission_to(session_id, submission, cx);
+        let submission =
+            composer::append_composer_to_voice_pad(ComposerSubmission::plain(text), composer);
+        self.drop_voice_scratchpad(owner, cx);
+        // The composer's own send path — an armed deliverable or employee
+        // command rides along the way a typed Enter's does.
+        self.submit_composer_submission(submission, cx);
     }
 
-    /// End the visible chat's session and discard its transcript.
+    /// End the surface's session and discard its transcript.
     pub(super) fn end_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(owner) = self.surface_voice_pad_owner() else {
             return;
         };
-        self.drop_voice_scratchpad(session_id, cx);
+        self.drop_voice_scratchpad(owner, cx);
         cx.notify();
     }
 
@@ -4373,21 +4429,21 @@ impl Waku {
         cx.notify();
     }
 
-    /// Remove one chat's scratchpad, tearing down the tap when it was the
-    /// one holding it — a press-to-talk hold bound to this chat cancels
+    /// Remove one owner's scratchpad, tearing down the tap when it was the
+    /// one holding it — a press-to-talk hold bound to this owner cancels
     /// first so its result cannot land on a pad that no longer exists.
-    fn drop_voice_scratchpad(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.press_to_talk.busy_for(session_id) {
+    fn drop_voice_scratchpad(&mut self, owner: Uuid, cx: &mut Context<Self>) {
+        if self.press_to_talk.busy_for(owner) {
             let directives = self.press_to_talk.cancel();
             self.apply_press_to_talk_directives(directives, cx);
         }
-        let Some(scratchpad) = self.voice_scratchpads.remove(&session_id) else {
+        let Some(scratchpad) = self.voice_scratchpads.remove(&owner) else {
             return;
         };
         if self
             .press_to_talk_bubble_edit
             .as_ref()
-            .is_some_and(|edit| edit.owner == session_id)
+            .is_some_and(|edit| edit.owner == owner)
         {
             self.press_to_talk_bubble_edit = None;
         }
@@ -4398,28 +4454,32 @@ impl Waku {
     }
 
     /// Selection or the session list moved: every scratchpad but the
-    /// visible chat's pauses — its worker exits and its socket closes
+    /// surface's own pauses — its worker exits and its socket closes
     /// rather than holding a gateway connection in the background — and a
-    /// session that no longer exists loses its scratchpad with it. Paused
-    /// sessions land muted so returning shows the transcript until the
-    /// user unmutes to resume. A press-to-talk hold bound to a context
-    /// this move tore down cancels with it.
+    /// pad whose owner no longer exists goes with it: a dead session, or
+    /// a deliverable dropped from its boss's list. Paused sessions land
+    /// muted so returning shows the transcript until the user unmutes to
+    /// resume. A press-to-talk hold bound to a context this move tore
+    /// down cancels with it.
     pub(super) fn sync_voice_scratchpad_capture(&mut self, cx: &mut Context<Self>) {
         self.sync_voice_briefing_navigation();
         self.press_to_talk_navigation(cx);
-        let selected = self.state.selected_session;
+        let on_screen = self.surface_voice_pad_owner();
         let sessions = &self.state.sessions;
-        let mut detached = false;
-        self.voice_scratchpads.retain(|id, scratchpad| {
-            let session_exists = sessions.iter().any(|session| session.id == *id);
-            if !session_exists || Some(*id) != selected {
-                detached |= scratchpad.capture_live;
-                scratchpad.stop_capture();
-                scratchpad.muted = true;
-            }
-            session_exists
-        });
-        if detached {
+        let boss_states = &self.boss_ui.states;
+        if sync_voice_scratchpad_pads(
+            &mut self.voice_scratchpads,
+            |owner| {
+                sessions.iter().any(|session| session.id == owner)
+                    || boss_states.values().any(|state| {
+                        state
+                            .deliverables
+                            .iter()
+                            .any(|deliverable| deliverable.id == owner && !deliverable.directory)
+                    })
+            },
+            on_screen,
+        ) {
             self.detach_voice_sink();
         }
     }
@@ -4468,10 +4528,8 @@ impl Waku {
                 .is_some_and(|scratchpad| scratchpad.transcript.has_content())
     }
 
-    /// The pad keyed by `owner` — the Press to Talk owner's pad is the
-    /// same map entry a chat's pad occupies, so item 3's deliverable-
-    /// owned pads read through here too.
-    #[allow(dead_code)]
+    /// The pad keyed by `owner` — a chat's session id and a deliverable's
+    /// own id share the one map.
     pub(super) fn voice_scratchpad_for(
         &self,
         owner: press_to_talk::VoicePadOwner,
@@ -4480,12 +4538,9 @@ impl Waku {
     }
 
     /// `voice_scratchpad_visible` keyed by owner rather than the selected
-    /// chat — the seam item 3's deliverable-owned panel rides.
-    #[allow(dead_code)]
+    /// chat — a deliverable page's pad answers it while its page is up.
     pub(super) fn voice_scratchpad_visible_for(&self, owner: press_to_talk::VoicePadOwner) -> bool {
-        self.state.voice_scratchpad_enabled
-            && self.state.selected_session == Some(owner)
-            && self.voice_scratchpad_visible()
+        self.voice_pad_owner_on_screen(owner) && self.voice_scratchpad_visible()
     }
 
     /// The composer a bubble's context answers to — removal and a
@@ -4501,7 +4556,7 @@ impl Waku {
                 self.annotation_comment_input.read(cx).focus()
             }
             press_to_talk::PressToTalkContext::Composer { owner } => {
-                if self.composer_session_id() == Some(owner) {
+                if self.composer_voice_pad_owner() == Some(owner) {
                     self.composer_focus(cx)
                 } else {
                     self.side_chat_composers
@@ -4718,11 +4773,12 @@ impl Waku {
     /// the pad stays muted; a pad that isn't on the selected chat opens
     /// through the session activation it lives on.
     fn open_voice_pad(&mut self, owner: press_to_talk::VoicePadOwner, cx: &mut Context<Self>) {
+        let on_screen = self.voice_pad_owner_on_screen(owner);
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) else {
             return;
         };
         let hidden = scratchpad.hidden;
-        if self.state.selected_session == Some(owner) {
+        if on_screen {
             if hidden {
                 scratchpad.hidden = false;
                 scratchpad.follow_tail = true;
@@ -4731,7 +4787,9 @@ impl Waku {
             return;
         }
         // The pad belongs to another chat — activating the session is
-        // what "open VoicePad" means for it.
+        // what "open VoicePad" means for it. A deliverable's pad only
+        // reaches here while its own page is live, so this fallback sees
+        // session ids alone.
         self.select_session(owner, cx);
         if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) {
             scratchpad.hidden = false;
@@ -4743,7 +4801,7 @@ impl Waku {
     /// The pill's posture for `owner`'s pad: content lines to show, the
     /// pending clear recovery, and whether the pill renders at all.
     fn voice_pad_pill_state(&self, owner: press_to_talk::VoicePadOwner) -> (usize, bool, bool) {
-        let Some(scratchpad) = self.voice_scratchpads.get(&owner) else {
+        let Some(scratchpad) = self.voice_scratchpad_for(owner) else {
             return (0, false, false);
         };
         let lines = scratchpad.transcript.line_count();
@@ -4795,7 +4853,7 @@ impl Waku {
     /// chrome — action suggestions and the turn-status markers yield
     /// the space above the card while it is up.
     pub(super) fn main_composer_press_to_talk_claimed(&self) -> bool {
-        self.composer_session_id().is_some_and(|owner| {
+        self.composer_voice_pad_owner().is_some_and(|owner| {
             !matches!(
                 self.press_to_talk_chrome(press_to_talk::PressToTalkContext::Composer { owner }),
                 PressToTalkChrome::Hidden
@@ -5225,8 +5283,10 @@ impl Waku {
             .and_then(|editor| match &editor.target {
                 annotations::AnnotationTarget::SideChat(id)
                 | annotations::AnnotationTarget::Plan(id) => Some(*id),
-                annotations::AnnotationTarget::Transcript
-                | annotations::AnnotationTarget::File(_) => self.state.selected_session,
+                annotations::AnnotationTarget::Transcript => self.state.selected_session,
+                // A file annotation on a live deliverable page records
+                // to the deliverable's pad — its surface's owner.
+                annotations::AnnotationTarget::File(_) => self.surface_voice_pad_owner(),
             })?;
         let context = press_to_talk::PressToTalkContext::Annotation { owner };
         let chrome = self.press_to_talk_chrome(context);
@@ -5389,7 +5449,7 @@ impl Waku {
                 changed = true;
                 if !granted {
                     scratchpad.status = ScratchpadStatus::MicDenied;
-                } else if self.state.selected_session == Some(session_id) {
+                } else if self.voice_pad_owner_on_screen(session_id) {
                     self.begin_voice_capture(session_id, cx);
                 }
                 continue;
@@ -6490,8 +6550,8 @@ impl Waku {
     /// the still-provisional text, dimmed beside the append point's own
     /// live row.
     fn render_scratchpad_hold_row(&self, theme: &Theme) -> Option<Div> {
-        let session_id = self.state.selected_session?;
-        if !self.press_to_talk.busy_for(session_id) {
+        let owner = self.surface_voice_pad_owner()?;
+        if !self.press_to_talk.busy_for(owner) {
             return None;
         }
         let label = self
@@ -6586,7 +6646,7 @@ impl Waku {
                             .hover(|row| row.bg(theme.overlay))
                             .child(tr!("voice_scratchpad.retry"))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                let session_id = this.state.selected_session;
+                                let session_id = this.surface_voice_pad_owner();
                                 let denied = this
                                     .selected_voice_scratchpad()
                                     .is_some_and(|scratchpad| {
@@ -7747,6 +7807,84 @@ mod tests {
             Uuid::new_v4(),
             Uuid::new_v4()
         ));
+    }
+
+    #[gpui::test]
+    fn capture_sync_keeps_deliverable_pads_and_pauses_covered_owners(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        // A deliverable's pad keys the same map by its own id — it must
+        // survive a sync that runs while its page owns the column, while
+        // the covered chat's pad pauses like any off-screen session's.
+        let holder = cx.new(|_| ());
+        let chat = Uuid::new_v4();
+        let deliverable = Uuid::new_v4();
+        let gone = Uuid::new_v4();
+        let mut chat_pad = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        chat_pad.capture_live = true;
+        let chat_stop = chat_pad.stop.clone();
+        let chat_generation = chat_pad.generation;
+        let mut deliverable_pad = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        deliverable_pad
+            .transcript
+            .append_finalized("deliverable words");
+        let mut pads = HashMap::from([
+            (chat, chat_pad),
+            (deliverable, deliverable_pad),
+            (gone, holder.update(cx, |_, cx| VoiceScratchpad::new(cx))),
+        ]);
+        // `exists` answers for live sessions and published deliverables —
+        // the dead owner has neither.
+        let exists = |owner| owner == chat || owner == deliverable;
+        assert!(sync_voice_scratchpad_pads(
+            &mut pads,
+            exists,
+            Some(deliverable)
+        ));
+        // The dead owner's pad goes with it.
+        assert!(!pads.contains_key(&gone));
+        // The covered chat's pad paused: muted, capture torn down, the
+        // transcript kept for a later return.
+        let chat_pad = &pads[&chat];
+        assert!(chat_pad.muted);
+        assert!(!chat_pad.capture_live);
+        assert_eq!(chat_pad.generation, chat_generation + 1);
+        assert!(chat_stop.load(Ordering::Relaxed));
+        // The on-screen deliverable's pad is untouched — its content and
+        // posture answer for the page.
+        assert_eq!(
+            pads[&deliverable].transcript.to_message(),
+            "deliverable words"
+        );
+        assert!(!pads[&deliverable].muted);
+    }
+
+    #[gpui::test]
+    fn capture_sync_switches_owner_between_deliverables(cx: &mut gpui::TestAppContext) {
+        // Moving between two deliverable pages on the same boss chat swaps
+        // the on-screen owner: the first pad pauses, the second answers —
+        // no bleed of one deliverable's pad into another's.
+        let holder = cx.new(|_| ());
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let mut first_pad = holder.update(cx, |_, cx| VoiceScratchpad::new(cx));
+        first_pad.capture_live = true;
+        let mut pads = HashMap::from([
+            (first, first_pad),
+            (second, holder.update(cx, |_, cx| VoiceScratchpad::new(cx))),
+        ]);
+        let exists = |owner| owner == first || owner == second;
+        assert!(sync_voice_scratchpad_pads(&mut pads, exists, Some(second)));
+        assert!(pads[&first].muted);
+        assert!(!pads[&first].capture_live);
+        assert!(!pads[&second].muted);
+        // Nothing held the tap anymore — a second sync reports no detach.
+        assert!(!sync_voice_scratchpad_pads(&mut pads, exists, Some(second)));
+        // And with no deliverable page up, the selected chat owns the
+        // surface again — both deliverable pads pause.
+        let chat = Uuid::new_v4();
+        assert!(!sync_voice_scratchpad_pads(&mut pads, exists, Some(chat)));
+        assert!(pads[&first].muted && pads[&second].muted);
     }
 
     #[test]

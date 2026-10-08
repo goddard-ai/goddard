@@ -5091,7 +5091,10 @@ impl Waku {
         // parked queue instead of covering its rows. The cell goes stale
         // the moment the card unmounts, so it is cleared on every miss.
         let queue_bounds = self.composer_autocomplete.queue_bounds_cell();
-        if self.live_deliverable_page().is_some() {
+        // The queue never shares the lane with a deliverable's page or a
+        // visible VoicePad — the pad's card underlaps the lane the queue
+        // would paint into.
+        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
             queue_bounds.set(None);
             return None;
         }
@@ -5827,6 +5830,13 @@ impl Waku {
                 .find(|session| session.id == *session_id),
         };
         let session_id = session.map(|session| session.id);
+        // The VoicePad owner this card answers to — a live deliverable
+        // page's own pad on the main card, the chat's session everywhere
+        // else.
+        let pad_owner = match surface {
+            ComposerCard::Main => self.composer_voice_pad_owner(),
+            ComposerCard::SideChat { .. } => session_id,
+        };
         let composer = match surface {
             ComposerCard::Main => self.composer.clone(),
             ComposerCard::SideChat { composer, .. } => composer.clone(),
@@ -6022,7 +6032,7 @@ impl Waku {
             // Press to Talk's chrome — the hold's status, the latest
             // recording's bubble, or the outcome — floats above the
             // card in the slot suggestions and status markers share.
-            .when_some(session_id, |card, owner| {
+            .when_some(pad_owner, |card, owner| {
                 card.children(self.render_press_to_talk_composer_chrome(surface, owner, cx))
             })
             .child(
@@ -6052,7 +6062,7 @@ impl Waku {
                     // The Voicepad · N lines pill — and the clear's
                     // explicit recovery — rides this card's chip line
                     // for whatever owner its composer answers to.
-                    .when_some(session_id, |row, owner| {
+                    .when_some(pad_owner, |row, owner| {
                         row.children(self.render_voice_pad_pill_row(
                             owner,
                             press_to_talk::PressToTalkContext::Composer { owner },
@@ -6150,11 +6160,11 @@ impl Waku {
                     )
                     .child(div().flex_1())
                     // The VP button lives on the main card only — one
-                    // dictation session at a time, bound to that chat.
+                    // dictation session at a time, bound to that owner.
                     .children(if interactive {
                         self.render_voice_scratchpad_button(
                             &controls,
-                            self.composer_session_id(),
+                            self.composer_voice_pad_owner(),
                             cx,
                         )
                     } else {

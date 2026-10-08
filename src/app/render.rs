@@ -907,6 +907,13 @@ impl Render for Waku {
                         } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some()
                         {
                             self.render_boss_page(window, cx)
+                        } else if self.voice_scratchpad_visible() {
+                            // The scratchpad takes the transcript slot —
+                            // empty or not — while the composer lane stays
+                            // mounted below it. On a deliverable page the
+                            // deliverable's own pad owns the same slot: the
+                            // preview waits underneath like a transcript.
+                            self.render_voice_scratchpad(window, cx)
                         } else if let Some(deliverable_page) = deliverable_page {
                             deliverable_page
                         } else if self.drafts_page {
@@ -919,11 +926,6 @@ impl Render for Waku {
                             self.render_inbox_page(window, cx)
                         } else if agy_surface {
                             self.render_agy_surface(self.chat_viewport_width(window), cx)
-                        } else if self.voice_scratchpad_visible() {
-                            // The scratchpad takes the transcript slot —
-                            // empty or not — while the composer lane stays
-                            // mounted below it.
-                            self.render_voice_scratchpad(window, cx)
                         } else if empty && self.boss_chat_key().is_some() {
                             self.render_boss_chat_empty_state(cx).into_any_element()
                         // A queued or dispatching employee's shell hydrates

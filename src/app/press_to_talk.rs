@@ -564,7 +564,7 @@ impl Waku {
                     return Some(PressToTalkContext::Annotation { owner: *owner });
                 }
                 annotations::AnnotationTarget::Plan(owner) => *owner,
-                annotations::AnnotationTarget::File(_) => self.state.selected_session?,
+                annotations::AnnotationTarget::File(_) => self.surface_voice_pad_owner()?,
             };
             return Some(PressToTalkContext::Composer { owner });
         }
@@ -589,7 +589,9 @@ impl Waku {
         }
         let owner = match self.last_focused_composer_target() {
             model_picker::ModelPickerTarget::SideChat(session_id) => Some(session_id),
-            _ => self.state.selected_session,
+            // The surface's owner — a live deliverable page's pad, the
+            // selected chat's otherwise.
+            _ => self.surface_voice_pad_owner(),
         }?;
         Some(PressToTalkContext::Composer { owner })
     }
@@ -720,14 +722,14 @@ impl Waku {
                         annotations::AnnotationTarget::Transcript => self.state.selected_session,
                         annotations::AnnotationTarget::SideChat(id)
                         | annotations::AnnotationTarget::Plan(id) => Some(*id),
-                        annotations::AnnotationTarget::File(_) => self.state.selected_session,
+                        annotations::AnnotationTarget::File(_) => self.surface_voice_pad_owner(),
                     })
                     == Some(owner)
             }
             PressToTalkContext::Composer { owner } => {
                 self.composer_mounted()
                     && self.settings_page.is_none()
-                    && (self.state.selected_session == Some(owner)
+                    && (self.voice_pad_owner_on_screen(owner)
                         || self.visible_side_chat_id() == Some(owner))
             }
         }
