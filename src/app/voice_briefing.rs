@@ -195,6 +195,42 @@ pub(super) struct SessionBriefing {
     eager_audio_used: bool,
 }
 
+impl SessionBriefing {
+    /// A cancelled gate eval never answers — a candidate still `Checking`
+    /// without a live gate entry would hold every later arrival scan in
+    /// `Wait` forever, so it resolves as a rejection for the absence.
+    fn resolve_orphaned_gate_checks(&mut self, live_gates: &HashSet<Uuid>) {
+        for candidate in &mut self.candidates {
+            if candidate.eligibility == BriefingEligibility::Checking
+                && !live_gates.contains(&candidate.message_id)
+            {
+                candidate.eligibility = BriefingEligibility::Ineligible;
+            }
+        }
+    }
+
+    /// Store a pipeline's transcript as prepared text — unless the slot
+    /// already holds text for a newer away completion. A result landing
+    /// late must not rewind the slot past a reply that settled after its
+    /// job began.
+    fn store_prepared_summary(&mut self, message_id: Uuid, transcript: String) {
+        let stale = self.summary.as_ref().is_some_and(|(held, _)| {
+            let position = |id: Uuid| {
+                self.candidates
+                    .iter()
+                    .position(|candidate| candidate.message_id == id)
+            };
+            matches!(
+                (position(*held), position(message_id)),
+                (Some(held), Some(new)) if held > new
+            )
+        });
+        if !stale {
+            self.summary = Some((message_id, transcript));
+        }
+    }
+}
+
 /// Ready automatic clips have one waiting slot. Older async completions
 /// cannot displace a newer clip, even after that clip has started playing.
 #[derive(Default)]
@@ -239,7 +275,9 @@ impl BriefingQueue {
 enum CandidateScan {
     Claim(Uuid),
     Check(Uuid),
-    Wait,
+    /// The newest unresolved candidate's message — the gate the arrival
+    /// is waiting on.
+    Wait(Uuid),
     Done,
 }
 
@@ -255,7 +293,9 @@ fn scan_briefing_candidates(
             BriefingEligibility::Eligible => {
                 return CandidateScan::Claim(candidate.message_id);
             }
-            BriefingEligibility::Checking => return CandidateScan::Wait,
+            BriefingEligibility::Checking => {
+                return CandidateScan::Wait(candidate.message_id);
+            }
             BriefingEligibility::Unchecked => {
                 return CandidateScan::Check(candidate.message_id);
             }
@@ -263,6 +303,17 @@ fn scan_briefing_candidates(
         }
     }
     CandidateScan::Done
+}
+
+/// The visit's outcome rides on this gate's answer — a speculative check
+/// becomes arrival work so an eager-off flip cannot cancel a claimed
+/// wait out from under the scan.
+fn promote_briefing_gate(gates: &mut HashMap<Uuid, PendingBriefing>, message_id: Uuid) {
+    if let Some(pending) = gates.get_mut(&message_id)
+        && pending.work == BriefingWork::Eager
+    {
+        pending.work = BriefingWork::Arrival;
+    }
 }
 
 impl Waku {
@@ -542,7 +593,10 @@ impl Waku {
                         return;
                     }
                 }
-                CandidateScan::Wait => return,
+                CandidateScan::Wait(message_id) => {
+                    promote_briefing_gate(&mut self.briefing_gate_pending, message_id);
+                    return;
+                }
                 CandidateScan::Done => {
                     if let Some(state) = self.briefings.get_mut(&session_id) {
                         state.visit = BriefingVisit::Done;
@@ -1195,6 +1249,7 @@ impl Waku {
             .retain(|_, pending| pending.work == BriefingWork::Manual);
         self.briefing_gate_pending.clear();
         for state in self.briefings.values_mut() {
+            state.resolve_orphaned_gate_checks(&HashSet::new());
             if state.visit != BriefingVisit::Away {
                 state.visit = BriefingVisit::Done;
                 state.claim = None;
@@ -1222,12 +1277,14 @@ impl Waku {
             .retain(|_, pending| pending.work != BriefingWork::Eager);
         self.briefing_gate_pending
             .retain(|_, pending| pending.work != BriefingWork::Eager);
+        let live_gates: HashSet<Uuid> = self.briefing_gate_pending.keys().copied().collect();
         let live_jobs: HashSet<u64> = self
             .briefing_pending
             .values()
             .map(|pending| pending.generation)
             .collect();
         for state in self.briefings.values_mut() {
+            state.resolve_orphaned_gate_checks(&live_gates);
             state.summary_wanted = None;
             if state
                 .summary_job
@@ -1808,7 +1865,7 @@ impl Waku {
         match result {
             Ok(transcript) => {
                 if let Some(state) = self.briefings.get_mut(&session_id) {
-                    state.summary = Some((message_id, transcript.clone()));
+                    state.store_prepared_summary(message_id, transcript.clone());
                     if state
                         .summary_job
                         .is_some_and(|generation| generation == request_id)
@@ -2058,7 +2115,7 @@ impl Waku {
         match result {
             Ok((transcript, bytes)) => {
                 if let Some(state) = self.briefings.get_mut(&session_id) {
-                    state.summary = Some((message_id, transcript.clone()));
+                    state.store_prepared_summary(message_id, transcript.clone());
                     if state
                         .audio_job
                         .is_some_and(|generation| generation == request_id)
@@ -2123,6 +2180,9 @@ impl Waku {
                 }
             }
         }
+        // A settling pipeline frees the coalesced slot — drive whatever
+        // the newest completion asked for while this one rendered.
+        self.advance_voice_briefing(session_id, cx);
         cx.notify();
     }
 }
@@ -2490,7 +2550,7 @@ mod queue_tests {
         ];
         assert_eq!(
             scan_briefing_candidates(&candidates, &briefed),
-            CandidateScan::Wait
+            CandidateScan::Wait(newest)
         );
         // Unchecked candidates get evaluated newest-first.
         let candidates = vec![
@@ -2529,6 +2589,106 @@ mod queue_tests {
         assert_eq!(
             scan_briefing_candidates(&candidates, &briefed),
             CandidateScan::Done
+        );
+    }
+
+    #[test]
+    fn cancelled_gate_resolves_orphaned_checks_so_arrival_never_waits_forever() {
+        let eligible = Uuid::new_v4();
+        let orphaned = Uuid::new_v4();
+        let gated = Uuid::new_v4();
+        let mut state = SessionBriefing::default();
+        // Oldest-first: an eligible reply, a check whose eager gate was
+        // cancelled, and a check whose gate is still live.
+        state.candidates = vec![
+            candidate(eligible, BriefingEligibility::Eligible),
+            candidate(orphaned, BriefingEligibility::Checking),
+            candidate(gated, BriefingEligibility::Checking),
+        ];
+        state.resolve_orphaned_gate_checks(&HashSet::from([gated]));
+        assert!(
+            state
+                .candidates
+                .iter()
+                .find(|candidate| candidate.message_id == orphaned)
+                .is_some_and(|candidate| {
+                    candidate.eligibility == BriefingEligibility::Ineligible
+                })
+        );
+        // The live gate still holds the scan; once it answers, the older
+        // eligible reply claims instead of waiting on the dead check.
+        assert_eq!(
+            scan_briefing_candidates(&state.candidates, &HashSet::new()),
+            CandidateScan::Wait(gated)
+        );
+        for candidate in &mut state.candidates {
+            if candidate.message_id == gated {
+                candidate.eligibility = BriefingEligibility::Ineligible;
+            }
+        }
+        assert_eq!(
+            scan_briefing_candidates(&state.candidates, &HashSet::new()),
+            CandidateScan::Claim(eligible)
+        );
+    }
+
+    #[test]
+    fn waiting_arrival_promotes_its_eager_gate_so_the_flip_cannot_cancel_it() {
+        let session = Uuid::new_v4();
+        let waited = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let gate = |generation| PendingBriefing {
+            generation,
+            session_id: session,
+            play: false,
+            work: BriefingWork::Eager,
+            stage: BriefingStage::Gate,
+        };
+        let mut gates = HashMap::from([(waited, gate(1)), (other, gate(2))]);
+        promote_briefing_gate(&mut gates, waited);
+        // The eager-off retain keeps the promoted gate and drops the rest.
+        gates.retain(|_, pending| pending.work != BriefingWork::Eager);
+        assert!(gates.get(&waited).is_some_and(|p| p.work == BriefingWork::Arrival));
+        assert!(!gates.contains_key(&other));
+        // Promoting twice, or a gate that is not eager, is a no-op.
+        promote_briefing_gate(&mut gates, waited);
+        promote_briefing_gate(&mut gates, Uuid::new_v4());
+        assert_eq!(gates.len(), 1);
+    }
+
+    #[test]
+    fn settling_clip_cannot_overwrite_a_newer_prepared_summary() {
+        let turn10 = Uuid::new_v4();
+        let turn12 = Uuid::new_v4();
+        let turn14 = Uuid::new_v4();
+        let mut state = SessionBriefing::default();
+        state.candidates = vec![
+            candidate(turn10, BriefingEligibility::Eligible),
+            candidate(turn12, BriefingEligibility::Eligible),
+            candidate(turn14, BriefingEligibility::Eligible),
+        ];
+        // Turn 12's summary settles while turn 10's audio is still
+        // rendering — the late audio result must not rewind the slot.
+        state.store_prepared_summary(turn12, "turn twelve".to_owned());
+        state.store_prepared_summary(turn10, "turn ten".to_owned());
+        assert_eq!(
+            state.summary.as_ref().map(|(id, text)| (*id, text.as_str())),
+            Some((turn12, "turn twelve"))
+        );
+        // The same reply refreshes and a newer completion displaces.
+        state.store_prepared_summary(turn12, "turn twelve revised".to_owned());
+        state.store_prepared_summary(turn14, "turn fourteen".to_owned());
+        assert_eq!(
+            state.summary.as_ref().map(|(id, text)| (*id, text.as_str())),
+            Some((turn14, "turn fourteen"))
+        );
+        // A reply with no candidate ordering — a manual pipeline — still
+        // lands its text.
+        let manual = Uuid::new_v4();
+        state.store_prepared_summary(manual, "manual".to_owned());
+        assert_eq!(
+            state.summary.as_ref().map(|(id, _)| *id),
+            Some(manual)
         );
     }
 
