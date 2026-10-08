@@ -602,7 +602,13 @@ impl Waku {
     /// Whether the right-side slot is occupied by either panel — used by the
     /// header's traffic-light controls and the slot's width math.
     pub(super) fn right_panel_slot_visible(&self) -> bool {
-        self.right_panel_visible || self.git_panel_visible
+        self.right_panel_content_visible() || self.git_panel_visible
+    }
+
+    /// A deliverable preview owns the main column, so the parked boss chat
+    /// panel must not occupy the right-side slot until chat is restored.
+    pub(super) fn right_panel_content_visible(&self) -> bool {
+        self.right_panel_visible && self.live_deliverable_page().is_none()
     }
 
     /// The remembered width of whichever panel owns the slot — the Git

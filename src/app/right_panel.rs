@@ -5632,7 +5632,7 @@ impl Waku {
         // not apply to it: shown mid-slide it would hang over the transcript
         // at full width. Keep it down until the panel has finished moving.
         let active_browser = if self.settings_page.is_none()
-            && self.right_panel_visible
+            && self.right_panel_content_visible()
             && self.right_panel_slide.is_none()
         {
             self.active_right_panel_surface()
@@ -8314,7 +8314,8 @@ impl Waku {
     /// The maximized panel layer is on screen this frame — the mode is
     /// active or its exit slide is still traveling.
     pub(super) fn panel_fullscreen_active(&self) -> bool {
-        self.fullscreen_surface.is_some() || self.panel_fullscreen_slide.is_some()
+        self.live_deliverable_page().is_none()
+            && (self.fullscreen_surface.is_some() || self.panel_fullscreen_slide.is_some())
     }
 
     /// Cover the window with the active right-panel surface, or dock it back.

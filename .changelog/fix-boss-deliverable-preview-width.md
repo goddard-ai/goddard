@@ -1,1 +1,2 @@
 - Resizing the deliverable preview now remembers its width separately from the Boss chat panel.
+- Viewing a deliverable hides the Boss chat's right panel; returning to chat restores it.

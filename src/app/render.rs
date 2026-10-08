@@ -182,6 +182,7 @@ impl Waku {
             self.panel_fullscreen_slide = None;
         }
         let (sidebar_content, right_panel_fitted) = self.effective_panel_widths(window);
+        let right_panel_visible = self.right_panel_content_visible();
         // An open commit turns the Git panel into the workspace's main
         // surface: the slot stretches to the sidebar so the diff column gets
         // everything the transcript had. The pane reads the unexpanded width
@@ -202,7 +203,7 @@ impl Waku {
         );
         let mut right_panel = slide_width(
             &mut self.right_panel_slide,
-            if self.right_panel_visible || self.git_panel_visible {
+            if right_panel_visible || self.git_panel_visible {
                 right_panel_content
             } else {
                 0.0
@@ -223,7 +224,7 @@ impl Waku {
                 (right_panel, right_panel_content) = sidebar_slide_right_panel_widths(
                     f32::from(window.viewport_size().width),
                     sidebar,
-                    self.right_panel_visible || self.git_panel_visible,
+                    right_panel_visible || self.git_panel_visible,
                     self.right_panel_slot_width(),
                 );
             } else {
