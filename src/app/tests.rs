@@ -7139,6 +7139,61 @@ fn a_burst_of_opening_reports_collapses_into_one_marker() {
 }
 
 #[test]
+fn finishing_reports_during_the_opening_turn_join_its_completion_burst() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.status = SessionStatus::Idle;
+    let turn_id = Uuid::new_v4();
+    let opening_id = Uuid::new_v4();
+    session.adopt_submitted_prompt(
+        "first employee finished",
+        turn_id,
+        opening_id,
+        Some(Uuid::new_v4()),
+        true,
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Opening,
+        )),
+    );
+    // The first report has already started the Boss turn when the other
+    // employees finish, so their notices are steers with the same turn id.
+    session.push_message(MessageRole::Assistant, "Reviewing the first result.");
+    let second_id = session.push_hidden_user_message(
+        "second employee finished",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Steer,
+        )),
+    );
+    let third_id = session.push_hidden_user_message(
+        "third employee finished",
+        Some(Uuid::new_v4()),
+        Some(report_trigger(
+            ReportTriggerKind::Finished,
+            ReportTriggerBoundary::Steer,
+        )),
+    );
+
+    let rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
+    assert_eq!(
+        rows,
+        vec![BossTrigger(opening_id), Message(1), WorkingIndicator]
+    );
+    let group = boss_trigger_group(&session, opening_id);
+    assert_eq!(
+        group.iter().map(|message| message.id).collect::<Vec<_>>(),
+        vec![opening_id, second_id, third_id]
+    );
+    let triggers = group
+        .iter()
+        .map(|message| message.report_trigger.clone().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(boss_trigger_burst_label(&triggers), "3 employees finished");
+}
+
+#[test]
 fn adjacent_steer_reports_share_one_marker_until_output_separates() {
     use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);

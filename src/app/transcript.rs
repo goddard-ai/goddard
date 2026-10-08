@@ -1544,6 +1544,12 @@ pub(super) fn folded_transcript_row_kinds(
     // steer run shares one row only while no boss output separates it.
     let mut opened_trigger_turns = HashSet::new();
     let mut steer_run_open = false;
+    let opening_finish_turns = session
+        .messages
+        .iter()
+        .filter(|message| is_opening_finish(message))
+        .filter_map(|message| message.turn_id)
+        .collect::<HashSet<_>>();
     // A steer parked behind a live turn keeps a preview — a user message
     // carrying the queue entry's id. Its row leaves the message flow and
     // trails the working indicator at the transcript's end instead.
@@ -1574,6 +1580,13 @@ pub(super) fn folded_transcript_row_kinds(
                     steer_run_open = false;
                 }
                 Some(crate::model::ReportTriggerBoundary::Steer) => {
+                    // A finish delivered while this turn is already running
+                    // belongs to the opening completion burst for that turn.
+                    // Keep its event in the first disclosure instead of
+                    // leaving a lone opening finish beside a later steer group.
+                    if is_steer_finish_in_opening_burst(message, &opening_finish_turns) {
+                        continue;
+                    }
                     if !steer_run_open {
                         rows.push(TranscriptRowKind::BossTrigger(message.id));
                         steer_run_open = true;
@@ -2033,27 +2046,44 @@ pub(super) fn boss_trigger_group(session: &AgentSession, anchor: Uuid) -> Vec<&M
     let members: Vec<usize> = match trigger.boundary {
         crate::model::ReportTriggerBoundary::Opening => {
             match session.messages[anchor_index].turn_id {
-                Some(turn_id) => session
-                    .messages
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, message)| {
-                        message.turn_id == Some(turn_id)
-                            && message.report_trigger.as_ref().is_some_and(|trigger| {
-                                trigger.boundary == crate::model::ReportTriggerBoundary::Opening
-                            })
-                    })
-                    .map(|(index, _)| index)
-                    .collect(),
+                Some(turn_id) => {
+                    let has_opening_finish = session.messages.iter().any(|message| {
+                        message.turn_id == Some(turn_id) && is_opening_finish(message)
+                    });
+                    session
+                        .messages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, message)| {
+                            message.turn_id == Some(turn_id)
+                                && message.report_trigger.as_ref().is_some_and(|trigger| {
+                                    trigger.boundary == crate::model::ReportTriggerBoundary::Opening
+                                        || (has_opening_finish
+                                            && trigger.kind
+                                                == crate::model::ReportTriggerKind::Finished
+                                            && trigger.boundary
+                                                == crate::model::ReportTriggerBoundary::Steer)
+                                })
+                        })
+                        .map(|(index, _)| index)
+                        .collect()
+                }
                 None => vec![anchor_index],
             }
         }
         crate::model::ReportTriggerBoundary::Steer => {
+            let opening_finish_turns = session
+                .messages
+                .iter()
+                .filter(|message| is_opening_finish(message))
+                .filter_map(|message| message.turn_id)
+                .collect::<HashSet<_>>();
             let is_run_member = |message: &Message| {
                 message.hidden
                     && message.report_trigger.as_ref().is_some_and(|trigger| {
                         trigger.boundary == crate::model::ReportTriggerBoundary::Steer
                     })
+                    && !is_steer_finish_in_opening_burst(message, &opening_finish_turns)
             };
             let mut members = vec![anchor_index];
             let mut index = anchor_index;
@@ -2096,6 +2126,26 @@ pub(super) fn boss_trigger_group(session: &AgentSession, anchor: Uuid) -> Vec<&M
         })
         .map(|index| &session.messages[index])
         .collect()
+}
+
+fn is_opening_finish(message: &Message) -> bool {
+    message.report_trigger.as_ref().is_some_and(|trigger| {
+        trigger.kind == crate::model::ReportTriggerKind::Finished
+            && trigger.boundary == crate::model::ReportTriggerBoundary::Opening
+    })
+}
+
+fn is_steer_finish_in_opening_burst(
+    message: &Message,
+    opening_finish_turns: &HashSet<Uuid>,
+) -> bool {
+    message
+        .turn_id
+        .is_some_and(|turn_id| opening_finish_turns.contains(&turn_id))
+        && message.report_trigger.as_ref().is_some_and(|trigger| {
+            trigger.kind == crate::model::ReportTriggerKind::Finished
+                && trigger.boundary == crate::model::ReportTriggerBoundary::Steer
+        })
 }
 
 /// Whether boss output — a message or a transcript block that renders —
