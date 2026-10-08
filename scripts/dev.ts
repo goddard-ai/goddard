@@ -26,9 +26,15 @@ import { WakuClient } from "../packages/waku-client/src/client";
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
+const devArgs = Bun.argv.slice(2);
 // --serve: the watcher builds a signed release bundle and publishes it as the
 // Dev channel's appcast (see dev-serve.ts) instead of a debug app.
-const serveMode = Bun.argv.slice(2).includes("--serve");
+const serveMode = devArgs.includes("--serve");
+// --wait restores the old block-on-build startup: the app only opens once the
+// initial build finishes. --no-build launches the last completed build and
+// skips the initial build entirely (watchers still rebuild on change).
+const waitForBuild = devArgs.includes("--wait");
+const noBuild = devArgs.includes("--no-build");
 if (serveMode && !isMacOS) {
   console.error("[goddard-dev] --serve requires macOS.");
   process.exit(2);
@@ -1985,17 +1991,29 @@ if (laned) {
   adoptAppLanes();
   adoptDaemonLanes();
 }
+// What the last completed build left behind: on macOS the newest surviving
+// app/daemon lanes, elsewhere cargo's outputs at appPath/daemonPath.
+const completedAppAvailable = laned
+  ? latestLane !== undefined
+  : existsSync(appPath);
+const daemonBinaryAvailable =
+  externalDaemonAddress !== undefined ||
+  latestDaemonLane !== undefined ||
+  existsSync(daemonPath);
+// --no-build only holds when there is a build to run — a first-ever checkout
+// has nothing to launch, so fall back to a normal initial build.
+const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;
+if (noBuild && !noBuildViable) {
+  console.log(
+    "[goddard-dev] --no-build requested but there is no completed build to launch; building the current tree.",
+  );
+}
+const runInitialBuild = !noBuildViable;
 building = true;
 // A previous session's completed bundle is usable during the very first
-// rebuild too. Start its daemon before cargo replaces the daemon executable,
-// and accept commands while the initial build is running — lane copies mean
-// the compile can't touch either binary.
-if (
-  latestLane !== undefined &&
-  (externalDaemonAddress ||
-    latestDaemonLane !== undefined ||
-    existsSync(daemonPath))
-) {
+// rebuild too. Start its daemon and accept commands while the initial build
+// is running — lane copies mean the compile can't touch either binary.
+if (completedAppAvailable && daemonBinaryAvailable) {
   try {
     await ensureDaemon();
   } catch (error) {
@@ -2006,14 +2024,43 @@ if (
 if (stopping) process.exit(0);
 startCommandLoop();
 if (interactive) printShortcuts();
+// Interactive runs launch the newest completed build right away — the same
+// path pressing a + enter mid-build takes — so testing never waits on the
+// initial compile. Non-interactive runs keep build-first semantics so
+// automation always gets current-tree bits; --wait opts back into that.
+const laneSuffix = laned ? ` (lane ${latestLane})` : "";
+if (
+  completedAppAvailable &&
+  daemonAddress !== undefined &&
+  (noBuildViable || (interactive && !waitForBuild))
+) {
+  console.log(
+    runInitialBuild
+      ? `[goddard-dev] Launching the last completed build${laneSuffix}; the fresh build continues in the background.`
+      : `[goddard-dev] --no-build: launching the last completed build${laneSuffix} and skipping the initial build.`,
+  );
+  await relaunchApp();
+} else if (runInitialBuild && interactive) {
+  console.log(
+    completedAppAvailable
+      ? "[goddard-dev] The app launches when this build finishes."
+      : "[goddard-dev] No completed build yet — the app launches when this build finishes.",
+  );
+}
 const initialAppRevision = appChangeRevision;
-const initialBuildSucceeded = await build("app");
-daemonBuildDirty = false;
-building = false;
-if (stopping) process.exit(0);
-if (!initialBuildSucceeded) {
-  await cleanup();
-  process.exit(1);
+let daemonRebuilt = false;
+if (runInitialBuild) {
+  const initialBuildSucceeded = await build("app");
+  daemonRebuilt = daemonBuildDirty;
+  daemonBuildDirty = false;
+  building = false;
+  if (stopping) process.exit(0);
+  if (!initialBuildSucceeded) {
+    await cleanup();
+    process.exit(1);
+  }
+} else {
+  building = false;
 }
 
 try {
@@ -2026,9 +2073,30 @@ try {
 
 if (stopping) process.exit(0);
 if (appChangeRevision === initialAppRevision) {
-  // An explicit launch during the build keeps running until the user asks
-  // for the new build, just like launches during later rebuilds.
-  if (app === undefined || relaunchAfterBuild) {
+  // An app already running a completed lane gets the same treatment a rebuild
+  // gets in drainBuildQueue: auto-restart only on the palette toggle, and the
+  // 'b' instruction whenever the protocol moved under it.
+  if (app !== undefined && runInitialBuild && !relaunchAfterBuild) {
+    if (protocolDirty) {
+      daemonRestartPending = true;
+      console.log(
+        "[goddard-dev] App rebuilt, but the protocol changed — press b + enter to restart the daemon and relaunch.",
+      );
+    } else if (interactive && autoRestartEnabled()) {
+      console.log(
+        daemonRebuilt
+          ? "[goddard-dev] App rebuilt — auto-restarting (the daemon also rebuilt; press b + enter to restart it)."
+          : "[goddard-dev] App rebuilt — auto-restarting.",
+      );
+      await relaunchApp();
+    } else {
+      console.log(
+        daemonRebuilt
+          ? "[goddard-dev] App and daemon rebuilt — press b + enter to restart both, a + enter to relaunch the app only."
+          : "[goddard-dev] App rebuilt — press a + enter to relaunch.",
+      );
+    }
+  } else if (app === undefined || relaunchAfterBuild) {
     if (forceDaemonRestart) await restartDaemon("requested");
     if (!stopping) await relaunchApp();
   }
