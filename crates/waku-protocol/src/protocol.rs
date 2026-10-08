@@ -629,9 +629,11 @@ pub enum Command {
     },
     /// Scoped agent credential only: submit a prompt to an existing task,
     /// addressed by Waku task id or provider-native Agent CLI thread id.
+    /// Employees may omit both addresses to resolve their supervisor and
+    /// always steer or start a turn immediately, regardless of `delivery`.
     AgentPrompt {
         /// Waku task id. Exactly one of `task_id` and `thread_id` is
-        /// required.
+        /// required, except for employees addressing their supervisor.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task_id: Option<Uuid>,
         /// Provider-native Agent CLI thread id, resolved against

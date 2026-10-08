@@ -117,6 +117,14 @@ Read the doc before working in its area:
   off the UI thread, degrades to the deterministic default on any failure,
   and is logged to `eval-decisions.jsonl` under a `feature` tag.
 
+## Employee communication
+
+Employees message their own supervisor with
+`goddard-agent steer-supervisor --text 'message'` (or `--file PATH`). No task ID
+is needed. Delivery steers a live turn or starts a new turn immediately; it
+never queues. Use `goddard-agent boss report-blocker` only when supervisor or
+human action is required to proceed.
+
 ## QA branch workflow
 
 - `dev` is the QA branch — there is no `qa` branch. Proposed work lands

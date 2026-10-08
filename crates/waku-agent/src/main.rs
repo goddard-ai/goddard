@@ -70,6 +70,8 @@ USAGE
     goddard-agent boss resume EMPLOYEE_ID     Revive an expired employee — transcript and worktree intact
     goddard-agent boss roster [--all]
     goddard-agent read [TASK_ID] [--turn N]
+    goddard-agent steer-supervisor (--text TEXT | --file PATH|-)
+        Employee-only: steer your supervisor or start its next turn; never queue
     goddard-agent prompt TASK_ID (--text TEXT | --file PATH|-)
     goddard-agent models                     List the provider/model options `create` accepts
     goddard-agent command list               List the user's custom commands
@@ -103,6 +105,10 @@ USAGE CONTRACT
     to find tasks worth `read`ing. Use `create` and `prompt` only when the
     human you are working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
+    Employees use `steer-supervisor --text TEXT` to message their own
+    supervisor without a task id: steer its live turn or start a new turn
+    immediately; never queue. Use `boss report-blocker` when you cannot
+    proceed without supervisor or human action.
     `map` searches this workspace's indexed declarations for code relevant to
     the current task. Ask a specific question, add `anchors` for known symbol
     names, and use `known_paths` when you have already inspected files; then
@@ -278,8 +284,13 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"results":"matching task/message records","session_link_hint":"how to format Goddard task links"}}),
             "goddard-agent search --text 'status:idle retry logic'".to_owned(),
         ),
+        "steer-supervisor" => (
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"role":"employee only","description":"Resolve your supervisor automatically. Steer its live turn or start a new turn immediately; never queue. No task id or delivery option."}),
+            json!({"json":{"ok":"true when the message was accepted"}}),
+            "goddard-agent steer-supervisor --text 'The focused checks passed.'".to_owned(),
+        ),
         "prompt" => (
-            json!({"TASK_ID":{"positional":true,"required":true,"type":"UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--delivery":{"enum":["interrupt","queue","steer"],"default":"interrupt"}}),
+            json!({"TASK_ID":{"positional":true,"required":true,"type":"UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--delivery":{"enum":["interrupt","queue","steer"],"default":"interrupt"},"description":"Employees use steer-supervisor without a task id. Legacy employee prompts to their supervisor always steer or start a turn immediately, even with queue delivery; other targets are rejected."}),
             json!({"json":{"ok":"true when the prompt was accepted"}}),
             "goddard-agent prompt TASK_ID --file followup.md".to_owned(),
         ),
@@ -701,7 +712,7 @@ fn legacy_schema() -> serde_json::Value {
             "returns": {"task_id": "uuid of the created task"}
         },
         "prompt": {
-            "description": "Submit a prompt to an existing task, addressed by Goddard task id or provider-native thread id. A Boss employee may target only its supervisor task — that is the employee report channel; any other target is rejected with the correct path (reportBlocker for attention, merge submit to land work).",
+            "description": "Submit a prompt to an existing task, addressed by Goddard task id or provider-native thread id. Employees use `goddard-agent steer-supervisor --text TEXT` without a task id. Legacy employee prompts may target only their supervisor and always steer or start a turn, regardless of delivery; other targets are rejected.",
             "fields": {
                 "task_id": {"type": "string", "notes": "Goddard task UUID; exactly one of task_id and thread_id is required"},
                 "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
@@ -816,6 +827,7 @@ fn schema() -> serde_json::Value {
     let paths = [
         "create",
         "prompt",
+        "steer-supervisor",
         "read",
         "search",
         "map",
@@ -1187,7 +1199,7 @@ fn run() -> anyhow::Result<()> {
             let action = arguments.next().unwrap();
             boss_everyday(&action, arguments.collect())
         }
-        "prompt" | "read" => task_everyday(&subcommand, arguments.collect()),
+        "prompt" | "read" | "steer-supervisor" => task_everyday(&subcommand, arguments.collect()),
         "create"
             if arguments
                 .clone()
@@ -2170,7 +2182,16 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
 }
 
 fn task_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
-    let command = if action == "prompt" {
+    let command = if action == "steer-supervisor" {
+        let (_, opts) = flags(args, &["file", "text"], false)?;
+        Command::AgentPrompt {
+            task_id: None,
+            thread_id: None,
+            provider: None,
+            prompt: raw_input(&opts)?,
+            delivery: AgentPromptDelivery::Interrupt,
+        }
+    } else if action == "prompt" {
         let (pos, opts) = flags(args, &["file", "text", "delivery"], true)?;
         if pos.len() != 1 {
             bail!("usage: goddard-agent prompt TASK_ID (--text TEXT|--file PATH|-)");

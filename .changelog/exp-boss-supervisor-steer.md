@@ -1,0 +1,1 @@
+- Employees can message their supervisor with `goddard-agent steer-supervisor` without a task ID; updates steer live work or start a new turn immediately instead of waiting in a prompt queue.

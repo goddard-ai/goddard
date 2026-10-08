@@ -114,6 +114,7 @@ impl Daemon {
                                 cancelled: false,
                                 released: false,
                                 admission: None,
+                                waiting_on: None,
                             });
                         }
                     }
