@@ -2621,6 +2621,7 @@ dependencies = [
 [[package]]
 name = "espeak-rs-sys"
 version = "0.2.0"
+source = "git+https://github.com/goddard-ai/piper-rs?rev=f34da576b000811ce3a99ba53baa29d3ac2bf546#f34da576b000811ce3a99ba53baa29d3ac2bf546"
 dependencies = [
  "bindgen 0.69.5",
  "cmake",

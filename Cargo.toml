@@ -302,6 +302,6 @@ debug = false
 # is the crates.io release plus the future-incompatibility fix only.
 [patch.crates-io]
 # espeak-rs-sys 0.2.0 assumes PROFILE matches the artifact directory, which
-# fails for our nightly profile. Remove this patch after upstream fixes it.
-espeak-rs-sys = { path = "vendor/espeak-rs-sys" }
+# fails for our nightly profile. Pin our fork until upstream fixes it.
+espeak-rs-sys = { git = "https://github.com/goddard-ai/piper-rs", rev = "f34da576b000811ce3a99ba53baa29d3ac2bf546" }
 block = { git = "https://github.com/Dicklesworthstone/rust-block", rev = "b39ae859d1ee8e8cb5eef6a516471f1578d26b96" }
