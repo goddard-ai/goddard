@@ -2621,8 +2621,6 @@ dependencies = [
 [[package]]
 name = "espeak-rs-sys"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d45d148019084e930df6cc3964a58c4c211342451ec5d3c328d8a6cc6b3464d"
 dependencies = [
  "bindgen 0.69.5",
  "cmake",

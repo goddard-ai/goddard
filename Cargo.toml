@@ -301,4 +301,7 @@ debug = false
 # `block` 0.1.6 declares an extern static with an uninhabited type. This fork
 # is the crates.io release plus the future-incompatibility fix only.
 [patch.crates-io]
+# espeak-rs-sys 0.2.0 assumes PROFILE matches the artifact directory, which
+# fails for our nightly profile. Remove this patch after upstream fixes it.
+espeak-rs-sys = { path = "vendor/espeak-rs-sys" }
 block = { git = "https://github.com/Dicklesworthstone/rust-block", rev = "b39ae859d1ee8e8cb5eef6a516471f1578d26b96" }
