@@ -4,7 +4,7 @@ set -eu
 profile="${1:-debug}"
 debug_icon_override="${2:-}"
 if [ "$#" -gt 2 ] || { [ -n "$debug_icon_override" ] && [ "$debug_icon_override" != "--debug-icon" ]; }; then
-  echo "usage: scripts/bundle.sh [debug|release] [--debug-icon]" >&2
+  echo "usage: scripts/bundle.sh [debug|release|nightly] [--debug-icon]" >&2
   exit 2
 fi
 cargo_target_dir="${CARGO_TARGET_DIR:-target}"
@@ -52,14 +52,14 @@ case "$profile" in
     bundle_identifier="org.goddardai.app.debug"
     icon_file="AppIconDev.icns"
     ;;
-  release)
+  release|nightly)
     app_name="Goddard"
     helper_name="Goddard Computer Use"
     bundle_identifier="org.goddardai.app"
     icon_file="AppIcon.icns"
     ;;
   *)
-    echo "usage: scripts/bundle.sh [debug|release] [--debug-icon]" >&2
+    echo "usage: scripts/bundle.sh [debug|release|nightly] [--debug-icon]" >&2
     exit 2
     ;;
 esac
@@ -72,8 +72,8 @@ if [ "$profile" = "debug" ] && [ "$codesign_identity_from_environment" = "0" ] &
 fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
 if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
-  if [ "$profile" = "release" ]; then
-    mbx build --release --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
+  if [ "$profile" != "debug" ]; then
+    mbx build --profile "$profile" --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
   else
     mbx build --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent
   fi
@@ -149,7 +149,7 @@ if [ ! -d "$cached_helper_bundle" ]; then
   if [ "$codesign_identity" = "-" ]; then
     codesign --force --sign - "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
     codesign --force --sign - "$cached_helper_staging"
-  elif [ "$profile" = "release" ]; then
+  elif [ "$profile" != "debug" ]; then
     codesign --force --options runtime --timestamp --sign "$codesign_identity" "$cached_helper_contents/Frameworks/libcua_driver_sdk.dylib"
     codesign --force --options runtime --timestamp --sign "$codesign_identity" "$cached_helper_staging"
   else
@@ -209,7 +209,7 @@ else
   chmod 755 "$repl_executable"
   cp "$cargo_target_dir/$profile/goddard-agent" "$agent_executable"
   chmod 755 "$agent_executable"
-  if [ "$profile" = "release" ]; then
+  if [ "$profile" != "debug" ]; then
     # The sandbox VM runner travels with the bundled daemon. The build machine
     # supplies it via GODDARD_SHURU_BIN or the default install location; it
     # must carry the virtualization entitlement to boot VMs once signed.
@@ -273,7 +273,7 @@ if [ "$codesign_identity" = "-" ]; then
   else
     codesign --force --sign - "$bundle"
   fi
-elif [ "$profile" = "release" ]; then
+elif [ "$profile" != "debug" ]; then
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework"
@@ -293,7 +293,7 @@ else
   codesign --force --options runtime --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
   codesign --force --options runtime --entitlements scripts/goddard.entitlements --sign "$codesign_identity" "$bundle"
 fi
-if [ "$profile" = "release" ]; then
+if [ "$profile" != "debug" ]; then
   codesign --verify --strict --verbose=2 "$repl_executable"
   codesign --verify --strict --verbose=2 "$daemon_executable"
   codesign --verify --strict --verbose=2 "$agent_executable"

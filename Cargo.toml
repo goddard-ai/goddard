@@ -274,6 +274,16 @@ ed25519-dalek = "2"
 lto = "thin"
 strip = true
 
+# Publish release-compatible Nightly updates without paying release rebuild costs.
+[profile.nightly]
+inherits = "release"
+opt-level = 1
+lto = false
+incremental = true
+debug = 1
+strip = false
+debug-assertions = false
+
 # Keep debug assertions and incremental builds for app code, but do not run
 # GPUI's text shaping and Taffy layout hot paths completely unoptimized.
 [profile.dev]
@@ -281,6 +291,10 @@ opt-level = 1
 debug = 1
 
 [profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.nightly.package."*"]
 opt-level = 2
 debug = false
 

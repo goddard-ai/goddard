@@ -1992,11 +1992,11 @@ settings.check_now:
 settings.update_channel:
   en: Update channel
 settings.update_channel_description:
-  en: Dev pulls builds published by a dev worktree instead of released versions
+  en: Nightly receives the latest development builds before stable releases
 settings.update_channel_stable:
   en: Stable
 settings.update_channel_dev:
-  en: Dev
+  en: Nightly
 settings.share_anonymous_usage_data:
   en: Share anonymous usage data
 settings.share_anonymous_usage_data_description:

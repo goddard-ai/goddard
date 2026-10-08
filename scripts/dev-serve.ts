@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 //
-// The publish side of the Dev update channel: package the built release
+// The publish side of the Nightly update channel: package the built
 // bundle as a signed Sparkle archive, regenerate appcast.xml, and serve the
 // directory to dev.goddardai.org through a named Cloudflare tunnel.
 //
@@ -265,7 +265,7 @@ export async function startDevServe(options: {
       } catch (error) {
         await rm(join(updatesDir, zipName), { force: true });
         log(
-          `Dev channel publish failed (is the Sparkle key in the keychain?): ` +
+          `Nightly channel publish failed (is the Sparkle key in the keychain?): ` +
             `${error instanceof Error ? error.message : error}`,
         );
         return false;

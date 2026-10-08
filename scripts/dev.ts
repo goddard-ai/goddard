@@ -26,8 +26,8 @@ import { WakuClient } from "../packages/waku-client/src/client";
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
 const devArgs = Bun.argv.slice(2);
-// --serve: the watcher builds a signed release bundle and publishes it as the
-// Dev channel's appcast (see dev-serve.ts) instead of a debug app.
+// --serve: build a signed release-compatible bundle with the faster nightly
+// profile and publish the Nightly appcast (see dev-serve.ts).
 const serveMode = devArgs.includes("--serve");
 // --wait restores the old block-on-build startup: the app only opens once the
 // initial build finishes. --no-build launches the last completed build and
@@ -38,7 +38,7 @@ if (serveMode && !isMacOS) {
   console.error("[goddard-dev] --serve requires macOS.");
   process.exit(2);
 }
-const profile = serveMode ? "release" : "debug";
+const profile = serveMode ? "nightly" : "debug";
 const appName = serveMode ? "Goddard" : "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const developmentDataDir = process.env.GODDARD_DATA_DIR || join(root, "temp");
@@ -858,7 +858,7 @@ async function build(target: BuildTarget): Promise<boolean> {
   }
   const appArgs = isMacOS
     ? [
-        ...(serveMode ? ["--release"] : []),
+        ...(serveMode ? ["--profile", profile] : []),
         "--package",
         "waku",
         "--bin",
@@ -939,7 +939,7 @@ async function buildDaemon(publishRuntime = true): Promise<boolean> {
   if (laned && publishRuntime && latestLane === undefined) return build("app");
   if (
     !(await cargoBuild("daemon", [
-      ...(serveMode ? ["--release"] : []),
+      ...(serveMode ? ["--profile", profile] : []),
       "--package",
       "waku-daemon",
       ...(serveMode ? [] : ["--features", "dev-binary"]),
