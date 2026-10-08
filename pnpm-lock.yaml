@@ -6,17 +6,17 @@ importers:
   .:
     configDependencies:
       '@octane-xplat/patches':
-        specifier: 0.9.0
-        version: 0.9.0
+        specifier: 0.11.1
+        version: 0.11.1
 
 packages:
 
-  '@octane-xplat/patches@0.9.0':
-    resolution: {integrity: sha512-UuyP+/x8q6IC1pKxKnpdY8crmb31dGN3uQ749FRKUJ57USMSqCtJy0/+OQqAyAkUb00vyUSuoMHC1RhqEs07lg==}
+  '@octane-xplat/patches@0.11.1':
+    resolution: {integrity: sha512-bhQIepVDAd99Qh4+6hGZaWI7bMNzr+h8D3TesM6mgD0MUM5o61rBCB/vh4BSD3Jze8jKFdHJh9/pXKGUQQdQgg==}
 
 snapshots:
 
-  '@octane-xplat/patches@0.9.0': {}
+  '@octane-xplat/patches@0.11.1': {}
 
 ---
 lockfileVersion: '9.0'
@@ -26,18 +26,21 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@nativescript-community/octane@0.2.4': b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6
+  '@lexical/link@0.51.0': b7acc2eb057e7ce7fce719af708781758cc666a4e618401bed165d973aa5f4a2
+  '@nativescript-community/octane@0.2.4': 3315d07db6dfd3d9c5ed4c0c6f36952745ddcfd9db76a4c7ac6fb0d16b9d4d5e
+  '@nativescript-community/ui-image@5.0.17': 350cd3967da115c16b323b82485548be45e9f005c0d41372632feedce23ad464
   '@nativescript-community/vite-octane@0.2.1': 495e5a4f441c704f2ac5996d80722f6210a7d21d2af5678d56fa843aed611bce
-  '@nativescript/core@9.1.2': 2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37
-  '@nativescript/types@9.0.0': 3dc11d16cb6622cce4d19875174015db65e6d9f67cf05ac912d7d2236ea0bf09
-  '@nativescript/vite@8.0.17': 0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c
-  '@octanejs/tiptap@0.0.51': 1d7d0d3864e41ae3008c316e81dd7c21c9b8dca6af3d89da1cd748c519346bf1
+  '@nativescript/core@9.1.3': 5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f
+  '@nativescript/vite@8.0.17': d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7
+  '@octanejs/tiptap@0.0.52': d0289ba086910439cae2273234809337c4721470c18709472e4ed003c2eb6ada
   '@tsrx/typescript-plugin@0.4.11': d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee
   css@3.0.0: f850496626b52d1bf5ca127576a655d5e46c02def5de9905d568490d4b71959b
   ios-sim-portable@4.5.1: 112322a31b23c85b3dea52d6acb58d06ebd65d4841332caa8ead372b196bc7f0
   linkifyjs@4.3.3: 6b103bc96e531c5a90bc869f12bc9e28023b5e6c686c4205d96734a28526e202
+  mdast-util-gfm-autolink-literal@2.0.1: f1dbc7060a978af792731939ee628ec229152a95dbcec32d6427e0a430ecfc5d
+  micromark-util-character@2.1.1: 1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402
   nativescript@9.1.1: d346def3acdba037bde11615062167e88ee1d079a0043f797d4073dca607e1b6
-  octane@0.6.3: 758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6
+  octane@0.10.2: be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6
 
 importers:
 
@@ -48,7 +51,7 @@ importers:
         version: 2.0.45
       '@nativescript-community/octane':
         specifier: 0.2.4
-        version: 0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+        version: 0.2.4(patch_hash=3315d07db6dfd3d9c5ed4c0c6f36952745ddcfd9db76a4c7ac6fb0d16b9d4d5e)(@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f))(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
       '@nativescript-community/ui-document-picker':
         specifier: 1.1.29
         version: 1.1.29
@@ -59,8 +62,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.0
       '@nativescript/core':
-        specifier: 9.1.2
-        version: 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
+        specifier: 9.1.3
+        version: 9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f)
       '@nativescript/haptics':
         specifier: ^3.1.0
         version: 3.1.0
@@ -113,12 +116,12 @@ importers:
         specifier: ^3.0.0
         version: 3.0.0
       octane:
-        specifier: 0.6.3
-        version: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+        specifier: 0.10.2
+        version: 0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
     devDependencies:
       '@nativescript-community/vite-octane':
         specifier: 0.2.1
-        version: 0.2.1(patch_hash=495e5a4f441c704f2ac5996d80722f6210a7d21d2af5678d56fa843aed611bce)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(@nativescript/vite@8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1))(@octanejs/vite-plugin@0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+        version: 0.2.1(patch_hash=495e5a4f441c704f2ac5996d80722f6210a7d21d2af5678d56fa843aed611bce)(@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f))(@nativescript/vite@8.0.17(patch_hash=d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1))(@octanejs/vite-plugin@0.1.61(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
       '@nativescript/android':
         specifier: 9.1.1
         version: 9.1.1
@@ -126,11 +129,11 @@ importers:
         specifier: 9.1.0
         version: 9.1.0
       '@nativescript/types':
-        specifier: 9.0.0
-        version: 9.0.0(patch_hash=3dc11d16cb6622cce4d19875174015db65e6d9f67cf05ac912d7d2236ea0bf09)
+        specifier: 9.1.4
+        version: 9.1.4
       '@nativescript/vite':
         specifier: 8.0.17
-        version: 8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
+        version: 8.0.17(patch_hash=d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
       '@octane-xplat/cli':
         specifier: link:../../alloc/octane-xplat/packages/cli
         version: link:../../alloc/octane-xplat/packages/cli
@@ -139,10 +142,10 @@ importers:
         version: link:../../alloc/octane-xplat/packages/lint
       '@octanejs/vite-plugin':
         specifier: 0.1.61
-        version: 0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+        version: 0.1.61(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
       '@tsrx/typescript-plugin':
         specifier: 0.4.11
-        version: 0.4.11(patch_hash=d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee)(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(typescript@5.9.3)
+        version: 0.4.11(patch_hash=d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee)(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(typescript@5.9.3)
       '@types/mdast':
         specifier: ^4.0.4
         version: 4.0.4
@@ -818,8 +821,8 @@ packages:
   '@nativescript/camera@7.0.0':
     resolution: {integrity: sha512-QyKvRqLnchWPV1T+s1Qx0rscnj03G7AK0kSLWW8dwDKXzFdc/EJUmp3nVaLuTxnphiaoUxqWp+o1FCV1TW64vQ==}
 
-  '@nativescript/core@9.1.2':
-    resolution: {integrity: sha512-zL/dgfuLmcVu9nR47UEFOaPHXoaRKuWMBnDwiaMAwXmf4WKd6yr1gIXcNHheKgBNGrls06LgbBpkB841fI+HcA==}
+  '@nativescript/core@9.1.3':
+    resolution: {integrity: sha512-Vh6j6z8m0d+NXVzy3ibHxHf+khQ+1Oa+Uil2hBqZKrD3Z+uvULbt9O7WmTiBwoWiJwRe4C8byrCbkHzkrQzk1w==}
 
   '@nativescript/doctor@2.0.18':
     resolution: {integrity: sha512-ir8IqN5IQa8UTYq4Xr+58A0HmqBPDeu2wWiMXctT7q9SPa3XcBVmZLGgO7alPf+unP4jVhlz0Rvg+Ztruiw/Eg==}
@@ -851,14 +854,14 @@ packages:
   '@nativescript/shared-notification-delegate@1.0.2':
     resolution: {integrity: sha512-Wh6F1WH9Aj23K+nyolA5MrA6MXku/5rSPt9r20ekbyx2FkRpBr0stjg4uD6KSyUvWY8YT+KQ9WlOUzhq7g7Ycw==}
 
-  '@nativescript/types-android@9.0.0':
-    resolution: {integrity: sha512-Az64E1m6jd7CKX/QKOZi3uSxQEXZbPW5NlmMNP9VGCP9UobHLd5GgqpEIyeBB4Jep4rckA2Z4LEEpjbu/my63Q==}
+  '@nativescript/types-android@9.1.1':
+    resolution: {integrity: sha512-PGaTum9tyqyyza3QT21Z7WrRR1+nM7ITsq9EJiaShLArThJI0PD1ZuDO5IoUUvSQ+gTKU2nLiVMnFbU4s3FeeQ==}
 
-  '@nativescript/types-ios@9.0.0':
-    resolution: {integrity: sha512-A13VLFFKNrkYqS7JU0V+R4wxKIE66VvYiHK1+vrVXqiK6l+95BxgEgRPD8FlXN7W2iXXqYLapo8nVMtWArpscg==}
+  '@nativescript/types-ios@9.1.3':
+    resolution: {integrity: sha512-iymdyLJfDX16T+t0oKOF3BpZxCPay35EQrd1U4pyBKYTGICAya1v3NgGc6SRdaHNDKQ89Xh5ASP1xQHIfxEKgg==}
 
-  '@nativescript/types@9.0.0':
-    resolution: {integrity: sha512-fR9ot7Si9L0StcsOZpAEThggeQb8cQxCL0BwRKuWHbm+SdlinuOWSl6lS3bKuIIcCzJem2cWP3UrzgweRnOe/A==}
+  '@nativescript/types@9.1.4':
+    resolution: {integrity: sha512-7XhcnFg98c3gm/lVF1jmH4u9viADxVlPkhDbY+swtsSKvNAGpof3BeKbbnnYAZpw1xIIAvPFbGtz4jWD6ey3Yw==}
 
   '@nativescript/vite@8.0.17':
     resolution: {integrity: sha512-Hq+GetG/bMW6NI2y9kf43EbcwZi/O84kFaXIBB0Z5QkKm1+ixuB1bwAWuDgd2ADGF/A7CjONApSHuDdzhbb+Ug==}
@@ -2933,15 +2936,18 @@ packages:
     resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
     engines: {node: '>=0.10.0'}
 
-  octane@0.6.3:
-    resolution: {integrity: sha512-KJAp1sJlqjDWyKQmkhlMyD93mzG7ZaIGryGAemTPegNAD3uPdYe30bRMU3kSlArmOmp3OvQ4y/9cRDzHSeHSqg==}
+  octane@0.10.2:
+    resolution: {integrity: sha512-KgjRcFOPz1RMh8qJJ/nX0xeET/g76vYb4g74yLrAAlFBcGUAbe/FNeT5s9kfkSOKmoT1pSXwc68dbR4VyJX7Zg==}
     engines: {node: '>=22.22.2'}
     peerDependencies:
+      '@tsrx/oxc': 0.16.0
       react: ^19.0.0
       react-dom: ^19.0.0
       typescript: ^5.9.3
       vite: ^8.0.16
     peerDependenciesMeta:
+      '@tsrx/oxc':
+        optional: true
       react:
         optional: true
       react-dom:
@@ -4354,10 +4360,10 @@ snapshots:
 
   '@nativescript-community/observable@2.0.11': {}
 
-  '@nativescript-community/octane@0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
+  '@nativescript-community/octane@0.2.4(patch_hash=3315d07db6dfd3d9c5ed4c0c6f36952745ddcfd9db76a4c7ac6fb0d16b9d4d5e)(@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f))(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
     dependencies:
-      '@nativescript/core': 9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)
-      octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+      '@nativescript/core': 9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f)
+      octane: 0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
 
   '@nativescript-community/perms@2.3.6': {}
 
@@ -4371,11 +4377,11 @@ snapshots:
     dependencies:
       '@nativescript-community/gesturehandler': 2.0.45
 
-  '@nativescript-community/vite-octane@0.2.1(patch_hash=495e5a4f441c704f2ac5996d80722f6210a7d21d2af5678d56fa843aed611bce)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(@nativescript/vite@8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1))(@octanejs/vite-plugin@0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))':
+  '@nativescript-community/vite-octane@0.2.1(patch_hash=495e5a4f441c704f2ac5996d80722f6210a7d21d2af5678d56fa843aed611bce)(@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f))(@nativescript/vite@8.0.17(patch_hash=d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1))(@octanejs/vite-plugin@0.1.61(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))':
     dependencies:
-      '@nativescript-community/octane': 0.2.4(patch_hash=b91ecc946a05e2319488291a4e69c7e090b3ffc9abb9b4ab83dbe87db5d730d6)(@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37))(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
-      '@nativescript/vite': 8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
-      '@octanejs/vite-plugin': 0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+      '@nativescript-community/octane': 0.2.4(patch_hash=3315d07db6dfd3d9c5ed4c0c6f36952745ddcfd9db76a4c7ac6fb0d16b9d4d5e)(@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f))(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+      '@nativescript/vite': 8.0.17(patch_hash=d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)
+      '@octanejs/vite-plugin': 0.1.61(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
       vite: 8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)
     transitivePeerDependencies:
       - '@nativescript/core'
@@ -4387,7 +4393,7 @@ snapshots:
     dependencies:
       '@nativescript-community/perms': 2.3.6
 
-  '@nativescript/core@9.1.2(patch_hash=2f362248a9a54f955f635bac7a14e4105c75e30f66870c7ffff0a9fc02aced37)':
+  '@nativescript/core@9.1.3(patch_hash=5aef06c2379d66b40bd7d65dfb6e47db1b26ff1a409112e26bcb22a50a02b15f)':
     dependencies:
       '@csstools/css-calc': 2.1.4(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-color-parser': 3.1.0(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)
@@ -4434,16 +4440,16 @@ snapshots:
 
   '@nativescript/shared-notification-delegate@1.0.2': {}
 
-  '@nativescript/types-android@9.0.0': {}
+  '@nativescript/types-android@9.1.1': {}
 
-  '@nativescript/types-ios@9.0.0': {}
+  '@nativescript/types-ios@9.1.3': {}
 
-  '@nativescript/types@9.0.0(patch_hash=3dc11d16cb6622cce4d19875174015db65e6d9f67cf05ac912d7d2236ea0bf09)':
+  '@nativescript/types@9.1.4':
     dependencies:
-      '@nativescript/types-android': 9.0.0
-      '@nativescript/types-ios': 9.0.0
+      '@nativescript/types-android': 9.1.1
+      '@nativescript/types-ios': 9.1.3
 
-  '@nativescript/vite@8.0.17(patch_hash=0cd576a526d90c517196a8392e2d2715f6153c8548bb6aabb9c8ecfd23fbe34c)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)':
+  '@nativescript/vite@8.0.17(patch_hash=d7bdf8c0b86f7b230cd8d68c87ce5a22a22c4973d41a72c25aedb720661218f7)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.1)':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/generator': 7.29.8
@@ -4535,7 +4541,7 @@ snapshots:
       proggy: 4.0.0
       promise-all-reject-late: 1.0.1
       promise-call-limit: 3.0.2
-      semver: 7.7.3
+      semver: 7.8.5
       ssri: 13.0.1
       treeverse: 3.0.0
       walk-up-path: 4.0.0
@@ -4544,7 +4550,7 @@ snapshots:
 
   '@npmcli/fs@5.0.0':
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.5
 
   '@npmcli/git@7.0.2':
     dependencies:
@@ -4554,7 +4560,7 @@ snapshots:
       lru-cache: 11.5.3
       npm-pick-manifest: 11.0.3
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.8.5
       which: 6.0.1
 
   '@npmcli/installed-package-contents@4.0.0':
@@ -4575,7 +4581,7 @@ snapshots:
       json-parse-even-better-errors: 5.0.0
       pacote: 21.0.4(supports-color@7.2.0)
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
 
@@ -4590,7 +4596,7 @@ snapshots:
       hosted-git-info: 9.0.3
       json-parse-even-better-errors: 5.0.0
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.8.5
       spdx-expression-parse: 4.0.0
 
   '@npmcli/promise-spawn@9.0.1':
@@ -4611,20 +4617,21 @@ snapshots:
       node-gyp: 12.4.0
       proc-log: 6.1.0
 
-  '@octanejs/app-core@0.0.57(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
+  '@octanejs/app-core@0.0.57(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))':
     dependencies:
       '@ripple-ts/adapter': 0.4.7
       esbuild: 0.28.2
-      octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+      octane: 0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
 
-  '@octanejs/vite-plugin@0.1.61(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))':
+  '@octanejs/vite-plugin@0.1.61(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))':
     dependencies:
-      '@octanejs/app-core': 0.0.57(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
+      '@octanejs/app-core': 0.0.57(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))
       '@ripple-ts/adapter': 0.4.7
-      octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+      octane: 0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
       vite: 8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)
 
-  '@oxc-project/types@0.150.0': {}
+  '@oxc-project/types@0.150.0':
+    optional: true
 
   '@oxc-project/types@0.152.0': {}
 
@@ -5067,16 +5074,17 @@ snapshots:
     transitivePeerDependencies:
       - svelte
       - vite-plus
+    optional: true
 
   '@tsrx/runtime@0.2.4': {}
 
-  '@tsrx/typescript-plugin@0.4.11(patch_hash=d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee)(octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(typescript@5.9.3)':
+  '@tsrx/typescript-plugin@0.4.11(patch_hash=d59e06c4ca94d559fee4b759d5aa18a118468586dbac9f1ec2c1d75a20bbd6ee)(octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)))(typescript@5.9.3)':
     dependencies:
       '@volar/language-core': 2.4.28
       '@volar/typescript': 2.4.28(typescript@5.9.3)
       typescript: 5.9.3
     optionalDependencies:
-      octane: 0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
+      octane: 0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1))
 
   '@tufjs/canonical-json@2.0.0': {}
 
@@ -6012,13 +6020,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-autolink-literal@2.0.1:
+  mdast-util-gfm-autolink-literal@2.0.1(patch_hash=f1dbc7060a978af792731939ee628ec229152a95dbcec32d6427e0a430ecfc5d):
     dependencies:
       '@types/mdast': 4.0.4
       ccount: 2.0.1
       devlop: 1.1.0
       mdast-util-find-and-replace: 3.0.2
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
 
   mdast-util-gfm-footnote@2.1.0(supports-color@7.2.0):
     dependencies:
@@ -6060,7 +6068,7 @@ snapshots:
   mdast-util-gfm@3.1.0(supports-color@7.2.0):
     dependencies:
       mdast-util-from-markdown: 2.0.3(supports-color@7.2.0)
-      mdast-util-gfm-autolink-literal: 2.0.1
+      mdast-util-gfm-autolink-literal: 2.0.1(patch_hash=f1dbc7060a978af792731939ee628ec229152a95dbcec32d6427e0a430ecfc5d)
       mdast-util-gfm-footnote: 2.1.0(supports-color@7.2.0)
       mdast-util-gfm-strikethrough: 2.0.1(supports-color@7.2.0)
       mdast-util-gfm-table: 2.0.0(supports-color@7.2.0)
@@ -6081,7 +6089,7 @@ snapshots:
       longest-streak: 3.1.0
       mdast-util-phrasing: 4.1.0
       mdast-util-to-string: 4.0.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-classify-character: 2.0.1
       micromark-util-decode-string: 2.0.1
       micromark-util-html-tag-name: 2.0.1
@@ -6107,7 +6115,7 @@ snapshots:
       micromark-factory-space: 2.1.0
       micromark-factory-title: 2.0.1
       micromark-factory-whitespace: 2.0.1
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-chunked: 2.0.1
       micromark-util-classify-character: 2.0.1
       micromark-util-edit-map: 1.0.0
@@ -6120,7 +6128,7 @@ snapshots:
 
   micromark-extension-gfm-autolink-literal@2.1.0:
     dependencies:
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
@@ -6130,7 +6138,7 @@ snapshots:
       devlop: 1.1.0
       micromark-core-commonmark: 2.0.4
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
@@ -6149,7 +6157,7 @@ snapshots:
     dependencies:
       devlop: 1.1.0
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
@@ -6161,7 +6169,7 @@ snapshots:
     dependencies:
       devlop: 1.1.0
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
@@ -6178,37 +6186,37 @@ snapshots:
 
   micromark-factory-destination@2.0.1:
     dependencies:
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
   micromark-factory-label@2.0.1:
     dependencies:
       devlop: 1.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
   micromark-factory-space@2.1.0:
     dependencies:
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-types: 2.0.3
 
   micromark-factory-title@2.0.1:
     dependencies:
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
   micromark-factory-whitespace@2.0.1:
     dependencies:
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
-  micromark-util-character@2.1.1:
+  micromark-util-character@2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402):
     dependencies:
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
@@ -6219,7 +6227,7 @@ snapshots:
 
   micromark-util-classify-character@2.0.1:
     dependencies:
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
 
@@ -6235,7 +6243,7 @@ snapshots:
   micromark-util-decode-string@2.0.1:
     dependencies:
       decode-named-character-reference: 1.3.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-decode-numeric-character-reference: 2.0.2
       micromark-util-symbol: 2.0.1
 
@@ -6257,7 +6265,7 @@ snapshots:
 
   micromark-util-sanitize-uri@2.0.1:
     dependencies:
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-encode: 2.0.1
       micromark-util-symbol: 2.0.1
 
@@ -6280,7 +6288,7 @@ snapshots:
       devlop: 1.1.0
       micromark-core-commonmark: 2.0.4
       micromark-factory-space: 2.1.0
-      micromark-util-character: 2.1.1
+      micromark-util-character: 2.1.1(patch_hash=1c76603428359235b502633e1ee0a86250b4785ead09d5f8147a7d8928112402)
       micromark-util-chunked: 2.0.1
       micromark-util-combine-extensions: 2.0.1
       micromark-util-decode-numeric-character-reference: 2.0.2
@@ -6454,7 +6462,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.8.5
       tar: 7.5.22
       tinyglobby: 0.2.17
       undici: 6.29.0
@@ -6474,7 +6482,7 @@ snapshots:
 
   npm-install-checks@8.0.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.5
 
   npm-normalize-package-bin@5.0.0: {}
 
@@ -6482,7 +6490,7 @@ snapshots:
     dependencies:
       hosted-git-info: 9.0.3
       proc-log: 6.1.0
-      semver: 7.7.3
+      semver: 7.8.5
       validate-npm-package-name: 7.0.2
 
   npm-packlist@10.0.4:
@@ -6495,7 +6503,7 @@ snapshots:
       npm-install-checks: 8.0.0
       npm-normalize-package-bin: 5.0.0
       npm-package-arg: 13.0.2
-      semver: 7.7.3
+      semver: 7.8.5
 
   npm-registry-fetch@19.1.1(supports-color@7.2.0):
     dependencies:
@@ -6520,10 +6528,9 @@ snapshots:
 
   object-assign@4.1.1: {}
 
-  octane@0.6.3(patch_hash=758abfef5ede246746cf6184dae17ca963f99c5bb4762fe47f76b8b8f2ebefd6)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)):
+  octane@0.10.2(patch_hash=be6f4f6d709376b457d582d48dd0b3e06802da4b9b1c033aaaa94d1f4f16b5b6)(@tsrx/oxc@0.16.0)(typescript@5.9.3)(vite@8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)):
     dependencies:
       '@tsrx/core': 0.4.0
-      '@tsrx/oxc': 0.16.0
       '@types/react': 19.3.0
       '@volar/language-core': 2.4.28
       '@volar/typescript': 2.4.28(typescript@5.9.3)
@@ -6534,12 +6541,11 @@ snapshots:
       es-module-lexer: 1.7.0
       esrap: 2.4.0
     optionalDependencies:
+      '@tsrx/oxc': 0.16.0
       typescript: 5.9.3
       vite: 8.3.0(esbuild@0.27.7)(sass@1.105.1)(yaml@2.9.1)
     transitivePeerDependencies:
       - '@typescript-eslint/types'
-      - svelte
-      - vite-plus
 
   omggif@1.0.10: {}
 
@@ -6592,6 +6598,7 @@ snapshots:
       '@oxfmt/binding-win32-arm64-msvc': 0.68.0
       '@oxfmt/binding-win32-ia32-msvc': 0.68.0
       '@oxfmt/binding-win32-x64-msvc': 0.68.0
+    optional: true
 
   oxlint-tsgolint@7.0.2002:
     optionalDependencies:
@@ -6601,6 +6608,7 @@ snapshots:
       '@oxlint-tsgolint/linux-x64': 7.0.2002
       '@oxlint-tsgolint/win32-arm64': 7.0.2002
       '@oxlint-tsgolint/win32-x64': 7.0.2002
+    optional: true
 
   oxlint@1.83.0(oxlint-tsgolint@7.0.2002):
     optionalDependencies:
@@ -6624,6 +6632,7 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.83.0
       '@oxlint/binding-win32-x64-msvc': 1.83.0
       oxlint-tsgolint: 7.0.2002
+    optional: true
 
   oxlint@1.86.0(oxlint-tsgolint@7.0.2002):
     optionalDependencies:
@@ -6712,7 +6721,8 @@ snapshots:
       lru-cache: 11.5.3
       minipass: 7.1.3
 
-  pathe@2.0.3: {}
+  pathe@2.0.3:
+    optional: true
 
   pbxproj-dom@1.2.0: {}
 
@@ -7086,7 +7096,8 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
 
-  tinypool@2.1.2: {}
+  tinypool@2.1.2:
+    optional: true
 
   to-regex-range@5.0.1:
     dependencies:

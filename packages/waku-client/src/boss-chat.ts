@@ -264,8 +264,19 @@ export interface BossMentionSpan {
   session: string
 }
 
+// NativeScript's V8 is built without ICU — \p{…} escapes are a parse error
+// there, so the literal form can't appear in the bundle. Build at runtime
+// and fall back to ASCII on engines without Unicode property support.
+const WORD_CHAR = (() => {
+  try {
+    return new RegExp('[\\p{L}\\p{N}_]', 'u')
+  } catch {
+    return /[A-Za-z0-9_]/
+  }
+})()
+
 function isWordChar(ch: string | undefined): boolean {
-  return ch != null && /[\p{L}\p{N}_]/u.test(ch)
+  return ch != null && WORD_CHAR.test(ch)
 }
 
 /**

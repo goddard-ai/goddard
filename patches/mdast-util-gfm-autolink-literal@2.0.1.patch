@@ -1,0 +1,21 @@
+diff --git a/lib/index.js b/lib/index.js
+index c5ca771c24dd914e342f791716a822431ee32b3a..6968dbb540ce7f174dc1a6b5024c716481dfc665 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -132,7 +132,15 @@ function transformGfmAutolinkLiterals(tree) {
+     tree,
+     [
+       [/(https?:\/\/|www(?=\.))([-.\w]+)([^ \t\r\n]*)/gi, findUrl],
+-      [/(?<=^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]
++      // NativeScript's embedded V8 builds without ICU, so \p{…} escapes are a
++      // parse error there. Build at runtime and fall back to ASCII punctuation.
++      [(function () {
++        try {
++          return new RegExp('(?<=^|\\s|\\p{P}|\\p{S})([-.\\w+]+)@([-\\w]+(?:\\.[-\\w]+)+)', 'gu')
++        } catch {
++          return /(?<=^|\s|[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu
++        }
++      })(), findEmail]
+     ],
+     {ignore: ['link', 'linkReference']}
+   )

@@ -188,12 +188,23 @@ const JOB_TITLE_SYMBOL_CATEGORIES: ReadonlyArray<readonly [readonly string[], st
   [['port'], 'arrow.triangle.branch'],
 ];
 
+// NativeScript's V8 is built without ICU — \p{…} escapes are a parse error
+// there, so the literal form can't appear in the bundle. Build at runtime
+// and fall back to ASCII on engines without Unicode property support.
+const NON_WORD = (() => {
+  try {
+    return new RegExp('[^\\p{L}\\p{N}]+', 'u');
+  } catch {
+    return /[^A-Za-z0-9]+/;
+  }
+})();
+
 /** The SF Symbol a job title earns when no explicit icon was chosen:
  * the first category containing one of the title's complete words, or
  * the brain fallback. */
 export function jobTitleSymbol(title: string): string {
   const words = title
-    .split(/[^\p{L}\p{N}]+/u)
+    .split(NON_WORD)
     .filter(Boolean)
     .map((word) => word.toLowerCase());
 

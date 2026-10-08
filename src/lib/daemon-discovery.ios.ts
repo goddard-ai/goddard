@@ -112,7 +112,7 @@ class DaemonBrowserDelegate
 		delete this.pending[key];
 		if (this.stopped || !(key in this.live)) {return;}
 		const host =
-			ipv4FromAddresses(service.addresses) ??
+			(service.addresses ? ipv4FromAddresses(service.addresses) : null) ??
 			service.hostName?.replace(/\.$/, '');
 
 		const port = service.port;

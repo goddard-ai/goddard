@@ -62,6 +62,18 @@ export function QrScanner(props: QrScannerProps) {
     );
   }
 
+  // Simulator builds skip the MLKit pods (hooks/before-prepare) and sims have
+  // no camera either — isAvailable() reports false in both cases.
+  if (!MLKitView.isAvailable()) {
+    return (
+      <ScanFallback
+        icon={{ ios: 'camera.fill', android: 'photo_camera', web: 'photo_camera' }}
+        message="Camera scanning isn't available on this device. You can enter the daemon address and token by hand instead."
+        onManual={props.onManual}
+      />
+    );
+  }
+
   return (
     <Grid rows="*" columns="*" style={{ flex: '1 1', backgroundColor: '#000000' }}>
       <View row={0} col={0} style={{ flex: '1 1' }}>

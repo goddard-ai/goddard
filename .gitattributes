@@ -1,1 +1,4 @@
 *.tsrx linguist-language=TypeScript
+
+# Vendored pnpm patches must be byte-exact — context whitespace is significant.
+patches/*.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab,-tab-in-indent

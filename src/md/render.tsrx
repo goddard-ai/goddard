@@ -112,6 +112,17 @@ const TASK_LINK_PREFIX = 'goddard://task/';
 const TASK_LINK_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// NativeScript's V8 is built without ICU — \p{…} escapes are a parse error
+// there, so the literal form can't appear in the bundle. Build at runtime
+// and fall back to ASCII on engines without Unicode property support.
+const WORD_CHAR = (() => {
+  try {
+    return new RegExp('[\\p{L}\\p{N}_]', 'u');
+  } catch {
+    return /[A-Za-z0-9_]/;
+  }
+})();
+
 export function openLinkExternally(url: string) {
   const planId = planReferenceId(url);
   if (planId) {
@@ -234,7 +245,7 @@ function RenderLeaf({
         value,
         mentions,
         ictx.cursor.value > 0
-          ? /[\p{L}\p{N}_]/u.test(ictx.flat[ictx.cursor.value - 1] ?? '')
+          ? WORD_CHAR.test(ictx.flat[ictx.cursor.value - 1] ?? '')
           : false,
       )
     : [];

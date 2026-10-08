@@ -115,7 +115,7 @@ function pasteboardHasAttachableContent(): boolean {
 	const pasteboard = UIPasteboard.generalPasteboard;
 	if (pasteboard.hasImages) {return true;}
 	const urls = pasteboard.URLs;
-	return Boolean(urls?.count) && urlsAreFiles(urls);
+	return urls != null && urls.count > 0 && urlsAreFiles(urls);
 }
 
 function urlsAreFiles(urls: NSArray<NSURL>): boolean {
@@ -135,6 +135,7 @@ function clipboardFiles(): LocalAttachmentFile[] | null {
 	const pasteboard = UIPasteboard.generalPasteboard;
 	if (pasteboard.hasImages) {
 		const images = pasteboard.images;
+		if (!images) {return null;}
 		const files: LocalAttachmentFile[] = [];
 		for (let index = 0; index < images.count; index++) {
 			const data = UIImagePNGRepresentation(images.objectAtIndex(index));

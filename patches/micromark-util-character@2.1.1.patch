@@ -1,0 +1,44 @@
+diff --git a/dev/index.js b/dev/index.js
+index 123745e860dd26c0f12b45f79a0a1fb69b45d6f0..745ab9ac2f13833d09c179fd31ed2442a3004205 100644
+--- a/dev/index.js
++++ b/dev/index.js
+@@ -203,7 +203,16 @@ export function markdownSpace(code) {
+  * @returns
+  *   Whether it matches.
+  */
+-export const unicodePunctuation = regexCheck(/\p{P}|\p{S}/u)
++// NativeScript's embedded V8 builds without ICU, so \p{…} escapes are a
++// parse error there. Build at runtime and fall back to ASCII punctuation.
++function safeUnicodePunctuation() {
++  try {
++    return new RegExp('\\p{P}|\\p{S}', 'u')
++  } catch {
++    return /[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]/
++  }
++}
++export const unicodePunctuation = regexCheck(safeUnicodePunctuation())
+ 
+ /**
+  * Check whether the character code represents Unicode whitespace.
+diff --git a/index.js b/index.js
+index 13698f04f2ea3591b7ca012b4270e027fb73e9bf..740836439f3dcc6fba8abb4b1461f526d89c8945 100644
+--- a/index.js
++++ b/index.js
+@@ -197,7 +197,16 @@ export function markdownSpace(code) {
+  * @returns
+  *   Whether it matches.
+  */
+-export const unicodePunctuation = regexCheck(/\p{P}|\p{S}/u);
++// NativeScript's embedded V8 builds without ICU, so \p{…} escapes are a
++// parse error there. Build at runtime and fall back to ASCII punctuation.
++function safeUnicodePunctuation() {
++  try {
++    return new RegExp('\\p{P}|\\p{S}', 'u')
++  } catch {
++    return /[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]/
++  }
++}
++export const unicodePunctuation = regexCheck(safeUnicodePunctuation());
+ 
+ /**
+  * Check whether the character code represents Unicode whitespace.

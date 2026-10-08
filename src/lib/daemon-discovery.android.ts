@@ -114,6 +114,8 @@ export function subscribeDaemonDiscovery(
 			if (wanted.has(info.getServiceName())) {upsert(info);}
 			drain();
 		},
+		onResolutionStopped: () => {},
+		onStopResolutionFailed: (_info, _errorCode) => {},
 	});
 
 	const discoveryListener = new android.net.nsd.NsdManager.DiscoveryListener({
