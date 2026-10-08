@@ -2515,6 +2515,24 @@ mod queue_tests {
     }
 
     #[test]
+    fn arrival_is_silent_without_any_unheard_eligible_candidate() {
+        let mut briefed = HashSet::new();
+        assert_eq!(scan_briefing_candidates(&[], &briefed), CandidateScan::Done);
+
+        let rejected = Uuid::new_v4();
+        let heard = Uuid::new_v4();
+        briefed.insert(heard);
+        let candidates = vec![
+            candidate(rejected, BriefingEligibility::Ineligible),
+            candidate(heard, BriefingEligibility::Eligible),
+        ];
+        assert_eq!(
+            scan_briefing_candidates(&candidates, &briefed),
+            CandidateScan::Done
+        );
+    }
+
+    #[test]
     fn dnd_holds_the_latest_automatic_clip_until_playback_is_allowed() {
         let mut queue = BriefingQueue::default();
         let first = queue.issue();
