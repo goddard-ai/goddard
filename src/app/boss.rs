@@ -10,6 +10,13 @@ use waku_client::boss::{
 use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
 
+fn global_avatar_style_operation(avatar_style: AvatarStyle) -> BossOperation {
+    BossOperation::SetAvatarStyle {
+        session_id: None,
+        avatar_style,
+    }
+}
+
 /// The logical size a session-mention chip's avatar occupies in the
 /// transcript — `ATOM_AVATAR_SCALE` of a body-text chip's height.
 const MENTION_AVATAR_SIZE: f32 = 18.0;
@@ -2561,24 +2568,17 @@ impl Waku {
         );
     }
 
-    /// The generator style is a global Boss setting — the menu lives on
-    /// whichever managed session the user opened, and every selection
-    /// applies to the boss and all employees at once.
-    fn set_managed_avatar_style(
+    /// The generator style is a global Boss setting shared by the boss and
+    /// every employee.
+    fn set_boss_avatar_style(
         &mut self,
-        session_id: Uuid,
+        key: DaemonKey,
         avatar_style: AvatarStyle,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, ..)) = self.managed_session_meta(session_id) else {
-            return;
-        };
         self.boss_request(
             key,
-            BossOperation::SetAvatarStyle {
-                session_id: None,
-                avatar_style,
-            },
+            global_avatar_style_operation(avatar_style),
             BossReply::List,
             cx,
         );
@@ -2676,44 +2676,6 @@ impl Waku {
                 .child(SharedString::from(identity.name.clone()))
                 .into_any_element()
         };
-        let handle = self.menu_handle("managed-avatar-style", cx);
-        let weak = cx.entity().downgrade();
-        let selected_style = identity.avatar_style;
-        let style_menu = dropdown_menu(
-            MenuChip::new("managed-avatar-style-trigger")
-                .label(tr!("boss.avatar_style"))
-                .selected(handle.is_open()),
-            "managed-avatar-style-menu",
-            &handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                [
-                    AvatarStyle::DiceBear,
-                    AvatarStyle::Blobby,
-                    AvatarStyle::AgentAvatars,
-                    AvatarStyle::Avvvatars,
-                ]
-                .into_iter()
-                .map(|style| {
-                    let weak = weak.clone();
-                    MenuItem::new(
-                        match style {
-                            AvatarStyle::DiceBear => "DiceBear",
-                            AvatarStyle::Blobby => "Blobby",
-                            AvatarStyle::AgentAvatars => "Agent Avatars",
-                            AvatarStyle::Avvvatars => "Avvvatars",
-                        },
-                        move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_managed_avatar_style(session_id, style, cx)
-                            });
-                        },
-                    )
-                    .selected(style == selected_style)
-                })
-                .collect()
-            },
-        );
         div()
             .flex()
             .items_center()
@@ -2729,7 +2691,6 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(job_title.to_owned())),
             )
-            .child(style_menu)
             .children(self.employee_assignment_popover(session_id, &theme, cx))
             .into_any_element()
     }
@@ -4166,6 +4127,10 @@ impl Waku {
         };
         let identity_handle = self.menu_handle("boss-identity", cx);
         let weak = cx.entity().downgrade();
+        let selected_style = state
+            .map(|state| state.identity.avatar_style)
+            .unwrap_or_default();
+        let avatar_key = key.clone();
         let identity_menu = dropdown_menu(
             MenuChip::new("boss-identity-trigger")
                 .icon("icons/user-round.svg", theme.text_tertiary)
@@ -4179,11 +4144,7 @@ impl Waku {
             move |_| {
                 let rename = weak.clone();
                 let face = weak.clone();
-                let dicebear = weak.clone();
-                let blobby = weak.clone();
-                let agent = weak.clone();
-                let avvvatars = weak.clone();
-                vec![
+                let mut items = vec![
                     MenuItem::new(tr!("common.rename"), move |window, cx| {
                         let _ = rename.update(cx, |this, cx| {
                             if let Some(session_id) = session_id {
@@ -4202,39 +4163,25 @@ impl Waku {
                     })
                     .icon("icons/rotate-cw.svg")
                     .disabled(session_id.is_none()),
-                    MenuItem::new(tr!("boss.avatar_style_dicebear"), move |_, cx| {
-                        let _ = dicebear.update(cx, |this, cx| {
-                            if let Some(id) = session_id {
-                                this.set_managed_avatar_style(id, AvatarStyle::DiceBear, cx);
-                            }
-                        });
-                    })
-                    .disabled(session_id.is_none()),
-                    MenuItem::new(tr!("boss.avatar_style_blobby"), move |_, cx| {
-                        let _ = blobby.update(cx, |this, cx| {
-                            if let Some(id) = session_id {
-                                this.set_managed_avatar_style(id, AvatarStyle::Blobby, cx);
-                            }
-                        });
-                    })
-                    .disabled(session_id.is_none()),
-                    MenuItem::new(tr!("boss.avatar_style_agent"), move |_, cx| {
-                        let _ = agent.update(cx, |this, cx| {
-                            if let Some(id) = session_id {
-                                this.set_managed_avatar_style(id, AvatarStyle::AgentAvatars, cx);
-                            }
-                        });
-                    })
-                    .disabled(session_id.is_none()),
-                    MenuItem::new(tr!("boss.avatar_style_avvvatars"), move |_, cx| {
-                        let _ = avvvatars.update(cx, |this, cx| {
-                            if let Some(id) = session_id {
-                                this.set_managed_avatar_style(id, AvatarStyle::Avvvatars, cx);
-                            }
-                        });
-                    })
-                    .disabled(session_id.is_none()),
-                ]
+                ];
+                for (style, label) in [
+                    (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
+                    (AvatarStyle::Blobby, tr!("boss.avatar_style_blobby")),
+                    (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
+                    (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
+                ] {
+                    let weak = weak.clone();
+                    let key = avatar_key.clone();
+                    items.push(
+                        MenuItem::new(label, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_boss_avatar_style(key.clone(), style, cx)
+                            });
+                        })
+                        .selected(style == selected_style),
+                    );
+                }
+                items
             },
         );
         div()
@@ -7819,6 +7766,17 @@ mod tests {
         assert_eq!(avatar_bucket(16.0), 16);
         assert_eq!(avatar_bucket(18.0), 24);
         assert_eq!(avatar_bucket(54.0), 56);
+    }
+
+    #[test]
+    fn avatar_style_setting_targets_the_global_boss_preference() {
+        assert!(matches!(
+            global_avatar_style_operation(AvatarStyle::Blobby),
+            BossOperation::SetAvatarStyle {
+                session_id: None,
+                avatar_style: AvatarStyle::Blobby,
+            }
+        ));
     }
 
     #[test]

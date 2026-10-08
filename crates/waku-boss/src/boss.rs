@@ -7533,6 +7533,17 @@ mod tests {
             waku_protocol::boss::AvatarStyle::AgentAvatars,
             "a global style applies to every employee"
         );
+        let restored = BossService::open(root.clone()).unwrap().document();
+        assert_eq!(
+            restored.identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::AgentAvatars,
+            "the global Boss style survives restart"
+        );
+        assert_eq!(
+            restored.employees[0].identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::AgentAvatars,
+            "the shared style is restored for employees"
+        );
         // A missing target — or the boss's own session — re-rolls the boss.
         let boss_seed = state.identity.avatar_seed;
         let BossResult::State { state } = service
