@@ -468,7 +468,7 @@ export function TranscriptScrollView({
       </scrollview>
       {jumpMounted && (
         <Absolute style={{ bottom: 12, right: 14 }}>
-          <View bind={jumpOpacity.bind}>
+          <View ref={jumpOpacity.ref}>
             <GlassSurface
               fallbackColor={theme.surface}
               interactive

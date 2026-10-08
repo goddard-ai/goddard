@@ -1,5 +1,5 @@
 /** @jsxImportSource @nativescript-community/octane */
-import { Pressable, ScrollView, Text, useRoute, View } from '@octane-xplat/ui';
+import { Pressable, ScrollableArea, Text, useRoute, View } from '@octane-xplat/ui';
 import { PlanDetail } from '@/components/plans';
 import { navigateBack, ScreenHeaderBackdrop } from '@/components/screen-header';
 import { useBossState } from '@/lib/daemon-queries';
@@ -16,8 +16,8 @@ export default function PlanScreen() {
     <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={navigateBack} style={{ padding: 14 }}>
       <Text style={{ color: theme.accent }}>Back</Text>
     </Pressable>
-    <ScrollView style={{ flex: '1 1' }}>
+    <ScrollableArea style={{ flex: '1 1' }}>
       {plan ? <PlanDetail plan={plan} /> : <Text style={{ color: theme.textSecondary, padding: 14 }}>{boss.error ? `Couldn’t load plan: ${String(boss.error)}` : boss.isPending ? 'Loading plan…' : 'Plan unavailable'}</Text>}
-    </ScrollView>
+    </ScrollableArea>
   </View>;
 }

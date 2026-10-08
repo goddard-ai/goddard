@@ -4,7 +4,7 @@ import { markBossGoalsViewed } from '@waku/client/boss';
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
   Text,
   View,
@@ -478,7 +478,7 @@ const GoalRowView = memo(function GoalRowView({
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>
         <View style={{ alignItems: 'center', height: 14, justifyContent: 'center', width: 14 }}>
           {marker.spin ? (
-            <ActivityIndicator busy style={{ height: 14, width: 14 }} />
+            <Spinner busy style={{ height: 14, width: 14 }} />
           ) : (
             <AppSymbol
               name={marker.symbol}

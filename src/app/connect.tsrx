@@ -1,13 +1,13 @@
 import { Haptics } from '../lib/haptics';
 import { useEffect, useRef, useState } from 'octane';
 import {
-  ActivityIndicator,
-  Row,
+  Spinner,
+  HStack,
   popRoute,
   Pressable,
   pushRoute,
   Text,
-  Column,
+  VStack,
 } from '@octane-xplat/ui';
 
 import { AppSymbol } from '../components/app-symbol';
@@ -58,7 +58,7 @@ export default function ConnectScreen(props: {
   }, []);
 
   return (
-    <Column
+    <VStack
       style={{
         alignItems: 'center',
         flex: '1 1',
@@ -70,7 +70,7 @@ export default function ConnectScreen(props: {
     >
       {error ? (
         <>
-          <Row style={{ alignItems: 'flex-start', gap: 8 }}>
+          <HStack style={{ alignItems: 'flex-start', gap: 8 }}>
             <AppSymbol
               name={{
                 ios: 'exclamationmark.circle.fill',
@@ -83,8 +83,8 @@ export default function ConnectScreen(props: {
             <Text style={{ flex: '1 1', fontSize: 15, lineHeight: '20px', color: theme.danger }}>
               {error}
             </Text>
-          </Row>
-          <Row style={{ gap: 10, marginTop: 8 }}>
+          </HStack>
+          <HStack style={{ gap: 10, marginTop: 8 }}>
             <Pressable
               accessibilityRole="button"
               onPress={() => pushRoute({ stack: 'root', name: 'daemon-editor', params: {} })}
@@ -117,16 +117,16 @@ export default function ConnectScreen(props: {
                 Cancel
               </Text>
             </Pressable>
-          </Row>
+          </HStack>
         </>
       ) : (
         <>
-          <ActivityIndicator busy />
+          <Spinner busy />
           <Text style={{ fontSize: 16, color: theme.textSecondary }}>
             Connecting to daemon…
           </Text>
         </>
       )}
-    </Column>
+    </VStack>
   );
 }

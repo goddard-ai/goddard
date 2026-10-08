@@ -1,4 +1,4 @@
-import { popRoute, ScrollView, Column } from '@octane-xplat/ui';
+import { popRoute, ScrollableArea, VStack } from '@octane-xplat/ui';
 
 import { DaemonEditor } from '../components/daemon-picker-sheet';
 import { useTheme } from '../lib/use-theme';
@@ -12,17 +12,17 @@ export default function DaemonEditorScreen(props: { id?: string }) {
   const profile = daemon.profiles.find((item) => item.id === props.id);
 
   return (
-    <Column style={{ flex: '1 1', backgroundColor: theme.background }}>
-      <ScrollView style={{ flex: '1 1' }}>
-        <Column style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
+    <VStack style={{ flex: '1 1', backgroundColor: theme.background }}>
+      <ScrollableArea style={{ flex: '1 1' }}>
+        <VStack style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
           <DaemonEditor
             key={profile?.id ?? 'new'}
             profile={profile}
             onRemoved={() => popRoute('root')}
             onSaved={() => popRoute('root')}
           />
-        </Column>
-      </ScrollView>
-    </Column>
+        </VStack>
+      </ScrollableArea>
+    </VStack>
   );
 }

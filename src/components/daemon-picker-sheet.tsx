@@ -2,8 +2,8 @@ import { Haptics } from '@/lib/haptics';
 import { useEffect, useMemo, useRef, useState } from 'octane';
 import type { PairedClientInfo, PairingState, PairRequestInfo, WakuClient } from '@waku/client';
 import {
-  ActivityIndicator,
-  Row,
+  Spinner,
+  HStack,
   Pressable,
   Text,
   TextInput,
@@ -233,10 +233,10 @@ export function DaemonEditor({
         onBack={onBack}
       />
       <View style={{ borderRadius: Radius.medium, overflow: 'hidden', backgroundColor: theme.overlay }}>
-        <Row style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
+        <HStack style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
           <Text style={{ fontSize: 16.5, width: 74, color: theme.text }}>Name</Text>
           <TextInput
-            editable={!saving && !removing}
+            isReadOnly={saving || removing}
             onChange={(value: string) => {
               setName(value);
               setLocalError(null);
@@ -247,13 +247,13 @@ export function DaemonEditor({
             style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
             value={name}
           />
-        </Row>
+        </HStack>
         <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
-        <Row style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
+        <HStack style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
           <Text style={{ fontSize: 16.5, width: 74, color: theme.text }}>Address</Text>
           <TextInput
-            bind={(h: any) => { addressInput.current = h; }}
-            editable={!saving && !removing}
+            ref={(h: any) => { addressInput.current = h; }}
+            isReadOnly={saving || removing}
             keyboardType="url"
             onChange={(value: string) => {
               setAddress(value);
@@ -265,13 +265,13 @@ export function DaemonEditor({
             style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
             value={address}
           />
-        </Row>
+        </HStack>
         <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
-        <Row style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
+        <HStack style={{ alignItems: 'center', minHeight: 54, paddingLeft: 12, paddingRight: 4 }}>
           <Text style={{ fontSize: 16.5, width: 74, color: theme.text }}>Token</Text>
           <TextInput
-            bind={(h: any) => { tokenInput.current = h; }}
-            editable={!saving && !removing}
+            ref={(h: any) => { tokenInput.current = h; }}
+            isReadOnly={saving || removing}
             onChange={(value: string) => {
               setToken(value);
               setLocalError(null);
@@ -299,23 +299,23 @@ export function DaemonEditor({
               tintColor={theme.textSecondary}
             />
           </Pressable>
-        </Row>
+        </HStack>
       </View>
 
       <ConnectionFootnote editing={Boolean(profile)} security={security} />
 
       {localError && (
-        <Row accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
           <AppSymbol
             name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }}
             size={14}
             tintColor={theme.danger}
           />
           <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color: theme.danger }}>{localError}</Text>
-        </Row>
+        </HStack>
       )}
 
-      <Row style={{ gap: 8, marginTop: 16 }}>
+      <HStack style={{ gap: 8, marginTop: 16 }}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: !canSave }}
@@ -335,12 +335,12 @@ export function DaemonEditor({
             opacity: !canSave ? 0.35 : 1,
           }}
         >
-          {saving && <ActivityIndicator busy />}
+          {saving && <Spinner busy />}
           <Text style={{ fontSize: 17, fontWeight: '600', color: '#ffffff' }}>
             {saving ? 'Saving…' : profile ? 'Save' : 'Add'}
           </Text>
         </Pressable>
-      </Row>
+      </HStack>
 
       {profile && profile.id === daemon.activeProfile?.id && daemon.client && (
         <PairingSection client={daemon.client} />
@@ -361,7 +361,7 @@ export function DaemonEditor({
             marginTop: 4,
           }}
         >
-          {removing && <ActivityIndicator busy />}
+          {removing && <Spinner busy />}
           <Text style={{ fontSize: 16.5, color: theme.danger }}>
             {removing ? 'Removing…' : 'Remove Daemon'}
           </Text>
@@ -471,7 +471,7 @@ function PairingSection({ client }: { client: WakuClient }) {
                 {index > 0 && (
                   <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
                 )}
-                <Row style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+                <HStack style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
                   <View style={{ flex: '1 1' }}>
                     <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
                       {request.deviceName}
@@ -481,7 +481,7 @@ function PairingSection({ client }: { client: WakuClient }) {
                     </Text>
                   </View>
                   {busyId === request.requestId ? (
-                    <ActivityIndicator busy />
+                    <Spinner busy />
                   ) : (
                     <>
                       <Pressable
@@ -520,7 +520,7 @@ function PairingSection({ client }: { client: WakuClient }) {
                       </Pressable>
                     </>
                   )}
-                </Row>
+                </HStack>
               </View>
             ))}
           </View>
@@ -570,7 +570,7 @@ function PairingSection({ client }: { client: WakuClient }) {
               {index > 0 && (
                 <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
               )}
-              <Row style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+              <HStack style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
                 <View style={{ flex: '1 1' }}>
                   <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
                     {entry.name}
@@ -580,7 +580,7 @@ function PairingSection({ client }: { client: WakuClient }) {
                   </Text>
                 </View>
                 {busyId === entry.clientId ? (
-                  <ActivityIndicator busy />
+                  <Spinner busy />
                 ) : (
                   <Pressable
                     accessibilityLabel={`Revoke ${entry.name}`}
@@ -600,21 +600,21 @@ function PairingSection({ client }: { client: WakuClient }) {
                     <Text style={{ fontSize: 14.5, fontWeight: '500', color: theme.danger }}>Revoke</Text>
                   </Pressable>
                 )}
-              </Row>
+              </HStack>
             </View>
           ))
         )}
       </View>
 
       {error && (
-        <Row accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
           <AppSymbol
             name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }}
             size={14}
             tintColor={theme.danger}
           />
           <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color: theme.danger }}>{error}</Text>
-        </Row>
+        </HStack>
       )}
     </View>
   );
@@ -631,7 +631,7 @@ function SheetPageHeader({
 }) {
   const theme = useTheme();
   return (
-    <Row style={{ alignItems: 'center', height: 46, marginBottom: 4 }}>
+    <HStack style={{ alignItems: 'center', height: 46, marginBottom: 4 }}>
       {onBack ? (
         <Pressable
           accessibilityLabel="Back to daemons"
@@ -661,7 +661,7 @@ function SheetPageHeader({
         {title}
       </Text>
       <View style={{ width: 44 }} />
-    </Row>
+    </HStack>
   );
 }
 
@@ -703,9 +703,9 @@ function ConnectionFootnote({
   }
 
   return (
-    <Row style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+    <HStack style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
       <AppSymbol name={icon} size={15} tintColor={color} />
       <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color }}>{message}</Text>
-    </Row>
+    </HStack>
   );
 }

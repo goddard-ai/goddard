@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, Sheet as XSheet, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { Pressable, ScrollableArea, BottomSheet as XSheet, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
 import { useWindowSize } from '@octane-xplat/platform';
 import type { ReactNode } from 'octane';
 
@@ -9,7 +9,7 @@ import { useTheme } from '@/lib/use-theme';
 
 /**
  * Bottom sheet used for pickers and action menus — the framework's in-window
- * Sheet (bottom-anchored panel with shade dismiss). The declarative `visible`
+ * BottomSheet (bottom-anchored panel with shade dismiss). The declarative `visible`
  * prop keeps call sites identical to the reference's @expo/ui sheet.
  */
 export function Sheet({
@@ -52,7 +52,7 @@ export function Sheet({
   );
 
   return (
-    <XSheet open={visible} onDismiss={onDismiss} detents={[0.62]}>
+    <XSheet label={title ?? 'Options'} isOpen={visible} onOpenChange={(isOpen) => {if (!isOpen) {onDismiss();}}} snapPoints={[0.62]}>
       <View
         style={{
           paddingHorizontal: Spacing.two,
@@ -62,7 +62,7 @@ export function Sheet({
         }}
       >
         {scrollable ? (
-          <ScrollView style={{ maxHeight: Math.round(height * 0.62) }}>{body}</ScrollView>
+          <ScrollableArea style={{ maxHeight: Math.round(height * 0.62) }}>{body}</ScrollableArea>
         ) : (
           body
         )}

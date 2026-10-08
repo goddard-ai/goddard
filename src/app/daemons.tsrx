@@ -3,15 +3,15 @@ import { requestPair } from '@waku/client';
 import { device } from '@octane-xplat/platform';
 import { useEffect, useState } from 'octane';
 import {
-  ActivityIndicator,
-  Row,
+  Spinner,
+  HStack,
   Pressable,
   pushRoute,
   popRoute,
-  ScrollView,
+  ScrollableArea,
   Text,
   View,
-  Column,
+  VStack,
 } from '@octane-xplat/ui';
 
 import { AppSymbol } from '../components/app-symbol';
@@ -101,9 +101,9 @@ export default function DaemonsScreen() {
   }
 
   return (
-    <Column style={{ flex: '1 1', backgroundColor: theme.background }}>
-      <ScrollView style={{ flex: '1 1' }}>
-        <Column style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
+    <VStack style={{ flex: '1 1', backgroundColor: theme.background }}>
+      <ScrollableArea style={{ flex: '1 1' }}>
+        <VStack style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
           <ConnectionBanner />
           {discovered.length ? (
             <>
@@ -118,7 +118,7 @@ export default function DaemonsScreen() {
               }}>
                 On your network
               </Text>
-              <Column style={{ borderRadius: 16, overflow: 'hidden', backgroundColor: theme.overlay }}>
+              <VStack style={{ borderRadius: 16, overflow: 'hidden', backgroundColor: theme.overlay }}>
                 {discovered.map((found, index) => (
                   <View key={found.id}>
                     {index > 0 && (
@@ -152,14 +152,14 @@ export default function DaemonsScreen() {
                         </Text>
                       </View>
                       {pairingId === found.id ? (
-                        <ActivityIndicator busy />
+                        <Spinner busy />
                       ) : (
                         <Text style={{ fontSize: 16, fontWeight: '600', color: String(NativeTint) }}>Pair</Text>
                       )}
                     </Pressable>
                   </View>
                 ))}
-              </Column>
+              </VStack>
             </>
           ) : null}
           {daemon.profiles.length ? (
@@ -180,7 +180,7 @@ export default function DaemonsScreen() {
                 }}
                 onSelect={(profile) => void select(profile)}
               />
-              <Row style={{
+              <HStack style={{
                 alignItems: 'flex-start',
                 gap: 8,
                 marginHorizontal: 12,
@@ -195,18 +195,18 @@ export default function DaemonsScreen() {
                   Only the selected daemon stays connected. Credentials are protected by the device
                   keychain and never pass through a Goddard service.
                 </Text>
-              </Row>
+              </HStack>
             </>
           ) : (
-            <Column style={{ alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 }}>
+            <VStack style={{ alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 }}>
               <Text style={{ fontSize: 19, fontWeight: '700', color: theme.text }}>No saved daemons</Text>
               <Text style={{ fontSize: 15, lineHeight: '20px', marginTop: 8, textAlign: 'center', color: theme.textSecondary }}>
                 Add the address and token shown in Goddard Desktop’s Daemon settings.
               </Text>
-            </Column>
+            </VStack>
           )}
-        </Column>
-      </ScrollView>
-    </Column>
+        </VStack>
+      </ScrollableArea>
+    </VStack>
   );
 }

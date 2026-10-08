@@ -26,13 +26,13 @@ import {
   Pressable,
   RichText,
   RichTextSpan,
-  ScrollView,
+  ScrollableArea,
   Text,
   useSafeAreaInsets,
   View,
 } from '@octane-xplat/ui';
 
-import { Sheet as XSheet } from '@octane-xplat/ui';
+import { BottomSheet as XSheet } from '@octane-xplat/ui';
 
 import { ACTIVITY_ICONS } from './activity-icons';
 import { AppSymbol } from './app-symbol';
@@ -113,10 +113,11 @@ export function ActivitySheetHost({
   return (
     <>
       {children}
-      <XSheet
-        open={Boolean(target && block)}
-        detents={[0.5, 1]}
-        onDismiss={() => {
+      <XSheet label="Activity"
+        isOpen={Boolean(target && block)}
+        snapPoints={[0.5, 1]}
+        onOpenChange={(isOpen) => {
+          if (isOpen) {return;}
           setTarget(null);
           setSelectedId(null);
         }}>
@@ -162,12 +163,12 @@ function GroupList({
 }) {
   const _insets = useSafeAreaInsets();
   return (
-    <ScrollView
+    <ScrollableArea
            style={styles.fill}>
       {activities.map((activity) => (
         <GroupRow activity={activity} onPress={() => onSelect(activity.id)} />
       ))}
-    </ScrollView>
+    </ScrollableArea>
   );
 }
 
@@ -251,7 +252,7 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
   const images = activity.image_urls ?? [];
   const title = activity.reasoning ? reasoningTitle(activity) : activityDisplayTitle(activity);
   return (
-    <ScrollView
+    <ScrollableArea
            style={styles.fill}>
       <View style={styles.header}>
         <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
@@ -295,7 +296,7 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
           ))}
         </>
       )}
-    </ScrollView>
+    </ScrollableArea>
   );
 }
 

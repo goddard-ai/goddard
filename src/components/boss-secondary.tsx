@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'octane';
-import { Absolute, Pressable, ScrollView, Sheet, Text, View, pushRoute, useRoute, useStore, useSafeAreaInsets } from '@octane-xplat/ui';
+import { Absolute, Pressable, ScrollableArea, BottomSheet, Text, View, pushRoute, useRoute, useStore, useSafeAreaInsets } from '@octane-xplat/ui';
 import { useDaemon } from '@/lib/daemon-hooks';
 import { useBossState, useSession } from '@/lib/daemon-queries';
 import { useTheme } from '@/lib/use-theme';
@@ -90,12 +90,12 @@ export function BossPinnedTerminals({ sessionId }: { sessionId: string }) {
   const terminal = terminals.find((item) => item.id === selected);
   if (!terminals.length) {return null;}
   return <View className="boss-secondary-pins" style={{ backgroundColor: theme.surface }}>
-    <ScrollView horizontal><View className="boss-secondary-pin-row">{terminals.map((item) => <Pressable accessibilityRole="button" onPress={() => setSelected(item.id)}>
+    <ScrollableArea axis="inline"><View className="boss-secondary-pin-row">{terminals.map((item) => <Pressable accessibilityRole="button" onPress={() => setSelected(item.id)}>
       <Text numberOfLines={1} className="boss-secondary-pin" style={{ color: theme.text }}>Pinned terminal · {item.title}{item.exited ? ' · Exited' : ''}</Text>
-    </Pressable>)}</View></ScrollView>
-    <Sheet open={Boolean(terminal)} detents={[0.75, 1]} onDismiss={() => setSelected(null)}>
+    </Pressable>)}</View></ScrollableArea>
+    <BottomSheet label="Terminal" isOpen={Boolean(terminal)} snapPoints={[0.75, 1]} onOpenChange={(isOpen) => {if (!isOpen) {setSelected(null);}}}>
       {terminal ? <PinnedTerminalSheet terminal={terminal} onDismiss={() => setSelected(null)} /> : null}
-    </Sheet>
+    </BottomSheet>
   </View>;
 }
 

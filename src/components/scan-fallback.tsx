@@ -1,4 +1,4 @@
-import { Pressable, Text, Column } from '@octane-xplat/ui';
+import { Pressable, Text, VStack } from '@octane-xplat/ui';
 
 import { AppSymbol } from './app-symbol';
 import type { AppSymbolName } from './app-symbol.types';
@@ -15,7 +15,7 @@ export function ScanFallback(props: {
 }) {
   const theme = useTheme();
   return (
-    <Column
+    <VStack
       style={{
         alignItems: 'center',
         flex: '1 1',
@@ -44,6 +44,6 @@ export function ScanFallback(props: {
       >
         <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>Enter manually</Text>
       </Pressable>
-    </Column>
+    </VStack>
   );
 }

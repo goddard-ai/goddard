@@ -2,9 +2,9 @@
 import type { NotificationThread } from '@waku/client';
 import { useCallback, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
-  ScrollView,
+  ScrollableArea,
   Text,
   View,
 } from '@octane-xplat/ui';
@@ -174,7 +174,7 @@ export default function NotificationsScreen() {
         />
       ) : inbox.isPending ? (
         <View style={styles.message}>
-          <ActivityIndicator busy />
+          <Spinner busy />
         </View>
       ) : inbox.error ? (
         <InboxMessage
@@ -195,7 +195,7 @@ export default function NotificationsScreen() {
           title="GitHub unavailable"
         />
       ) : (
-        <ScrollView style={styles.list}>
+        <ScrollableArea style={styles.list}>
           {sections.length === 0 ? (
             <InboxMessage
               detail={
@@ -315,7 +315,7 @@ export default function NotificationsScreen() {
               ))}
             </View>
           ))}
-        </ScrollView>
+        </ScrollableArea>
       )}
     </View>
   );

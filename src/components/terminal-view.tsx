@@ -178,7 +178,8 @@ export function TerminalView({
   return (
     <WebView
       accessibilityLabel="Terminal"
-      bind={(handle) => {
+      ref={(handle) => {
+        if (!handle) {return;}
         attach(handle.native);
         bind?.({
           write: (data) => runJs(`window.__goddardWrite(${JSON.stringify(data)})`),

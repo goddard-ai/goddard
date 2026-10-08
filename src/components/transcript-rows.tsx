@@ -22,7 +22,7 @@ import {
 
 import { atomSegments, atomVisibleText, formatMessageTime } from '@waku/client/transcript-presentation';
 import { memo, useEffect, useState } from 'octane';
-import { ActivityIndicator, Pressable, RichText, RichTextSpan, Text, pushRoute, View } from '@octane-xplat/ui';
+import { Spinner, Pressable, RichText, RichTextSpan, Text, pushRoute, View } from '@octane-xplat/ui';
 
 import { setStringAsync as copyToClipboard } from '@/lib/clipboard';
 import { Haptics } from '@/lib/haptics';
@@ -595,7 +595,7 @@ function HistoryBoundaryRow({
         disabled={loading}
         onPress={onLoad}
         style={styles.historyButton}>
-        {loading ? <ActivityIndicator busy /> : null}
+        {loading ? <Spinner busy /> : null}
         <Text style={[styles.historyLabel, { color: theme.textSecondary }]}>{label}</Text>
       </Pressable>
       {error ? (
@@ -814,7 +814,7 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
 export function EarlierIndicator() {
   return (
     <View accessibilityLabel="Loading earlier messages" style={styles.earlier}>
-      <ActivityIndicator busy />
+      <Spinner busy />
     </View>
   );
 }
@@ -833,7 +833,7 @@ export function SessionEmpty({
   boss?: BossIdentity | null;
 }) {
   const theme = useTheme();
-  if (loading) {return <ActivityIndicator busy />;}
+  if (loading) {return <Spinner busy />;}
   if (boss && !error && !missing) {
     return (
       <View style={styles.empty}>

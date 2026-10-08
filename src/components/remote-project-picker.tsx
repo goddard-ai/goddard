@@ -1,10 +1,10 @@
 import type { Project, WorkingTreeEntry } from '@waku/client';
 import { useEffect, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
   SafeArea,
-  Sheet as XSheet,
+  BottomSheet as XSheet,
   Text,
   TextInput,
   View,
@@ -120,7 +120,7 @@ export function RemoteProjectPicker({
   if (!visible) {return null;}
 
   return (
-    <XSheet open onDismiss={onDismiss} detents={[1]}>
+    <XSheet label="Remote project" isOpen onOpenChange={(isOpen) => {if (!isOpen) {onDismiss();}}} snapPoints={[1]}>
       <SafeArea style={{ flex: '1 1', backgroundColor: theme.background }}>
         <View style={{
           alignItems: 'center',
@@ -149,7 +149,7 @@ export function RemoteProjectPicker({
             style={{ alignItems: 'flex-end', justifyContent: 'center', minHeight: 44, minWidth: 64, paddingHorizontal: 8 }}
           >
             {submitting === 'folder'
-              ? <ActivityIndicator busy />
+              ? <Spinner busy />
               : (
                 <Text style={{ fontSize: 17, fontWeight: '600', color: directory.data?.path ? theme.accent : theme.textTertiary }}>
                   Add
@@ -257,7 +257,7 @@ export function RemoteProjectPicker({
             onPress={() => void addEmptyWorkspace()}
             style={{ alignItems: 'center', flexDirection: 'row', gap: 6, minHeight: 42 }}
           >
-            {submitting === 'empty' && <ActivityIndicator busy />}
+            {submitting === 'empty' && <Spinner busy />}
             <Text style={{ fontSize: 13.5, fontWeight: '600', color: theme.textSecondary }}>
               New empty workspace
             </Text>
@@ -352,7 +352,7 @@ function DirectoryEmpty({ loading }: { loading: boolean }) {
   const theme = useTheme();
   return (
     <View style={{ alignItems: 'center', flex: '1 1', justifyContent: 'center', minHeight: 220 }}>
-      {loading ? <ActivityIndicator busy /> : (
+      {loading ? <Spinner busy /> : (
         <View style={{
           alignItems: 'center',
           borderRadius: 18,

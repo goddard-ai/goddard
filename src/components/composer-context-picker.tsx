@@ -1,5 +1,5 @@
 import {
-  ActivityIndicator,
+  Spinner,
   Text,
   TextInput,
   View,
@@ -53,7 +53,7 @@ export function ComposerContextPicker({
           onChange={onQueryChange}
         />
         <View style={{ width: 28, alignItems: 'center', justifyContent: 'center' }}>
-          {loading && <ActivityIndicator busy />}
+          {loading && <Spinner busy />}
         </View>
       </View>
       <VirtualList

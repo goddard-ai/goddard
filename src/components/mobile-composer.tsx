@@ -23,9 +23,9 @@ import { atomVisibleText } from '@waku/client/transcript-presentation';
 import { parseRenameSubmission } from '@waku/client/composer-autocomplete';
 import { useEffect, useRef, useState, type ReactNode } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
-  ScrollView,
+  ScrollableArea,
   Text,
   TextArea,
   pushRoute,
@@ -204,7 +204,7 @@ export function SendButton({
         opacity: busy ? 0.6 : 1,
       }}>
       {busy ? (
-        <ActivityIndicator busy />
+        <Spinner busy />
       ) : (
         <AppSymbol
           name={queueing
@@ -643,8 +643,8 @@ export function MobileComposer({
       <ComposerCard
         {...contextPicker.inputProps}
         beforeInput={attachments.length || importingAttachments || deliverable ? (
-          <ScrollView
-            horizontal
+          <ScrollableArea
+            axis="inline"
             style={{ marginBottom: 6 }}>
             <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 4, paddingBottom: 6 }}>
               {deliverable ? (
@@ -718,12 +718,12 @@ export function MobileComposer({
                   backgroundColor: theme.inset,
                   borderColor: theme.border,
                 }}>
-                  <ActivityIndicator busy />
+                  <Spinner busy />
                   <Text style={{ fontSize: 12.5, color: theme.textSecondary }}>Attaching…</Text>
                 </View>
               )}
             </View>
-          </ScrollView>
+          </ScrollableArea>
         ) : undefined}
         editable={!disconnected && !submitting}
         left={(
@@ -843,7 +843,7 @@ export function PermissionPanel({
         <Text style={{ flex: '1 1', fontSize: 15, fontWeight: '700', color: theme.text }}>{permission.title}</Text>
       </View>
       {permission.detail ? (
-        <ScrollView
+        <ScrollableArea
           style={{
             borderRadius: Radius.small,
             borderWidth: hairline,
@@ -856,7 +856,7 @@ export function PermissionPanel({
           <Text style={{ fontFamily: MonoFont, fontSize: 12.5, lineHeight: '17px', color: theme.textSecondary }}>
             {permission.detail}
           </Text>
-        </ScrollView>
+        </ScrollableArea>
       ) : null}
       {error && <Text style={{ fontSize: 13, lineHeight: '17px', marginTop: 8, color: theme.danger }}>{error}</Text>}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end', marginTop: 11 }}>
@@ -883,7 +883,7 @@ export function PermissionPanel({
               backgroundColor: option.allow ? theme.inverse : theme.surfaceMuted,
               opacity: responding && responding !== option.id ? 0.55 : 1,
             }}>
-            {responding === option.id && <ActivityIndicator busy />}
+            {responding === option.id && <Spinner busy />}
             <Text style={{
               fontSize: 14,
               fontWeight: '700',
@@ -983,7 +983,7 @@ function UserInputPanel({
         )}
       </View>
       <Text style={{ fontSize: 15, fontWeight: '600', lineHeight: '20px', marginTop: 7, color: theme.text }}>{question.question}</Text>
-      <ScrollView style={{ marginTop: 10, maxHeight: 260 }}>
+      <ScrollableArea style={{ marginTop: 10, maxHeight: 260 }}>
         {question.options.map((option) => {
           const checked = selected.includes(option.label);
           return (
@@ -1043,7 +1043,7 @@ function UserInputPanel({
             if (value.trim()) {setSelections((values) => ({ ...values, [question.id]: [] }));}
           }}
         />
-      </ScrollView>
+      </ScrollableArea>
       {error && <Text style={{ fontSize: 13, lineHeight: '17px', marginTop: 8, color: theme.danger }}>{error}</Text>}
       {supportsActions && (
         <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
@@ -1119,7 +1119,7 @@ function UserInputPanel({
             backgroundColor: theme.inverse,
             opacity: !canContinue || submitting ? 0.55 : 1,
           }}>
-          {submitting && <ActivityIndicator busy />}
+          {submitting && <Spinner busy />}
           <Text style={{ fontSize: 14, fontWeight: '700', color: theme.onInverse }}>
             {last ? 'Submit' : 'Next'}
           </Text>

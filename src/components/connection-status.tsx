@@ -1,4 +1,4 @@
-import { ActivityIndicator, Row, Text, View } from '@octane-xplat/ui';
+import { Spinner, HStack, Text, View } from '@octane-xplat/ui';
 
 import { useTheme } from '@/lib/use-theme';
 import type { ConnectionPhase } from '@/lib/daemon-store';
@@ -13,9 +13,9 @@ export function ConnectionStatus({
   const theme = useTheme();
   const presentation = statusPresentation(phase, theme);
   return (
-    <Row style={{ alignItems: 'center', gap: 6 }}>
+    <HStack style={{ alignItems: 'center', gap: 6 }}>
       {presentation.busy ? (
-        <ActivityIndicator busy style={{ height: 12, width: 12 }} />
+        <Spinner busy style={{ height: 12, width: 12 }} />
       ) : (
         <View
           style={{
@@ -31,7 +31,7 @@ export function ConnectionStatus({
           {presentation.label}
         </Text>
       )}
-    </Row>
+    </HStack>
   );
 }
 

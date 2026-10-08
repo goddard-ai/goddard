@@ -21,7 +21,7 @@ import { fuzzyScore } from '@waku/client/fuzzy-search';
 import { useEffect, useMemo, useState } from 'octane';
 import { useWindowSize } from '@octane-xplat/platform';
 import {
-  ActivityIndicator,
+  Spinner,
   pushRoute,
   SearchInput,
   Text,
@@ -256,7 +256,7 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
         </Text>
       )}
       {sessions.isPending ? (
-        <ActivityIndicator busy style={{ paddingVertical: 20 }} />
+        <Spinner busy style={{ paddingVertical: 20 }} />
       ) : (
         <VirtualList
           items={rows}
@@ -267,7 +267,7 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
               label={item.title || 'Untitled session'}
               description={item.cwd_missing ? `${item.cwd} · folder missing` : item.cwd}
               disabled={Boolean(resuming)}
-              leading={resuming === providerSessionKey(item.cursor) ? <ActivityIndicator busy /> : undefined}
+              leading={resuming === providerSessionKey(item.cursor) ? <Spinner busy /> : undefined}
               onPress={() => void resume(item)}
             />
           )}
@@ -323,7 +323,7 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
       )}
       <TextArea
         rows={4}
-        editable={!pending}
+        isReadOnly={pending}
         placeholder="What should the agent keep working on?"
         style={{
           borderRadius: Radius.medium,
@@ -353,7 +353,7 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
       <SheetRow
         label={goal ? (replace ? 'Replace goal' : 'Save goal') : 'Set goal'}
         disabled={pending || !objective.trim()}
-        leading={pending ? <ActivityIndicator busy /> : undefined}
+        leading={pending ? <Spinner busy /> : undefined}
         onPress={() => void run({
           kind: 'set', objective: objective.trim(),
           status: goal && !replace && goal.status !== 'complete' && goal.status !== 'budgetLimited'

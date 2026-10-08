@@ -11,7 +11,7 @@ import {
 
 import {
   Absolute,
-  ActivityIndicator,
+  Spinner,
   createStore,
   Pressable,
   pushRoute,
@@ -69,7 +69,7 @@ import {
   sessionHasUnseenReply,
 } from '@/lib/unseen-replies';
 
-import { ScrollView } from '@octane-xplat/ui';
+import { ScrollableArea } from '@octane-xplat/ui';
 
 const DaemonPickerHeight = 38;
 const SearchDockGap = 14;
@@ -480,7 +480,7 @@ function TaskDrawerContent({
         </Absolute>
       )}
 
-      <ScrollView
+      <ScrollableArea
         refreshing={refreshing}
         onRefresh={() => void refreshTasks()}
         style={styles.listHost}>
@@ -510,7 +510,7 @@ function TaskDrawerContent({
           </Pressable> : null}
           {rows.map(renderRow)}
         </View>
-      </ScrollView>
+      </ScrollableArea>
 
       {!hasRows && (
         <Absolute
@@ -692,7 +692,7 @@ function TaskListEmpty({
   if (phase === 'booting' || phase === 'connecting' || phase === 'reconnecting') {
     return (
       <View style={styles.emptyState}>
-        <ActivityIndicator busy />
+        <Spinner busy />
         <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
           {phase === 'reconnecting' ? 'Reconnecting…' : 'Connecting to daemon…'}
         </Text>
@@ -821,7 +821,7 @@ const SessionRow = memo(function SessionRow({
               {displaySessionTitle(session)}
             </Text>
             {running && (
-              <ActivityIndicator busy />
+              <Spinner busy />
             )}
             {!running && unseen && (
               <View

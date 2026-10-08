@@ -1,5 +1,5 @@
 import { useMemo } from 'octane';
-import { ScrollView, Text, View } from '@octane-xplat/ui';
+import { ScrollableArea, Text, View } from '@octane-xplat/ui';
 
 import { MonoFont } from '@/lib/theme-platform';
 import { Radius } from '@/lib/theme-colors';
@@ -49,7 +49,7 @@ export function DiffView({
 
   return (
     <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
-      <ScrollView horizontal>
+      <ScrollableArea axis="inline">
         <View style={styles.lines}>
           {lines.map((line) => (
             <DiffRow line={line} />
@@ -60,7 +60,7 @@ export function DiffView({
             </Text>
           )}
         </View>
-      </ScrollView>
+      </ScrollableArea>
     </View>
   );
 }

@@ -192,10 +192,10 @@ export function GoddardThinking({ color }: { color?: string }) {
   }, [reducedMotion]);
 
   return (
-    <View accessible={false} bind={tilt.bind} style={{ width: SIZE, height: SIZE }}>
+    <View accessible={false} ref={tilt.ref} style={{ width: SIZE, height: SIZE }}>
       <Stack style={{ width: SIZE, height: SIZE }}>
         <Icon name="goddard-thinking" size={SIZE} color={color} />
-        <View bind={lids.bind} style={{ width: SIZE, height: SIZE }}>
+        <View ref={lids.ref} style={{ width: SIZE, height: SIZE }}>
           <Icon name="goddard-thinking-eyes" size={SIZE} color={color} />
         </View>
       </Stack>

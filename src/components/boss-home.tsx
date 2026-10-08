@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'octane';
-import { ActivityIndicator, Pressable, Text, View } from '@octane-xplat/ui';
+import { Spinner, Pressable, Text, View } from '@octane-xplat/ui';
 import { openBossSession } from '@waku/client/boss';
 
 import { ConnectionBanner } from '@/components/connection-banner';
@@ -53,7 +53,7 @@ export function BossHome() {
         <Text style={{ color: theme.textSecondary, textAlign: 'center' }}>
           {message ?? (daemon.phase === 'connected' ? 'Opening Boss chat…' : 'Connect to this host to talk to your Boss.')}
         </Text>
-        {!message && daemon.phase === 'connected' ? <ActivityIndicator busy /> : null}
+        {!message && daemon.phase === 'connected' ? <Spinner busy /> : null}
         {message ? (
           <Pressable accessibilityRole="button" onPress={() => { setRetry((value) => value + 1); void boss.refetch(); }}>
             <Text style={{ color: theme.accent }}>Try again</Text>

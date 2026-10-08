@@ -1,4 +1,4 @@
-import { ActivityIndicator, Row, Pressable, Text, View, Column } from '@octane-xplat/ui';
+import { Spinner, HStack, Pressable, Text, View, VStack } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
@@ -21,7 +21,7 @@ export function DaemonList({
   const theme = useTheme();
   const daemon = useDaemon();
   return (
-    <Column
+    <VStack
       style={{
         backgroundColor: theme.overlay,
         borderRadius: Radius.large,
@@ -33,7 +33,7 @@ export function DaemonList({
         const selecting = profile.id === selectingId;
         return (
           <View>
-            <Row style={{ alignItems: 'stretch', minHeight: 64 }}>
+            <HStack style={{ alignItems: 'stretch', minHeight: 64 }}>
               <Pressable
                 accessibilityHint="Switches to this daemon"
                 accessibilityLabel={`${profile.name}, ${displayHost(profile.address)}, ${
@@ -55,18 +55,18 @@ export function DaemonList({
               >
                 <DaemonAvatar name={profile.name} size={36} />
                 <View style={{ flex: '1 1' }}>
-                  <Row style={{ alignItems: 'center', gap: 8 }}>
+                  <HStack style={{ alignItems: 'center', gap: 8 }}>
                     <Text numberOfLines={1} style={{ fontSize: 17, fontWeight: '500', color: theme.text }}>
                       {profile.name}
                     </Text>
                     {active && <ConnectionStatus compact phase={daemon.phase} />}
-                  </Row>
+                  </HStack>
                   <Text numberOfLines={1} style={{ fontSize: 13.5, marginTop: 3, color: theme.textSecondary }}>
                     {displayHost(profile.address)}
                   </Text>
                 </View>
                 {selecting ? (
-                  <ActivityIndicator busy />
+                  <Spinner busy />
                 ) : active ? (
                   <AppSymbol
                     name={{ ios: 'checkmark', android: 'check', web: 'check' }}
@@ -90,13 +90,13 @@ export function DaemonList({
                   />
                 </Pressable>
               )}
-            </Row>
+            </HStack>
             {index < daemon.profiles.length - 1 && (
               <View style={{ height: 1, marginLeft: 60, backgroundColor: theme.separator }} />
             )}
           </View>
         );
       })}
-    </Column>
+    </VStack>
   );
 }

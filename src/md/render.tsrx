@@ -31,7 +31,7 @@ import {
   pushRoute,
   RichText,
   RichTextSpan,
-  ScrollView,
+  ScrollableArea,
   View,
 } from '@octane-xplat/ui';
 
@@ -492,7 +492,7 @@ function RenderCode({
           </RichText>
         </View>
       ) : null}
-      <ScrollView horizontal>
+      <ScrollableArea axis="inline">
         <View style={styles.codeContent}>
           {lines.map((line, index) => {
             const pieces = leafPieces(line, ictx);
@@ -509,7 +509,7 @@ function RenderCode({
             );
           })}
         </View>
-      </ScrollView>
+      </ScrollableArea>
     </View>
   );
 }
@@ -556,7 +556,7 @@ function RenderTable({
   const [head, ...rows] = node.children;
   return (
     <View style={styles.table}>
-      <ScrollView horizontal>
+      <ScrollableArea axis="inline">
         <View>
           {head ? (
             <View style={[styles.tableRow, styles.tableHeadRow]}>
@@ -584,7 +584,7 @@ function RenderTable({
             </View>
           ))}
         </View>
-      </ScrollView>
+      </ScrollableArea>
     </View>
   );
 }

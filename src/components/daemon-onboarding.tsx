@@ -1,4 +1,4 @@
-import { Pressable, Text, Column, Row } from '@octane-xplat/ui';
+import { Pressable, Text, VStack, HStack } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { Radius } from '@/lib/theme-colors';
@@ -7,7 +7,7 @@ import { useTheme } from '@/lib/use-theme';
 export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
   const theme = useTheme();
   return (
-    <Column
+    <VStack
       style={{
         alignItems: 'center',
         flex: '1 1',
@@ -62,7 +62,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
         />
         <Text style={{ fontSize: 17, fontWeight: '700', color: theme.onInverse }}>Connect your Boss</Text>
       </Pressable>
-      <Row
+      <HStack
         style={{
           alignItems: 'flex-start',
           gap: 8,
@@ -77,7 +77,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
         <Text style={{ flex: '1 1', fontSize: 13, lineHeight: '17px', color: theme.textTertiary }}>
           Tokens stay on this device and go directly to the host you choose.
         </Text>
-      </Row>
-    </Column>
+      </HStack>
+    </VStack>
   );
 }

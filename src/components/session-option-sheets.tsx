@@ -1,7 +1,7 @@
 import type { ProviderKind, ProviderModel, RuntimeMode } from '@waku/client';
 import { useEffect, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
   Text,
   TextInput,
@@ -96,7 +96,7 @@ export function ModelSheet({
       <ModelSearchField onChangeText={setSearch} value={search} />
       {probe.isPending ? (
         <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
-          <ActivityIndicator busy />
+          <Spinner busy />
         </View>
       ) : probe.error ? (
         <Text style={[noteStyle, { color: theme.danger }]}>
@@ -362,7 +362,7 @@ export function ModelPickerSheet({
           <ModelSearchField onChangeText={setSearch} value={search} />
           {entry?.isPending ? (
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40, height: listHeight }}>
-              <ActivityIndicator busy />
+              <Spinner busy />
             </View>
           ) : (
             <VirtualList

@@ -19,12 +19,12 @@ import {
 } from 'octane';
 
 import {
-  ActivityIndicator,
+  Spinner,
   DropdownMenu,
   Image,
   Pressable,
-  ScrollView,
-  Sheet,
+  ScrollableArea,
+  BottomSheet,
   Text,
   TextArea,
   TextInput,
@@ -145,16 +145,16 @@ export function TaskSurfaceSheet({
   onDismiss: () => void;
 }) {
   return (
-    <Sheet
-      open={visible && surface != null}
-      detents={[0.58, 1]}
-      onDismiss={onDismiss}>
+    <BottomSheet label="Task details"
+      isOpen={visible && surface != null}
+      snapPoints={[0.58, 1]}
+      onOpenChange={(isOpen) => {if (!isOpen) {onDismiss();}}}>
       <View style={styles.sheet}>
         {surface ? (
           <SurfaceBody project={project} session={session} surface={surface} />
         ) : null}
       </View>
-    </Sheet>
+    </BottomSheet>
   );
 }
 
@@ -518,14 +518,14 @@ function FilesSurface({ root }: { root: string | null }) {
               title="Couldn’t read image"
             />
           ) : (
-            <ScrollView style={{ flexGrow: 1 }}>
+            <ScrollableArea style={{ flexGrow: 1 }}>
               <Image
                 src={`data:${imageMime};base64,${image.data ?? ''}`}
                 style={{ aspectRatio: 1, width: '100%' }}
                 ios={{ stretch: 'aspectFit' }}
                 web={{ style: { objectFit: 'contain' } }}
               />
-            </ScrollView>
+            </ScrollableArea>
           )
         ) : file.isPending ? (
           <LoadingMessage />
@@ -535,15 +535,15 @@ function FilesSurface({ root }: { root: string | null }) {
             title="Couldn’t read file"
           />
         ) : editing ? (
-          <ScrollView style={styles.fileContent}>
+          <ScrollableArea style={styles.fileContent}>
             <TextArea
               onChange={setDraft}
               style={[styles.fileText, styles.fileEditor, { color: theme.text }]}
               value={draft}
             />
-          </ScrollView>
+          </ScrollableArea>
         ) : (
-          <ScrollView style={styles.fileContent}>
+          <ScrollableArea style={styles.fileContent}>
             <Text style={[styles.fileText, { color: theme.text }]}>
               {(file.data ?? '').slice(0, MAX_FILE_CHARACTERS)}
             </Text>
@@ -552,7 +552,7 @@ function FilesSurface({ root }: { root: string | null }) {
                 File truncated in this viewer.
               </Text>
             ) : null}
-          </ScrollView>
+          </ScrollableArea>
         )}
       </View>
     );
@@ -577,7 +577,7 @@ function FilesSurface({ root }: { root: string | null }) {
           title="Couldn’t load files"
         />
       ) : (
-        <ScrollView style={{ flex: '1 1' }}>
+        <ScrollableArea style={{ flex: '1 1' }}>
           {(tree.data ?? []).length === 0 ? (
             <PanelMessage
               detail="The workspace has no visible files."
@@ -627,7 +627,7 @@ function FilesSurface({ root }: { root: string | null }) {
               </Text>
             </Pressable>
           ))}
-        </ScrollView>
+        </ScrollableArea>
       )}
     </View>
   );
@@ -756,7 +756,7 @@ function ReviewSurface({
           title="Couldn’t load review"
         />
       ) : (
-        <ScrollView style={styles.reviewList}>
+        <ScrollableArea style={styles.reviewList}>
           {!diff.data?.completeContext ? (
             <Text
               style={[
@@ -806,7 +806,7 @@ function ReviewSurface({
               </View>
             </View>
           ))}
-        </ScrollView>
+        </ScrollableArea>
       )}
     </View>
   );
@@ -1016,7 +1016,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
               ) : null}
             </View>
           ) : null}
-          <ScrollView style={{ flex: '1 1' }}>
+          <ScrollableArea style={{ flex: '1 1' }}>
             {sections.length === 0 ? (
               <PanelMessage detail="The working tree is clean." title="No changes" />
             ) : null}
@@ -1081,7 +1081,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
                 ))}
               </View>
             ))}
-          </ScrollView>
+          </ScrollableArea>
           {opError ? (
             <Text style={[styles.gitError, { color: theme.danger }]}>{opError}</Text>
           ) : null}
@@ -1096,7 +1096,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
             ]}
           >
             <TextInput
-              editable={pending == null}
+              isReadOnly={pending != null}
               onChange={setMessage}
               placeholder={
                 invocation ? 'Message (blank generates one)' : 'Commit message'
@@ -1126,7 +1126,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
               ]}
             >
               {pending === 'commit' ? (
-                <ActivityIndicator busy />
+                <Spinner busy />
               ) : (
                 <Text style={styles.commitButtonLabel}>
                   {stagedCount > 0 ? 'Commit' : 'Commit all'}
@@ -1254,7 +1254,7 @@ function QueueSurface({ root }: { root: string | null }) {
               />
             </View>
           ) : null}
-          <ScrollView style={{ flex: '1 1' }}>
+          <ScrollableArea style={{ flex: '1 1' }}>
             {snapshot.entries.length === 0 ? (
               <PanelMessage
                 detail="Nothing is waiting for review."
@@ -1346,7 +1346,7 @@ function QueueSurface({ root }: { root: string | null }) {
                 ) : null}
               </View>
             ))}
-          </ScrollView>
+          </ScrollableArea>
           {opError ? (
             <Text style={[styles.gitError, { color: theme.danger }]}>
               {opError}
@@ -1382,7 +1382,7 @@ function LoadingMessage() {
   const theme = useTheme();
   return (
     <View style={styles.loading}>
-      <ActivityIndicator busy />
+      <Spinner busy />
       <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
         Loading…
       </Text>

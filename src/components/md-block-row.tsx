@@ -188,7 +188,7 @@ export function MdRevealOnMount({
   }, [fade]);
 
   if (!fade) {return <>{children}</>;}
-  return <View bind={opacity.bind}>{children}</View>;
+  return <View ref={opacity.ref}>{children}</View>;
 }
 
 /** A settled markdown block. Re-renders only when its source changes — the

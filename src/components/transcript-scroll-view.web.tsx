@@ -1,11 +1,11 @@
-import { Pressable, ScrollView, Text, View } from '@octane-xplat/ui';
+import { Pressable, ScrollableArea, Text, View } from '@octane-xplat/ui';
 
 import { useTheme } from '@/lib/use-theme';
 import type { TranscriptScrollViewProps } from './transcript-scroll-view.types';
 
 /**
  * Web transcript scroller — the pre-leaf behavior: rows in natural order
- * inside the shared ScrollView, a manual "Earlier messages" control in
+ * inside the shared ScrollableArea, a manual "Earlier messages" control in
  * place of scroll-triggered window extension, and no scroll engine (no
  * follow/jump/reveal — the handle is never handed out).
  */
@@ -18,7 +18,7 @@ export function TranscriptScrollView({
 }: TranscriptScrollViewProps) {
   const theme = useTheme();
   return (
-    <ScrollView style={{ flex: '1 1' }}>
+    <ScrollableArea style={{ flex: '1 1' }}>
       <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
         {hasEarlier && (
           <Pressable
@@ -34,7 +34,7 @@ export function TranscriptScrollView({
         {rows.map((row) => renderRow(row, { keepRowTop: applyNow }))}
         {strip}
       </View>
-    </ScrollView>
+    </ScrollableArea>
   );
 }
 

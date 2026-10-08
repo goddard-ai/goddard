@@ -3,10 +3,10 @@ import type { MessageAttachment } from '@waku/client';
 import { memo, useCallback, useState } from 'octane';
 import {
   Absolute,
-  ActivityIndicator,
+  Spinner,
   Image,
   Pressable,
-  Sheet as XSheet,
+  BottomSheet as XSheet,
   Text,
   View,
 } from '@octane-xplat/ui';
@@ -119,7 +119,7 @@ export const AttachmentTile = memo(function AttachmentTile({
           <AttachmentImage source={source} onError={onImageError} />
         ) : (
           <View style={{ flex: '1 1', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 7 }}>
-            {image.isFetching ? <ActivityIndicator busy /> : (
+            {image.isFetching ? <Spinner busy /> : (
               <AppSymbol
                 name={attachment.is_dir
                   ? { ios: 'folder', android: 'folder', web: 'folder' }
@@ -217,7 +217,7 @@ function AttachmentImagePreview({
 }) {
   const theme = useTheme();
   return (
-    <XSheet open onDismiss={onDismiss} detents={[1]}>
+    <XSheet label="Attachment preview" isOpen onOpenChange={(isOpen) => {if (!isOpen) {onDismiss();}}} snapPoints={[1]}>
       <View style={{ flex: '1 1', backgroundColor: theme.background }}>
         <View style={{
           flexDirection: 'row',

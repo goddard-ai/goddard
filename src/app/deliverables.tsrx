@@ -4,7 +4,7 @@ import type { BossDeliverable } from '@waku/client';
 import { useMemo, useState } from 'octane';
 import {
   Pressable,
-  ScrollView,
+  ScrollableArea,
   SegmentedControl,
   Text,
   View,
@@ -122,7 +122,7 @@ export default function DeliverablesScreen() {
               value={filter}
             />
           </View>
-          <ScrollView style={{ flex: '1 1' }}>
+          <ScrollableArea style={{ flex: '1 1' }}>
             {deliverables.length === 0 ? (
               <LibraryMessage
                 detail={FILTER_EMPTY[filter].detail}
@@ -137,7 +137,7 @@ export default function DeliverablesScreen() {
                 onOpen={openDeliverable}
               />
             ))}
-          </ScrollView>
+          </ScrollableArea>
         </View>
       )}
     </View>

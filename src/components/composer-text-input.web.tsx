@@ -9,14 +9,23 @@ export function ComposerTextInput({
   selection: _selection,
   onSelectionChange: _onSelectionChange,
   style,
+  editable,
+  onChangeText,
+  autoFocus,
+  multiline: _multiline,
   ...props
 }: ComposerTextInputProps) {
   // Paste files on web arrive through the textarea's paste event.
   return (
     <TextArea
-      bind={(h: any) => inputRef?.({ focus: () => h.focus() })}
+      ref={(h) => {
+        inputRef?.(h ? { focus: () => h.focus() } : null);
+      }}
+      isReadOnly={editable === false}
+      onChange={onChangeText}
       autoGrow
       web={{
+        autoFocus,
         onPaste: onPasteFiles
           ? (event: ClipboardEvent) => {
               const files = [...(event.clipboardData?.files ?? [])].map((file) => ({

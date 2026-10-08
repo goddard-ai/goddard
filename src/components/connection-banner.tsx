@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'octane';
 import {
-  ActivityIndicator,
-  Row,
+  Spinner,
+  HStack,
   Pressable,
   pushRoute,
   Text,
@@ -159,8 +159,8 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
   const detail = notice.kind === 'restored' ? null : notice.detail;
 
   return (
-    <Row
-      bind={opacity.bind}
+    <HStack
+      ref={opacity.ref}
       accessibilityLiveRegion="polite"
       style={{
         alignItems: 'center',
@@ -175,7 +175,7 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
     >
       <View style={{ alignItems: 'center', justifyContent: 'center', width: 18 }}>
         {notice.kind === 'reconnecting' && notice.attempting ? (
-          <ActivityIndicator busy style={{ height: 18, width: 18 }} />
+          <Spinner busy style={{ height: 18, width: 18 }} />
         ) : (
           <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
         )}
@@ -195,7 +195,7 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
         />
       )}
       {notice.kind === 'error' && (
-        <Row style={{ alignItems: 'center', gap: 12 }}>
+        <HStack style={{ alignItems: 'center', gap: 12 }}>
           <BannerAction
             label="Retry"
             accessibilityLabel="Retry daemon connection"
@@ -214,9 +214,9 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
               }
             />
           )}
-        </Row>
+        </HStack>
       )}
-    </Row>
+    </HStack>
   );
 }
 

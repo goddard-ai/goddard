@@ -84,7 +84,8 @@ export function TerminalView({
   return (
     <WebView
       accessibilityLabel="Terminal"
-      bind={(handle) => {
+      ref={(handle) => {
+        if (!handle) {return;}
         frameRef.current = handle.native;
         bind?.({
           write: (data) => page()?.__goddardWrite?.(data),

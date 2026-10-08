@@ -13,7 +13,7 @@ import {
 
 import { memo, useCallback, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   ContextMenu,
   Image,
   Pressable,
@@ -709,7 +709,7 @@ function DeliverablePreview({
 function PreviewLoading() {
   return (
     <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-      <ActivityIndicator busy />
+      <Spinner busy />
     </View>
   );
 }

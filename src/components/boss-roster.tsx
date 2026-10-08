@@ -12,7 +12,7 @@ import { bossEmployeeLifecycle, openBossSession } from '@waku/client/boss';
 
 import { memo, useCallback, useMemo, useState } from 'octane';
 import {
-  ActivityIndicator,
+  Spinner,
   Pressable,
   Text,
   View,
@@ -253,7 +253,7 @@ export function BossSection({
               {attentionLabel}
             </Text>
           </View>
-          {openingChat ? <ActivityIndicator busy /> : null}
+          {openingChat ? <Spinner busy /> : null}
           {!openingChat && bossUnseen ? (
             <View style={{ backgroundColor: theme.info, borderRadius: 3.5, height: 7, width: 7 }} />
           ) : null}
@@ -579,7 +579,7 @@ export function BossCapacitySheet({
         Host resources
       </Text>
       {resources.isPending ? (
-        <ActivityIndicator busy />
+        <Spinner busy />
       ) : status ? (
         <View>
           <CapacityLine label="Devices" used={status.reservations.reduce((total, item) => total + item.resources.resident_devices, 0)} limit={status.policy.resident_devices} />
@@ -689,7 +689,7 @@ export function EmployeeStatusCard({
       }}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-        <ActivityIndicator busy={lifecycle === 'dispatching' || lifecycle === 'finishing'} />
+        <Spinner busy={lifecycle === 'dispatching' || lifecycle === 'finishing'} />
         <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600' }}>
           {waiting ? 'Queued' : lifecycle === 'dispatching' ? 'Starting' : 'Finishing'}
         </Text>

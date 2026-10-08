@@ -10,7 +10,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'octane';
 import {
   Absolute,
-  ActivityIndicator,
+  Spinner,
   Pressable,
   pushRoute,
   Text,
@@ -580,7 +580,7 @@ export default function NewTaskScreen() {
       <Sheet onDismiss={() => setOpenSheet(null)} title="Base branch" visible={openSheet === 'branch'}>
         {branches.isPending ? (
           <View style={{ alignItems: 'center', paddingVertical: 14 }}>
-            <ActivityIndicator busy />
+            <Spinner busy />
           </View>
         ) : branches.error ? (
           <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 10, color: theme.danger }}>
@@ -643,7 +643,7 @@ function SelectorRow({
       }}>
       <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
       {loading ? (
-        <ActivityIndicator busy />
+        <Spinner busy />
       ) : (
         <Text numberOfLines={1} style={{ flexShrink: 1, fontSize: 17.5, fontWeight: '500', color: theme.text }}>
           {value}
