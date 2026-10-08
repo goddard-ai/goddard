@@ -113,6 +113,7 @@ impl Waku {
             // propagation on a claim.
             .on_key_down(cx.listener(Self::enter_outside_composer))
             .on_key_down(cx.listener(Self::type_to_focus_composer))
+            .on_key_down(cx.listener(Self::paste_into_composer))
             .when(!tiling.top, |backdrop| backdrop.pt(inset))
             .when(!tiling.bottom, |backdrop| backdrop.pb(inset))
             .when(!tiling.left, |backdrop| backdrop.pl(inset))

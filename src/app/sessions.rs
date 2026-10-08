@@ -4393,6 +4393,62 @@ impl Waku {
         self.composer.clone()
     }
 
+    /// ⌘V outside every field: focus the last-used composer and run its own
+    /// `Paste` action, so a media clipboard stages attachments and a large
+    /// paste collapses exactly as if the field had held focus. A focused
+    /// text surface claims the chord through its `TextInput`-context binding
+    /// (the browser through `Browser`) before this listener ever sees the
+    /// keystroke; what arrives here is a paste the menu would otherwise
+    /// drop.
+    pub(super) fn paste_into_composer(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key != "v" || event.keystroke.modifiers != Modifiers::secondary_key() {
+            return;
+        }
+        // The same reach as Enter outside the composer: a page that unmounts
+        // the field or an overlay that owns the keyboard keeps its ⌘V.
+        if !self.composer_mounted()
+            || self.settings_page.is_some()
+            || self.big_picture.is_open()
+            || self.message_edit.is_some()
+            || self.command_palette.is_open()
+            || self.task_switcher.is_open()
+            || self.project_switcher.is_open()
+            || self.keyboard_options_is_open()
+            || self.commit_dialog.is_some()
+            || self.archive_dialog.is_some()
+            || self.full_access_dialog.is_some()
+            || self.incognito_dialog.is_some()
+            || self.provider_switch_dialog.is_some()
+            || self.shortcuts_dialog.is_some()
+            || self.goal_dialog.is_some()
+            || self.image_preview.is_some()
+            || self.menus.borrow().values().any(|menu| menu.is_open())
+        {
+            return;
+        }
+        if window.context_stack().iter().any(|context| {
+            TYPING_OWNED_CONTEXTS
+                .iter()
+                .any(|owned| context.contains(owned))
+        }) {
+            return;
+        }
+        // A standing scratchpad selection or live caret owns edit keys
+        // wherever focus sits — ⌘V must not write into the draft mid-edit.
+        if self.voice_scratchpad_claims_edit_keys() {
+            return;
+        }
+        let focus = self.typing_target_composer().read(cx).focus();
+        window.focus(&focus, cx);
+        focus.dispatch_action(&crate::input::Paste, window, cx);
+        cx.stop_propagation();
+    }
+
     /// Enter outside the composer. The field's own binding claims it while
     /// the composer is focused, and a focused control that activates on Enter
     /// — a transcript button, a rail item — stops it earlier in the bubble.

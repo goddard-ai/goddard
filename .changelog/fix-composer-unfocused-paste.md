@@ -1,0 +1,1 @@
+- ⌘V in a chat now pastes into the composer even when the field isn't focused, instead of doing nothing. Paste still goes to whichever text field has focus, and image or file clipboards still attach.
