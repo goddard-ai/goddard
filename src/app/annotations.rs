@@ -30,6 +30,13 @@
 //! "Annotation N", and a reply doing so gets a dotted underline whose hover
 //! tooltip shows the quoted passage and comment — see
 //! [`Waku::annotation_ref_set`].
+//!
+//! A boss chat's earlier-conversation rows annotate the same way: their text
+//! elements key by source session (`boss-history-message-{session}:{message}`)
+//! so resolution finds the rotated session that owns the message, and the pin
+//! snapshots its provenance (`HistorySource`) — the staged card labels it
+//! "Earlier boss chat" and the sent prompt names the session, message, and
+//! the `goddard-agent read` that pulls the original turn.
 
 use std::cell::RefCell;
 use std::ops::Range;
@@ -43,7 +50,9 @@ use gpui::{
 
 use crate::input::Clear;
 use crate::md::render::{MarkdownView, TranscriptSelection, text_range_bounds};
-use crate::md::selection::{Annotations, FileAnnotation, Span, TextKey, TranscriptAnnotation};
+use crate::md::selection::{
+    Annotations, FileAnnotation, HistorySource, Span, TextKey, TranscriptAnnotation,
+};
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
 use crate::ui::shortcut::ShortcutHint;
@@ -167,10 +176,34 @@ fn annotation_file_path(
         .or(panel_path)
 }
 
+/// The "Source:" line an earlier-boss-chat annotation adds to the prompt:
+/// the session and message the passage actually came from, plus the read
+/// that pulls the original turn — `goddard-agent read` resolves archived
+/// boss sessions by task id, and `--turn` narrows to the message's turn.
+fn annotation_source_line(annotation: &TranscriptAnnotation) -> Option<String> {
+    let history = annotation.history.as_ref()?;
+    let read = match history.turn {
+        Some(turn) => format!(
+            "goddard-agent read '{{\"task_id\":\"{}\",\"turn\":{}}}'",
+            history.session_id, turn
+        ),
+        None => format!(
+            "goddard-agent read '{{\"task_id\":\"{}\"}}'",
+            history.session_id
+        ),
+    };
+    Some(format!(
+        "Source: an earlier Boss chat — session {}, message {}. To pull the original turn, run `{read}`.",
+        history.session_id, annotation.message_id
+    ))
+}
+
 /// The prompt block prepended to a submission carrying annotations.
 ///
 /// Each passage is quoted and labelled so the agent can cite the comment's
-/// target; the trailing instruction is what makes the labels usable.
+/// target; the trailing instruction is what makes the labels usable. A
+/// passage pinned on an earlier boss chat's rows also names its source
+/// session and the read that reaches the original turn.
 pub(super) fn annotation_prompt_prefix(annotations: &[TranscriptAnnotation]) -> String {
     if annotations.is_empty() {
         return String::new();
@@ -185,7 +218,12 @@ pub(super) fn annotation_prompt_prefix(annotations: &[TranscriptAnnotation]) -> 
         }
         out.push_str("\nComment: ");
         out.push_str(annotation.comment.trim());
-        out.push_str("\n\n");
+        out.push('\n');
+        if let Some(source) = annotation_source_line(annotation) {
+            out.push_str(&source);
+            out.push('\n');
+        }
+        out.push('\n');
     }
     out.push_str(
         "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
@@ -220,6 +258,22 @@ pub(super) fn annotation_display_content(annotations: &[TranscriptAnnotation]) -
         .join("\n")
 }
 
+/// The settled selection's spans when they sit entirely inside one painted
+/// row: the row key they share plus the snapshot. Multi-row grabs fail the
+/// same-row check, so annotations never span messages.
+fn settled_selection_row(selection: &TranscriptSelection) -> Option<(Rc<str>, Vec<Span>)> {
+    let selection = selection.selection.borrow();
+    if selection.is_dragging() || selection.is_empty() {
+        return None;
+    }
+    let spans = selection.spans();
+    let first_row = spans.first()?.key.row.clone();
+    if !spans.iter().all(|span| span.key.row == first_row) {
+        return None;
+    }
+    Some((first_row, spans.to_vec()))
+}
+
 /// The shared "is this selection annotatable" walk — spans entirely inside
 /// one assistant message row of `session`, keyed by the row prefix the
 /// surface paints (`message-` on the transcript, `side-chat-message-` in a
@@ -229,21 +283,25 @@ fn annotatable_selection_in(
     session: &AgentSession,
     row_prefix: &str,
 ) -> Option<(Uuid, Vec<Span>)> {
-    let selection = selection.selection.borrow();
-    if selection.is_dragging() || selection.is_empty() {
-        return None;
-    }
-    let spans = selection.spans();
-    let first_row = spans.first()?.key.row.clone();
-    let message_id = Uuid::parse_str(first_row.strip_prefix(row_prefix)?).ok()?;
-    if !spans.iter().all(|span| span.key.row == first_row) {
-        return None;
-    }
+    let (row, spans) = settled_selection_row(selection)?;
+    let message_id = Uuid::parse_str(row.strip_prefix(row_prefix)?).ok()?;
     let message = session
         .messages
         .iter()
         .find(|message| message.id == message_id)?;
-    (message.role == MessageRole::Assistant).then(|| (message_id, spans.to_vec()))
+    (message.role == MessageRole::Assistant).then(|| (message_id, spans))
+}
+
+/// A settled transcript selection confined to one assistant message: the
+/// session that owns it — the live chat's, or a loaded earlier boss chat's —
+/// the message id, and the span snapshot "Add to chat" would pin.
+pub(super) struct AnnotatableSelection {
+    /// `Some` for an earlier boss chat's rows: the rotated-out session the
+    /// message belongs to. The annotation records it so the quote keeps its
+    /// real source rather than claiming the live session's.
+    pub history_session: Option<Uuid>,
+    pub message_id: Uuid,
+    pub spans: Vec<Span>,
 }
 
 /// What the sent user bubble shows: each annotated passage as a quote block
@@ -279,10 +337,39 @@ impl Waku {
     /// The settled selection's spans when they sit entirely inside one
     /// assistant message — the only selection "Add to chat" may annotate.
     /// Reasoning, tool output, user messages and cross-row selections all fail
-    /// the row-key or role check.
-    fn annotatable_selection(&self) -> Option<(Uuid, Vec<Span>)> {
+    /// the row-key or role check. A row painted from an earlier boss chat
+    /// resolves to the session that owns the message — the
+    /// `boss-history-message-{session}:{message}` key names it — never the
+    /// live session.
+    fn annotatable_selection(&self) -> Option<AnnotatableSelection> {
+        let (row, spans) = settled_selection_row(&self.transcript_selection)?;
+        if let Some(rest) = row.strip_prefix("boss-history-message-") {
+            let (session, message) = rest.split_once(':')?;
+            let session_id = Uuid::parse_str(session).ok()?;
+            let message_id = Uuid::parse_str(message).ok()?;
+            let entry = self.boss_history_session(session_id)?;
+            let message = entry
+                .session
+                .messages
+                .iter()
+                .find(|message| message.id == message_id)?;
+            return (message.role == MessageRole::Assistant).then(|| AnnotatableSelection {
+                history_session: Some(session_id),
+                message_id,
+                spans,
+            });
+        }
         let session = self.selected_session()?;
-        annotatable_selection_in(&self.transcript_selection, session, "message-")
+        let message_id = Uuid::parse_str(row.strip_prefix("message-")?).ok()?;
+        let message = session
+            .messages
+            .iter()
+            .find(|message| message.id == message_id)?;
+        (message.role == MessageRole::Assistant).then(|| AnnotatableSelection {
+            history_session: None,
+            message_id,
+            spans,
+        })
     }
 
     /// The lane's `annotatable_selection`: its own selection registry and
@@ -886,9 +973,39 @@ impl Waku {
     /// Turn the settled selection into a new annotation and open its comment
     /// editor.
     fn annotate_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((message_id, spans)) = self.annotatable_selection() else {
+        let Some(selection) = self.annotatable_selection() else {
             return;
         };
+        // A pin on an earlier boss chat snapshots its provenance — the row
+        // can unload or the chat can rotate again before the comment ships.
+        let history = selection.history_session.map(|session_id| {
+            let entry = self.boss_history_session(session_id);
+            let message = entry.and_then(|entry| {
+                entry
+                    .session
+                    .messages
+                    .iter()
+                    .find(|message| message.id == selection.message_id)
+            });
+            HistorySource {
+                session_id,
+                turn: message
+                    .and_then(|message| message.turn_id)
+                    .and_then(|turn_id| {
+                        entry.and_then(|entry| {
+                            entry.session.turns.iter().find(|turn| turn.id == turn_id)
+                        })
+                    })
+                    .map(|turn| turn.turn_count),
+                author: self
+                    .boss_chat_key()
+                    .and_then(|key| self.boss_ui.states.get(&key))
+                    .map(|state| state.identity.name.clone()),
+                created_at: message.map(|message| message.created_at),
+            }
+        });
+        let message_id = selection.message_id;
+        let spans = selection.spans;
         let id = self.annotation_next_id;
         self.annotation_next_id = self.annotation_next_id.wrapping_add(1);
         {
@@ -899,6 +1016,7 @@ impl Waku {
                 spans,
                 comment: String::new(),
                 file: None,
+                history,
             });
             annotations.hovered = None;
         }
@@ -939,6 +1057,7 @@ impl Waku {
                 spans,
                 comment: String::new(),
                 file: None,
+                history: None,
             });
             annotations.hovered = None;
         }
@@ -1013,6 +1132,7 @@ impl Waku {
                     source: None,
                     plan_session: None,
                 }),
+                history: None,
             });
             annotations.hovered = None;
         }
@@ -1159,6 +1279,7 @@ impl Waku {
                     source,
                     plan_session: None,
                 }),
+                history: None,
             });
             annotations.hovered = None;
         }
@@ -1312,6 +1433,7 @@ impl Waku {
                     source,
                     plan_session: Some(session_id),
                 }),
+                history: None,
             });
             annotations.hovered = None;
         }
@@ -1714,10 +1836,14 @@ impl Waku {
             match self.selected_session() {
                 Some(session) => {
                     annotations.items.retain(|annotation| {
-                        session.messages.iter().any(|message| {
-                            message.id == annotation.message_id
-                                && message.role == MessageRole::Assistant
-                        })
+                        // A pin on an earlier boss chat quotes a snapshot,
+                        // not the live message — it survives the source row
+                        // unloading and the chat rotating again mid-edit.
+                        annotation.history.is_some()
+                            || session.messages.iter().any(|message| {
+                                message.id == annotation.message_id
+                                    && message.role == MessageRole::Assistant
+                            })
                     });
                 }
                 None => annotations.items.clear(),
@@ -1808,8 +1934,8 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (_, spans) = self.annotatable_selection()?;
-        let anchor = self.spans_anchor(&spans)?;
+        let selection = self.annotatable_selection()?;
+        let anchor = self.spans_anchor(&selection.spans)?;
         // The chord sits on the transcript's key context, so resolve it as if
         // the transcript were focused — true whenever the pill can show.
         let shortcut_label =
@@ -1925,6 +2051,16 @@ impl Waku {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let trash_focus = self.transcript_control_focus("annotation-remove", cx);
+        let provenance = self.annotation_editor.as_ref().and_then(|editor| {
+            self.annotation_store(&editor.target).and_then(|store| {
+                store
+                    .borrow()
+                    .items
+                    .iter()
+                    .find(|annotation| annotation.id == editor.annotation_id)
+                    .and_then(history_annotation_label)
+            })
+        });
         let card = div()
             .occlude()
             .key_context(ANNOTATION_CONTEXT)
@@ -1960,6 +2096,18 @@ impl Waku {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .when_some(provenance, |field, label| {
+                                field.child(
+                                    div()
+                                        .text_size(sp(11.5))
+                                        .line_height(sp(14.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(label),
+                                )
+                            })
                             .child(self.annotation_comment_input.clone()),
                     )
                     .child(
@@ -2081,7 +2229,7 @@ impl Waku {
             return None;
         }
         let anchor = self.side_chat_annotation_anchor(session_id, hover.id)?;
-        Some(self.annotation_tooltip_card(anchor, comment, cx))
+        Some(self.annotation_tooltip_card(anchor, comment, None, cx))
     }
 
     /// The lane's citation tooltip — the sent-set entry the `Annotation N`
@@ -2164,12 +2312,14 @@ impl Waku {
     }
 
     /// The shared comment tooltip card: the annotation's comment, anchored
-    /// above the highlight. Pointer-transparent by construction — no hit
-    /// targets.
+    /// above the highlight — `provenance` adds the dimmed "Earlier boss
+    /// chat" line a history pin leads with. Pointer-transparent by
+    /// construction — no hit targets.
     fn annotation_tooltip_card(
         &self,
         anchor: Bounds<Pixels>,
         comment: String,
+        provenance: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -2186,6 +2336,12 @@ impl Waku {
             .line_height(sp(15.0))
             .font_family(crate::fonts::current(cx).ui)
             .text_color(theme.text_secondary)
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .when_some(provenance, |card, label| {
+                card.child(div().text_color(theme.text_tertiary).child(label))
+            })
             .child(comment);
         deferred(FloatingSurface::new(
             card.into_any_element(),
@@ -2214,19 +2370,24 @@ impl Waku {
         {
             return None;
         }
-        let comment = {
+        let (comment, provenance) = {
             let annotations = self.transcript_selection.annotations.borrow();
             annotations
                 .items
                 .iter()
                 .find(|annotation| annotation.id == hover.id)
-                .map(|annotation| annotation.comment.clone())
+                .map(|annotation| {
+                    (
+                        annotation.comment.clone(),
+                        history_annotation_label(annotation),
+                    )
+                })
         }?;
         if comment.trim().is_empty() {
             return None;
         }
         let anchor = self.annotation_anchor(hover.id)?;
-        Some(self.annotation_tooltip_card(anchor, comment, cx))
+        Some(self.annotation_tooltip_card(anchor, comment, provenance, cx))
     }
 
     /// The same comment tooltip over a file annotation's highlight.
@@ -2261,7 +2422,7 @@ impl Waku {
             return None;
         }
         let anchor = self.file_annotation_anchor(relative_path, hover.id, cx)?;
-        Some(self.annotation_tooltip_card(anchor, comment, cx))
+        Some(self.annotation_tooltip_card(anchor, comment, None, cx))
     }
 
     /// The same comment tooltip over a preview annotation's highlight.
@@ -2296,7 +2457,7 @@ impl Waku {
             return None;
         }
         let anchor = self.preview_annotation_anchor(relative_path, hover.id)?;
-        Some(self.annotation_tooltip_card(anchor, comment, cx))
+        Some(self.annotation_tooltip_card(anchor, comment, None, cx))
     }
 
     /// The floating "Add to chat" pill over a settled plan-document
@@ -2380,7 +2541,7 @@ impl Waku {
             return None;
         }
         let anchor = self.plan_annotation_anchor(session_id, hover.id)?;
-        Some(self.annotation_tooltip_card(anchor, comment, cx))
+        Some(self.annotation_tooltip_card(anchor, comment, None, cx))
     }
 
     /// The citation tooltip, surfaced after the hover delay over an
@@ -2402,6 +2563,7 @@ impl Waku {
         let anchor = self.annotation_ref_anchor(&hover.key, &hover.range)?;
         let theme = Theme::current(cx);
         let quote = annotation_quote_preview(annotation);
+        let provenance = history_annotation_label(annotation);
         let comment = annotation.comment.trim().to_owned();
         let card = div()
             .max_w(px(320.0))
@@ -2417,6 +2579,9 @@ impl Waku {
             .flex()
             .flex_col()
             .gap(px(3.0))
+            .when_some(provenance, |card, label| {
+                card.child(div().text_color(theme.text_tertiary).child(label))
+            })
             .child(div().text_color(theme.text_tertiary).child(quote))
             .when(!comment.is_empty(), |card| {
                 card.child(div().text_color(theme.text_secondary).child(comment))
@@ -3221,6 +3386,29 @@ fn preview_span_source_range(
     Some(block.start + local..block.start + local + selected.len())
 }
 
+/// The compact provenance a history-sourced pin shows on its editor card and
+/// tooltip — "Earlier boss chat" plus the snapshotted author and date when
+/// they were known. No session ids: rotation mechanics stay out of the UI.
+fn history_annotation_label(annotation: &TranscriptAnnotation) -> Option<String> {
+    let history = annotation.history.as_ref()?;
+    let mut label = tr!("annotations.earlier_chat");
+    let mut detail = Vec::new();
+    if let Some(author) = &history.author {
+        detail.push(author.clone());
+    }
+    if let Some(created_at) = history.created_at {
+        let time = format_message_time(created_at);
+        if !time.is_empty() {
+            detail.push(time);
+        }
+    }
+    if !detail.is_empty() {
+        label.push_str(" · ");
+        label.push_str(&detail.join(" · "));
+    }
+    Some(label)
+}
+
 /// The annotation whose highlight contains `position`, consulting the frame's
 /// painted geometry.
 fn annotation_hit_at(selection: &TranscriptSelection, position: Point<Pixels>) -> Option<u64> {
@@ -3343,7 +3531,32 @@ mod tests {
             }],
             comment: comment.to_owned(),
             file: None,
+            history: None,
         }
+    }
+
+    /// A history-sourced annotation as `annotate_selection` builds it on an
+    /// earlier boss chat's row: live `message-{id}` spans keyed by the
+    /// source session, and the provenance snapshot alongside.
+    fn history_annotation(
+        id: u64,
+        session_id: Uuid,
+        message_id: Uuid,
+        turn: Option<usize>,
+        text: &str,
+        comment: &str,
+    ) -> TranscriptAnnotation {
+        let mut pinned = annotation(id, text, comment);
+        pinned.message_id = message_id;
+        pinned.spans[0].key =
+            TextKey::new(format!("boss-history-message-{session_id}:{message_id}"), 0);
+        pinned.history = Some(HistorySource {
+            session_id,
+            turn,
+            author: None,
+            created_at: None,
+        });
+        pinned
     }
 
     /// A file annotation as `annotate_file_selection` builds it: one span
@@ -3376,6 +3589,7 @@ mod tests {
                 source: None,
                 plan_session: None,
             }),
+            history: None,
         }
     }
 
@@ -3398,6 +3612,34 @@ mod tests {
                 "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
             )
         );
+    }
+
+    #[test]
+    fn prompt_prefix_names_an_earlier_chats_source_and_read() {
+        let session = Uuid::from_u128(7);
+        let message = Uuid::from_u128(9);
+        let annotations = [history_annotation(
+            1,
+            session,
+            message,
+            Some(3),
+            "earlier answer",
+            "check this",
+        )];
+        assert_eq!(
+            annotation_prompt_prefix(&annotations),
+            concat!(
+                "Annotation 1:\n> earlier answer\n\nComment: check this\n",
+                "Source: an earlier Boss chat — session 00000000-0000-0000-0000-000000000007, message 00000000-0000-0000-0000-000000000009. ",
+                "To pull the original turn, run `goddard-agent read '{\"task_id\":\"00000000-0000-0000-0000-000000000007\",\"turn\":3}'`.\n\n",
+                "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+            )
+        );
+        // Without a turn the read falls back to the whole transcript.
+        let annotations = [history_annotation(1, session, message, None, "x", "")];
+        assert!(annotation_prompt_prefix(&annotations).contains(
+            "run `goddard-agent read '{\"task_id\":\"00000000-0000-0000-0000-000000000007\"}'`"
+        ));
     }
 
     #[test]

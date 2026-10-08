@@ -66,6 +66,7 @@ export type { ComposerDraftAnnotationSpan } from "./ComposerDraftAnnotationSpan"
 export type { ComposerDraftAttachment } from "./ComposerDraftAttachment";
 export type { ComposerDraftChange } from "./ComposerDraftChange";
 export type { ComposerDraftFileAnnotation } from "./ComposerDraftFileAnnotation";
+export type { ComposerDraftHistorySource } from "./ComposerDraftHistorySource";
 export type { ComposerDraftTarget } from "./ComposerDraftTarget";
 export type { ComposerDrafts } from "./ComposerDrafts";
 export type { ComputerAppGrant } from "./ComputerAppGrant";

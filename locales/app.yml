@@ -3527,6 +3527,8 @@ annotations.count_one:
   en: 1 annotation
 annotations.count_many:
   en: "%{count} annotations"
+annotations.earlier_chat:
+  en: Earlier boss chat
 composer.remove_attachment:
   en: Remove %{name}
 composer.pasted_block:

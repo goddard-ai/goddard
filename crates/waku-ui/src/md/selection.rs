@@ -537,6 +537,27 @@ pub struct FileAnnotation {
     pub plan_session: Option<uuid::Uuid>,
 }
 
+/// Earlier-boss-chat provenance for a transcript annotation: the rotated-out
+/// session that owns the quoted message. The whole record is a snapshot taken
+/// at pin time — the staged label and the sent prompt's source still resolve
+/// after the history rows unload, the live chat rotates again, or the draft
+/// restores after a restart.
+#[derive(Clone, Debug)]
+pub struct HistorySource {
+    /// The archived session the message belongs to — never the live chat's.
+    /// The spans' `boss-history-message-{session}:{message}` row keys carry
+    /// the same id, so a same-id message in the live session cannot claim
+    /// them.
+    pub session_id: uuid::Uuid,
+    /// The message's 1-based turn number in that session, when it has one —
+    /// the `--turn` a transcript read of the session accepts.
+    pub turn: Option<usize>,
+    /// The author's display name and the message's timestamp, for the staged
+    /// quote's provenance label.
+    pub author: Option<String>,
+    pub created_at: Option<u64>,
+}
+
 /// A highlighted passage of transcript text carrying a user comment.
 ///
 /// Annotations are created from a finished selection confined to one agent
@@ -557,6 +578,8 @@ pub struct TranscriptAnnotation {
     pub comment: String,
     /// Right-panel file provenance; `None` for transcript annotations.
     pub file: Option<FileAnnotation>,
+    /// Earlier-boss-chat provenance; `None` for live-session annotations.
+    pub history: Option<HistorySource>,
 }
 
 impl TranscriptAnnotation {
@@ -710,6 +733,7 @@ pub fn line_range(text: &str, offset: usize) -> Range<usize> {
 
 use waku_protocol::persistence::{
     ComposerDraftAnnotation, ComposerDraftAnnotationSpan, ComposerDraftFileAnnotation,
+    ComposerDraftHistorySource,
 };
 
 impl From<&Span> for ComposerDraftAnnotationSpan {
@@ -764,6 +788,28 @@ impl From<ComposerDraftFileAnnotation> for FileAnnotation {
     }
 }
 
+impl From<&HistorySource> for ComposerDraftHistorySource {
+    fn from(history: &HistorySource) -> Self {
+        Self {
+            session_id: history.session_id,
+            turn: history.turn,
+            author: history.author.clone(),
+            created_at: history.created_at,
+        }
+    }
+}
+
+impl From<ComposerDraftHistorySource> for HistorySource {
+    fn from(history: ComposerDraftHistorySource) -> Self {
+        Self {
+            session_id: history.session_id,
+            turn: history.turn,
+            author: history.author,
+            created_at: history.created_at,
+        }
+    }
+}
+
 impl From<&TranscriptAnnotation> for ComposerDraftAnnotation {
     fn from(annotation: &TranscriptAnnotation) -> Self {
         Self {
@@ -772,6 +818,7 @@ impl From<&TranscriptAnnotation> for ComposerDraftAnnotation {
             spans: annotation.spans.iter().map(Into::into).collect(),
             comment: annotation.comment.clone(),
             file: annotation.file.as_ref().map(Into::into),
+            history: annotation.history.as_ref().map(Into::into),
         }
     }
 }
@@ -784,6 +831,7 @@ impl From<ComposerDraftAnnotation> for TranscriptAnnotation {
             spans: annotation.spans.into_iter().map(Into::into).collect(),
             comment: annotation.comment,
             file: annotation.file.map(Into::into),
+            history: annotation.history.map(Into::into),
         }
     }
 }

@@ -2102,7 +2102,17 @@ impl Waku {
                     let animate_streaming = message.streaming && !cx.reduce_motion();
                     let mut ctx = self
                         .markdown_ctx(
-                            format!("message-{}", message.id),
+                            // An earlier boss chat's rows key their text by
+                            // the source session, so a selection's spans can
+                            // never collide with a same-id message in the
+                            // live chat — annotation resolution reads the
+                            // owning session straight off the row key.
+                            match self.boss_ui.history_render_session.get() {
+                                Some(owner) => {
+                                    format!("boss-history-message-{owner}:{}", message.id)
+                                }
+                                None => format!("message-{}", message.id),
+                            },
                             &palette,
                             metrics,
                             animate_streaming,

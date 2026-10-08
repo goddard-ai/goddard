@@ -65,6 +65,24 @@ pub struct ComposerDraftFileAnnotation {
     pub plan_session: Option<Uuid>,
 }
 
+/// Earlier-boss-chat provenance on a draft annotation: the rotated-out
+/// session the quoted message belongs to, plus the label snapshot — author
+/// and timestamp — taken at pin time so a restored draft still carries its
+/// source after the history unloads or the live chat rotates again.
+/// `turn` is the message's 1-based turn number in that session: the
+/// `--turn` a transcript read of the session accepts.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct ComposerDraftHistorySource {
+    #[ts(type = "string")]
+    pub session_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
+}
+
 /// A commented highlight staged with the draft — a passage of an assistant
 /// message or a file-editor selection plus the user's comment. `id` persists
 /// so creation order survives a save and a session's next id stays above
@@ -80,6 +98,9 @@ pub struct ComposerDraftAnnotation {
     pub comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<ComposerDraftFileAnnotation>,
+    /// Set when the passage came from an earlier boss chat's rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<ComposerDraftHistorySource>,
 }
 
 /// Client-local metadata for an inline atom while a composer draft is being
@@ -583,6 +604,43 @@ mod tests {
             !serde_json::to_string(&plain)
                 .unwrap()
                 .contains("plan_session")
+        );
+    }
+
+    #[test]
+    fn draft_history_source_round_trips_and_stays_optional() {
+        let history = ComposerDraftHistorySource {
+            session_id: Uuid::from_u128(42),
+            turn: Some(3),
+            author: Some("Boss".to_owned()),
+            created_at: Some(1_760_000_000),
+        };
+        let json = serde_json::to_string(&history).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ComposerDraftHistorySource>(&json).unwrap(),
+            history
+        );
+        // Drafts written before the field existed deserialize to `None`.
+        let legacy = serde_json::json!({
+            "id": 1,
+            "message_id": "00000000-0000-0000-0000-000000000000",
+            "spans": [],
+        });
+        let parsed = serde_json::from_value::<ComposerDraftAnnotation>(legacy).unwrap();
+        assert_eq!(parsed.history, None);
+        // `None` never serializes — the format stays identical for live pins.
+        let annotation = ComposerDraftAnnotation {
+            id: 1,
+            message_id: Uuid::nil(),
+            spans: Vec::new(),
+            comment: String::new(),
+            file: None,
+            history: None,
+        };
+        assert!(
+            !serde_json::to_string(&annotation)
+                .unwrap()
+                .contains("history")
         );
     }
 }

@@ -55,10 +55,28 @@ function annotationPromptPassage(annotation: ComposerDraftAnnotation): string {
   return `@${file.path}\n${marker}\n\`\`\`\n${annotationQuotedText(annotation).trimEnd()}\n\`\`\``;
 }
 
+// The "Source:" line an earlier-boss-chat annotation adds to the prompt:
+// the session and message the passage actually came from, plus the read
+// that pulls the original turn — `goddard-agent read` resolves archived
+// boss sessions by task id, and `turn` narrows to the message's turn.
+function annotationSourceLine(
+  annotation: ComposerDraftAnnotation,
+): string | null {
+  const history = annotation.history;
+  if (!history) return null;
+  const read =
+    history.turn != null
+      ? `goddard-agent read '{"task_id":"${history.session_id}","turn":${history.turn}}'`
+      : `goddard-agent read '{"task_id":"${history.session_id}"}'`;
+  return `Source: an earlier Boss chat — session ${history.session_id}, message ${annotation.message_id}. To pull the original turn, run \`${read}\`.`;
+}
+
 /**
  * The prompt block prepended to a submission carrying annotations. Each
  * passage is quoted and labelled so the agent can cite the comment's target;
- * the trailing instruction is what makes the labels usable.
+ * the trailing instruction is what makes the labels usable. A passage
+ * pinned on an earlier boss chat's rows also names its source session and
+ * the read that reaches the original turn.
  */
 export function annotationPromptPrefix(
   annotations: ComposerDraftAnnotation[],
@@ -70,7 +88,10 @@ export function annotationPromptPrefix(
     for (const line of annotationPromptPassage(annotation).split("\n")) {
       out += `> ${line}\n`;
     }
-    out += `\nComment: ${(annotation.comment ?? "").trim()}\n\n`;
+    out += `\nComment: ${(annotation.comment ?? "").trim()}\n`;
+    const source = annotationSourceLine(annotation);
+    if (source) out += `${source}\n`;
+    out += "\n";
   });
   out +=
     'When responding, refer to the annotations above by their label (e.g. "Annotation 1") when appropriate.\n\n';
