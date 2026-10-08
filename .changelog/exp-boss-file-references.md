@@ -1,0 +1,1 @@
+- Fixed relative file references in Boss chat so clicking one opens the referenced file in the right panel.

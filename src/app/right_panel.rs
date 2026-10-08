@@ -181,6 +181,18 @@ fn percent_decode_file_path(path: &str) -> String {
 }
 
 fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
+    let path = markdown_file_link_path_inner(target)?;
+    path.is_absolute().then_some(path)
+}
+
+/// Provider references may name a file relative to their captured workspace.
+/// Keep this permissive parser scoped to those references; ordinary Markdown
+/// links still require an absolute file path before they enter the file route.
+fn reference_file_link_path(target: &str) -> Option<PathBuf> {
+    markdown_file_link_path_inner(target)
+}
+
+fn markdown_file_link_path_inner(target: &str) -> Option<PathBuf> {
     let target = strip_file_location(target.trim());
     let target = target
         .rsplit_once('#')
@@ -195,8 +207,7 @@ fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
         return url::Url::parse(target).ok()?.to_file_path().ok();
     }
 
-    let path = PathBuf::from(percent_decode_file_path(target));
-    path.is_absolute().then_some(path)
+    Some(PathBuf::from(percent_decode_file_path(target)))
 }
 
 fn markdown_file_link_heading(target: &str) -> Option<String> {
@@ -2121,6 +2132,30 @@ mod tests {
     }
 
     #[test]
+    fn contextual_file_references_resolve_relative_paths_without_changing_other_links() {
+        let context = crate::model::ReferenceContext {
+            project_root: PathBuf::from("/work/project"),
+            worktree: None,
+        };
+        let reference = context.encode_reference("src/main.rs:12:4");
+        let (decoded_context, target) =
+            crate::model::ReferenceContext::decode_reference(&reference).unwrap();
+
+        assert_eq!(decoded_context, context);
+        assert_eq!(
+            reference_file_link_path(&target),
+            Some(PathBuf::from("src/main.rs"))
+        );
+        assert_eq!(file_link_location(&target), Some((12, Some(4))));
+        // Plain relative Markdown links keep their existing external behavior.
+        assert_eq!(markdown_file_link_path("src/main.rs"), None);
+        assert_eq!(
+            transcript_link_route("src/main.rs", None),
+            TranscriptLinkRoute::External
+        );
+    }
+
+    #[test]
     fn task_links_route_an_optional_message_deep_link() {
         let task = Uuid::new_v4();
         let message = Uuid::new_v4();
@@ -2864,7 +2899,7 @@ impl Waku {
 
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
         if let Some((context, target)) = crate::model::ReferenceContext::decode_reference(target) {
-            let Some(path) = markdown_file_link_path(&target) else {
+            let Some(path) = reference_file_link_path(&target) else {
                 return true;
             };
             let Some(client) = self.workspace_client_for_path(context.workspace()) else {
