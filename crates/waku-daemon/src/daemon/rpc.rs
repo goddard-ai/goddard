@@ -206,6 +206,21 @@ impl Backend for WakuBackend {
     ) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
+        if let Command::Respond { request_id, .. } = &request.command
+            && request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
+        {
+            anyhow::ensure!(
+                agent.is_none(),
+                "only a human client can answer plan approval"
+            );
+            anyhow::ensure!(
+                self.sessions
+                    .lock()
+                    .get(&session_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id),
+                "plan approval belongs to a different or stopped runtime"
+            );
+        }
         let boss_chat_command = matches!(
             &request.command,
             Command::Start { .. } | Command::Prompt { .. }

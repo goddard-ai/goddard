@@ -422,6 +422,30 @@ describe('localized events', () => {
   })
 })
 
+test('plan approval stays pinned on an idle boss chat until explicitly settled', () => {
+  const requested = reduceRuntimeEvent(idleSession(), event('permission', {
+    requestId: 'plan-finalize-1',
+    title: 'Finalize plan?',
+    detail: 'Review plans/auth.md',
+    options: [
+      { id: 'deny', label: 'Deny', allow: false },
+      { id: 'finalize', label: 'Finalize', allow: true },
+    ],
+  }), clock)
+  expect(requested.daemonRequest?.requestId).toBe('plan-finalize-1')
+  expect(requested.permission).toBeUndefined()
+  expect(requested.session.status).toBe('waiting')
+  const finished = reduceRuntimeEvent(requested.session, event('turnFinished', {
+    success: true, summary: null,
+  }), clock)
+  expect(finished.daemonRequest).toBeUndefined()
+  const settled = reduceRuntimeEvent(finished.session, event('requestSettled', {
+    requestId: 'plan-finalize-1',
+  }), clock)
+  expect(settled.settledRequestId).toBe('plan-finalize-1')
+  expect(settled.session.status).toBe('idle')
+})
+
 describe('agent rename requests', () => {
   const renameEvent = () =>
     event('permission', {

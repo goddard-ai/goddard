@@ -507,6 +507,7 @@ impl Waku {
                 // folding away with it.
                 if request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX)
                     || request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX)
+                    || request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
                 {
                     runtime.pending_daemon_request = Some(PendingPermission {
                         request_id,

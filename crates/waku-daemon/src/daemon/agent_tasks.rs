@@ -412,7 +412,7 @@ impl WakuBackend {
     /// `finalizePlan`: freeze a plan document once the user approves. A
     /// planning session finalizes its own plan; the boss chat or a human
     /// names the file. Scoped callers park a daemon-owned approval card on
-    /// their session — the same contract `agentProposeArchive` uses — and
+    /// the boss chat — the same contract `agentProposeArchive` uses — and
     /// only the `finalize` answer stamps `finalized_at`, freezes writes,
     /// and starts the post-approval grace period before archival. A human
     /// caller is the approver, so a master-token call finalizes directly.
@@ -468,6 +468,73 @@ impl WakuBackend {
                 .any(|session| session.id == plan.session_id && session.archived_at.is_none())
             {
                 bail!("planning session for {} is gone", plan.plan_file);
+            }
+        }
+        // Only a user-client call is itself approval. Scoped callers request
+        // approval on the boss chat, where the human reviews employee work.
+        // Never send this through provider permission review or fullAccess.
+        if caller.is_some() {
+            let approver = self
+                .boss
+                .document()
+                .session_id
+                .ok_or_else(|| anyhow!("no boss chat is available for human plan approval"))?;
+            let runtime_id = self
+                .sessions
+                .lock()
+                .get(&approver)
+                .map(|entry| entry.runtime_id)
+                .ok_or_else(|| {
+                    anyhow!("boss chat {approver} has no running runtime to show the request")
+                })?;
+            let request_id = format!(
+                "{}{}",
+                waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX,
+                Uuid::new_v4()
+            );
+            let (title_text, title_i18n) = localized!("boss.plan_finalize_title");
+            let (detail_text, detail_i18n) = localized!(
+                "boss.plan_finalize_detail",
+                file = plan.plan_file.clone(),
+                idea = plan.idea,
+            );
+            let wire = event_to_wire(DriverEvent::Permission {
+                request_id: request_id.clone(),
+                title: title_text,
+                title_i18n: Some(title_i18n),
+                detail: detail_text,
+                detail_i18n: Some(detail_i18n),
+                options: vec![
+                    PermissionOption::keyed("deny", localized!("common.deny"), false),
+                    PermissionOption::keyed("finalize", localized!("boss.plan_finalize"), true),
+                ],
+            })?;
+            let (settled, settle_rx) = crossbeam_channel::bounded(1);
+            // One parked request per session — same card contract as the
+            // archive proposal.
+            if !self
+                .agent
+                .try_park_permission(approver, request_id.clone(), settled)
+            {
+                bail!("boss chat {approver} already has a request waiting on the user");
+            }
+            let events = events.for_session(approver, runtime_id);
+            if let Err(error) = events.send(wire) {
+                self.agent.remove_permission(approver, &request_id);
+                return Err(error);
+            }
+            eprintln!(
+                "plan approval requested: request_id={request_id} plan_session={} approver={approver}",
+                plan.session_id
+            );
+            let option = settle_rx.recv().unwrap_or_default();
+            eprintln!("plan approval settled: request_id={request_id} option={option:?}");
+            self.agent.remove_permission(approver, &request_id);
+            let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
+            match option.as_deref() {
+                Some("finalize") => {}
+                Some(_) => bail!("the plan finalization was declined"),
+                None => bail!("the finalization request went unanswered"),
             }
         }
         let finalized =

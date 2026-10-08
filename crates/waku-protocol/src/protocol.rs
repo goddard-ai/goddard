@@ -70,6 +70,9 @@ pub const AGENT_RENAME_REQUEST_PREFIX: &str = "agent-rename-";
 /// permission requests. Same contract as the rename prefix: daemon-owned,
 /// parked on the session rather than the turn, rendered pinned.
 pub const AGENT_ARCHIVE_REQUEST_PREFIX: &str = "agent-archive-";
+/// Human-only plan approval, pinned on the boss chat independently of turns.
+/// Clients must never treat it as a provider permission eligible for auto-review.
+pub const PLAN_FINALIZE_REQUEST_PREFIX: &str = "plan-finalize-";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

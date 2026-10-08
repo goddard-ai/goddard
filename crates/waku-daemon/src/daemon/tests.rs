@@ -9860,19 +9860,20 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Agent finalization freezes the plan and reports it without parking a
-/// permission request, just like the human Finalize plan button.
+/// Scoped planning requests wait on the boss chat. Neither agent answers,
+/// generic allow options nor losing the runtime count as human approval.
 #[test]
-fn a_boss_caller_finalizes_directly_without_an_approval_card() {
-    use waku_protocol::boss::BossOperation;
+fn plan_finalization_requires_an_explicit_human_answer() {
+    use waku_protocol::boss::{BossOperation, PlanOutcome};
     let root = std::env::temp_dir().join(format!("boss-plan-card-{}", Uuid::new_v4()));
     let (backend, boss) = surface_test_backend(&root);
     backend.boss.set_session_id(boss).unwrap();
+    let runtime_id = Uuid::new_v4();
     let boss_capture = Arc::new(CaptureDriver::default());
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
-            runtime_id: Uuid::new_v4(),
+            runtime_id,
             driver: DriverHandle::from_control(boss_capture.clone()),
             last_active: std::time::Instant::now(),
             resumable: false,
@@ -9881,77 +9882,154 @@ fn a_boss_caller_finalizes_directly_without_an_approval_card() {
             cwd: root.join("repo"),
         },
     );
-    let mut daemon_settings = backend.settings.get();
-    daemon_settings.provider_binary_overrides.insert(
+    let mut settings = backend.settings.get();
+    settings.provider_binary_overrides.insert(
         ProviderKind::Codex,
         root.join("missing-codex").display().to_string(),
     );
-    backend.settings.replace(daemon_settings).unwrap();
+    backend.settings.replace(settings).unwrap();
     let events = EventSink::detached();
-    for plan_file in ["auth.md", "billing.md"] {
-        assert!(
-            backend
-                .handle_boss_operation(
-                    Some(boss),
-                    BossOperation::CreatePlan {
-                        title: plan_file.into(),
-                        plan_file: plan_file.into(),
-                        prompt: format!("plan {plan_file}"),
-                        provider: Some(ProviderKind::Codex),
-                        model: None,
-                        reasoning_effort: None,
-                    },
-                    &events,
-                )
-                .is_err()
-        );
-    }
-    for plan_file in ["auth.md", "billing.md"] {
-        let result = backend
+    assert!(
+        backend
             .handle_boss_operation(
                 Some(boss),
-                BossOperation::FinalizePlan {
-                    plan_file: Some(plan_file.into()),
-                    items: None,
+                BossOperation::CreatePlan {
+                    title: "Auth".into(),
+                    plan_file: "auth.md".into(),
+                    prompt: "plan auth".into(),
+                    provider: Some(ProviderKind::Codex),
+                    model: None,
+                    reasoning_effort: None,
                 },
                 &events,
             )
-            .unwrap();
-        assert!(matches!(
-            result,
-            waku_protocol::boss::BossResult::PlanFinalized { .. }
-        ));
-        assert!(backend.agent.parked_permission_request(boss).is_none());
-        let file = format!("plans/{plan_file}");
-        assert!(
-            backend
-                .boss
-                .plan_for_file(&file)
-                .unwrap()
-                .finalized_at
-                .is_some()
-        );
-        assert!(
-            backend
-                .boss
-                .handle(
-                    None,
-                    BossOperation::WriteFile {
-                        path: file.clone(),
-                        content: "changed".into()
-                    }
+            .is_err()
+    );
+    let planning = backend
+        .boss
+        .plan_for_file("plans/auth.md")
+        .unwrap()
+        .session_id;
+    std::thread::scope(|scope| {
+        for answer in [
+            Some("deny"),
+            Some("always"),
+            Some("allow"),
+            Some("cancel"),
+            None,
+            Some("finalize"),
+        ] {
+            let backend = &backend;
+            let events = events.clone();
+            let call = scope.spawn(move || {
+                backend.handle_boss_operation(
+                    Some(planning),
+                    BossOperation::FinalizePlan {
+                        plan_file: None,
+                        items: None,
+                    },
+                    &events,
                 )
-                .is_err(),
-            "finalization freezes the document"
-        );
-        let prompts = boss_capture.prompts.lock();
-        assert!(
-            prompts
-                .iter()
-                .any(|prompt| prompt.contains("finalized its design") && prompt.contains(&file)),
-            "the boss chat received the implementation handoff"
-        );
-    }
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let request_id = loop {
+                if let Some(id) = backend.agent.parked_permission_request(boss) {
+                    break id;
+                }
+                if std::time::Instant::now() >= deadline {
+                    backend.agent.drain_permissions(boss);
+                    backend.agent.drain_permissions(planning);
+                    panic!("approval did not park on boss chat");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert!(request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX));
+            assert!(backend.agent.parked_permission_request(planning).is_none());
+            assert!(backend.boss.plan(planning).unwrap().finalized_at.is_none());
+            // A finished boss turn must not drop the human's card.
+            backend.agent.note_driver_event(
+                boss,
+                &DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                    summary_i18n: None,
+                },
+            );
+            assert_eq!(
+                backend.agent.parked_permission_request(boss),
+                Some(request_id.clone())
+            );
+            let response = |option: &str, runtime| Request {
+                request_id: Uuid::new_v4(),
+                session_id: boss,
+                runtime_id: runtime,
+                command: Command::Respond {
+                    request_id: request_id.clone(),
+                    option_id: option.into(),
+                },
+            };
+            assert!(
+                backend
+                    .handle(
+                        response("finalize", runtime_id),
+                        EventSink::detached(),
+                        Some(planning)
+                    )
+                    .is_err()
+            );
+            assert!(
+                backend
+                    .handle(
+                        response("finalize", Uuid::new_v4()),
+                        EventSink::detached(),
+                        None
+                    )
+                    .is_err()
+            );
+            assert_eq!(
+                backend.agent.parked_permission_request(boss),
+                Some(request_id.clone())
+            );
+            if let Some(answer) = answer {
+                backend
+                    .handle(response(answer, runtime_id), EventSink::detached(), None)
+                    .unwrap();
+            } else {
+                backend
+                    .agent
+                    .note_driver_event(boss, &DriverEvent::ProcessExited);
+            }
+            let result = call.join().unwrap();
+            let plan = backend.boss.plan(planning).unwrap();
+            if answer == Some("finalize") {
+                assert!(result.is_ok());
+                assert!(plan.finalized_at.is_some());
+                assert_eq!(plan.outcome, Some(PlanOutcome::Approved));
+                assert!(
+                    boss_capture
+                        .prompts
+                        .lock()
+                        .iter()
+                        .any(|p| p.contains("finalized its design"))
+                );
+            } else {
+                assert!(result.is_err());
+                assert!(plan.finalized_at.is_none());
+                assert!(plan.outcome.is_none());
+                backend
+                    .boss
+                    .handle(
+                        None,
+                        BossOperation::WriteFile {
+                            path: "plans/auth.md".into(),
+                            content: "still editable".into(),
+                        },
+                    )
+                    .unwrap();
+            }
+            assert!(backend.agent.parked_permission_request(boss).is_none());
+        }
+    });
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

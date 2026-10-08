@@ -1,1 +1,1 @@
-- Finalize a plan directly without an extra approval request; the frozen plan is reported to the boss and the planning session archives after its grace period.
+- Finalize a plan directly from its planning session. Agent requests require your explicit answer on the Boss chat before the plan freezes and implementation begins.

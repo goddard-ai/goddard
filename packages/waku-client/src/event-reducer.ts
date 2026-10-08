@@ -67,6 +67,7 @@ export const AGENT_RENAME_REQUEST_PREFIX = 'agent-rename-'
  * permission requests — same daemon-owned, session-parked contract as
  * `agent-rename-`. */
 export const AGENT_ARCHIVE_REQUEST_PREFIX = 'agent-archive-'
+export const PLAN_FINALIZE_REQUEST_PREFIX = 'plan-finalize-'
 
 export interface RuntimeEventResult {
   session: AgentSession
@@ -329,7 +330,8 @@ export function reduceRuntimeEvent(
       // apply, and it renders pinned rather than folding away with it.
       if (
         parsed.requestId.startsWith(AGENT_RENAME_REQUEST_PREFIX) ||
-        parsed.requestId.startsWith(AGENT_ARCHIVE_REQUEST_PREFIX)
+        parsed.requestId.startsWith(AGENT_ARCHIVE_REQUEST_PREFIX) ||
+        parsed.requestId.startsWith(PLAN_FINALIZE_REQUEST_PREFIX)
       ) {
         result.daemonRequest = parsed
         session.status = 'waiting'

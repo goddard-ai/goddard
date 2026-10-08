@@ -6626,7 +6626,9 @@ impl Waku {
                     if option.allow { "allow" } else { "deny" }
                 },
             );
-        let kind = if request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX) {
+        let kind = if request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX) {
+            "plan_finalize"
+        } else if request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX) {
             "agent_archive"
         } else {
             "agent_rename"
