@@ -851,6 +851,81 @@ fn queued_preview_chips_annotations_and_atoms() {
 }
 
 #[test]
+fn voice_pad_appends_plain_composer_text_after_transcript() {
+    use super::composer::append_composer_to_voice_pad;
+
+    let submission = append_composer_to_voice_pad(
+        ComposerSubmission::plain("spoken words".to_owned()),
+        Some(ComposerSubmission::plain("typed draft".to_owned())),
+    );
+
+    assert_eq!(submission.prompt, "spoken words\n\ntyped draft");
+    assert!(submission.display_content.is_none());
+}
+
+#[test]
+fn voice_pad_appends_composer_annotations_atoms_and_attachments() {
+    use super::composer::{append_composer_to_voice_pad, atom_display_content};
+    use crate::md::selection::{CopySpec, Span, TextKey, TranscriptAnnotation};
+    use std::rc::Rc;
+    use waku_protocol::model::MessageAtom;
+
+    let atom = session_atom("typed draft ".len());
+    let quote: Rc<str> = Rc::from("quoted passage");
+    let annotation = TranscriptAnnotation {
+        id: 1,
+        message_id: Uuid::nil(),
+        spans: vec![Span {
+            key: TextKey::new("message-0000", 0),
+            range: 0..quote.len(),
+            text: quote,
+            block_break: false,
+            copy: Rc::new(CopySpec::default()),
+        }],
+        comment: "annotation note".to_owned(),
+        file: None,
+        history: None,
+    };
+    let composer_display = atom_display_content(
+        &format!("typed draft {}", crate::input::INLINE_ATOM_MARKER),
+        std::slice::from_ref(&atom),
+    );
+    let composer = ComposerSubmission {
+        prompt: format!(
+            "Annotation 1:\n> quoted passage\n\nComment: annotation note\n\nWhen responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\ntyped draft {} @src/main.rs",
+            atom.payload()
+        ),
+        display_content: Some(composer_display),
+        human_content: Some("typed draft".to_owned()),
+        attachments: vec![file_attachment("src/main.rs")],
+        message_atoms: vec![MessageAtom {
+            label: atom.label(),
+            payload: atom.payload(),
+            session_id: atom.session_id(),
+        }],
+        atoms: vec![atom],
+        annotations: vec![annotation],
+        queued_id: None,
+        hidden: false,
+    };
+
+    let submission = append_composer_to_voice_pad(
+        ComposerSubmission::plain("spoken words".to_owned()),
+        Some(composer),
+    );
+
+    assert!(submission.prompt.starts_with("spoken words\n\nAnnotation 1:"));
+    assert!(submission.prompt.contains("typed draft [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] @src/main.rs"));
+    assert!(submission.display_content.as_deref().unwrap().starts_with("spoken words\n\n"));
+    assert!(submission.display_content.as_deref().unwrap().contains("Big refactor"));
+    assert_eq!(submission.human_content.as_deref(), Some("spoken words\n\ntyped draft"));
+    assert_eq!(submission.attachments.len(), 1);
+    assert_eq!(submission.message_atoms.len(), 1);
+    assert_eq!(submission.atoms.len(), 1);
+    assert_eq!(submission.annotations.len(), 1);
+}
+
+#[test]
 fn queued_preview_degrades_when_the_blocks_do_not_match() {
     use super::composer::{QueuedPreviewPart, queued_message_preview_parts};
     use waku_protocol::model::MESSAGE_ATOM_OPEN as OPEN;

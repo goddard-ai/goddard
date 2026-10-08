@@ -4062,8 +4062,16 @@ impl Waku {
         if text.is_empty() {
             return;
         }
+        let composer = self.voice_pad_composer_submission(cx);
+        if composer.is_some() {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+        }
+        let submission = composer::append_composer_to_voice_pad(
+            ComposerSubmission::plain(text),
+            composer,
+        );
         self.drop_voice_scratchpad(session_id, cx);
-        self.submit_composer_submission_to(session_id, ComposerSubmission::plain(text), cx);
+        self.submit_composer_submission_to(session_id, submission, cx);
     }
 
     /// End the visible chat's session and discard its transcript.

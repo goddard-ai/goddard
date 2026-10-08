@@ -3630,6 +3630,33 @@ impl Waku {
         if self.model_picker_has_no_providers() {
             return None;
         }
+        self.take_composer_submission(&prompt, bare_rename, cx)
+    }
+
+    /// Serialize the visible main composer for a Voice Pad submission. Voice
+    /// Pad owns the send action while visible, so slash commands remain
+    /// ordinary attached composer content instead of executing independently.
+    pub(super) fn voice_pad_composer_submission(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<ComposerSubmission> {
+        let prompt = self.composer.read(cx).content(cx).to_owned();
+        if prompt.trim().is_empty()
+            && self.composer_attachments.is_empty()
+            && self.composer_inline_atoms.is_empty()
+            && self.annotation_count() == 0
+        {
+            return None;
+        }
+        self.take_composer_submission(&prompt, false, cx)
+    }
+
+    fn take_composer_submission(
+        &mut self,
+        prompt: &str,
+        bare_rename: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<ComposerSubmission> {
         for attachment in &self.composer_attachments {
             if let (Some(reference), Some(image)) = (
                 attachment.blob_reference.as_ref(),
@@ -3654,7 +3681,7 @@ impl Waku {
         // Markers splice back to their atoms in place — pasted text and
         // session tokens — then the attachment tokens `merged_submission`
         // still trails.
-        let body = splice_inline_atoms(&prompt, &atoms);
+        let body = splice_inline_atoms(prompt, &atoms);
         let annotations = self.drain_annotations();
         let submission = match merged_submission(&body, &attachments) {
             Some(body) => {
@@ -3682,7 +3709,7 @@ impl Waku {
         // quote and comment above the typed text, while titles and a restored
         // draft keep the user's own words — the comments when nothing was
         // typed.
-        let typed_content = text_without_atom_markers(&prompt);
+        let typed_content = text_without_atom_markers(prompt);
         let typed = typed_content.trim();
         let human_content =
             (bare_rename || !annotations.is_empty() || !atoms.is_empty()).then(|| {
@@ -3702,7 +3729,7 @@ impl Waku {
                 let typed = if atoms.is_empty() {
                     body.clone()
                 } else {
-                    atom_display_content(&prompt, &atoms)
+                    atom_display_content(prompt, &atoms)
                 };
                 if annotations.is_empty() {
                     typed
@@ -9534,5 +9561,47 @@ pub(super) fn merged_submission(prompt: &str, attachments: &[MessageAttachment])
         (false, true) => Some(prompt.to_owned()),
         (true, false) => Some(mentions),
         (false, false) => Some(format!("{prompt} {mentions}")),
+    }
+}
+
+/// Append the visible main-composer submission after Voice Pad's transcript,
+/// preserving the composer serialization and presentation metadata.
+pub(super) fn append_composer_to_voice_pad(
+    mut voice: ComposerSubmission,
+    composer: Option<ComposerSubmission>,
+) -> ComposerSubmission {
+    let Some(composer) = composer else {
+        return voice;
+    };
+
+    let voice_text = voice.prompt.clone();
+    let voice_display = voice.display_content.clone();
+    let voice_human = voice.human_content.clone();
+    voice.prompt = append_message_part(&voice.prompt, &composer.prompt);
+    if let Some(display_content) = composer.display_content {
+        voice.display_content = Some(append_message_part(
+            voice_display.as_deref().unwrap_or(&voice_text),
+            &display_content,
+        ));
+    }
+    if let Some(human_content) = composer.human_content {
+        voice.human_content = Some(append_message_part(
+            voice_human.as_deref().unwrap_or(&voice_text),
+            &human_content,
+        ));
+    }
+    voice.attachments.extend(composer.attachments);
+    voice.message_atoms.extend(composer.message_atoms);
+    voice.atoms.extend(composer.atoms);
+    voice.annotations.extend(composer.annotations);
+    voice
+}
+
+fn append_message_part(prefix: &str, suffix: &str) -> String {
+    match (prefix.trim_end().is_empty(), suffix.trim_start().is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => suffix.trim_start().to_owned(),
+        (false, true) => prefix.trim_end().to_owned(),
+        (false, false) => format!("{}\n\n{}", prefix.trim_end(), suffix.trim_start()),
     }
 }
