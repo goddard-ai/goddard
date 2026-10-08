@@ -5,6 +5,9 @@ import {
   bossChat,
   bossEmployeeLifecycle,
   bossListFiles,
+  bossPlanGroups,
+  bossPlanLifecycle,
+  bossPlanTerminal,
   bossReadFile,
   bossReadPlanDocument,
   bossRequest,
@@ -288,6 +291,67 @@ describe("derived state", () => {
   test("expired projection wins over a stale lifecycle", () => {
     expect(bossEmployeeLifecycle(employee({ expired: true, state: "working" }))).toBe("expired");
     expect(bossEmployeeLifecycle(employee())).toBe("working");
+  });
+
+  test("bossPlanLifecycle reads drafts from finalizedAt and the rest from the stored outcome", () => {
+    expect(bossPlanLifecycle(plan())).toBe("planning");
+    expect(bossPlanLifecycle(plan({ finalizedAt: 10 }))).toBe("approved");
+    expect(bossPlanLifecycle(plan({ finalizedAt: 10, outcome: "completed" }))).toBe("completed");
+    expect(bossPlanLifecycle(plan({ finalizedAt: 10, outcome: "abandoned" }))).toBe("abandoned");
+    expect(bossPlanTerminal(plan())).toBe(false);
+    expect(bossPlanTerminal(plan({ finalizedAt: 10 }))).toBe(false);
+    expect(bossPlanTerminal(plan({ finalizedAt: 10, outcome: "completed" }))).toBe(true);
+  });
+
+  test("bossPlanGroups lists open plans by child activity", () => {
+    const draft = plan({ id: "plan-draft" });
+    const approved = plan({ id: "plan-approved", finalizedAt: 10 });
+    const abandoned = plan({ id: "plan-dead", finalizedAt: 5, outcome: "abandoned" });
+    const state = bossState({ planning: [draft, approved, abandoned] });
+
+    // No employees: the approved plan earns a group, the untagged draft does
+    // not, and the abandoned plan has left the ongoing area entirely.
+    expect(bossPlanGroups(state).map((group) => group.plan.id)).toEqual(["plan-approved"]);
+
+    const withWork = bossState({
+      planning: [draft, approved, abandoned],
+      employees: [
+        employee({ sessionId: "a", planId: "plan-draft", createdAt: 50 }),
+        employee({ sessionId: "b", planId: "plan-approved", itemId: "item-1", createdAt: 60 }),
+      ],
+    });
+    const groups = bossPlanGroups(withWork);
+    expect(groups.map((group) => group.plan.id)).toEqual(["plan-approved", "plan-draft"]);
+    // `itemId: "item-1"` names no item on the approved plan — the tag lands
+    // in its unallocated tail.
+    expect(groups[0]!.unallocated.map((entry) => entry.sessionId)).toEqual(["b"]);
+    expect(groups[1]!.unallocated.map((entry) => entry.sessionId)).toEqual(["a"]);
+  });
+
+  test("bossPlanGroups nests item members and keeps orphan item tags unallocated", () => {
+    const target = plan({
+      id: "plan-1",
+      finalizedAt: 10,
+      items: [
+        { id: "item-1", title: "U0", state: "toDo" },
+        { id: "item-2", title: "U1", state: "done" },
+      ],
+    });
+    const state = bossState({
+      planning: [target],
+      employees: [
+        employee({ sessionId: "a", planId: "plan-1", itemId: "item-1" }),
+        employee({ sessionId: "b", planId: "plan-1", itemId: "gone" }),
+        employee({ sessionId: "c", planId: "other" }),
+      ],
+    });
+
+    const [group] = bossPlanGroups(state);
+    expect(group!.items.map((entry) => entry.item.id)).toEqual(["item-1", "item-2"]);
+    expect(group!.items[0]!.employees.map((entry) => entry.sessionId)).toEqual(["a"]);
+    expect(group!.items[0]!.progress).toBe("inProgress");
+    expect(group!.items[1]!.progress).toBe("done");
+    expect(group!.unallocated.map((entry) => entry.sessionId)).toEqual(["b"]);
   });
 
   test("planItemProgress derives in-progress from live linked employees", () => {

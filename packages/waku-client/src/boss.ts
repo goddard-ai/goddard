@@ -307,6 +307,90 @@ export function planItemProgress(
   return live ? 'inProgress' : 'toDo'
 }
 
+/** The current outcome — finalized records predating the field read as
+ * approved, the state their freeze implied. Mirrors `BossPlan::outcome`. */
+export function bossPlanOutcome(plan: BossPlan): PlanOutcome {
+  return plan.outcome ?? 'approved'
+}
+
+/** The plan's panel-facing lifecycle: a draft is still in planning, an
+ * approved plan is open, a marked plan is completed or abandoned. Mirrors
+ * `BossPlan::lifecycle`. */
+export type PlanLifecycle = 'planning' | 'approved' | 'completed' | 'abandoned'
+
+export function bossPlanLifecycle(plan: BossPlan): PlanLifecycle {
+  if (plan.finalizedAt == null) return 'planning'
+  switch (bossPlanOutcome(plan)) {
+    case 'approved':
+      return 'approved'
+    case 'completed':
+      return 'completed'
+    case 'abandoned':
+      return 'abandoned'
+  }
+}
+
+/** Closed outcomes refuse new work tags — the check both the summon tag
+ * and `setPlan` apply. Mirrors `BossPlan::terminal`. */
+export function bossPlanTerminal(plan: BossPlan): boolean {
+  return plan.finalizedAt != null && bossPlanOutcome(plan) !== 'approved'
+}
+
+/** One work item inside a plan group — its derived progress plus the
+ * employees linked to it, in roster order. */
+export interface BossPlanGroupItem {
+  item: PlanItem
+  progress: PlanItemProgress
+  employees: BossEmployee[]
+}
+
+/** The Goals surface's ongoing-area group for one plan: the work breakdown
+ * in declared order with each item's linked employees beneath it, then the
+ * employees tagged to the plan but no live item. Mirrors the daemon's
+ * `BossState::plan_groups`. */
+export interface BossPlanGroup {
+  plan: BossPlan
+  items: BossPlanGroupItem[]
+  /** Tagged employees whose `itemId` is absent or names an item the
+   * breakdown no longer carries. */
+  unallocated: BossEmployee[]
+  /** The newest activity the group owns — a linked employee's summon or
+   * finish, the plan's freeze, or its latest audited transition. */
+  lastActivityAt: number
+}
+
+/** Plan groups for the Goals ongoing area: every open plan that is
+ * approved or carries at least one tagged employee — a draft earns its
+ * row through work alone — ordered by most recent child activity.
+ * Completed and abandoned plans leave the ongoing area entirely.
+ * Employees within a bucket keep roster order; the surface owns finer
+ * sorting. Mirrors the daemon's `BossState::plan_groups`. */
+export function bossPlanGroups(state: BossState): BossPlanGroup[] {
+  const groups: BossPlanGroup[] = []
+  for (const plan of state.planning) {
+    if (bossPlanTerminal(plan)) continue
+    const tagged = state.employees.filter((entry) => entry.planId === plan.id)
+    if (bossPlanLifecycle(plan) === 'planning' && tagged.length === 0) continue
+    const items = (plan.items ?? []).map((item) => ({
+      item,
+      progress: planItemProgress(plan, item, state.employees),
+      employees: tagged.filter((entry) => entry.itemId === item.id),
+    }))
+    const unallocated = tagged.filter(
+      (entry) =>
+        entry.itemId == null
+        || !(plan.items ?? []).some((known) => known.id === entry.itemId),
+    )
+    const lastActivityAt = tagged.reduce(
+      (latest, entry) => Math.max(latest, entry.expiredAt ?? entry.createdAt ?? 0),
+      Math.max(plan.finalizedAt ?? 0, plan.history?.[plan.history.length - 1]?.at ?? 0),
+    )
+    groups.push({ plan, items, unallocated, lastActivityAt })
+  }
+
+  return groups.sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+}
+
 /** Where a deliverable's bytes can be browsed on the daemon host: the
  * record's `path` for a directory, its parent for a file. Read or list it
  * through the ordinary workspace operations (`browseDirectory`,

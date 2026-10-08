@@ -29,6 +29,17 @@ const FALLBACK_TEXT: Record<string, string> = {
   'doc.text': '📄',
   'externaldrive': '▤',
   globe: '🌐',
+  target: '◎',
+  hourglass: '⧖',
+  'exclamationmark.triangle': '⚠',
+  pause: '⏸',
+  'arrow.triangle.2.circlepath': '⟳',
+  circle: '○',
+  'circle.inset.filled': '◐',
+  'xmark.circle': '⊘',
+  'list.bullet.clipboard': '☰',
+  'arrow.triangle.branch': '⎇',
+  folder: '📁',
 };
 
 const registered = new Set<string>();

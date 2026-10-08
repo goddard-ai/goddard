@@ -27,6 +27,7 @@ import {
 
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionBanner } from '@/components/connection-banner';
+import { GoalsSheet } from '@/components/goals';
 import {
   DeliverableSheet,
   useDeliverableArm,
@@ -56,6 +57,7 @@ import {
 import { SessionEmpty } from '@/components/transcript-rows';
 import { useBossState, useProviderModels, useSession, useTaskState } from '@/lib/daemon-queries';
 import { bossEmployeeForSession, bossQueueRanks } from '@/lib/boss';
+import { bossGoalsUnreadCount } from '@/lib/goals';
 import { useKeyboardPadding } from '@/lib/use-keyboard-padding';
 import { useTheme } from '@/lib/use-theme';
 import { useHasUnseenReplies } from '@/lib/use-unseen-replies';
@@ -127,6 +129,7 @@ export function SessionView({
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [capacityOpen, setCapacityOpen] = useState(false);
   const [automationHistoryOpen, setAutomationHistoryOpen] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findIndex, setFindIndex] = useState(0);
@@ -272,6 +275,8 @@ export function SessionView({
         setAssignmentOpen(true);
       } else if (command === 'automation-history') {
         setAutomationHistoryOpen(true);
+      } else if (command === 'goals') {
+        setGoalsOpen(true);
       } else if (command === 'capacity') {
         setCapacityOpen(true);
       } else if (command === 'model') {
@@ -305,6 +310,7 @@ export function SessionView({
   const bossData = bossState.data;
   const employee = bossEmployeeForSession(bossData, session?.id);
   const isBossChat = Boolean(bossData?.sessionId && bossData.sessionId === session?.id);
+  const goalsUnread = bossData ? bossGoalsUnreadCount(bossData) : 0;
   useEffect(() => {
     if (isBossChat && session?.id === mountedTranscriptSessionId) {setBossChatReady(session?.id ?? null);}
   }, [isBossChat, session?.id, mountedTranscriptSessionId]);
@@ -484,17 +490,26 @@ export function SessionView({
           }]
         : []),
       ...(isBossChat && bossData
-        ? [{
-            key: 'automation-history',
-            label: 'Automation history',
-            icon: 'clock',
-            onSelect: () => handleTaskMenuCommand('automation-history'),
-          }, {
-            key: 'capacity',
-            label: 'Capacity',
-            icon: 'gauge',
-            onSelect: () => handleTaskMenuCommand('capacity'),
-          }]
+        ? [
+            {
+              key: 'goals',
+              label: goalsUnread > 0 ? `Goals · ${goalsUnread} new` : 'Goals',
+              icon: 'target',
+              onSelect: () => handleTaskMenuCommand('goals'),
+            },
+            {
+              key: 'automation-history',
+              label: 'Automation history',
+              icon: 'clock',
+              onSelect: () => handleTaskMenuCommand('automation-history'),
+            },
+            {
+              key: 'capacity',
+              label: 'Capacity',
+              icon: 'gauge',
+              onSelect: () => handleTaskMenuCommand('capacity'),
+            },
+          ]
         : []),
       {
         key: 'model',
@@ -510,7 +525,7 @@ export function SessionView({
           onSelect: () => handleTaskMenuCommand(item.id),
         })),
     ],
-    [bossData, employee, handleTaskMenuCommand, isBossChat, modelLabel],
+    [bossData, employee, goalsUnread, handleTaskMenuCommand, isBossChat, modelLabel],
   );
 
   const keyboardPadding = useKeyboardPadding();
@@ -760,6 +775,19 @@ export function SessionView({
           visible={capacityOpen}
         />
       )}
+      {isBossChat && bossData ? (
+        <GoalsSheet
+          projects={taskState?.projects ?? []}
+          sessions={taskState?.sessions ?? []}
+          state={bossData}
+          visible={goalsOpen}
+          onDismiss={() => setGoalsOpen(false)}
+          onOpenSession={(id) => {
+            setGoalsOpen(false);
+            pushRoute({ stack: 'root', name: 'session/:id', params: { id } });
+          }}
+        />
+      ) : null}
       {arm && armedDeliverable ? (
         <DeliverableSheet
           deliverable={armedDeliverable}

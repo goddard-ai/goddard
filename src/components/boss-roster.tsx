@@ -34,7 +34,9 @@ import {
   planOutcomeLabel,
 } from '@/lib/boss';
 
+import { bossGoalsUnreadCount } from '@/lib/goals';
 import { planFilter } from '@/lib/plans';
+
 import { relativeSessionTime, displaySessionTitle } from '@/lib/session-presentation';
 import type { TaskState } from '@/lib/daemon-api';
 import { useDaemon, useDaemonQuery } from '@/lib/daemon-hooks';
@@ -135,8 +137,13 @@ export function BossSection({
   const ranks = useMemo(() => bossQueueRanks(state), [state]);
   const roster = useMemo(() => bossRosterSplit(state, sessionCreatedAt), [state, sessionCreatedAt]);
   const blockers = useMemo(() => bossOpenBlockers(state), [state]);
+  // The daemon's goals-viewed stamp: a goal finished since the user last
+  // opened the surface reads as unread here — the sidebar-row badge the
+  // `markGoalsViewed` contract backs.
+  const goalsUnread = bossGoalsUnreadCount(state);
   const bossSession = state.sessionId ? sessions.get(state.sessionId) : undefined;
-  const bossUnseen = bossSession ? sessionHasUnseenReply(bossSession, watermarks) : false;
+  const bossUnseen = (bossSession ? sessionHasUnseenReply(bossSession, watermarks) : false)
+    || goalsUnread > 0;
 
   const openChat = useCallback(async () => {
     const client = daemon.client;
@@ -220,7 +227,9 @@ export function BossSection({
             <Text numberOfLines={1} style={{ color: blockers.length ? theme.warning : theme.textTertiary, fontSize: 12.5, marginTop: 1 }}>
               {blockers.length
                 ? `${blockers.length} need${blockers.length === 1 ? 's' : ''} attention`
-                : daemon.activeProfile ? displayHost(daemon.activeProfile.address) : 'Boss'}
+                : goalsUnread > 0
+                  ? `${goalsUnread} goal${goalsUnread === 1 ? '' : 's'} finished`
+                  : daemon.activeProfile ? displayHost(daemon.activeProfile.address) : 'Boss'}
             </Text>
           </View>
           {openingChat ? <ActivityIndicator busy /> : null}
