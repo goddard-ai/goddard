@@ -939,6 +939,7 @@ impl WakuBackend {
                 session_id: employee.session_id,
                 name: employee_name.clone(),
                 avatar_seed: employee.identity.avatar_seed.clone(),
+                avatar_style: employee.identity.avatar_style,
                 job_title: employee_title.clone(),
                 icon: employee
                     .icon

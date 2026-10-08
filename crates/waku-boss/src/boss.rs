@@ -1273,6 +1273,7 @@ impl BossService {
                 id,
                 name,
                 avatar_seed: id.to_string(),
+                avatar_style: Default::default(),
             },
             job_title: job_title.trim().to_owned(),
             persona_id,
@@ -2885,6 +2886,29 @@ impl BossService {
                             .ok_or_else(|| anyhow!("not a Boss employee"))?;
                         employee.identity.avatar_seed = seed;
                     }
+                    Ok(())
+                })?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::SetAvatarStyle {
+                session_id,
+                avatar_style,
+            } => {
+                anyhow::ensure!(caller.is_none(), "only a human can select avatar styles");
+                self.update(|state| {
+                    let identity = if session_id.is_none() || session_id == state.session_id {
+                        &mut state.identity
+                    } else {
+                        &mut state
+                            .employees
+                            .iter_mut()
+                            .find(|entry| Some(entry.session_id) == session_id)
+                            .ok_or_else(|| anyhow!("not a Boss employee"))?
+                            .identity
+                    };
+                    identity.avatar_style = avatar_style;
                     Ok(())
                 })?;
                 Ok(BossResult::State {
@@ -4669,7 +4693,7 @@ fn fresh_state() -> BossState {
     let employee_id = Uuid::new_v4();
     let names = ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
     BossState {
-        identity: BossIdentity { id, name: names[id.as_bytes()[0] as usize % names.len()].into(), avatar_seed: id.to_string() },
+        identity: BossIdentity { id, name: names[id.as_bytes()[0] as usize % names.len()].into(), avatar_seed: id.to_string(), avatar_style: Default::default() },
         persona_id,
         session_id: None,
         personas: vec![
@@ -4698,6 +4722,7 @@ fn disabled_state() -> BossState {
             id: Uuid::nil(),
             name: String::new(),
             avatar_seed: String::new(),
+            avatar_style: Default::default(),
         },
         persona_id: Uuid::nil(),
         session_id: None,
@@ -5162,6 +5187,7 @@ mod tests {
                         id: supervisor_id,
                         name: "Super".into(),
                         avatar_seed: supervisor_id.to_string(),
+                        avatar_style: Default::default(),
                     },
                     job_title: "Super".into(),
                     persona_id: state.personas[1].id,
@@ -5232,6 +5258,7 @@ mod tests {
                         id: session_id,
                         name: "Nova".into(),
                         avatar_seed: session_id.to_string(),
+                        avatar_style: Default::default(),
                     },
                     job_title: "Research".into(),
                     persona_id: state.personas[1].id,
@@ -5512,6 +5539,7 @@ mod tests {
                         id: session_id,
                         name: "Release".into(),
                         avatar_seed: session_id.to_string(),
+                        avatar_style: Default::default(),
                     },
                     job_title: "Release".into(),
                     persona_id: state.personas[1].id,
@@ -5976,6 +6004,7 @@ mod tests {
                         id: employee_id,
                         name: "Release".into(),
                         avatar_seed: employee_id.to_string(),
+                        avatar_style: Default::default(),
                     },
                     job_title: "Release".into(),
                     persona_id: state.personas[1].id,
@@ -6573,6 +6602,7 @@ mod tests {
                         id: session_id,
                         name: "Quinn".into(),
                         avatar_seed: session_id.to_string(),
+                        avatar_style: Default::default(),
                     },
                     job_title: "Release engineer".into(),
                     persona_id: state.personas[1].id,
@@ -6606,6 +6636,10 @@ mod tests {
             BossOperation::RegenerateAvatar {
                 session_id: Some(session_id),
             },
+            BossOperation::SetAvatarStyle {
+                session_id: Some(session_id),
+                avatar_style: waku_protocol::boss::AvatarStyle::Blobby,
+            },
         ] {
             assert!(service.handle(Some(session_id), operation).is_err());
         }
@@ -6623,6 +6657,21 @@ mod tests {
         };
         assert_eq!(state.employees[0].identity.name, "Scout");
         let seed = state.employees[0].identity.avatar_seed.clone();
+        service
+            .handle(
+                None,
+                BossOperation::SetAvatarStyle {
+                    session_id: Some(session_id),
+                    avatar_style: waku_protocol::boss::AvatarStyle::Blobby,
+                },
+            )
+            .unwrap();
+        assert_eq!(service.document().employees[0].identity.avatar_seed, seed);
+        let restored = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            restored.document().employees[0].identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::Blobby
+        );
         let BossResult::State { state } = service
             .handle(
                 None,
@@ -6635,8 +6684,37 @@ mod tests {
             panic!("avatar regeneration returns the updated state");
         };
         assert_ne!(state.employees[0].identity.avatar_seed, seed);
-        // A missing target — or the boss's own session — re-rolls the
-        // boss's face instead.
+        assert_eq!(
+            state.employees[0].identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::Blobby
+        );
+        // Boss style is independent of its seed and cannot be changed by agents.
+        let boss_session = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss_session);
+                Ok(())
+            })
+            .unwrap();
+        let style_op = BossOperation::SetAvatarStyle {
+            session_id: Some(boss_session),
+            avatar_style: waku_protocol::boss::AvatarStyle::AgentAvatars,
+        };
+        assert!(
+            service
+                .handle(Some(boss_session), style_op.clone())
+                .is_err()
+        );
+        service.handle(None, style_op).unwrap();
+        assert_eq!(
+            service.document().identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::AgentAvatars
+        );
+        assert_eq!(
+            service.document().identity.avatar_seed,
+            state.identity.avatar_seed
+        );
+        // A missing target — or the boss's own session — re-rolls the boss.
         let boss_seed = state.identity.avatar_seed;
         let BossResult::State { state } = service
             .handle(None, BossOperation::RegenerateAvatar { session_id: None })
@@ -6645,6 +6723,10 @@ mod tests {
             panic!("avatar regeneration returns the updated state");
         };
         assert_ne!(state.identity.avatar_seed, boss_seed);
+        assert_eq!(
+            state.identity.avatar_style,
+            waku_protocol::boss::AvatarStyle::AgentAvatars
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -4705,6 +4705,7 @@ impl Waku {
                     id: employee_id,
                     name: card.name.clone(),
                     avatar_seed: card.avatar_seed.clone(),
+                    avatar_style: card.avatar_style,
                 }
             })
         });

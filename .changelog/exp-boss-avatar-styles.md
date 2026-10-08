@@ -1,0 +1,1 @@
+- Choose an avatar style for each boss or employee from the identity controls; changing style keeps their face seed, and New face keeps the selected style.

@@ -64,7 +64,7 @@ function bossPayload(result: BossResult): ResponsePayload {
   return { type: "boss", result };
 }
 
-const IDENTITY = { id: "boss-1", name: "Boss", avatarSeed: "seed" };
+const IDENTITY = { id: "boss-1", name: "Boss", avatarSeed: "seed", avatarStyle: "diceBear" as const };
 
 function bossState(overrides: Partial<BossState> = {}): BossState {
   return {
@@ -90,7 +90,7 @@ function employee(overrides: Partial<BossEmployee> = {}): BossEmployee {
   return {
     sessionId: "emp-1",
     supervisorId: "boss-session",
-    identity: { id: "emp-1", name: "Owen", avatarSeed: "seed" },
+    identity: { id: "emp-1", name: "Owen", avatarSeed: "seed", avatarStyle: "diceBear" as const },
     jobTitle: "U0",
     personaId: "persona-1",
     workGoal: "errand",

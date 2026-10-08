@@ -7,6 +7,7 @@ use waku_client::boss::{
     BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
     MemoryOperation, PersonaPermissions,
 };
+use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
 
 /// The logical size a session-mention chip's avatar occupies in the
@@ -317,12 +318,12 @@ pub(super) struct BossUi {
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
-    avatar_queue: RefCell<VecDeque<(String, u32, u8)>>,
+    avatar_queue: RefCell<VecDeque<(String, AvatarStyle, u32, u8)>>,
     // Marks keys queued or in flight so a render pass cannot enqueue
     // duplicates; exhausted failures stay marked to bound retry churn.
     // Eviction clears the mark — a face on screen may be asked for again.
-    avatar_requested: RefCell<HashSet<(String, u32)>>,
-    avatars: HashMap<String, HashMap<u32, Arc<gpui::RenderImage>>>,
+    avatar_requested: RefCell<HashSet<((String, AvatarStyle), u32)>>,
+    avatars: HashMap<(String, AvatarStyle), HashMap<u32, Arc<gpui::RenderImage>>>,
     avatar_active: usize,
     focus: Option<FocusHandle>,
 }
@@ -416,17 +417,17 @@ impl Default for BossUi {
 }
 
 impl BossUi {
-    fn retry_avatar(&self, seed: String, bucket: u32, attempt: u8) {
+    fn retry_avatar(&self, seed: (String, AvatarStyle), bucket: u32, attempt: u8) {
         if attempt < AVATAR_MAX_ATTEMPTS {
             self.avatar_queue
                 .borrow_mut()
-                .push_back((seed, bucket, attempt + 1));
+                .push_back((seed.0, seed.1, bucket, attempt + 1));
         }
     }
 
     fn cache_avatar(
         &mut self,
-        seed: String,
+        seed: (String, AvatarStyle),
         bucket: u32,
         image: Arc<gpui::RenderImage>,
     ) -> Option<Arc<gpui::RenderImage>> {
@@ -2313,8 +2314,7 @@ impl Waku {
             let Some(identity) = self.boss_ui.identities.get(id) else {
                 continue;
             };
-            if let Some(image) = self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
-            {
+            if let Some(image) = self.boss_avatar_cached(identity, MENTION_AVATAR_SIZE) {
                 avatars.insert(*id, image);
             }
             mentions.push(md::render::SessionMention {
@@ -2347,7 +2347,7 @@ impl Waku {
             chats
                 .chain(employees)
                 .filter_map(|(id, identity)| {
-                    self.boss_avatar_cached(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+                    self.boss_avatar_cached(identity, MENTION_AVATAR_SIZE)
                         .map(|image| (id, image))
                 })
                 .collect(),
@@ -2368,7 +2368,7 @@ impl Waku {
                 .filter_map(composer::ComposerInlineAtom::session_id)
                 .filter_map(|id| {
                     let identity = self.boss_session_identity(id)?;
-                    self.boss_avatar_image(&identity.avatar_seed, MENTION_AVATAR_SIZE)
+                    self.boss_avatar_image(&identity, MENTION_AVATAR_SIZE)
                         .map(|image| (id, image))
                 })
                 .collect(),
@@ -2522,6 +2522,27 @@ impl Waku {
         );
     }
 
+    fn set_managed_avatar_style(
+        &mut self,
+        session_id: Uuid,
+        avatar_style: AvatarStyle,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((key, ..)) = self.managed_session_meta(session_id) else {
+            return;
+        };
+        let employee = (!self.managed_session_is_boss(key, session_id)).then_some(session_id);
+        self.boss_request(
+            key,
+            BossOperation::SetAvatarStyle {
+                session_id: employee,
+                avatar_style,
+            },
+            BossReply::List,
+            cx,
+        );
+    }
+
     /// The identity block a managed session's top bar shows in place of the
     /// plain title: avatar, name, and job title. Double-clicking the name
     /// swaps in the shared inline rename field; double-clicking the avatar
@@ -2614,6 +2635,44 @@ impl Waku {
                 .child(SharedString::from(identity.name.clone()))
                 .into_any_element()
         };
+        let handle = self.menu_handle("managed-avatar-style", cx);
+        let weak = cx.entity().downgrade();
+        let selected_style = identity.avatar_style;
+        let style_menu = dropdown_menu(
+            MenuChip::new("managed-avatar-style-trigger")
+                .label(tr!("boss.avatar_style"))
+                .selected(handle.is_open()),
+            "managed-avatar-style-menu",
+            &handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                [
+                    AvatarStyle::DiceBear,
+                    AvatarStyle::Blobby,
+                    AvatarStyle::AgentAvatars,
+                    AvatarStyle::Avvvatars,
+                ]
+                .into_iter()
+                .map(|style| {
+                    let weak = weak.clone();
+                    MenuItem::new(
+                        match style {
+                            AvatarStyle::DiceBear => "DiceBear",
+                            AvatarStyle::Blobby => "Blobby",
+                            AvatarStyle::AgentAvatars => "Agent Avatars",
+                            AvatarStyle::Avvvatars => "Avvvatars",
+                        },
+                        move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_managed_avatar_style(session_id, style, cx)
+                            });
+                        },
+                    )
+                    .selected(style == selected_style)
+                })
+                .collect()
+            },
+        );
         div()
             .flex()
             .items_center()
@@ -2629,6 +2688,7 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(SharedString::from(job_title.to_owned())),
             )
+            .child(style_menu)
             .children(self.employee_assignment_popover(session_id, &theme, cx))
             .into_any_element()
     }
@@ -2837,24 +2897,24 @@ impl Waku {
         );
     }
 
-    /// The raster cached for `(seed, size bucket)` — a lookup with no side
+    /// The raster cached for `(seed, style, size bucket)` — a lookup with no side
     /// effects. Callers that sweep every managed identity (mention pools,
     /// transcript chips) read through here: queueing on their path would
     /// enqueue renders the cache cannot hold and evict the faces on-screen
     /// surfaces asked for.
     pub(super) fn boss_avatar_cached(
         &self,
-        seed: &str,
+        identity: &BossIdentity,
         size: f32,
     ) -> Option<Arc<gpui::RenderImage>> {
         self.boss_ui
             .avatars
-            .get(seed)
+            .get(&(identity.avatar_seed.clone(), identity.avatar_style))
             .and_then(|buckets| buckets.get(&avatar_bucket(size)))
             .cloned()
     }
 
-    /// The raster cached for `(seed, size bucket)`, queueing a render when
+    /// The raster cached for `(seed, style, size bucket)`, queueing a render when
     /// it is missing. Returns `None` while the raster is in flight so
     /// callers can draw their placeholder. Failures retry up to twice and
     /// exhausted renders keep the placeholder; evicted rasters requeue on
@@ -2862,30 +2922,30 @@ impl Waku {
     /// all-identity sweeps go through [`Self::boss_avatar_cached`].
     pub(super) fn boss_avatar_image(
         &self,
-        seed: &str,
+        identity: &BossIdentity,
         size: f32,
     ) -> Option<Arc<gpui::RenderImage>> {
-        if let Some(image) = self.boss_avatar_cached(seed, size) {
+        if let Some(image) = self.boss_avatar_cached(identity, size) {
             return Some(image);
         }
         let bucket = avatar_bucket(size);
-        if self
-            .boss_ui
-            .avatar_requested
-            .borrow_mut()
-            .insert((seed.to_string(), bucket))
-        {
-            self.boss_ui
-                .avatar_queue
-                .borrow_mut()
-                .push_back((seed.to_string(), bucket, 1));
+        if self.boss_ui.avatar_requested.borrow_mut().insert((
+            (identity.avatar_seed.clone(), identity.avatar_style),
+            bucket,
+        )) {
+            self.boss_ui.avatar_queue.borrow_mut().push_back((
+                identity.avatar_seed.clone(),
+                identity.avatar_style,
+                bucket,
+                1,
+            ));
             signal_event_pump(&self.event_wake_tx);
         }
         None
     }
 
     pub(super) fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
-        if let Some(image) = self.boss_avatar_image(&identity.avatar_seed, size) {
+        if let Some(image) = self.boss_avatar_image(identity, size) {
             return gpui::img(image)
                 .size(px(size))
                 .rounded(px(6.0))
@@ -2904,7 +2964,8 @@ impl Waku {
 
     fn pump_boss_avatars(&mut self, cx: &mut Context<Self>) {
         while self.boss_ui.avatar_active < 4 {
-            let Some((seed, bucket, attempt)) = self.boss_ui.avatar_queue.borrow_mut().pop_front()
+            let Some((seed, style, bucket, attempt)) =
+                self.boss_ui.avatar_queue.borrow_mut().pop_front()
             else {
                 break;
             };
@@ -2914,7 +2975,7 @@ impl Waku {
             cx.spawn(async move |this, cx| {
                 let image = cx.background_executor().spawn(async move {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let svg = boss_moods::avatar_svg(&avatar_seed);
+                        let svg = boss_moods::avatar_svg_for_style(&avatar_seed, style, bucket);
                         renderer
                             .render_single_frame(&svg, avatar_scale(bucket))
                             .map_err(anyhow::Error::from)
@@ -2942,11 +3003,11 @@ impl Waku {
                     this.boss_ui.avatar_active -= 1;
                     match image {
                         Ok(image) => {
-                            if let Some(evicted) = this.boss_ui.cache_avatar(seed, bucket, image) {
+                            if let Some(evicted) = this.boss_ui.cache_avatar((seed, style), bucket, image) {
                                 cx.drop_image(evicted, None);
                             }
                         }
-                        Err(_) => this.boss_ui.retry_avatar(seed, bucket, attempt),
+                        Err(_) => this.boss_ui.retry_avatar((seed, style), bucket, attempt),
                     }
                     signal_event_pump(&this.event_wake_tx); cx.notify();
                 });
@@ -4077,6 +4138,10 @@ impl Waku {
             move |_| {
                 let rename = weak.clone();
                 let face = weak.clone();
+                let dicebear = weak.clone();
+                let blobby = weak.clone();
+                let agent = weak.clone();
+                let avvvatars = weak.clone();
                 vec![
                     MenuItem::new(tr!("common.rename"), move |window, cx| {
                         let _ = rename.update(cx, |this, cx| {
@@ -4095,6 +4160,38 @@ impl Waku {
                         });
                     })
                     .icon("icons/rotate-cw.svg")
+                    .disabled(session_id.is_none()),
+                    MenuItem::new(tr!("boss.avatar_style_dicebear"), move |_, cx| {
+                        let _ = dicebear.update(cx, |this, cx| {
+                            if let Some(id) = session_id {
+                                this.set_managed_avatar_style(id, AvatarStyle::DiceBear, cx);
+                            }
+                        });
+                    })
+                    .disabled(session_id.is_none()),
+                    MenuItem::new(tr!("boss.avatar_style_blobby"), move |_, cx| {
+                        let _ = blobby.update(cx, |this, cx| {
+                            if let Some(id) = session_id {
+                                this.set_managed_avatar_style(id, AvatarStyle::Blobby, cx);
+                            }
+                        });
+                    })
+                    .disabled(session_id.is_none()),
+                    MenuItem::new(tr!("boss.avatar_style_agent"), move |_, cx| {
+                        let _ = agent.update(cx, |this, cx| {
+                            if let Some(id) = session_id {
+                                this.set_managed_avatar_style(id, AvatarStyle::AgentAvatars, cx);
+                            }
+                        });
+                    })
+                    .disabled(session_id.is_none()),
+                    MenuItem::new(tr!("boss.avatar_style_avvvatars"), move |_, cx| {
+                        let _ = avvvatars.update(cx, |this, cx| {
+                            if let Some(id) = session_id {
+                                this.set_managed_avatar_style(id, AvatarStyle::Avvvatars, cx);
+                            }
+                        });
+                    })
                     .disabled(session_id.is_none()),
                 ]
             },
@@ -7612,6 +7709,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 name: String::new(),
                 avatar_seed: String::new(),
+                avatar_style: Default::default(),
             },
             job_title: String::new(),
             persona_id: Uuid::new_v4(),
@@ -7683,14 +7781,14 @@ mod tests {
     #[test]
     fn failed_avatar_retries_are_bounded_and_stay_deduplicated() {
         let ui = BossUi::default();
-        let key = ("failed".to_string(), 24);
+        let key = (("failed".to_string(), AvatarStyle::Blobby), 24);
         ui.avatar_requested.borrow_mut().insert(key.clone());
         for attempt in 1..=AVATAR_MAX_ATTEMPTS {
             ui.retry_avatar(key.0.clone(), key.1, attempt);
             assert!(!ui.avatar_requested.borrow_mut().insert(key.clone()));
             let queued = ui.avatar_queue.borrow_mut().pop_front();
             if attempt < AVATAR_MAX_ATTEMPTS {
-                assert_eq!(queued, Some((key.0.clone(), key.1, attempt + 1)));
+                assert_eq!(queued, Some((key.0.0.clone(), key.0.1, key.1, attempt + 1)));
             } else {
                 assert!(queued.is_none(), "permanent failures must stop retrying");
             }
@@ -7707,7 +7805,7 @@ mod tests {
         // More identities than the raster budget exercises the eviction
         // path without relying on which HashMap entry gets evicted.
         for id in 0..(AVATAR_CACHE_LIMIT + 64) {
-            let seed = id.to_string();
+            let seed = (id.to_string(), AvatarStyle::DiceBear);
             ui.avatar_requested.borrow_mut().insert((seed.clone(), 24));
             let _ = ui.cache_avatar(seed, 24, image.clone());
         }
@@ -7715,11 +7813,14 @@ mod tests {
             ui.avatars.values().map(HashMap::len).sum::<usize>(),
             AVATAR_CACHE_LIMIT
         );
-        assert!((0..(AVATAR_CACHE_LIMIT + 64)).any(|id| !ui.avatars.contains_key(&id.to_string())));
+        assert!((0..(AVATAR_CACHE_LIMIT + 64)).any(|id| {
+            !ui.avatars
+                .contains_key(&(id.to_string(), AvatarStyle::DiceBear))
+        }));
         // Cached keys keep their dedup mark — a hit never reaches it — while
         // evicted keys lose theirs so the next request requeues the render.
         for id in 0..(AVATAR_CACHE_LIMIT + 64) {
-            let seed = id.to_string();
+            let seed = (id.to_string(), AvatarStyle::DiceBear);
             if let Some(cached) = ui.avatars.get(&seed).and_then(|buckets| buckets.get(&24)) {
                 assert!(Arc::ptr_eq(cached, &image));
                 assert!(!ui.avatar_requested.borrow_mut().insert((seed, 24)));
@@ -7730,9 +7831,9 @@ mod tests {
         assert!(
             ui.avatar_requested
                 .borrow_mut()
-                .insert(("new-seed".into(), 24))
+                .insert((("new-seed".into(), AvatarStyle::DiceBear), 24))
         );
-        assert!(ui.avatar_requested.borrow_mut().insert(("0".into(), 56)));
+        assert!(ui.avatar_requested.borrow_mut().insert((("0".into(), AvatarStyle::DiceBear), 56)));
     }
 
     /// The scale handed to the SVG rasterizer must land each bucket's
@@ -7798,6 +7899,7 @@ mod tests {
                 id: session_id,
                 name: format!("Employee {id}"),
                 avatar_seed: String::new(),
+                avatar_style: Default::default(),
             },
             job_title: "Tester".into(),
             persona_id: Uuid::from_u128(u128::MAX - 1),
@@ -8071,6 +8173,7 @@ mod tests {
                 id: Uuid::from_u128(u128::MAX - 2),
                 name: "Boss".into(),
                 avatar_seed: String::new(),
+                avatar_style: Default::default(),
             },
             persona_id: Uuid::from_u128(u128::MAX - 3),
             session_id: None,

@@ -9829,7 +9829,7 @@ impl Waku {
             .boss_ui
             .identities
             .get(&row.session_id)
-            .and_then(|identity| self.boss_avatar_image(&identity.avatar_seed, GOALS_PANEL_AVATAR));
+            .and_then(|identity| self.boss_avatar_image(&identity, GOALS_PANEL_AVATAR));
         BossGoalPanelRow {
             session_id: row.session_id,
             height: boss_goal_row_height(self.state.ui_font_size),

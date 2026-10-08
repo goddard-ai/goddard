@@ -6374,6 +6374,16 @@ boss.greeting:
   en: What should we do today?
 boss.new_face:
   en: New face
+boss.avatar_style:
+  en: Avatar style
+boss.avatar_style_dicebear:
+  en: "Avatar style: DiceBear"
+boss.avatar_style_blobby:
+  en: "Avatar style: Blobby"
+boss.avatar_style_agent:
+  en: "Avatar style: Agent Avatars"
+boss.avatar_style_avvvatars:
+  en: "Avatar style: Avvvatars"
 boss.planning_label:
   en: Planning
 boss.plan_seed_opener:

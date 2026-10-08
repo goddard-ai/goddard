@@ -20,10 +20,15 @@
 //! style), `contrastTo`/`notEqualTo` palette rules (unused by moods), and
 //! CSS animations (the app rasterizes a single frame).
 
+mod agent;
+mod avvvatars;
+mod blobby;
+
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::sync::OnceLock;
+use waku_protocol::boss::AvatarStyle;
 
 const STYLE_JSON: &str = include_str!("boss_moods.json");
 
@@ -311,8 +316,17 @@ fn write_elements(
     }
 }
 
-/// The standalone avatar SVG for `seed` — the same face DiceBear's API
-/// returns for it, generated without any network or I/O.
+/// Dispatch the human-selected generator at the requested logical bucket.
+pub(super) fn avatar_svg_for_style(seed: &str, style: AvatarStyle, bucket: u32) -> Vec<u8> {
+    match style {
+        AvatarStyle::DiceBear => avatar_svg(seed),
+        AvatarStyle::Blobby => blobby::avatar_svg(seed, bucket),
+        AvatarStyle::AgentAvatars => agent::avatar_svg(seed),
+        AvatarStyle::Avvvatars => avvvatars::avatar_svg(seed, bucket),
+    }
+}
+
+/// The same face DiceBear's API returns, generated without network or I/O.
 pub(super) fn avatar_svg(seed: &str) -> Vec<u8> {
     let style = style();
     let placements = resolve(style, seed);
@@ -526,6 +540,26 @@ mod tests {
     }
 
     #[test]
+    fn new_avatar_styles_are_pinned() {
+        for (bucket, expected) in [(16, 0xb2863c22), (24, 0xac8d7aa0), (56, 0xa658f844)] {
+            let svg = avatar_svg_for_style("test", AvatarStyle::Blobby, bucket);
+            assert_eq!(fnv1a(std::str::from_utf8(&svg).unwrap()), expected);
+            assert_ne!(
+                svg,
+                avatar_svg_for_style("another", AvatarStyle::Blobby, bucket)
+            );
+        }
+        for (style, expected) in [
+            (AvatarStyle::AgentAvatars, 0x3e13591c),
+            (AvatarStyle::Avvvatars, 0xe2ba1b6b),
+        ] {
+            let svg = avatar_svg_for_style("test", style, 16);
+            assert_eq!(fnv1a(std::str::from_utf8(&svg).unwrap()), expected);
+            assert_ne!(svg, avatar_svg_for_style("another", style, 16));
+        }
+    }
+
+    #[test]
     fn generated_svg_is_stable_and_balanced() {
         let a = avatar_svg("test");
         assert_eq!(a, avatar_svg("test"));
@@ -553,22 +587,32 @@ mod tests {
             "00000000-0000-0000-0000-000000000000",
             "ffffffff-ffff-ffff-ffff-ffffffffffff",
         ] {
-            let svg = avatar_svg(seed);
-            assert_eq!(svg, avatar_svg(seed), "unstable seed {seed:?}");
-            for bucket in [16, 24, 56] {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    renderer.render_single_frame(&svg, bucket as f32 / AVATAR_SOURCE_SIZE)
-                }));
-                match result {
-                    Ok(Ok(image)) => {
-                        let frame = image.size(0);
-                        assert_eq!((frame.width.0, frame.height.0), (bucket * 2, bucket * 2));
-                    }
-                    Ok(Err(error)) => {
-                        failures.push(format!("seed {seed:?}, bucket {bucket}: {error:#}"))
-                    }
-                    Err(_) => {
-                        failures.push(format!("seed {seed:?}, bucket {bucket}: renderer panicked"))
+            for style in [
+                AvatarStyle::DiceBear,
+                AvatarStyle::Blobby,
+                AvatarStyle::AgentAvatars,
+                AvatarStyle::Avvvatars,
+            ] {
+                for bucket in [16, 24, 56] {
+                    let svg = avatar_svg_for_style(seed, style, bucket);
+                    assert_eq!(
+                        svg,
+                        avatar_svg_for_style(seed, style, bucket),
+                        "unstable seed {seed:?}"
+                    );
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        renderer.render_single_frame(&svg, bucket as f32 / AVATAR_SOURCE_SIZE)
+                    }));
+                    match result {
+                        Ok(Ok(image)) => {
+                            let frame = image.size(0);
+                            assert_eq!((frame.width.0, frame.height.0), (bucket as i32 * 2, bucket as i32 * 2));
+                        }
+                        Ok(Err(error)) => {
+                            failures.push(format!("seed {seed:?}, bucket {bucket}: {error:#}"))
+                        }
+                        Err(_) => failures
+                            .push(format!("seed {seed:?}, bucket {bucket}: renderer panicked")),
                     }
                 }
             }

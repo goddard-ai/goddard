@@ -976,6 +976,7 @@ impl Waku {
                 if let Some(identity) = self.boss_session_identity(session.id) {
                     identity.name.hash(&mut hasher);
                     identity.avatar_seed.hash(&mut hasher);
+                    identity.avatar_style.hash(&mut hasher);
                 }
             }
         }

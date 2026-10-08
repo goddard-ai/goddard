@@ -7446,6 +7446,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 name: "Boss".into(),
                 avatar_seed: String::new(),
+                avatar_style: Default::default(),
             },
             persona_id: Uuid::new_v4(),
             session_id: None,

@@ -10,12 +10,25 @@ use crate::AgentWorkspace;
 use crate::automations::AutomationInput;
 use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode, SessionPlanning};
 
+/// Human-selected avatar generator; old identities retain DiceBear moods.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AvatarStyle {
+    #[default]
+    DiceBear,
+    Blobby,
+    AgentAvatars,
+    Avvvatars,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossIdentity {
     pub id: Uuid,
     pub name: String,
     pub avatar_seed: String,
+    #[serde(default)]
+    pub avatar_style: AvatarStyle,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
@@ -1490,6 +1503,11 @@ pub enum BossOperation {
     RegenerateAvatar {
         session_id: Option<Uuid>,
     },
+    /// Change the generator without re-rolling the seed. Human-only.
+    SetAvatarStyle {
+        session_id: Option<Uuid>,
+        avatar_style: AvatarStyle,
+    },
     UpsertPersona {
         persona: BossPersonaUpsert,
     },
@@ -1892,6 +1910,19 @@ pub enum EmployeeControl {
 mod tests {
     use super::EmployeeControl;
     use uuid::Uuid;
+
+    #[test]
+    fn old_identity_defaults_to_dicebear() {
+        let identity: super::BossIdentity = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(), "name": "Boss", "avatarSeed": "existing"
+        }))
+        .unwrap();
+        assert_eq!(identity.avatar_style, super::AvatarStyle::DiceBear);
+        let mut value = serde_json::to_value(identity).unwrap();
+        value["avatarStyle"] = serde_json::json!("blobby");
+        let identity: super::BossIdentity = serde_json::from_value(value).unwrap();
+        assert_eq!(identity.avatar_style, super::AvatarStyle::Blobby);
+    }
 
     #[test]
     fn set_model_control_decodes_provider_model_and_effort() {

@@ -34,6 +34,7 @@ export type { AutomationSchedule } from "./AutomationSchedule";
 export type { AutomationTrigger } from "./AutomationTrigger";
 export type { AutomationWorkspace } from "./AutomationWorkspace";
 export type { AutomationsState } from "./AutomationsState";
+export type { AvatarStyle } from "./AvatarStyle";
 export type { BasePushState } from "./BasePushState";
 export type { BossDeliverable } from "./BossDeliverable";
 export type { BossEmployee } from "./BossEmployee";

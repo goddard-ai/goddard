@@ -3611,6 +3611,8 @@ pub struct BossSummonCard {
     pub name: String,
     pub avatar_seed: String,
     #[serde(default)]
+    pub avatar_style: crate::boss::AvatarStyle,
+    #[serde(default)]
     pub job_title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
@@ -3627,6 +3629,7 @@ impl BossSummonCard {
                 session_id,
                 name: String::new(),
                 avatar_seed: session_id.to_string(),
+                avatar_style: Default::default(),
                 job_title: String::new(),
                 icon: None,
             });
@@ -6551,6 +6554,7 @@ mod tests {
             session_id,
             name: "Alden".into(),
             avatar_seed: "seed-1".into(),
+            avatar_style: Default::default(),
             job_title: "Release checks".into(),
             icon: Some(crate::custom_commands::CustomCommandIcon::Beaker),
         };

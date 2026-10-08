@@ -241,6 +241,10 @@ else
   plutil -replace CFBundleName -string "$app_name" "$contents/Info.plist"
   cp -R "$cached_helper_bundle" "$helper_bundle"
 fi
+# Preserve vendored avatar license notices in binary distributions too.
+mkdir -p "$contents/Resources/licenses"
+cp src/app/boss_moods/blobby-LICENSE src/app/boss_moods/agent-LICENSE \
+  src/app/boss_moods/avvvatars-LICENSE "$contents/Resources/licenses/"
 sparkle_framework="$contents/Frameworks/Sparkle.framework"
 cp "$cargo_target_dir/$profile/$daemon_name" "$daemon_executable"
 chmod 755 "$daemon_executable"
