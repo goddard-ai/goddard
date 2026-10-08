@@ -2591,6 +2591,13 @@ pub struct Waku {
     /// current consent listen window — each gated utterance bumps it.
     voice_consent_restarts: u8,
     voice_consent_timer_gen: u64,
+    /// When the wanted mic input went missing — the "microphone
+    /// unavailable" row sits behind a grace so a Bluetooth profile
+    /// switch's seconds of zero reported input channels never shows it.
+    voice_input_down_since: Option<Instant>,
+    /// A device-set re-poll is in flight — armed while the wanted input
+    /// is missing since the HAL listener can miss in-place channel gains.
+    voice_input_retry_scheduled: bool,
     /// `bossSpeechRequested` ids already handled this run — reconnects and
     /// repeat broadcasts must not replay an utterance.
     speech_requests_seen: VecDeque<Uuid>,
@@ -6996,6 +7003,8 @@ impl Waku {
                 speech_auth_requested: false,
                 voice_consent_restarts: 0,
                 voice_consent_timer_gen: 0,
+                voice_input_down_since: None,
+                voice_input_retry_scheduled: false,
                 speech_requests_seen: VecDeque::new(),
                 eval_probe_pending: false,
                 eval_probe_result: None,

@@ -1,0 +1,1 @@
+- Unmuting the VoicePad scratchpad with a Bluetooth microphone no longer stalls on "Microphone unavailable" — the headset briefly reports no input while it switches to its call profile, so the app now re-checks for it instead of waiting on a system notification that may never arrive, and gaps under a couple of seconds never show the banner at all.

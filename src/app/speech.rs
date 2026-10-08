@@ -57,6 +57,19 @@ const VOICE_CONSENT_WINDOW: std::time::Duration = std::time::Duration::from_secs
 /// Restarts for a consent task that ended on its own before the feature
 /// degrades to click-only consent.
 const VOICE_CONSENT_RESTARTS: u8 = 3;
+/// Cadence for re-polling the device set while the wanted input is
+/// missing — the HAL device listener watches the device list and the
+/// default-input property, neither of which reliably fires when a live
+/// device gains input channels in place, the exact move a Bluetooth
+/// headset makes flipping into HFP.
+const VOICE_INPUT_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+/// An input gap shorter than this never raises the "microphone
+/// unavailable" row — a Bluetooth profile switch crosses it routinely.
+const VOICE_INPUT_GRACE: std::time::Duration = std::time::Duration::from_millis(1_500);
+/// Stop re-polling a missing input after this — a device gone that long
+/// was removed rather than profile-switching, and any later HAL event
+/// re-arms the poll.
+const VOICE_INPUT_POLL_CAP: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The persisted clip library: `index.json` beside the `clips/` audio files
 /// it names. Entries append oldest-first; past `SPEECH_EXPIRY_THRESHOLD`
@@ -961,29 +974,96 @@ impl Waku {
                 VoiceGateEvent::SpeechAuth(false) => {}
                 VoiceGateEvent::InputDevicesChanged => {
                     // The platform rebinds (or parks) the engine here, on the
-                    // main thread that owns it; scratchpads just mirror the
-                    // availability into their status.
+                    // main thread that owns it; scratchpads mirror the
+                    // availability into their status — behind the grace, so
+                    // a brief Bluetooth profile switch never flashes it.
                     let available = crate::platform::voice_input_devices_changed();
-                    self.set_voice_input_unavailable(!available);
+                    self.sync_voice_input(available, cx);
                 }
             }
         }
         changed
     }
 
-    /// The mic goes off when nothing is queued for playback, no consent
-    /// session is still listening, and no dictation — scratchpad sink or
-    /// composer capture — holds the tap; gated items alone never hold it
-    /// open.
+    /// Anything still holding the mic open — playback or a queued clip,
+    /// a consent session, a composer capture, or a scratchpad sink;
+    /// gated items alone never hold it.
+    fn voice_listener_wanted(&self) -> bool {
+        !self.speech_clip_queue.is_empty()
+            || self.voice_briefing_playback.is_some()
+            || crate::platform::consent_recognition_active()
+            || crate::platform::dictation_capture_active()
+            || crate::platform::voice_audio_sink_active()
+    }
+
+    /// The mic goes off when nothing wants it any longer.
     pub(super) fn maybe_stop_voice_listener(&mut self) {
-        if self.speech_clip_queue.is_empty()
-            && self.voice_briefing_playback.is_none()
-            && !crate::platform::consent_recognition_active()
-            && !crate::platform::dictation_capture_active()
-            && !crate::platform::voice_audio_sink_active()
-        {
+        if !self.voice_listener_wanted() {
             crate::platform::stop_voice_listener();
         }
+    }
+
+    /// Fold a fresh device-set verdict into the scratchpad status. An
+    /// input that can actually capture clears the "microphone
+    /// unavailable" row at once; a missing one only raises the row after
+    /// the grace, and arms the retry poll — the HAL does not reliably
+    /// report a device gaining input channels in place, so events alone
+    /// can leave a returning headset waiting.
+    pub(super) fn sync_voice_input(&mut self, available: bool, cx: &mut Context<Self>) {
+        let ready = available && crate::platform::voice_listener_running();
+        if ready {
+            self.voice_input_down_since = None;
+            self.set_voice_input_unavailable(false);
+            return;
+        }
+        if !self.voice_listener_wanted() {
+            // Nobody owns the tap — mirror the device set as before but
+            // run no clock; the next start re-checks on its own.
+            self.voice_input_down_since = None;
+            self.set_voice_input_unavailable(!available);
+            return;
+        }
+        match self.voice_input_down_since {
+            None => self.voice_input_down_since = Some(Instant::now()),
+            Some(since) if since.elapsed() >= VOICE_INPUT_GRACE => {
+                self.set_voice_input_unavailable(true);
+            }
+            _ => {}
+        }
+        self.schedule_voice_input_retry(cx);
+    }
+
+    /// Keep re-polling the device set while the wanted input is missing —
+    /// covers the device-list notifications CoreAudio never sends. One
+    /// task at a time; it stops when the engine is live again, when the
+    /// mic is no longer wanted, or when the outage outlives the cap.
+    fn schedule_voice_input_retry(&mut self, cx: &mut Context<Self>) {
+        if self.voice_input_retry_scheduled {
+            return;
+        }
+        self.voice_input_retry_scheduled = true;
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            loop {
+                cx.background_executor().timer(VOICE_INPUT_RETRY).await;
+                let keep_polling = weak
+                    .update(cx, |this, cx| {
+                        let available = crate::platform::voice_input_devices_changed();
+                        this.sync_voice_input(available, cx);
+                        cx.notify();
+                        this.voice_input_down_since
+                            .is_some_and(|since| since.elapsed() < VOICE_INPUT_POLL_CAP)
+                    })
+                    .unwrap_or(false);
+                if !keep_polling {
+                    break;
+                }
+            }
+            let _ = weak.update(cx, |this, _| {
+                this.voice_input_retry_scheduled = false;
+            });
+        })
+        .detach();
     }
 
     /// Sound the next queued speech clip when nothing is playing — and only

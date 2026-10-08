@@ -3233,10 +3233,13 @@ impl Waku {
             });
         })));
         // A refused engine start parks the session on the unavailable
-        // row instead of flagging capture live over a dead tap.
-        let engine_started = crate::platform::start_voice_listener();
+        // row instead of flagging capture live over a dead tap — but
+        // only once `sync_voice_input`'s grace elapses, so a Bluetooth
+        // profile switch never flashes it.
+        crate::platform::start_voice_listener();
         scratchpad.capture_live = true;
-        scratchpad.input_unavailable = !engine_started || !crate::platform::voice_input_available();
+        let available = crate::platform::voice_input_available();
+        self.sync_voice_input(available, cx);
         self.spawn_transcription_worker(session_id, cx);
     }
 

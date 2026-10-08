@@ -599,6 +599,17 @@ mod voice_gate {
         INPUT_AVAILABLE.load(Ordering::Relaxed)
     }
 
+    /// Whether the engine object is actually running — a present input
+    /// can still sit over a dead engine when a start raced a device
+    /// transition. `VOICE_LISTENER` is thread-local: call on the thread
+    /// that owns it.
+    pub fn engine_running() -> bool {
+        VOICE_LISTENER.with_borrow(|slot| {
+            slot.as_ref()
+                .is_some_and(|listener| unsafe { listener.engine.isRunning() })
+        })
+    }
+
     /// Re-evaluate the device set: stop the engine when its input vanished,
     /// (re)build it when the wanted device is back or the default moved.
     /// Call on the thread that owns `VOICE_LISTENER`; returns the input's
@@ -920,6 +931,13 @@ pub fn voice_input_available() -> bool {
     voice_gate::input_available()
 }
 
+/// Whether the voice listener's engine is live — a present input with a
+/// dead engine is still "unavailable" as far as capture is concerned.
+#[cfg(target_os = "macos")]
+pub fn voice_listener_running() -> bool {
+    voice_gate::engine_running()
+}
+
 /// Begin on-device recognition of the spoken consent phrase. `hook` is
 /// invoked off the UI thread for each `ConsentSignal`.
 #[cfg(target_os = "macos")]
@@ -992,6 +1010,11 @@ pub fn voice_input_devices_changed() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub fn voice_input_available() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn voice_listener_running() -> bool {
     false
 }
 
