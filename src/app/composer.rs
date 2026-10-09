@@ -9461,7 +9461,18 @@ fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -
         .children(parts.into_iter().enumerate().map(|(index, part)| {
             match part {
                 QueuedPreviewPart::Text(text) => {
-                    div().min_w_0().max_w_full().child(text).into_any_element()
+                    // Keep each word as its own flex item. A whole text run is
+                    // measured as one item and can consume the row before a
+                    // following chip gets a chance to flow beside it.
+                    text.split_inclusive(char::is_whitespace)
+                        .map(|word| {
+                            div()
+                                .flex_none()
+                                .max_w_full()
+                                .child(SharedString::from(word.to_owned()))
+                                .into_any_element()
+                        })
+                        .collect::<Vec<_>>()
                 }
                 QueuedPreviewPart::Chip { icon, label } => queued_preview_chip(
                     SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),

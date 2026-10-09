@@ -1,1 +1,1 @@
-- Queued follow-ups carrying annotations or session and paste references now preview them as compact inline chips above the composer instead of raw quoted blocks.
+- Queued follow-ups carrying annotations or session and paste references now preview them as compact chips flowing inline with the prompt text above the composer, instead of on their own line or as raw quoted blocks.
