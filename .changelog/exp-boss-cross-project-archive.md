@@ -1,0 +1,1 @@
+- **Boss:** From Boss chat, `goddard-agent archive` can now propose archiving a task in any project, not just the Boss workspace — the request card names each task's project, and your approval is still required before anything is archived.

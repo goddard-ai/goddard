@@ -129,7 +129,8 @@ USAGE CONTRACT
     permission, each call asks the user first — it blocks on the request card
     and fails when the user declines.
     `archive` proposes archiving tasks by Goddard task id — siblings in this
-    task's project, found through `search`. It is a proposal, not an action:
+    task's project, found through `search`; the boss may name tasks in any
+    project on this daemon. It is a proposal, not an action:
     each call renders a request card naming the tasks and your reason, blocks
     until the user answers, and fails when they decline. Nothing is archived
     without that approval. Use it when the human asked for cleanup or a
@@ -727,7 +728,7 @@ fn legacy_schema() -> serde_json::Value {
             "reset": "no payload; resets only this task",
             "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"
         },
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. Computer run uses Jev to select semantic browser actions and returns needs_input or needs_parent when it cannot safely finish. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
+        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — the boss may name tasks in any project on this daemon — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. Computer run uses Jev to select semantic browser actions and returns needs_input or needs_parent when it cannot safely finish. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
         "resource": {
             "syntax": "resource acquire '<json>' | resource run '<json>' -- COMMAND [ARGS] | resource release/cancel '{\"id\":\"UUID\"}' | resource status",
             "acquire": {"resources": {"exclusive": ["ios:SIMULATOR-UDID"], "resident_devices": 1, "native_builds": 1, "desktop_input": 0}, "purpose": "iOS smoke test", "wait_seconds": 600},
@@ -773,7 +774,7 @@ fn legacy_schema() -> serde_json::Value {
             "returns": {"ok": true}
         },
         "archive": {
-            "description": "Propose archiving tasks in this task's project, by Goddard task id. The user sees the named tasks and your reason on a request card and approves or declines — the call blocks until then and fails on decline. Targets must be started, unarchived, and not side chats; archived tasks' side chats leave with them. Use `search` to find task ids.",
+            "description": "Propose archiving tasks by Goddard task id — siblings in this task's project, or tasks in any project on this daemon for the boss. The user sees the named tasks and your reason on a request card and approves or declines — the call blocks until then and fails on decline. Targets must be started, unarchived, and not side chats; archived tasks' side chats leave with them. Use `search` to find task ids.",
             "fields": {
                 "task_ids": {"type": "array of strings", "required": true, "notes": "Goddard task UUIDs to archive"},
                 "reason": {"type": "string", "notes": "why these tasks should be archived; shown on the request card"}

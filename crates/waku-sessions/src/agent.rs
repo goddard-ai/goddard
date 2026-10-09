@@ -934,11 +934,16 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              a human decision must come back before you can proceed, not \
              for questions a reply can carry.",
         );
-        instruction.push_str(
-            " `archive` proposes archiving tasks in this project by task id \
+        instruction.push_str(&format!(
+            " `archive` proposes archiving {} by task id \
              — the user reviews the named tasks and your reason on a request \
              card, and nothing is archived without their approval.",
-        );
+            if scope.boss {
+                "tasks in any project this daemon knows"
+            } else {
+                "tasks in this project"
+            }
+        ));
     }
     if let Some(parent) = scope.parent_task_id {
         instruction.push_str(&format!(

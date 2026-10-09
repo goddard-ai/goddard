@@ -143,8 +143,11 @@ impl WakuBackend {
     /// user approves. Targets must be started, unarchived tasks in the
     /// caller's own project — the same reach the agent's `search` has —
     /// because the card can only meaningfully list a set the caller could
-    /// have found. Side chats are refused by name; archiving their parent
-    /// already takes them.
+    /// have found. The boss principal is the exception `search` already
+    /// grants: its own project holds only its session, so it may name a
+    /// task in any project the daemon knows and the card names each
+    /// task's project beside its title. Side chats are refused by name;
+    /// archiving their parent already takes them.
     pub(super) fn agent_propose_archive(
         &self,
         agent: Option<Uuid>,
@@ -178,7 +181,12 @@ impl WakuBackend {
                 unique.push(id);
             }
         }
-        let (target_ids, titles) = {
+        // Like `agent_search_sessions`, the boss principal's project is a
+        // placeholder holding only its session, so its proposals reach a
+        // task in any project the daemon knows. Every other caller stays
+        // confined to the project its own session belongs to.
+        let boss_principal = self.boss.is_boss_principal(caller);
+        let (target_ids, titles, projects) = {
             let state = self.task_state.lock();
             let project_id = state
                 .sessions
@@ -188,13 +196,14 @@ impl WakuBackend {
                 .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
             let mut ids = Vec::with_capacity(unique.len());
             let mut titles = Vec::with_capacity(unique.len());
+            let mut projects = Vec::with_capacity(unique.len());
             for id in &unique {
                 let session = state
                     .sessions
                     .iter()
                     .find(|session| session.id == *id)
                     .ok_or_else(|| anyhow!("task {id} is unknown to the daemon"))?;
-                if session.project_id != project_id {
+                if !boss_principal && session.project_id != project_id {
                     bail!("task {id} is outside this task's project");
                 }
                 if session.is_side_chat() {
@@ -208,8 +217,19 @@ impl WakuBackend {
                 }
                 ids.push(*id);
                 titles.push(session.display_title().to_owned());
+                // A boss card can span projects, so each named task also
+                // names the project the user is asked to archive it in.
+                projects.push(if boss_principal {
+                    state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| project.name.clone())
+                } else {
+                    None
+                });
             }
-            (ids, titles)
+            (ids, titles, projects)
         };
         let runtime_id = self
             .sessions
@@ -230,8 +250,12 @@ impl WakuBackend {
         };
         let mut tasks_text = titles
             .iter()
+            .zip(&projects)
             .take(AGENT_ARCHIVE_CARD_TITLES)
-            .map(|title| format!("“{title}”"))
+            .map(|(title, project)| match project {
+                Some(project) => format!("“{title}” ({project})"),
+                None => format!("“{title}”"),
+            })
             .collect::<Vec<_>>()
             .join(", ");
         if titles.len() > AGENT_ARCHIVE_CARD_TITLES {

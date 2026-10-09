@@ -2630,6 +2630,135 @@ fn a_declined_archive_proposal_archives_nothing() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The boss principal's reach is the one `search` already grants: its own
+/// project holds only its session, so a proposal may name a task in any
+/// project the daemon knows. It is still only a proposal — the card parks
+/// on the boss chat naming the task's project, and nothing archives until
+/// the user approves.
+#[test]
+fn a_boss_archive_proposal_reaches_other_projects() {
+    let root = std::env::temp_dir().join(format!("waku-boss-archive-{}", Uuid::new_v4()));
+    let (backend, boss_id, _side_id) = read_scope_test_backend(&root);
+    backend.boss.set_session_id(boss_id).unwrap();
+    let (_target_id, target_side_id, foreign_id, archived_id) =
+        archive_proposal_targets(&backend, &root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let boss_runtime = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        boss_id,
+        RuntimeEntry {
+            runtime_id: boss_runtime,
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.join("repo"),
+        },
+    );
+    // The hub only emits to runtimes it knows — register the boss's so the
+    // tap sees the parked card like an attached client would.
+    let events = EventSink::detached().begin_session_runtime(boss_id, boss_runtime);
+    let tapped = events.tapped_events();
+    // The wider reach changes no other rule: unknown ids, side chats, and
+    // already-archived tasks still fail before a card parks.
+    for ids in [
+        vec![Uuid::new_v4()],
+        vec![target_side_id],
+        vec![archived_id],
+    ] {
+        assert!(
+            backend
+                .agent_propose_archive(Some(boss_id), ids, None, &events)
+                .is_err()
+        );
+    }
+    assert!(backend.agent.parked_permission_request(boss_id).is_none());
+    std::thread::scope(|scope| {
+        let proposal = scope.spawn(|| {
+            backend.agent_propose_archive(
+                Some(boss_id),
+                vec![foreign_id],
+                Some("project shipped".into()),
+                &events,
+            )
+        });
+        let mut request_id = None;
+        while request_id.is_none() && !proposal.is_finished() {
+            request_id = backend.agent.parked_permission_request(boss_id);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let request_id = request_id.unwrap_or_default();
+        // The card lands on the boss chat and names the task's own
+        // project — the approver can see which project's task is named.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut card = None;
+        while card.is_none() && std::time::Instant::now() < deadline {
+            match tapped.try_recv() {
+                Ok(crate::ServerMessage::Event(event)) if event.event.kind == "permission" => {
+                    card = Some(event);
+                }
+                Ok(_) => {}
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+        let archived_while_parked = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == foreign_id)
+            .unwrap()
+            .archived_at
+            .is_some();
+        backend.agent.resolve_permission(
+            boss_id,
+            &Command::Respond {
+                request_id: request_id.clone(),
+                option_id: "archive".into(),
+            },
+        );
+        let outcome = proposal.join().unwrap();
+        // Every check lands after the proposal thread joined — a failure
+        // reports instead of stranding the parked call.
+        assert!(request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX));
+        let card = card.expect("the permission card reached the boss chat");
+        assert_eq!(card.session_id, boss_id);
+        let detail = card.event.payload["detail"].as_str().unwrap_or_default();
+        assert!(detail.contains("(elsewhere)"), "card detail: {detail}");
+        assert!(detail.contains("project shipped"), "card detail: {detail}");
+        // Nothing archived while the card waited on the user.
+        assert!(!archived_while_parked);
+        assert!(matches!(outcome, Ok(ResponsePayload::Ack)));
+    });
+    let state = backend.task_state.lock();
+    assert!(
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == foreign_id)
+            .unwrap()
+            .archived_at
+            .is_some()
+    );
+    assert!(
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == boss_id)
+            .unwrap()
+            .archived_at
+            .is_none()
+    );
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn a_scoped_read_reaches_self_and_a_side_chats_parent() {
     let root = std::env::temp_dir().join(format!("waku-read-scope-{}", Uuid::new_v4()));
