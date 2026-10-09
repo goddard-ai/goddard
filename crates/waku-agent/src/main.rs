@@ -351,7 +351,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss employee icon EMPLOYEE_ID search".to_owned(),
         ),
         "boss employee model" => (
-            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--provider":{"required":true,"enum":providers},"--model":{"required":true,"type":"provider model ID"},"--effort":{"type":"provider reasoning effort","optional":true},"notes":"one atomic reconfigure — an open turn is interrupted intentionally (never marked failed), the selection applies, and the employee resumes its assignment; a provider+model change re-enters admission against the new pool"}),
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--provider":{"required":true,"enum":providers},"--model":{"required":true,"type":"provider model ID"},"--effort":{"type":"provider reasoning effort","optional":true},"notes":"one atomic reconfigure — an open turn is interrupted intentionally (never marked failed), the selection applies, and the employee resumes its assignment; a provider+model change re-enters admission against the new pool; an omitted --effort resolves the model's catalog default — including a rung packed into the model id — never the stale effort the provider thread kept"}),
             json!({"json":{"type":"saved"}}),
             "goddard-agent boss employee model EMPLOYEE_ID --provider codex --model gpt-5".to_owned(),
         ),

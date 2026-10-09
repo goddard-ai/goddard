@@ -3003,7 +3003,10 @@ pub enum EmployeeControl {
     /// the employee resumes its assignment on it. A provider+model change
     /// re-enters admission against the new pool; a same-model change keeps
     /// the runtime and continues in place. Queued tickets reticket in
-    /// place.
+    /// place. An omitted `reasoning_effort` resolves inside the target
+    /// model's ladder — a rung packed into the model id first, then the
+    /// catalog default — never the stale effort a resumed provider thread
+    /// would keep.
     SetModel {
         provider: crate::model::ProviderKind,
         model: String,

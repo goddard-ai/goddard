@@ -1823,8 +1823,12 @@ impl WakuBackend {
     /// Catalog validation shared by `setModel` on queued and working
     /// employees — the provider's catalog must list the model and any
     /// pinned effort. Returns the catalog's own model id plus the
-    /// normalized effort pin, so callers store the resolved id rather
-    /// than the caller's alias.
+    /// resolved effort pin, so callers store the resolved id rather
+    /// than the caller's alias. An unnamed effort still resolves inside
+    /// the model's ladder — a packed alias (`swe-2-high`) carries its
+    /// own rung, then the model's declared default or first option —
+    /// so a reconfigure never leaves the provider thread's stale effort
+    /// standing; a model without a ladder keeps the provider default.
     pub(super) fn validate_employee_model(
         &self,
         provider: ProviderKind,
@@ -1841,25 +1845,37 @@ impl WakuBackend {
                         provider.display_name()
                     )
                 })?;
-        let effort = reasoning_effort
-            .map(|effort| {
-                if effort == "default" {
-                    Ok(None)
-                } else if selected
+        let effort = match reasoning_effort {
+            Some(effort) if effort != "default" => {
+                if !selected
                     .model
                     .reasoning_efforts
                     .iter()
                     .any(|option| option.id == effort)
                 {
-                    Ok(Some(effort))
-                } else {
-                    Err(anyhow!(
-                        "reasoning effort is not supported by model {model:?}"
-                    ))
+                    bail!("reasoning effort is not supported by model {model:?}");
                 }
-            })
-            .transpose()?
-            .flatten();
+                Some(effort)
+            }
+            None => waku_protocol::model_catalog::packed_suffix_reasoning_effort(
+                &selected.suffix,
+                &selected.model.reasoning_efforts,
+            ),
+            Some(_) => None,
+        }
+        .or_else(|| {
+            selected
+                .model
+                .default_reasoning_effort
+                .clone()
+                .or_else(|| {
+                    selected
+                        .model
+                        .reasoning_efforts
+                        .first()
+                        .map(|option| option.id.clone())
+                })
+        });
         Ok((selected.model.id.clone(), effort))
     }
 

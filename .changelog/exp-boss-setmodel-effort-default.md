@@ -1,0 +1,1 @@
+- Fixed `boss employee model` leaving a switched employee on its old reasoning effort — switching provider or model without naming an effort now lands on the new model's catalog default (a rung packed into the model id is honored too) instead of silently keeping the provider thread's stale level.

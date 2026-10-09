@@ -8069,6 +8069,267 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// `setModel` with no named effort still lands a concrete rung: a packed
+/// model id (`<base>-<effort>`) carries its own, a bare id falls to the
+/// catalog's declared default — provider turns only omit `effort` when the
+/// selection carries none, which is how a switched employee kept running
+/// its old reasoning level. A model with no ladder keeps the provider
+/// default.
+#[test]
+fn setmodel_resolves_the_selections_effective_effort() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-effort-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let catalog = |provider| {
+        crate::model_catalog::cached_models(provider)
+            .unwrap_or_else(|| crate::model_catalog::fallback_models(provider))
+    };
+    let codex_ladder = catalog(ProviderKind::Codex)
+        .into_iter()
+        .find(|model| !model.reasoning_efforts.is_empty())
+        .expect("the codex catalog names a model with an effort ladder");
+    set_model_policy(&backend, ProviderKind::Codex, &codex_ladder.id, 1, 1);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, &codex_ladder.id);
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "effort",
+                ProviderKind::Codex,
+                Some(&codex_ladder.id),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let control = |provider, model: &str, effort: Option<&str>| {
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetModel {
+                        provider,
+                        model: model.to_owned(),
+                        reasoning_effort: effort.map(str::to_owned),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        employee.ticket.clone().expect("a queued ticket")
+    };
+
+    // Cross-provider without a named effort: the ticket lands on the
+    // target model's declared default, never the rung being left behind.
+    let claude_ladder = catalog(ProviderKind::Claude)
+        .into_iter()
+        .find(|model| model.default_reasoning_effort.is_some())
+        .expect("the claude catalog names a model with a default effort");
+    set_model_policy(&backend, ProviderKind::Claude, &claude_ladder.id, 1, 1);
+    let _held_claude = hold_model_slot(&backend, ProviderKind::Claude, &claude_ladder.id);
+    let ticket = control(ProviderKind::Claude, &claude_ladder.id, None);
+    assert_eq!(ticket.provider, ProviderKind::Claude);
+    assert_eq!(ticket.model, claude_ladder.id);
+    assert_eq!(
+        ticket.reasoning_effort.as_deref(),
+        claude_ladder.default_reasoning_effort.as_deref(),
+        "an unnamed effort resolves to the target model's catalog default"
+    );
+
+    // A packed alias carries its own rung and stores the base id.
+    let rung = codex_ladder
+        .reasoning_efforts
+        .iter()
+        .map(|option| option.id.clone())
+        .find(|id| Some(id) != codex_ladder.default_reasoning_effort.as_ref())
+        .or_else(|| codex_ladder.reasoning_efforts.first().map(|o| o.id.clone()))
+        .expect("the ladder names a rung");
+    let packed = format!("{}-{rung}", codex_ladder.id);
+    let ticket = control(ProviderKind::Codex, &packed, None);
+    assert_eq!(ticket.model, codex_ladder.id, "the packed id stores its base");
+    assert_eq!(
+        ticket.reasoning_effort.as_deref(),
+        Some(rung.as_str()),
+        "the packed id's effort suffix is not dropped"
+    );
+
+    // An explicit pin still wins, and a model without a ladder keeps the
+    // provider default rather than inventing a rung.
+    let ticket = control(ProviderKind::Codex, &codex_ladder.id, Some(&rung));
+    assert_eq!(ticket.reasoning_effort.as_deref(), Some(rung.as_str()));
+    if let Some(bare) = catalog(ProviderKind::Claude)
+        .into_iter()
+        .find(|model| model.reasoning_efforts.is_empty())
+    {
+        set_model_policy(&backend, ProviderKind::Claude, &bare.id, 1, 1);
+        let _held_bare = hold_model_slot(&backend, ProviderKind::Claude, &bare.id);
+        let ticket = control(ProviderKind::Claude, &bare.id, None);
+        assert_eq!(
+            ticket.reasoning_effort, None,
+            "a model with no ladder keeps the provider default"
+        );
+    }
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A same-pair `setModel` with no named effort retunes the live runtime
+/// to the model's catalog default — the stale rung the thread kept before
+/// is exactly the one an omitted `effort` would have preserved.
+#[test]
+fn setmodel_retune_resets_to_the_models_default_effort() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    use waku_protocol::resources::{AdmissionClaim, ResourceSet};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-reset-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let catalog = crate::model_catalog::cached_models(ProviderKind::Codex)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(ProviderKind::Codex));
+    let model = catalog
+        .iter()
+        .find(|model| model.default_reasoning_effort.is_some())
+        .expect("the codex catalog names a model with a default effort")
+        .clone();
+    let default_effort = model.default_reasoning_effort.clone().unwrap();
+    let stale = model
+        .reasoning_efforts
+        .iter()
+        .map(|option| option.id.clone())
+        .find(|id| id != &default_effort)
+        .expect("the ladder names a non-default rung");
+    set_model_policy(&backend, ProviderKind::Codex, &model.id, 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, &model.id);
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "reset",
+                ProviderKind::Codex,
+                Some(&model.id),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+    let attempt = backend
+        .resource_broker()
+        .unwrap()
+        .try_admission(
+            session_id,
+            reservation,
+            ResourceSet::default(),
+            "summon dispatch".into(),
+            AdmissionClaim {
+                daemon: backend.boss.document().identity.id,
+                provider: ProviderKind::Codex.id().into(),
+                model: model.id.clone(),
+                live_limit: 1,
+                hard_cap: 2,
+                allow_burst: true,
+            },
+        )
+        .unwrap();
+    assert!(attempt.granted);
+    assert!(
+        backend
+            .boss
+            .mark_dispatching(session_id, 1, Some(reservation))
+            .unwrap()
+    );
+    assert!(backend.boss.mark_working(session_id, 1).unwrap());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("Work on reset");
+        // The stale rung a resumed provider thread would still hold.
+        session.reasoning_effort = Some(stale.clone());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    let capture = Arc::new(CaptureDriver {
+        applies_options: true,
+        ..Default::default()
+    });
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider: ProviderKind::Codex,
+                    model: model.id.clone(),
+                    reasoning_effort: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+
+    {
+        let options = capture.options.lock();
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].model.as_deref(), Some(model.id.as_str()));
+        assert_eq!(
+            options[0].reasoning_effort.as_deref(),
+            Some(default_effort.as_str()),
+            "the retune must send a concrete effort, not leave the stale one"
+        );
+    }
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    assert_eq!(
+        employee
+            .ticket
+            .as_ref()
+            .and_then(|ticket| ticket.reasoning_effort.as_deref()),
+        Some(default_effort.as_str())
+    );
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    assert_eq!(
+        session.reasoning_effort.as_deref(),
+        Some(default_effort.as_str())
+    );
+    drop(state);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// An employee's `prompt` to its supervisor is the report channel — it
 /// delivers with sender attribution. A prompt to any other task fails
 /// with the actionable channel names instead of a bare roster refusal.
