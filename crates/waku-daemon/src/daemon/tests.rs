@@ -8763,6 +8763,61 @@ fn a_resume_drains_parked_prompts_first() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The app's Resume button issues the op as the human — no boss session
+/// behind the call. A supervisor stop ends only the admission it cut, so
+/// the employee re-admits in place with its cancelled mark cleared.
+#[test]
+fn a_human_resume_requeues_a_stopped_employee() {
+    use waku_protocol::boss::{
+        BossOperation, EmployeeControl, EmployeeLifecycle, ExpiryCause,
+    };
+    let root = std::env::temp_dir().join(format!("boss-resume-stopped-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
+    // Pin a model so the synthesized ticket queues under a closed pool —
+    // the requeue's adjustments stay readable instead of dispatching.
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.model = Some("gpt-5.5".into());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .handle_boss_operation(
+            Some(supervisor),
+            BossOperation::Control {
+                session_id: employee_id,
+                action: EmployeeControl::Stop,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let stopped = backend.boss.employee(employee_id).unwrap();
+    assert!(stopped.expired && stopped.cancelled);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Resume {
+                session_id: employee_id,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(!employee.expired && !employee.cancelled);
+    let ticket = employee.ticket.as_ref().unwrap();
+    assert_eq!(ticket.resume_count, 1);
+    assert_eq!(ticket.last_resumed_cause, Some(ExpiryCause::Stopped));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A parked prompt is unfinished work, not a finish: a `TurnFinished`
 /// arriving with the queue still full drains the entry into a fresh
 /// prompt and the employee stays live. Only the next finish — queue

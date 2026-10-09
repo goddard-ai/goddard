@@ -3191,6 +3191,10 @@ boss.employees_empty_active: 没有活跃的员工
 boss.employees_empty_active_hint: 老板正在运行和排队的工作显示在这里。
 boss.employees_empty_history: 没有已结束的员工
 boss.employees_empty_history_hint: 已完成、失败和被取消的工作结束后会移到这里。
+boss.resume_employee: 恢复
+boss.resume_employee_hint: 从中断处重启此员工——保留其对话记录和工作区。
+boss.resume_unavailable: 此员工无法恢复。
+boss.resume_queued: 恢复已加入队列——员工将从中断处继续。
 boss.capacity: 容量
 boss.capacity_models: 模型容量
 boss.capacity_none: 未设置模型上限

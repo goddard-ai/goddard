@@ -6510,6 +6510,14 @@ boss.employees_empty_history:
   en: No finished employees
 boss.employees_empty_history_hint:
   en: Finished, failed, and cancelled work moves here when it ends.
+boss.resume_employee:
+  en: Resume
+boss.resume_employee_hint:
+  en: Restart this employee where it left off — its transcript and workspace carry over.
+boss.resume_unavailable:
+  en: This employee can't be resumed.
+boss.resume_queued:
+  en: Resume queued — the employee picks up where it left off.
 boss.capacity:
   en: Capacity
 boss.capacity_models:

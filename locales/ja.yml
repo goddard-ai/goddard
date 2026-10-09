@@ -3240,6 +3240,10 @@ boss.employees_empty_active: 実行中の従業員はいません
 boss.employees_empty_active_hint: ボスが実行中・キュー待ちの作業がここに表示されます。
 boss.employees_empty_history: 終了した従業員はいません
 boss.employees_empty_history_hint: 完了・失敗・キャンセルされた作業は終了時にここへ移動します。
+boss.resume_employee: 再開
+boss.resume_employee_hint: 中断したところから従業員を再起動します — トランスクリプトとワークスペースを引き継ぎます。
+boss.resume_unavailable: この従業員は再開できません。
+boss.resume_queued: 再開をキューに入れました — 従業員は中断したところから続きます。
 boss.capacity: 容量
 boss.capacity_models: モデル容量
 boss.capacity_none: モデル上限は設定されていません

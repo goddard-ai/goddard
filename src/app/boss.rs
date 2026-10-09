@@ -824,6 +824,9 @@ pub(super) enum BossReply {
     /// The human's pick of the canonical Employee base — reports its own
     /// toast rather than the instruction-update one.
     BaseChoice,
+    /// A manual `resume` dispatch — confirms the re-admission and pulls
+    /// the fresh roster rather than reusing `Saved`'s editor bookkeeping.
+    Resume,
 }
 
 /// Expansion state for one canonical default's instructions card.
@@ -2043,6 +2046,13 @@ impl Waku {
                         if matches!(reply, BossReply::BaseChoice) {
                             this.show_toast(tr!("boss.base_choice_saved"));
                         }
+                        if matches!(reply, BossReply::Resume) {
+                            this.show_success_toast(tr!("boss.resume_queued"));
+                            // The pushed revision lands the same refresh —
+                            // this pull just beats it so the control
+                            // disappears with the confirmation.
+                            this.refresh_boss_state_on(key, cx);
+                        }
                     }
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
                     Err(error) => {
@@ -2868,6 +2878,19 @@ impl Waku {
                     .child(SharedString::from(job_title.to_owned())),
             )
             .children(self.employee_assignment_popover(session_id, &theme, cx))
+            .children(
+                self.boss_employee_record(session_id)
+                    .and_then(|(key, employee)| {
+                        self.employee_resume_button(
+                            key,
+                            session_id,
+                            employee_resume_action(employee),
+                            "header",
+                            &theme,
+                            cx,
+                        )
+                    }),
+            )
             .into_any_element()
     }
 
@@ -5035,6 +5058,16 @@ impl Waku {
         };
         let status =
             employee.map(|employee| self.boss_employee_status_label(employee, session, &theme));
+        let resume = employee.and_then(|employee| {
+            self.employee_resume_button(
+                key,
+                id,
+                employee_resume_action(employee),
+                "row",
+                &theme,
+                cx,
+            )
+        });
         let stamp = employee.and_then(|employee| {
             if employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued {
                 employee.queued_at.or(employee.created_at)
@@ -5130,6 +5163,7 @@ impl Waku {
                         .child(label),
                 )
             })
+            .when_some(resume, |row, button| row.child(button))
             .when_some(stamp, |row, stamp| {
                 row.child(
                     div()
@@ -5213,6 +5247,102 @@ impl Waku {
                 }
             }
         }
+    }
+
+    /// The roster record a Resume targets — live-roster employees and
+    /// the retired entries their transcripts still resolve to, paired
+    /// with the daemon that owns the record.
+    fn boss_employee_record(
+        &self,
+        session_id: Uuid,
+    ) -> Option<(DaemonKey, &waku_protocol::boss::BossEmployee)> {
+        self.boss_ui.states.iter().find_map(|(key, state)| {
+            state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|employee| employee.session_id == session_id)
+                .map(|employee| (*key, employee))
+        })
+    }
+
+    /// The Resume control's dispatch — the same `resume` operation the
+    /// boss issues, fired by the human directly. While another boss
+    /// request holds the pipe `boss_request` drops non-Open operations,
+    /// so the click reports the wait instead of going silent.
+    fn resume_boss_employee(&mut self, key: DaemonKey, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.boss_ui.pending {
+            self.show_toast(tr!("boss.loading"));
+            cx.notify();
+            return;
+        }
+        self.boss_request(
+            key,
+            BossOperation::Resume { session_id },
+            BossReply::Resume,
+            cx,
+        );
+    }
+
+    /// The Resume chip an expired employee's surfaces carry — its chat
+    /// page's header and its Employees-list row. `slot` disambiguates
+    /// the element id when both render at once. A disabled control stays
+    /// in the tab order so the reason is still reachable.
+    fn employee_resume_button(
+        &self,
+        key: DaemonKey,
+        session_id: Uuid,
+        action: EmployeeResume,
+        slot: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if action == EmployeeResume::Hidden {
+            return None;
+        }
+        let enabled = action == EmployeeResume::Enabled;
+        let label = tr!("boss.resume_employee");
+        let button = div()
+            .id(SharedString::from(format!(
+                "employee-resume-{slot}-{session_id}"
+            )))
+            .tab_index(0)
+            .h(px(22.0))
+            .px(px(7.0))
+            .rounded(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .bg(theme.overlay)
+            .text_size(sp(12.5))
+            .aria_label(label.clone())
+            .tooltip(Tooltip::text(if enabled {
+                tr!("boss.resume_employee_hint")
+            } else {
+                tr!("boss.resume_unavailable")
+            }))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            // The header's drag region and the list row's activation both
+            // answer the same press without this guard.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(icon("icons/play.svg", 11.0, theme.text_tertiary))
+            .child(label);
+        let button = if enabled {
+            button
+                .cursor_pointer()
+                .text_color(theme.text_secondary)
+                .hover(|style| style.bg(theme.overlay_strong))
+                .on_activation(cx, move |this, _, cx| {
+                    this.resume_boss_employee(key, session_id, cx)
+                })
+        } else {
+            button
+                .cursor_default()
+                .text_color(theme.text_tertiary)
+                .opacity(0.55)
+        };
+        Some(button.into_any_element())
     }
 
     /// The ellipsis popover an employee's top bar carries after its job
@@ -8167,6 +8297,33 @@ fn boss_queue_ranks(state: &BossState) -> HashMap<Uuid, usize> {
         .collect()
 }
 
+/// Whether an employee record offers the manual Resume action: the
+/// daemon's `resume` op re-admits an expired record in place with its
+/// transcript, workspace, and provider cursor intact. A live record
+/// takes a prompt instead, so the action stays hidden until expiry; an
+/// expiry flagged unresumable renders disabled rather than absent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EmployeeResume {
+    Hidden,
+    Enabled,
+    Disabled,
+}
+
+fn employee_resume_action(employee: &waku_protocol::boss::BossEmployee) -> EmployeeResume {
+    if !employee.expired {
+        return EmployeeResume::Hidden;
+    }
+    if employee
+        .expiry
+        .as_ref()
+        .is_some_and(|expiry| !expiry.resumable)
+    {
+        EmployeeResume::Disabled
+    } else {
+        EmployeeResume::Enabled
+    }
+}
+
 /// A queued employee's wait reason for the sidebar row tooltip and the
 /// Goals Pending row — the ticket's admission blocker when the scheduler
 /// recorded one, else a neutral admission label. `rank` is the employee's
@@ -8803,6 +8960,34 @@ mod tests {
             item_id: None,
             assignment: None,
         }
+    }
+
+    #[test]
+    fn resume_action_keys_off_expiry_and_the_wire_resumable_flag() {
+        use waku_protocol::boss::{EmployeeExpiry, EmployeeLifecycle, ExpiryCause};
+        // A live record takes a prompt, not a revive — no control at all.
+        let mut employee = boss_employee(Some(100));
+        assert_eq!(employee_resume_action(&employee), EmployeeResume::Hidden);
+
+        // A supervisor stop expires the record; every cause offers the
+        // action, stopped included.
+        employee.set_lifecycle(EmployeeLifecycle::Expired, 200);
+        employee.expiry = Some(EmployeeExpiry {
+            cause: ExpiryCause::Stopped,
+            resumable: true,
+            parked_prompts: 0,
+            pending_question: None,
+        });
+        assert_eq!(employee_resume_action(&employee), EmployeeResume::Enabled);
+
+        // An expiry flagged unresumable keeps the control visible but
+        // disabled rather than silently absent.
+        employee.expiry.as_mut().unwrap().resumable = false;
+        assert_eq!(employee_resume_action(&employee), EmployeeResume::Disabled);
+
+        // A record too old to carry an expiry still offers the action.
+        employee.expiry = None;
+        assert_eq!(employee_resume_action(&employee), EmployeeResume::Enabled);
     }
 
     #[test]

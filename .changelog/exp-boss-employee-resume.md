@@ -1,0 +1,1 @@
+- Resume a stopped or interrupted employee without asking the boss — the Resume button in the employee's header and on its Boss → Employees → History row revives it in place with the same transcript and workspace.
