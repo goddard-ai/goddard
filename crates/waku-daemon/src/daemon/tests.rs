@@ -5929,6 +5929,48 @@ fn boss_summon_adopts_a_finished_employees_worktree() {
     assert!(error.contains("worktree was adopted"), "{error}");
 }
 
+/// The same refusal reaches every prompt entry point — `agent prompt`
+/// is the one the app and `goddard-agent prompt` share: an adopted
+/// employee cannot resurrect, the error names why, and the record
+/// stays expired.
+#[test]
+fn an_agent_prompt_to_an_adopted_employee_refuses() {
+    let fixture = AdoptFixture::new("refuse-prompt");
+    let mut settings = fixture.backend.settings.get();
+    settings.agent_tools_enabled = true;
+    fixture.backend.settings.replace(settings).unwrap();
+
+    assert!(
+        fixture
+            .summon(Some(AgentWorkspace::Worktree), None)
+            .is_err()
+    );
+    let (dead_id, _) = fixture.session_workspace(0);
+    let worktree_path = fixture.workspace_path(0);
+    assert!(
+        fixture
+            .summon(Some(AgentWorkspace::Adopt), Some(worktree_path))
+            .is_err()
+    );
+    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired);
+
+    let error = fixture
+        .backend
+        .agent_prompt(
+            None,
+            Some(dead_id),
+            None,
+            None,
+            "keep going".into(),
+            AgentPromptDelivery::Interrupt,
+            EventSink::detached(),
+        )
+        .unwrap_err();
+    let text = format!("{error:#}");
+    assert!(text.contains("worktree was adopted"), "{text}");
+    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired);
+}
+
 /// Adoption refuses worktrees it cannot safely take: a live owner's,
 /// a checkout that is not a daemon worktree of the project repo, a
 /// path nobody owns, and a summon missing its field pair.
@@ -8546,6 +8588,70 @@ fn an_expired_employees_prompt_requeues_for_admission() {
     // The session already ran — the revive prompt replays as a turn,
     // not as a fresh envelope.
     assert_eq!(ticket.pending_prompts, vec!["try again".to_owned()]);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// `goddard-agent prompt` — a human's `agent prompt` request, not a
+/// roster `control` — aimed at an expired employee takes the same
+/// re-entry path: requeue for admission, resume the parked transcript.
+/// It must not reach a provider launch, which the expired record
+/// refuses.
+#[test]
+fn an_agent_prompt_to_an_expired_employee_requeues_it() {
+    use waku_protocol::boss::EmployeeLifecycle;
+    let root = std::env::temp_dir().join(format!("agent-revive-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+
+    // The first summon grants and fails at launch — expired record.
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "revive",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    let session_id = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id != boss)
+        .unwrap()
+        .id;
+    assert!(backend.boss.employee(session_id).unwrap().expired);
+
+    // Close the pool, then prompt the expired employee — it queues as
+    // generation two with the prompt parked on the ticket.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .agent_prompt(
+            None,
+            Some(session_id),
+            None,
+            None,
+            "keep going".into(),
+            AgentPromptDelivery::Interrupt,
+            EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(!employee.expired);
+    assert_eq!(
+        employee.ticket.as_ref().unwrap().pending_prompts,
+        vec!["keep going".to_owned()]
+    );
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

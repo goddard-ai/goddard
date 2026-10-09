@@ -14,8 +14,8 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    append_queued_steer_preview, merge_remote_session_catalog, session_accepts_immediate_steer,
-    session_has_active_provider_turn,
+    append_queued_steer_preview, expired_employee_operation, merge_remote_session_catalog,
+    session_accepts_immediate_steer, session_has_active_provider_turn,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -4746,6 +4746,40 @@ fn continue_state_tracks_the_queued_resume() {
     nudge.hidden = true;
     session.queued_messages.push(nudge);
     assert_eq!(continue_state(&session), ContinueState::Armed);
+}
+
+/// A submission aimed at an expired employee never reaches the provider
+/// launch path — it becomes the roster's re-entry op instead: a typed
+/// prompt (a steer's too — there is no live turn to fold into) parks on
+/// the ticket as a `control` prompt, a hidden nudge rides `resume` so the
+/// ticket keeps the expiry's cause, and an empty prompt is no op at all.
+#[test]
+fn expired_employee_submissions_map_to_roster_operations() {
+    use waku_client::boss::{BossOperation, EmployeeControl};
+
+    let session_id = Uuid::new_v4();
+    match expired_employee_operation(session_id, &ComposerSubmission::plain("  keep going  ".into()))
+    {
+        Some(BossOperation::Control {
+            session_id: target,
+            action:
+                EmployeeControl::Prompt {
+                    prompt, delivery, ..
+                },
+        }) => {
+            assert_eq!(target, session_id);
+            assert_eq!(prompt, "keep going");
+            assert!(delivery.is_none());
+        }
+        other => panic!("a typed prompt becomes a control prompt: {other:?}"),
+    }
+    assert!(matches!(
+        expired_employee_operation(session_id, &ComposerSubmission::hidden_continue()),
+        Some(BossOperation::Resume { session_id: id }) if id == session_id
+    ));
+    assert!(
+        expired_employee_operation(session_id, &ComposerSubmission::plain("   ".into())).is_none()
+    );
 }
 
 /// The approval gate watches both places a prompt can sit: parked in the

@@ -73,6 +73,30 @@ pub(super) fn session_resume_eligible(session: &AgentSession) -> bool {
             .is_some_and(|turn| turn.status == TurnStatus::Running && turn.provider_turn_started)
 }
 
+/// The roster operation a submission to an expired employee becomes: a
+/// hidden nudge resumes the ticket on the cause it answers, a typed
+/// message parks as the dispatch envelope's next prompt. An empty prompt
+/// is no operation at all — the daemon would refuse it anyway.
+pub(super) fn expired_employee_operation(
+    session_id: Uuid,
+    submission: &ComposerSubmission,
+) -> Option<waku_client::boss::BossOperation> {
+    if submission.hidden {
+        return Some(waku_client::boss::BossOperation::Resume { session_id });
+    }
+    let prompt = submission.prompt.trim().to_owned();
+    if prompt.is_empty() {
+        return None;
+    }
+    Some(waku_client::boss::BossOperation::Control {
+        session_id,
+        action: waku_client::boss::EmployeeControl::Prompt {
+            prompt,
+            delivery: None,
+        },
+    })
+}
+
 fn workspace_ack(
     workspace: &waku_client::WorkspaceClient,
     operation: waku_client::WorkspaceOperation,
@@ -6635,6 +6659,13 @@ impl Waku {
             self.restore_composer_submission(session_id, submission, cx);
             return;
         };
+        // A steer aimed at an expired employee has no live turn to fold
+        // into — its record may still read busy while the roster already
+        // settled it. Re-enter admission the same way a prompt does.
+        if self.boss_ui.expired.contains(&session.id) {
+            self.submit_expired_employee_submission(session.id, submission, cx);
+            return;
+        }
         if !session.is_busy() {
             self.submit_composer_submission_to(session.id, submission, cx);
             return;
@@ -6671,6 +6702,76 @@ impl Waku {
                 .runtimes
                 .get(&session.id)
                 .is_some_and(|runtime| runtime.driver.supports_steer())
+    }
+
+    /// A prompt, steer, or nudge aimed at an expired employee takes the
+    /// roster's re-entry path rather than a provider launch: the ticket
+    /// re-enters admission and resumes the same transcript, workspace, and
+    /// config once a slot frees. A hidden nudge rides `resume` so the
+    /// ticket records the cause it answers; a typed message parks as the
+    /// envelope's next prompt. A record that cannot resume — an adopted
+    /// worktree, a reused name — refuses with its own reason: the draft
+    /// returns to the composer and the toast carries the refusal.
+    fn submit_expired_employee_submission(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(operation) = expired_employee_operation(session_id, &submission) else {
+            return;
+        };
+        let Some(client) = self
+            .daemon_for_session(session_id)
+            .map(|daemon| daemon.client())
+        else {
+            self.restore_composer_submission(session_id, submission, cx);
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss { operation },
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                match result {
+                    Ok(_) => {
+                        let name = waku
+                            .boss_ui
+                            .identities
+                            .get(&session_id)
+                            .map(|identity| identity.name.clone())
+                            .or_else(|| {
+                                waku.state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == session_id)
+                                    .map(|session| session.title.clone())
+                            })
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| tr!("boss.trigger_employee"));
+                        waku.show_success_toast(tr!(
+                            "boss.employee_resume_queued",
+                            name = name
+                        ));
+                    }
+                    Err(error) => {
+                        waku.restore_composer_submission(session_id, submission, cx);
+                        waku.show_toast(format!("{error:#}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Resolve presentation-preserving composer syntax immediately before a
@@ -7058,6 +7159,14 @@ impl Waku {
         else {
             return;
         };
+        // An expired employee owns no runtime to start — a prompt or steer
+        // re-enters admission instead and resumes the same transcript once
+        // a slot frees. Sending it through the provider launch path only
+        // surfaces the roster's refusal as a failed start.
+        if self.boss_ui.expired.contains(&session_id) {
+            self.submit_expired_employee_submission(session_id, submission, cx);
+            return;
+        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);

@@ -1,0 +1,1 @@
+- Fixed prompting or steering a finished employee failing with "Could not start the agent" — the message now re-enters the employee in the summon queue and resumes its existing transcript and workspace once a slot opens.

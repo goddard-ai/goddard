@@ -6360,6 +6360,8 @@ boss.loading:
   en: Loading…
 boss.employee_finished:
   en: Finished
+boss.employee_resume_queued:
+  en: "%{name} is queued to resume — the message delivers when it starts"
 boss.finished_now:
   en: "%{name} finished just now"
 boss.finished_ago:
