@@ -3955,6 +3955,7 @@ impl BossService {
             | BossOperation::Resume { .. }
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
+            | BossOperation::HistorySearch { .. }
             | BossOperation::Speak { .. }
             | BossOperation::SetResourcePolicy { .. }
             | BossOperation::SetProjectSubmissions { .. }

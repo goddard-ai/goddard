@@ -1880,6 +1880,9 @@ impl SettingsNavigation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionActivationTransition {
     Visit,
+    /// A read-only look at a retained record — history search hits open
+    /// archived sources without restoring them to the active list.
+    Inspect,
     /// The activation serves another location's hop — a deliverable page's
     /// restore re-lands its boss chat underneath — so it records nothing.
     Silent,
@@ -3760,6 +3763,9 @@ pub struct Waku {
     skills_search: Entity<TextInput>,
     /// Filename query over the Boss Brain Memory documents tree.
     boss_memory_search: Entity<TextInput>,
+    /// The Employees → History lookup field — topic or person name over
+    /// retained task, employee, Boss-chat and planning records.
+    boss_history_search: Entity<TextInput>,
     /// Virtualized list over the filtered skill rows.
     skills_list_state: ListState,
     skills_scrollbar: Rc<ScrollbarState>,
@@ -5647,6 +5653,13 @@ impl Waku {
                 .accessibility_label(tr!("boss.search_file_names"))
                 .placeholder(tr!("boss.search_file_names"))
         });
+        let boss_history_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("boss.history_search"))
+                .placeholder(tr!("boss.history_search_placeholder"))
+        });
         let drafts_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -6749,6 +6762,22 @@ impl Waku {
                 },
             )
             .detach();
+            cx.subscribe(
+                &boss_history_search,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.submit_boss_history_search(cx),
+                    InputEvent::Edited => {
+                        // Keep the mirror current — row building reads it
+                        // without leasing the input.
+                        this.boss_ui.history_query =
+                            this.boss_history_search.read(cx).content().to_owned();
+                        this.sync_boss_page_rows();
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
             cx.subscribe(&drafts_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -7564,6 +7593,7 @@ impl Waku {
                 skills_scanned_at: None,
                 skills_search,
                 boss_memory_search,
+                boss_history_search,
                 skills_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 skills_scrollbar: ScrollbarState::new(),
                 skills_rows: RefCell::new(Vec::new()),

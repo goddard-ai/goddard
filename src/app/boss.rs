@@ -223,6 +223,102 @@ enum BossEmployeesView {
     History,
 }
 
+/// The History lookup's date filter presets — bounds resolve at request
+/// time so "last 30 days" means what it says when the search runs.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum HistoryDateRange {
+    #[default]
+    Any,
+    Last7,
+    Last30,
+    Last90,
+    Before90,
+}
+
+impl HistoryDateRange {
+    const DAY: u64 = 86_400;
+
+    /// `(after, before)` message-date bounds for the daemon, in unix
+    /// seconds.
+    fn bounds(self, now: u64) -> (Option<u64>, Option<u64>) {
+        match self {
+            Self::Any => (None, None),
+            Self::Last7 => (Some(now.saturating_sub(7 * Self::DAY)), None),
+            Self::Last30 => (Some(now.saturating_sub(30 * Self::DAY)), None),
+            Self::Last90 => (Some(now.saturating_sub(90 * Self::DAY)), None),
+            Self::Before90 => (None, Some(now.saturating_sub(90 * Self::DAY))),
+        }
+    }
+}
+
+/// One host's Employees → History lookup — the filter picks, accumulated
+/// hits, and the coverage the last reply reported. Kept per host so
+/// leaving a source's transcript and returning restores the same list
+/// under the same query.
+#[derive(Default)]
+pub(super) struct BossHistorySearch {
+    /// Project filter for the next request — the daemon-side project id.
+    pub project: Option<Uuid>,
+    /// Source-kind filter for the next request.
+    pub kind: Option<waku_protocol::model::HistorySourceKind>,
+    /// Date bounds for the next request.
+    pub range: HistoryDateRange,
+    /// Hits so far — a fresh lookup replaces them, a continuation appends.
+    pub hits: Vec<waku_protocol::model::AgentHistorySearchHit>,
+    /// What the last reply scanned and capped — `None` until one lands.
+    pub coverage: Option<waku_protocol::model::AgentHistorySearchCoverage>,
+    /// A request is in flight or parked for the current selections.
+    pub searching: bool,
+    /// The in-flight request's page offset — `0` replaces the hits, a
+    /// "show more" continuation appends to them.
+    pub pending_offset: Option<usize>,
+    /// The last failure — prior hits stay on screen beside it.
+    pub error: Option<String>,
+}
+
+/// Whether the lookup owns the list — field text or any filter pick
+/// engages it; empty-on-defaults keeps the finished-roster list.
+fn boss_history_search_active(query: &str, search: Option<&BossHistorySearch>) -> bool {
+    !query.trim().is_empty()
+        || search.is_some_and(|search| {
+            search.project.is_some()
+                || search.kind.is_some()
+                || search.range != HistoryDateRange::Any
+        })
+}
+
+/// The lookup's list rows — one per accumulated hit, then the coverage
+/// footer while the search has state worth reporting.
+fn boss_history_rows(search: &BossHistorySearch) -> Vec<BossItem> {
+    let mut rows: Vec<BossItem> = (0..search.hits.len()).map(BossItem::HistoryHit).collect();
+    if search.searching || search.error.is_some() || search.coverage.is_some() {
+        rows.push(BossItem::HistoryFooter);
+    }
+    rows
+}
+
+/// Append a continuation page to the accumulated hits. A record re-ranked
+/// between pages can repeat — dedupe on the excerpted message.
+fn merge_history_page(
+    hits: &mut Vec<waku_protocol::model::AgentHistorySearchHit>,
+    page: Vec<waku_protocol::model::AgentHistorySearchHit>,
+) {
+    let seen: HashSet<(Uuid, Uuid)> = hits
+        .iter()
+        .map(|hit| (hit.task_id, hit.message_id))
+        .collect();
+    hits.extend(
+        page.into_iter()
+            .filter(|hit| !seen.contains(&(hit.task_id, hit.message_id))),
+    );
+}
+
+/// One hit row's element id — task plus excerpted message keeps entries
+/// distinct when two passages land from the same record.
+fn boss_history_hit_id(task_id: Uuid, message_id: Uuid) -> SharedString {
+    SharedString::from(format!("boss-history-hit-{task_id}-{message_id}"))
+}
+
 /// The Plans section's document filter. Approved plans keep their record
 /// after the planning session archives; an archived session on an
 /// unfinished draft is what Archived means here.
@@ -418,6 +514,16 @@ pub(super) struct BossUi {
     /// parks the operation here; the next request completion re-issues it so
     /// the daemon still sees the open. Last click wins.
     queued_open: Option<(DaemonKey, BossOperation)>,
+    /// A `HistorySearch` parked while another request held the pipe — a
+    /// refinement submitted mid-flight replaces the park rather than
+    /// dropping silently. Last submission wins.
+    queued_history_search: Option<(DaemonKey, BossOperation)>,
+    /// The Employees → History lookup state per host — filters, hits,
+    /// coverage, and the last error. Absent means never searched.
+    pub(super) history_search: HashMap<DaemonKey, BossHistorySearch>,
+    /// The `boss_history_search` field's current text, mirrored on Edited
+    /// so row building never touches the input entity.
+    pub(super) history_query: String,
     list: ListState,
     scrollbar: Rc<ScrollbarState>,
     rows: Vec<BossItem>,
@@ -514,6 +620,9 @@ impl Default for BossUi {
             pending_reply: None,
             plan_finalizing: HashSet::new(),
             queued_open: None,
+            queued_history_search: None,
+            history_search: HashMap::new(),
+            history_query: String::new(),
             list: ListState::new(0, ListAlignment::Top, px(640.0)),
             scrollbar: ScrollbarState::new(),
             rows: Vec::new(),
@@ -708,6 +817,12 @@ enum BossItem {
     Plan(Uuid),
     /// A `BossState.deliverables` record — the library rows.
     Deliverable(Uuid),
+    /// A History lookup hit — the index into the host's accumulated
+    /// `BossHistorySearch::hits`.
+    HistoryHit(usize),
+    /// The History lookup's coverage row — scope, caveats, and the
+    /// continuation affordance, drawn after the hits.
+    HistoryFooter,
 }
 
 fn memory_tree_rows(
@@ -827,6 +942,9 @@ pub(super) enum BossReply {
     /// A manual `resume` dispatch — confirms the re-admission and pulls
     /// the fresh roster rather than reusing `Saved`'s editor bookkeeping.
     Resume,
+    /// An Employees → History lookup — the reply merges into the host's
+    /// `BossHistorySearch` instead of the roster list.
+    HistorySearch,
 }
 
 /// Expansion state for one canonical default's instructions card.
@@ -1396,6 +1514,12 @@ impl Waku {
                     .copied()
                     .unwrap_or_default()
                     == BossEmployeesView::History;
+                // An active lookup swaps the roster list for hit rows and
+                // the coverage footer; an empty field with every filter
+                // unset keeps the finished-roster list.
+                if history && self.boss_history_search_active(key) {
+                    return self.boss_history_rows(key);
+                }
                 let mut rows: Vec<BossItem> = self
                     .boss_ui
                     .recent
@@ -1548,7 +1672,7 @@ impl Waku {
         }
     }
 
-    fn sync_boss_page_rows(&mut self) {
+    pub(super) fn sync_boss_page_rows(&mut self) {
         let Some((key, tab)) = self.boss_ui.page else {
             return;
         };
@@ -1623,6 +1747,11 @@ impl Waku {
                 BossMemoryView::Records => self.ensure_boss_memory_buckets(key, cx),
             }
         }
+        if tab == BossTab::Employees {
+            // Land on History with a live query or filters and no result —
+            // arm the lookup rather than showing an empty hit list.
+            self.ensure_boss_history_search(key, cx);
+        }
         let focus = self
             .boss_ui
             .focus
@@ -1670,6 +1799,10 @@ impl Waku {
                 } else {
                     self.boss_ui.queued_open = Some((key, operation));
                 }
+            } else if let BossOperation::HistorySearch { .. } = operation {
+                // A lookup submitted mid-flight parks instead of dropping —
+                // the next completion re-issues the freshest one.
+                self.boss_ui.queued_history_search = Some((key, operation));
             }
             return;
         }
@@ -1724,6 +1857,13 @@ impl Waku {
                             .memory_records_error
                             .insert((key, bucket), unreachable);
                     }
+                }
+                BossReply::HistorySearch => {
+                    let search = self.boss_ui.history_search.entry(key).or_default();
+                    search.searching = false;
+                    search.pending_offset = None;
+                    search.error = Some(unreachable);
+                    self.sync_boss_page_rows();
                 }
                 _ => self.show_toast(tr!("boss.unreachable")),
             }
@@ -1984,6 +2124,22 @@ impl Waku {
                                 this.boss_ui.memory_error = None;
                                 this.boss_ui.preview_file = Some((key, path, content));
                             }
+                            BossResult::HistorySearch { result }
+                                if matches!(reply, BossReply::HistorySearch) =>
+                            {
+                                let search =
+                                    this.boss_ui.history_search.entry(key).or_default();
+                                let offset = search.pending_offset.take().unwrap_or(0);
+                                if offset == 0 {
+                                    search.hits = result.hits;
+                                } else {
+                                    merge_history_page(&mut search.hits, result.hits);
+                                }
+                                search.coverage = Some(result.coverage);
+                                search.searching = false;
+                                search.error = None;
+                                this.sync_boss_page_rows();
+                            }
                             BossResult::Memory {
                                 buckets, overview, ..
                             } => match reply {
@@ -2079,6 +2235,14 @@ impl Waku {
                                     .memory_records_error
                                     .insert((key, bucket.clone()), error);
                             }
+                        } else if reply == BossReply::HistorySearch {
+                            // Keep any hits already on screen — a failed
+                            // lookup reports beside them, not instead of.
+                            let search = this.boss_ui.history_search.entry(key).or_default();
+                            search.searching = false;
+                            search.pending_offset = None;
+                            search.error = Some(error);
+                            this.sync_boss_page_rows();
                         } else {
                             this.show_toast(tr!("boss.failed", error = error.clone()));
                         }
@@ -2093,11 +2257,169 @@ impl Waku {
                 {
                     this.boss_request(queued_key, operation, BossReply::Open, cx);
                 }
+                if !this.boss_ui.pending
+                    && let Some((queued_key, operation)) =
+                        this.boss_ui.queued_history_search.take()
+                {
+                    this.boss_request(queued_key, operation, BossReply::HistorySearch, cx);
+                }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+
+    /// Whether the Employees → History lookup is engaged — any field text
+    /// or a set project/kind/date filter swaps the finished roster for
+    /// the hit list.
+    fn boss_history_search_active(&self, key: DaemonKey) -> bool {
+        boss_history_search_active(
+            &self.boss_ui.history_query,
+            self.boss_ui.history_search.get(&key),
+        )
+    }
+
+    /// The lookup's list rows — one per accumulated hit, then the
+    /// coverage footer while the search has state worth reporting.
+    fn boss_history_rows(&self, key: DaemonKey) -> Vec<BossItem> {
+        let Some(search) = self.boss_ui.history_search.get(&key) else {
+            return Vec::new();
+        };
+        boss_history_rows(search)
+    }
+
+    /// Enter in the History field — search the host the page shows,
+    /// starting from the first page.
+    pub(super) fn submit_boss_history_search(&mut self, cx: &mut Context<Self>) {
+        let Some((key, BossTab::Employees)) = self.boss_ui.page else {
+            return;
+        };
+        self.run_boss_history_search(key, 0, cx);
+    }
+
+    /// Issue the History lookup with the field's current text and the
+    /// host's filter picks. `offset` continues a capped page; `0` starts
+    /// fresh and replaces the accumulated hits when the reply lands. The
+    /// request parks behind any in-flight boss operation rather than
+    /// dropping, so a refinement submitted mid-search still runs.
+    fn run_boss_history_search(&mut self, key: DaemonKey, offset: usize, cx: &mut Context<Self>) {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
+        let query = self
+            .boss_history_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let (project, kind, range) = {
+            let search = self.boss_ui.history_search.entry(key).or_default();
+            (search.project, search.kind, search.range)
+        };
+        if query.is_empty()
+            && project.is_none()
+            && kind.is_none()
+            && range == HistoryDateRange::Any
+        {
+            // Nothing to ask — the view falls back to the finished roster.
+            let search = self.boss_ui.history_search.entry(key).or_default();
+            search.searching = false;
+            search.pending_offset = None;
+            return;
+        }
+        let (after, before) = range.bounds(unix_time());
+        {
+            let search = self.boss_ui.history_search.entry(key).or_default();
+            search.searching = true;
+            search.error = None;
+            search.pending_offset = Some(offset);
+        }
+        self.boss_request(
+            key,
+            BossOperation::HistorySearch {
+                query,
+                project: project.map(|id| id.to_string()),
+                person: None,
+                after: after.map(|seconds| seconds.to_string()),
+                before: before.map(|seconds| seconds.to_string()),
+                kind,
+                limit: Some(20),
+                offset,
+            },
+            BossReply::HistorySearch,
+            cx,
+        );
+        self.sync_boss_page_rows();
+        cx.notify();
+    }
+
+    /// Arm the lookup when the History view opens with text or set
+    /// filters but nothing resolved yet — a host the user already
+    /// searched stays put.
+    fn ensure_boss_history_search(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        let history_view = self
+            .boss_ui
+            .employees_view
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+            == BossEmployeesView::History;
+        if !history_view || !self.boss_history_search_active(key) {
+            return;
+        }
+        let needs = self
+            .boss_ui
+            .history_search
+            .get(&key)
+            .is_none_or(|search| {
+                !search.searching && search.coverage.is_none() && search.error.is_none()
+            });
+        if needs {
+            self.run_boss_history_search(key, 0, cx);
+        }
+    }
+
+    /// The projects the host's retained work spans — the filter menu's
+    /// options in name order, the boss's own project included.
+    fn boss_history_project_options(&self, key: DaemonKey) -> Vec<(Uuid, String)> {
+        let mut options: Vec<(Uuid, String)> = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| self.daemons.project_owner(project.id) == key)
+            .map(|project| (project.id, project.display_name()))
+            .collect();
+        for project in self.boss_ui.projects.values() {
+            if options.iter().all(|(id, _)| *id != project.id) {
+                options.push((project.id, project.display_name()));
+            }
+        }
+        options.sort_by_cached_key(|(_, name)| name.to_lowercase());
+        options
+    }
+
+    /// Open a hit's record on its matched passage. `Inspect` keeps
+    /// archived sources archived — the lookup is read-only end to end —
+    /// and a record the task list no longer carries reports instead of
+    /// failing silently.
+    fn open_history_hit(&mut self, task_id: Uuid, message_id: Uuid, cx: &mut Context<Self>) {
+        if !self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == task_id)
+        {
+            self.show_toast(tr!("boss.history_source_missing"));
+            cx.notify();
+            return;
+        }
+        self.pending_transcript_match = Some(PendingTranscriptMatch {
+            session_id: task_id,
+            message_id,
+            query: String::new(),
+        });
+        self.request_session_activation(task_id, SessionActivationTransition::Inspect, cx);
     }
 
     /// Filename search reads every folder under `memory/` — kick off the
@@ -4850,10 +5172,17 @@ impl Waku {
             move |this, picked, _, cx| {
                 this.boss_ui.employees_view.insert(key, picked);
                 this.sync_boss_page_rows();
+                if picked == BossEmployeesView::History {
+                    this.ensure_boss_history_search(key, cx);
+                }
                 cx.notify();
             },
         );
-        let body: AnyElement = if self.boss_ui.rows.is_empty() {
+        let searching =
+            view == BossEmployeesView::History && self.boss_history_search_active(key);
+        let body: AnyElement = if searching {
+            self.render_boss_history_body(key, &theme, cx)
+        } else if self.boss_ui.rows.is_empty() {
             let (title, hint) = match view {
                 BossEmployeesView::Active => (
                     tr!("boss.employees_empty_active"),
@@ -4888,6 +5217,9 @@ impl Waku {
                     .child(div().flex_1())
                     .child(self.render_boss_capacity_menu(key, cx)),
             )
+            .when(view == BossEmployeesView::History, |page| {
+                page.child(self.render_boss_history_toolbar(key, cx))
+            })
             .child(
                 div()
                     .flex_1()
@@ -4901,6 +5233,507 @@ impl Waku {
                     .flex_col()
                     .child(body),
             )
+            .into_any_element()
+    }
+
+    /// The History lookup's controls — a topic-or-name field plus the
+    /// project, source-kind, and date filters — beside the plain scope
+    /// statement the plan asks the view to carry.
+    fn render_boss_history_toolbar(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let search = self.boss_ui.history_search.get(&key);
+        let project_filter = search.and_then(|search| search.project);
+        let kind_filter = search.and_then(|search| search.kind);
+        let range = search.map(|search| search.range).unwrap_or_default();
+
+        let project_options = self.boss_history_project_options(key);
+        let weak = cx.entity().downgrade();
+        let project_handle = self.menu_handle("boss-history-project", cx);
+        let project_label = project_filter
+            .and_then(|id| {
+                project_options
+                    .iter()
+                    .find(|(option, _)| *option == id)
+                    .map(|(_, name)| name.clone())
+                    .or_else(|| {
+                        self.state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == id)
+                            .map(|project| project.display_name())
+                    })
+            })
+            .unwrap_or_else(|| tr!("boss.history_all_projects"));
+        let project_menu = dropdown_menu(
+            MenuChip::new("boss-history-project")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(project_label)
+                .outlined()
+                .height(px(24.0))
+                .selected(project_handle.is_open())
+                .max_w(px(180.0))
+                .flex_none(),
+            "boss-history-project-menu",
+            &project_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::with_capacity(project_options.len() + 1);
+                items.push(
+                    MenuItem::new(tr!("boss.history_all_projects"), {
+                        let weak = weak.clone();
+                        move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.boss_ui
+                                    .history_search
+                                    .entry(key)
+                                    .or_default()
+                                    .project = None;
+                                this.run_boss_history_search(key, 0, cx);
+                            });
+                        }
+                    })
+                    .selected(project_filter.is_none()),
+                );
+                items.extend(project_options.iter().map(|(id, name)| {
+                    let id = *id;
+                    let weak = weak.clone();
+                    MenuItem::new(name.clone(), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.boss_ui
+                                .history_search
+                                .entry(key)
+                                .or_default()
+                                .project = Some(id);
+                            this.run_boss_history_search(key, 0, cx);
+                        });
+                    })
+                    .selected(project_filter == Some(id))
+                }));
+                items
+            },
+        );
+
+        let weak = cx.entity().downgrade();
+        let kind_handle = self.menu_handle("boss-history-kind", cx);
+        let kind_options: Vec<(Option<waku_protocol::model::HistorySourceKind>, String)> = vec![
+            (None, tr!("boss.history_all_sources")),
+            (
+                Some(waku_protocol::model::HistorySourceKind::Task),
+                tr!("boss.history_kind_task"),
+            ),
+            (
+                Some(waku_protocol::model::HistorySourceKind::Employee),
+                tr!("boss.history_kind_employee"),
+            ),
+            (
+                Some(waku_protocol::model::HistorySourceKind::Boss),
+                tr!("boss.history_kind_boss"),
+            ),
+            (
+                Some(waku_protocol::model::HistorySourceKind::Plan),
+                tr!("boss.history_kind_plan"),
+            ),
+        ];
+        let kind_label = kind_options
+            .iter()
+            .find(|(kind, _)| *kind == kind_filter)
+            .map(|(_, label)| label.clone())
+            .unwrap_or_else(|| tr!("boss.history_all_sources"));
+        let kind_menu = dropdown_menu(
+            MenuChip::new("boss-history-kind")
+                .icon("icons/list-filter.svg", theme.text_tertiary)
+                .label(kind_label)
+                .outlined()
+                .height(px(24.0))
+                .selected(kind_handle.is_open())
+                .max_w(px(160.0))
+                .flex_none(),
+            "boss-history-kind-menu",
+            &kind_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                kind_options
+                    .iter()
+                    .map(|(kind, label)| {
+                        let kind = *kind;
+                        let weak = weak.clone();
+                        MenuItem::new(label.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.boss_ui
+                                    .history_search
+                                    .entry(key)
+                                    .or_default()
+                                    .kind = kind;
+                                this.run_boss_history_search(key, 0, cx);
+                            });
+                        })
+                        .selected(kind == kind_filter)
+                    })
+                    .collect()
+            },
+        );
+
+        let weak = cx.entity().downgrade();
+        let date_handle = self.menu_handle("boss-history-date", cx);
+        let date_options: Vec<(HistoryDateRange, String)> = vec![
+            (HistoryDateRange::Any, tr!("boss.history_date_any")),
+            (HistoryDateRange::Last7, tr!("boss.history_date_7")),
+            (HistoryDateRange::Last30, tr!("boss.history_date_30")),
+            (HistoryDateRange::Last90, tr!("boss.history_date_90")),
+            (HistoryDateRange::Before90, tr!("boss.history_date_older")),
+        ];
+        let date_label = date_options
+            .iter()
+            .find(|(option, _)| *option == range)
+            .map(|(_, label)| label.clone())
+            .unwrap_or_else(|| tr!("boss.history_date_any"));
+        let date_menu = dropdown_menu(
+            MenuChip::new("boss-history-date")
+                .icon("icons/hourglass.svg", theme.text_tertiary)
+                .label(date_label)
+                .outlined()
+                .height(px(24.0))
+                .selected(date_handle.is_open())
+                .max_w(px(160.0))
+                .flex_none(),
+            "boss-history-date-menu",
+            &date_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                date_options
+                    .iter()
+                    .map(|(option, label)| {
+                        let option = *option;
+                        let weak = weak.clone();
+                        MenuItem::new(label.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.boss_ui
+                                    .history_search
+                                    .entry(key)
+                                    .or_default()
+                                    .range = option;
+                                this.run_boss_history_search(key, 0, cx);
+                            });
+                        })
+                        .selected(option == range)
+                    })
+                    .collect()
+            },
+        );
+
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .py(px(6.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .child(
+                TextField::new("boss-history-search", self.boss_history_search.clone())
+                    .icon("icons/search.svg", 13.0)
+                    .w(px(230.0))
+                    .flex_none(),
+            )
+            .child(project_menu)
+            .child(kind_menu)
+            .child(date_menu)
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_ghost)
+                    .child(tr!("boss.history_scope_hint")),
+            )
+    }
+
+    /// The lookup's body states — searching, failure with retry, an honest
+    /// no-match inside the searched scope, and the unsubmitted hint — or
+    /// the hit list itself.
+    fn render_boss_history_body(
+        &self,
+        key: DaemonKey,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let search = self.boss_ui.history_search.get(&key);
+        if !self.boss_ui.rows.is_empty() {
+            return self.boss_item_list(cx).into_any_element();
+        }
+        if search.is_some_and(|search| search.searching) {
+            return boss_empty_state(
+                theme,
+                "icons/search.svg",
+                tr!("boss.history_searching"),
+                tr!("boss.history_searching_hint"),
+            )
+            .into_any_element();
+        }
+        if let Some(error) = search.and_then(|search| search.error.clone()) {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(10.0))
+                .px(px(40.0))
+                .child(
+                    div()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_secondary)
+                        .text_center()
+                        .child(error),
+                )
+                .child(
+                    boss_button("boss-history-retry", tr!("boss.retry"), theme)
+                        .child(tr!("boss.retry"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.run_boss_history_search(key, 0, cx);
+                        }),
+                )
+                .into_any_element();
+        }
+        if let Some(coverage) = search.and_then(|search| search.coverage.as_ref()) {
+            // A resolved search with zero hits says what it covered rather
+            // than implying the work never happened.
+            return boss_empty_state(
+                theme,
+                "icons/search.svg",
+                tr!("boss.history_no_match"),
+                tr!("boss.history_no_match_hint", scope = coverage.scope.clone()),
+            )
+            .into_any_element();
+        }
+        boss_empty_state(
+            theme,
+            "icons/search.svg",
+            tr!("boss.history_submit_hint"),
+            tr!("boss.history_scope_hint"),
+        )
+        .into_any_element()
+    }
+
+    /// A History hit: source kind, subject, person, project and date up
+    /// top, archive state labelled, and the excerpt that earned the row —
+    /// flagged as orientation when the title matched instead of a passage.
+    fn render_boss_history_hit(&self, key: DaemonKey, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(hit) = self
+            .boss_ui
+            .history_search
+            .get(&key)
+            .and_then(|search| search.hits.get(index))
+            .cloned()
+        else {
+            return div().into_any_element();
+        };
+        use waku_protocol::model::HistorySourceKind;
+        let (kind_label, kind_icon) = match hit.kind {
+            HistorySourceKind::Task => (tr!("boss.history_kind_task"), "icons/message-square.svg"),
+            HistorySourceKind::Employee => {
+                (tr!("boss.history_kind_employee"), "icons/bot.svg")
+            }
+            HistorySourceKind::Boss => (tr!("boss.history_kind_boss"), "icons/goddard-logo.svg"),
+            HistorySourceKind::Plan => (tr!("boss.history_kind_plan"), "icons/file-text.svg"),
+        };
+        let mut meta = vec![kind_label];
+        if let Some(person) = hit
+            .person
+            .as_ref()
+            .filter(|person| person.as_str() != hit.title.as_str())
+        {
+            meta.push(person.clone());
+        }
+        if let Some(job) = hit.job_title.as_ref().filter(|job| !job.is_empty()) {
+            meta.push(job.clone());
+        }
+        if !hit.project.is_empty() {
+            meta.push(hit.project.clone());
+        }
+        if let Some(recorded_by) = hit.recorded_by.as_ref() {
+            meta.push(tr!("boss.history_recorded_by", name = recorded_by.clone()));
+        }
+        if hit.archived {
+            meta.push(tr!("session.archived"));
+        }
+        if hit.employee_expired == Some(true) {
+            meta.push(tr!("boss.status_expired"));
+        }
+        if hit.matched_messages > 1 {
+            meta.push(tr!(
+                "boss.history_passages",
+                count = hit.matched_messages as usize
+            ));
+        }
+        let task_id = hit.task_id;
+        let message_id = hit.message_id;
+        div()
+            .id(boss_history_hit_id(task_id, message_id))
+            .tab_index(0)
+            .w_full()
+            .px(px(8.0))
+            .py(px(6.0))
+            .flex()
+            .flex_col()
+            .gap(px(3.0))
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.open_history_hit(task_id, message_id, cx)
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .min_w_0()
+                    .child(icon(kind_icon, 13.0, theme.text_tertiary).flex_none())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(14.0))
+                            .line_height(sp(17.0))
+                            .text_color(theme.text)
+                            .child(hit.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_ghost)
+                            .child(components::format_message_time(hit.updated_at)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .min_w_0()
+                    .pl(px(19.0))
+                    .text_size(sp(12.0))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .truncate()
+                    .child(meta.join(" · ")),
+            )
+            .child(
+                div()
+                    .pl(px(19.0))
+                    .min_w_0()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .line_clamp(2)
+                    .text_ellipsis()
+                    .child(if hit.excerpt_matched {
+                        format!("“{}”", hit.excerpt.trim())
+                    } else {
+                        tr!(
+                            "boss.history_excerpt_unmatched",
+                            excerpt = hit.excerpt.trim().to_owned()
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The lookup's coverage row — what the reply says it searched, what
+    /// the cap cut, and the caveats worth repeating — plus the Show more
+    /// continuation while pages remain.
+    fn render_boss_history_footer(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(search) = self.boss_ui.history_search.get(&key) else {
+            return div().into_any_element();
+        };
+        let mut lines: Vec<AnyElement> = Vec::new();
+        if let Some(coverage) = search.coverage.as_ref() {
+            lines.push(
+                div()
+                    .truncate()
+                    .child(
+                        tr!(
+                            "boss.history_coverage",
+                            shown = search.hits.len(),
+                            matched = coverage.sources_matched as usize,
+                            scanned = coverage.sources_scanned as usize,
+                            scope = coverage.scope.clone()
+                        )
+                        .to_string(),
+                    )
+                    .into_any_element(),
+            );
+            for note in &coverage.notes {
+                lines.push(div().truncate().child(note.clone()).into_any_element());
+            }
+        }
+        if let Some(error) = search.error.as_ref() {
+            lines.push(
+                div()
+                    .text_color(theme.warning)
+                    .truncate()
+                    .child(error.clone())
+                    .into_any_element(),
+            );
+        }
+        if search.searching {
+            lines.push(
+                div()
+                    .child(tr!("boss.history_searching").to_string())
+                    .into_any_element(),
+            );
+        }
+        let next_offset = search
+            .coverage
+            .as_ref()
+            .and_then(|coverage| coverage.next_offset);
+        let show_more = next_offset.map(|offset| {
+            boss_button(
+                format!("boss-history-more-{key:?}"),
+                tr!("boss.history_show_more"),
+                &theme,
+            )
+            .child(tr!("boss.history_show_more"))
+            .on_activation(cx, move |this, _, cx| {
+                this.run_boss_history_search(key, offset as usize, cx);
+            })
+            .into_any_element()
+        });
+        let retry = (search.error.is_some() && !search.searching).then(|| {
+            boss_button("boss-history-footer-retry", tr!("boss.retry"), &theme)
+                .child(tr!("boss.retry"))
+                .on_activation(cx, move |this, _, cx| {
+                    this.run_boss_history_search(key, 0, cx);
+                })
+                .into_any_element()
+        });
+        div()
+            .w_full()
+            .px(px(8.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .text_size(sp(11.5))
+            .line_height(sp(14.0))
+            .text_color(theme.text_ghost)
+            .children(lines)
+            .when(show_more.is_some() || retry.is_some(), |row| {
+                row.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .children(show_more)
+                        .children(retry),
+                )
+            })
             .into_any_element()
     }
 
@@ -7332,6 +8165,8 @@ impl Waku {
         match item {
             BossItem::Employee(id) => self.render_boss_employee_page_row(id, key, cx),
             BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
+            BossItem::HistoryHit(index) => self.render_boss_history_hit(key, index, cx),
+            BossItem::HistoryFooter => self.render_boss_history_footer(key, cx),
             BossItem::MemoryStatus(path, depth, failed) => {
                 let label = if failed {
                     self.boss_ui
@@ -9599,5 +10434,180 @@ mod tests {
             wave_outbox: Vec::new(),
             revision: 0,
         }
+    }
+
+    fn history_hit(task: u8, message: u8) -> waku_protocol::model::AgentHistorySearchHit {
+        waku_protocol::model::AgentHistorySearchHit {
+            task_id: Uuid::from_u128(task as u128),
+            kind: waku_protocol::model::HistorySourceKind::Task,
+            title: format!("record {task}"),
+            project: "project".into(),
+            person: None,
+            job_title: None,
+            employee_expired: None,
+            status: waku_protocol::model::SessionStatus::Idle,
+            archived: true,
+            created_at: 10,
+            updated_at: 20,
+            message_id: Uuid::from_u128(message as u128),
+            role: waku_protocol::model::MessageRole::Assistant,
+            recorded_by: None,
+            excerpt: "the matched passage".into(),
+            excerpt_matched: true,
+            excerpt_at: 15,
+            matched_terms: vec!["matched".into()],
+            title_matched: false,
+            matched_messages: 1,
+        }
+    }
+
+    #[test]
+    fn history_lookup_engages_on_text_or_any_filter() {
+        // An empty field over default filters keeps the finished roster.
+        assert!(!boss_history_search_active("", None));
+        assert!(!boss_history_search_active("  ", Some(&BossHistorySearch::default())));
+
+        // Field text alone engages the lookup — the query names what the
+        // human remembers, not an employee.
+        assert!(boss_history_search_active("zed upgrade", None));
+        assert!(boss_history_search_active(
+            "walter",
+            Some(&BossHistorySearch::default())
+        ));
+
+        // Each filter alone engages it — a filtered listing needs no
+        // query text.
+        for search in [
+            BossHistorySearch {
+                project: Some(Uuid::new_v4()),
+                ..Default::default()
+            },
+            BossHistorySearch {
+                kind: Some(waku_protocol::model::HistorySourceKind::Boss),
+                ..Default::default()
+            },
+            BossHistorySearch {
+                range: HistoryDateRange::Last30,
+                ..Default::default()
+            },
+        ] {
+            assert!(boss_history_search_active("", Some(&search)));
+        }
+    }
+
+    #[test]
+    fn history_rows_pair_hits_with_the_coverage_footer() {
+        // An unresolved lookup draws no rows — the body shows its own
+        // searching/error/no-match states.
+        assert!(boss_history_rows(&BossHistorySearch::default()).is_empty());
+        assert!(
+            boss_history_rows(&BossHistorySearch {
+                searching: true,
+                ..Default::default()
+            })
+                == vec![BossItem::HistoryFooter]
+        );
+
+        // Hits list in order; the footer follows while anything —
+        // coverage, an in-flight page, or an error — stays reportable.
+        let resolved = BossHistorySearch {
+            hits: vec![history_hit(1, 1), history_hit(2, 2)],
+            coverage: Some(waku_protocol::model::AgentHistorySearchCoverage {
+                scope: "every project".into(),
+                includes_archived: true,
+                kinds: Vec::new(),
+                sources_scanned: 4,
+                sources_matched: 2,
+                returned: 2,
+                truncated: false,
+                next_offset: None,
+                excluded_by_access: 0,
+                notes: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            boss_history_rows(&resolved),
+            vec![
+                BossItem::HistoryHit(0),
+                BossItem::HistoryHit(1),
+                BossItem::HistoryFooter
+            ]
+        );
+
+        // A failed lookup still lists the hits it already had.
+        let failed = BossHistorySearch {
+            hits: vec![history_hit(1, 1)],
+            error: Some("the daemon is unreachable".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            boss_history_rows(&failed),
+            vec![BossItem::HistoryHit(0), BossItem::HistoryFooter]
+        );
+    }
+
+    #[test]
+    fn history_continuation_dedupes_reranked_records() {
+        let mut hits = vec![history_hit(1, 1), history_hit(2, 2)];
+        merge_history_page(
+            &mut hits,
+            // A source re-ranked between pages repeats; a new message on
+            // the same source does not.
+            vec![history_hit(2, 2), history_hit(2, 9), history_hit(3, 3)],
+        );
+        let ids: Vec<(Uuid, Uuid)> = hits
+            .iter()
+            .map(|hit| (hit.task_id, hit.message_id))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                (Uuid::from_u128(1), Uuid::from_u128(1)),
+                (Uuid::from_u128(2), Uuid::from_u128(2)),
+                (Uuid::from_u128(2), Uuid::from_u128(9)),
+                (Uuid::from_u128(3), Uuid::from_u128(3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn history_hit_ids_stay_unique_per_passage() {
+        // Two passages from one record keep distinct row ids, and the id
+        // is stable enough for keyboard focus to survive a refresh.
+        let task = Uuid::from_u128(7);
+        assert_eq!(
+            boss_history_hit_id(task, Uuid::from_u128(1)),
+            boss_history_hit_id(task, Uuid::from_u128(1))
+        );
+        assert_ne!(
+            boss_history_hit_id(task, Uuid::from_u128(1)),
+            boss_history_hit_id(task, Uuid::from_u128(2))
+        );
+        assert_ne!(
+            boss_history_hit_id(Uuid::from_u128(8), Uuid::from_u128(1)),
+            boss_history_hit_id(task, Uuid::from_u128(1))
+        );
+    }
+
+    #[test]
+    fn history_date_ranges_bound_by_message_age() {
+        let now = 100 * HistoryDateRange::DAY;
+        assert_eq!(HistoryDateRange::Any.bounds(now), (None, None));
+        assert_eq!(
+            HistoryDateRange::Last7.bounds(now),
+            (Some(93 * HistoryDateRange::DAY), None)
+        );
+        assert_eq!(
+            HistoryDateRange::Last90.bounds(now),
+            (Some(10 * HistoryDateRange::DAY), None)
+        );
+        // "Older" is the complement — everything before the 90-day window.
+        assert_eq!(
+            HistoryDateRange::Before90.bounds(now),
+            (None, Some(10 * HistoryDateRange::DAY))
+        );
+        // The window clamps at zero rather than wrapping.
+        assert_eq!(HistoryDateRange::Last7.bounds(0), (Some(0), None));
     }
 }

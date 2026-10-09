@@ -190,7 +190,6 @@ impl WakuBackend {
         limit: Option<usize>,
         offset: usize,
     ) -> anyhow::Result<ResponsePayload> {
-        use waku_protocol::model::HistorySourceKind;
         self.require_agent_tools()?;
         let caller = agent.or_else(|| {
             (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
@@ -198,6 +197,34 @@ impl WakuBackend {
         let Some(caller) = caller else {
             bail!("history search needs a calling task to scope to");
         };
+        Ok(ResponsePayload::AgentHistorySearch {
+            result: self.history_search_scoped(
+                Some(caller),
+                query, project, person, after, before, kind, limit, offset,
+            )?,
+        })
+    }
+
+    /// The corpus scan `agent_history_search` and
+    /// `BossOperation::HistorySearch` share once the caller's reach is
+    /// settled. `caller` is `None` for the human's own client — it searches
+    /// with the boss's reach, the same grant `authorize_transcript` gives
+    /// its transcript reads. The lookup is read-only: it contacts nothing,
+    /// revives nothing, and never widens the caller's access.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn history_search_scoped(
+        &self,
+        caller: Option<Uuid>,
+        query: &str,
+        project: Option<&str>,
+        person: Option<&str>,
+        after: Option<&str>,
+        before: Option<&str>,
+        kind: Option<waku_protocol::model::HistorySourceKind>,
+        limit: Option<usize>,
+        offset: usize,
+    ) -> anyhow::Result<waku_protocol::model::AgentHistorySearchResult> {
+        use waku_protocol::model::HistorySourceKind;
         let limit = limit.unwrap_or(AGENT_SEARCH_DEFAULT_LIMIT);
         if limit == 0 || limit > HISTORY_SEARCH_MAX_LIMIT {
             bail!("`limit` must be between 1 and {HISTORY_SEARCH_MAX_LIMIT}");
@@ -234,8 +261,9 @@ impl WakuBackend {
             .map(|plan| plan.session_id)
             .collect();
         let boss_session_id = document.session_id;
-        let is_boss = self.boss.is_boss_principal(caller);
-        let is_employee = !is_boss && self.boss.is_employee(caller);
+        // `None` — the human's own client — searches with the boss's reach.
+        let is_boss = caller.is_none_or(|caller| self.boss.is_boss_principal(caller));
+        let is_employee = !is_boss && caller.is_some_and(|caller| self.boss.is_employee(caller));
 
         // One classifier for the corpus scan and the result projection:
         // planning metadata first, then the employee roster (active and
@@ -259,13 +287,19 @@ impl WakuBackend {
 
         let (allowed_ids, excluded_by_access, kinds_scanned, caller_project_name, person_matches) = {
             let state = self.task_state.lock();
-            let caller_session = state
-                .sessions
-                .iter()
-                .find(|session| session.id == caller)
-                .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
-            let caller_project = caller_session.project_id;
-            let caller_parent = caller_session.side_chat_of;
+            // A scoped caller's own session seeds its project and a side
+            // chat's parent; the human's `None` reaches everything anyway.
+            let (caller_project, caller_parent) = match caller {
+                Some(caller) => {
+                    let caller_session = state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == caller)
+                        .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+                    (caller_session.project_id, caller_session.side_chat_of)
+                }
+                None => (Uuid::nil(), None),
+            };
             let caller_project_name = state
                 .projects
                 .iter()
@@ -277,7 +311,7 @@ impl WakuBackend {
             // the boss's whole store — no allowlist needed.
             let accessible: Option<HashSet<Uuid>> = if is_boss {
                 None
-            } else if is_employee {
+            } else if let Some(caller) = caller.filter(|_| is_employee) {
                 // Self plus every active-roster employee whose supervisor
                 // chain reaches the caller — the set `authorize_transcript`
                 // already lets it read — plus a side chat's parent.
@@ -546,22 +580,20 @@ impl WakuBackend {
                 "project '{caller_project_name}' — its task transcripts, including archived records"
             )
         };
-        Ok(ResponsePayload::AgentHistorySearch {
-            result: waku_protocol::model::AgentHistorySearchResult {
-                query: query.to_owned(),
-                hits,
-                coverage: waku_protocol::model::AgentHistorySearchCoverage {
-                    scope,
-                    includes_archived: true,
-                    kinds: kinds_scanned,
-                    sources_scanned: scanned,
-                    sources_matched,
-                    returned,
-                    truncated,
-                    next_offset: truncated.then(|| offset as u64 + returned),
-                    excluded_by_access,
-                    notes,
-                },
+        Ok(waku_protocol::model::AgentHistorySearchResult {
+            query: query.to_owned(),
+            hits,
+            coverage: waku_protocol::model::AgentHistorySearchCoverage {
+                scope,
+                includes_archived: true,
+                kinds: kinds_scanned,
+                sources_scanned: scanned,
+                sources_matched,
+                returned,
+                truncated,
+                next_offset: truncated.then(|| offset as u64 + returned),
+                excluded_by_access,
+                notes,
             },
         })
     }

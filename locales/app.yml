@@ -6512,6 +6512,56 @@ boss.employees_empty_history:
   en: No finished employees
 boss.employees_empty_history_hint:
   en: Finished, failed, and cancelled work moves here when it ends.
+boss.history_search:
+  en: Search history
+boss.history_search_placeholder:
+  en: Topic or name…
+boss.history_scope_hint:
+  en: Tasks · employees · Boss chats · plans — archived included
+boss.history_submit_hint:
+  en: Press Enter to search retained work
+boss.history_all_projects:
+  en: All projects
+boss.history_all_sources:
+  en: All sources
+boss.history_kind_task:
+  en: Task
+boss.history_kind_employee:
+  en: Employee
+boss.history_kind_boss:
+  en: Boss chat
+boss.history_kind_plan:
+  en: Plan
+boss.history_date_any:
+  en: Any time
+boss.history_date_7:
+  en: Last 7 days
+boss.history_date_30:
+  en: Last 30 days
+boss.history_date_90:
+  en: Last 90 days
+boss.history_date_older:
+  en: More than 90 days ago
+boss.history_searching:
+  en: Searching…
+boss.history_searching_hint:
+  en: Scanning retained records — the query and any earlier hits stay listed.
+boss.history_no_match:
+  en: No matching record
+boss.history_no_match_hint:
+  en: Nothing matched in %{scope}. Try different wording or broaden the filters.
+boss.history_coverage:
+  en: "%{shown} of %{matched} matching records · %{scanned} searched · %{scope}"
+boss.history_show_more:
+  en: Show more
+boss.history_recorded_by:
+  en: via %{name}
+boss.history_passages:
+  en: "%{count} passages"
+boss.history_excerpt_unmatched:
+  en: "Title matched — latest message: %{excerpt}"
+boss.history_source_missing:
+  en: That record is no longer in the task list.
 boss.resume_employee:
   en: Resume
 boss.resume_employee_hint:

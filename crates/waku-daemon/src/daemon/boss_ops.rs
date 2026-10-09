@@ -786,6 +786,34 @@ impl WakuBackend {
                 };
                 Ok(BossResult::Transcript { transcript })
             }
+            BossOperation::HistorySearch {
+                query,
+                project,
+                person,
+                after,
+                before,
+                kind,
+                limit,
+                offset,
+            } => {
+                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                    bail!("only the boss or a human can search history");
+                }
+                // `None` scopes to the boss's reach — every retained record,
+                // archives included — for the human and the boss alike.
+                let result = self.history_search_scoped(
+                    None,
+                    &query,
+                    project.as_deref(),
+                    person.as_deref(),
+                    after.as_deref(),
+                    before.as_deref(),
+                    kind,
+                    limit,
+                    offset,
+                )?;
+                Ok(BossResult::HistorySearch { result })
+            }
             BossOperation::Speak { parts } => {
                 let parts = self.boss.speak_parts(caller, parts)?;
                 let delivered = events.speech_requested(Uuid::new_v4(), parts);

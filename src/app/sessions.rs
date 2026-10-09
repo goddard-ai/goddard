@@ -606,12 +606,13 @@ impl Waku {
         // employee's task is a boss record, not the user's own — a visit
         // from history or search is inspection, so its flag stays put and
         // the top bar marks the session Archived.
-        let visit_restores = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id && session.archived_at.is_some())
-            .is_some_and(|session| !self.session_is_employee(session));
+        let visit_restores = !matches!(transition, SessionActivationTransition::Inspect)
+            && self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id && session.archived_at.is_some())
+                .is_some_and(|session| !self.session_is_employee(session));
         if visit_restores {
             self.unarchive_session(session_id, false, cx);
         }
@@ -653,10 +654,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         match transition {
-            SessionActivationTransition::Visit => self.session_navigation.visit(
-                self.navigation_location(),
-                NavigationLocation::Task(session_id),
-            ),
+            SessionActivationTransition::Visit | SessionActivationTransition::Inspect => self
+                .session_navigation
+                .visit(self.navigation_location(), NavigationLocation::Task(session_id)),
             SessionActivationTransition::Silent => {}
             SessionActivationTransition::Back { from } => {
                 if self.navigation_location() != Some(from)

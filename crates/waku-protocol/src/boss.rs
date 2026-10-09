@@ -2788,6 +2788,35 @@ pub enum BossOperation {
         #[serde(default)]
         turn: Option<usize>,
     },
+    /// The read-only work-history lookup behind the Employees → History
+    /// search: retained task, employee, Boss-chat and planning records,
+    /// archives included. Human and boss principal only — scoped agents
+    /// use `agentHistorySearch`, which confines the corpus to their
+    /// credential's reach. Fields mirror
+    /// [`crate::Command::AgentHistorySearch`]: `query` is free text split
+    /// into terms over message text and record titles, `project` names a
+    /// registered project, `person` an employee or Boss identity name,
+    /// `after`/`before` bound the matched messages' recorded dates,
+    /// `kind` a [`crate::model::HistorySourceKind`], and `limit`/`offset`
+    /// page the per-source hits. Opening a hit never resumes, revives, or
+    /// unarchives the record.
+    HistorySearch {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        person: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<crate::model::HistorySourceKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default)]
+        offset: usize,
+    },
     Rename {
         name: String,
     },
@@ -3081,6 +3110,12 @@ pub enum BossResult {
     },
     Transcript {
         transcript: crate::model::AgentSessionTranscript,
+    },
+    /// The hits and coverage a `historySearch` operation resolved — the
+    /// same shape `agentHistorySearch` returns, scoped to the boss's
+    /// reach rather than the caller's grants.
+    HistorySearch {
+        result: crate::model::AgentHistorySearchResult,
     },
     /// The shipped-default inspection report — one record per canonical
     /// role with full texts, revision labels, provenance, and diffs.

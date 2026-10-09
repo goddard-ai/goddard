@@ -13663,3 +13663,146 @@ fn employee_history_search_reaches_itself_and_supervised_only() {
     assert_eq!(named.coverage.excluded_by_access, 1);
     std::fs::remove_dir_all(root).ok();
 }
+
+/// The app's History lookup rides `BossOperation::HistorySearch`: the
+/// human searches with the boss's reach — archived and employee records
+/// included — and a scoped agent cannot ride the operation at all, so
+/// nothing widens past what `agentHistorySearch` already grants it.
+#[test]
+fn boss_operation_history_search_uses_boss_reach_for_the_human_only() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeGoal};
+    use waku_protocol::model::HistorySourceKind;
+    let root = std::env::temp_dir().join(format!("waku-hist-op-{}", Uuid::new_v4()));
+    let (backend, boss_id) = surface_test_backend(&root);
+    backend.boss.set_session_id(boss_id).unwrap();
+    let document = backend.boss.document();
+    let boss_project = document.identity.id;
+    let persona = document.personas[0].id;
+    let project_id = backend.task_state.lock().sessions[0].project_id;
+    drop(document);
+
+    let employee = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Sync notes".into(),
+            None,
+            EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+
+    let task_id = {
+        let mut state = backend.task_state.lock();
+        let mut task = AgentSession::new(project_id, ProviderKind::Codex);
+        task.begin_turn("plain task upstream highlights");
+        task.push_message(
+            waku_protocol::model::MessageRole::User,
+            "collect the upstream highlights",
+        );
+        task.finish_active_turn(crate::model::TurnStatus::Completed);
+        task.archived_at = Some(1);
+        let task_id = task.id;
+        state.push_session(task);
+        let mut child = AgentSession::new(project_id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.project_id = boss_project;
+        child.boss_managed = true;
+        child.begin_turn("report the sync notes");
+        child.push_message(
+            waku_protocol::model::MessageRole::Assistant,
+            "the upstream highlights shipped",
+        );
+        child.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(child);
+        backend.task_store.save(&mut state).unwrap();
+        task_id
+    };
+
+    let events = EventSink::detached();
+    let operation = |kind| BossOperation::HistorySearch {
+        query: "highlights".into(),
+        project: None,
+        person: None,
+        after: None,
+        before: None,
+        kind,
+        limit: None,
+        offset: 0,
+    };
+
+    // The human — `caller` `None` — searches with the boss's reach:
+    // the archived task and the employee record both surface.
+    let BossResult::HistorySearch { result } = backend
+        .handle_boss_operation(None, operation(None), &events)
+        .unwrap()
+    else {
+        panic!("history search returns the result")
+    };
+    assert!(result.coverage.includes_archived);
+    assert_eq!(result.coverage.excluded_by_access, 0);
+    let task_hit = result
+        .hits
+        .iter()
+        .find(|hit| hit.task_id == task_id)
+        .expect("the archived task is in the corpus");
+    assert_eq!(task_hit.kind, HistorySourceKind::Task);
+    assert!(task_hit.archived);
+    assert!(result.hits.iter().any(|hit| {
+        hit.task_id == employee_id && hit.kind == HistorySourceKind::Employee
+    }));
+
+    // The boss principal rides the same operation with the same reach.
+    let BossResult::HistorySearch { result: for_boss } = backend
+        .handle_boss_operation(Some(boss_id), operation(None), &events)
+        .unwrap()
+    else {
+        panic!("the boss's own search returns the result")
+    };
+    assert_eq!(for_boss.coverage.excluded_by_access, 0);
+    assert!(for_boss.hits.iter().any(|hit| hit.task_id == task_id));
+
+    // A kind filter narrows the corpus, not the scope statement.
+    let BossResult::HistorySearch { result: employees } = backend
+        .handle_boss_operation(
+            None,
+            operation(Some(HistorySourceKind::Employee)),
+            &events,
+        )
+        .unwrap()
+    else {
+        panic!("a kind-filtered search returns the result")
+    };
+    assert_eq!(employees.hits.len(), 1);
+    assert_eq!(employees.hits[0].task_id, employee_id);
+
+    // A scoped agent cannot ride the operation — its search surface is
+    // `agentHistorySearch`; neither request revives or unarchives.
+    assert!(
+        backend
+            .handle_boss_operation(Some(employee_id), operation(None), &events)
+            .is_err(),
+        "an employee cannot broaden its reach through the boss operation"
+    );
+    assert!(
+        backend
+            .handle_boss_operation(Some(task_id), operation(None), &events)
+            .is_err(),
+        "a plain task cannot ride the boss operation"
+    );
+    {
+        let state = backend.task_state.lock();
+        assert!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == task_id)
+                .is_some_and(|session| session.archived_at.is_some()),
+            "history search must not unarchive its sources"
+        );
+    }
+    std::fs::remove_dir_all(root).ok();
+}
