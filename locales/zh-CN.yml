@@ -3267,17 +3267,14 @@ voice_scratchpad.open_pad: 打开 VoicePad
 voice_scratchpad.clear_pad: 清空 VoicePad
 voice_scratchpad.pad_cleared: 已清空 VoicePad
 voice_scratchpad.undo_clear: 撤销清空
-voice_scratchpad.latest_recording: 最新的 VoicePad 录音
 voice_scratchpad.edit_recording: 编辑录音
 voice_scratchpad.remove_recording: 删除录音
 voice_scratchpad.remove_recording_tooltip: 删除录音 · ⌘Z
-voice_scratchpad.undo_removes_recording: ⌘Z 删除此录音
 voice_scratchpad.ptt_hint: 按住 ⌥Space 录音
 experiments.voice_scratchpad_backend_label: 转写引擎
 experiments.press_to_talk_title: 按键说话
 experiments.press_to_talk_description: 按住 Alt+Space 即可在不打开 VoicePad 的情况下添加录音。VoicePad 打开时麦克风处于静音状态。
 press_to_talk.recorded: 已添加到 VoicePad
-press_to_talk.starting: 正在启动麦克风…
 press_to_talk.recording: 录音中…
 press_to_talk.finishing: 正在完成转写…
 press_to_talk.no_speech: 未检测到语音

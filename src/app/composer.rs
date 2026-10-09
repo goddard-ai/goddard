@@ -6017,6 +6017,19 @@ impl Waku {
                     })
             })
             .children(self.render_annotation_chip_for(surface, cx))
+            // The `Voicepad · N lines` pill — and the clear's explicit
+            // recovery — sits above the field, placed like the
+            // annotation chip.
+            .when_some(pad_owner, |card, owner| {
+                card.children(
+                    self.render_voice_pad_pill_row(
+                        owner,
+                        press_to_talk::PressToTalkContext::Composer { owner },
+                        cx,
+                    )
+                    .map(|pill| div().px(px(14.0)).pb(px(6.0)).flex().child(pill)),
+                )
+            })
             // The plan-approval chip and the briefing's pause/resume float
             // above the card like suggestion chips — they ride the
             // suggestion row instead while that slot is claimed.
@@ -6059,16 +6072,6 @@ impl Waku {
                     .children(self.render_composer_incognito_chip(&controls, cx))
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
-                    // The Voicepad · N lines pill — and the clear's
-                    // explicit recovery — rides this card's chip line
-                    // for whatever owner its composer answers to.
-                    .when_some(pad_owner, |row, owner| {
-                        row.children(self.render_voice_pad_pill_row(
-                            owner,
-                            press_to_talk::PressToTalkContext::Composer { owner },
-                            cx,
-                        ))
-                    })
                     .when(
                         interactive
                             && matches!(surface, ComposerCard::Main)

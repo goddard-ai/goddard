@@ -6654,16 +6654,12 @@ voice_scratchpad.pad_cleared:
   en: VoicePad cleared
 voice_scratchpad.undo_clear:
   en: Undo clear
-voice_scratchpad.latest_recording:
-  en: Latest VoicePad recording
 voice_scratchpad.edit_recording:
   en: Edit recording
 voice_scratchpad.remove_recording:
   en: Remove recording
 voice_scratchpad.remove_recording_tooltip:
   en: Remove recording · ⌘Z
-voice_scratchpad.undo_removes_recording:
-  en: ⌘Z removes this recording
 voice_scratchpad.ptt_hint:
   en: Hold ⌥Space to record
 
@@ -6675,8 +6671,6 @@ experiments.voice_briefing_tts_voice_caption:
   en: "Using %{voice}. Enter a voice name or ID supported by this model; clear to restore its default."
 press_to_talk.recorded:
   en: Added to VoicePad
-press_to_talk.starting:
-  en: Starting microphone…
 press_to_talk.recording:
   en: Recording…
 press_to_talk.finishing:

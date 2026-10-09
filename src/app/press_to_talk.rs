@@ -255,7 +255,8 @@ impl PressToTalk {
         match &self.notice {
             PressToTalkNotice::Idle => None,
             PressToTalkNotice::Recorded => Some(tr!("press_to_talk.recorded")),
-            PressToTalkNotice::Starting => Some(tr!("press_to_talk.starting")),
+            // Starting is too brief for a chip — no label exists for it.
+            PressToTalkNotice::Starting => None,
             PressToTalkNotice::Recording => Some(tr!("press_to_talk.recording")),
             PressToTalkNotice::Finishing => Some(tr!("press_to_talk.finishing")),
             PressToTalkNotice::NoSpeech => Some(tr!("press_to_talk.no_speech")),
@@ -271,6 +272,14 @@ impl PressToTalk {
     /// clears on the bound session wait for this.
     pub(super) fn busy(&self) -> bool {
         self.phase != PressToTalkPhase::Ready
+    }
+
+    /// Whether the live hold claims the composer's chrome — Starting is
+    /// deliberately out: capture spins up fast enough that a
+    /// "Starting…" chip would only flicker ahead of the recording
+    /// indicator.
+    pub(super) fn claims_chrome(&self) -> bool {
+        self.busy() && self.phase != PressToTalkPhase::Starting
     }
 
     /// The surface the current notice belongs to — the live hold's
@@ -805,13 +814,9 @@ impl Waku {
             .voice_scratchpads
             .iter()
             .find_map(|(owner, scratchpad)| {
-                let bubble = scratchpad.press_to_talk_bubble?;
-                (self.press_to_talk_context_alive(bubble.context)
-                    && scratchpad
-                        .transcript
-                        .paragraph_text(bubble.paragraph)
-                        .is_some())
-                .then_some((*owner, bubble))
+                let bubble = scratchpad.live_bubble()?;
+                self.press_to_talk_context_alive(bubble.context)
+                    .then_some((*owner, bubble))
             });
         let Some((owner, bubble)) = bubble else {
             return;
@@ -1067,15 +1072,33 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let owner = context.owner();
-        let scratchpad = self.voice_scratchpads.entry(owner).or_insert_with(|| {
-            let mut scratchpad = voice_scratchpad::VoiceScratchpad::new(cx);
-            scratchpad.muted = true;
-            scratchpad.hidden = true;
+        let committed = {
+            let scratchpad = self.voice_scratchpads.entry(owner).or_insert_with(|| {
+                let mut scratchpad = voice_scratchpad::VoiceScratchpad::new(cx);
+                scratchpad.muted = true;
+                scratchpad.hidden = true;
+                scratchpad
+            });
             scratchpad
-        });
-        if let Some(paragraph) = scratchpad.transcript.commit_press_to_talk(text) {
-            scratchpad.press_to_talk_bubble =
-                Some(voice_scratchpad::PressToTalkBubble { paragraph, context });
+                .transcript
+                .commit_press_to_talk(text)
+                .and_then(|paragraph| {
+                    scratchpad.press_to_talk_bubble = Some(voice_scratchpad::PressToTalkBubble {
+                        paragraph,
+                        context,
+                        dismissed: false,
+                    });
+                    scratchpad
+                        .transcript
+                        .paragraph_text(paragraph)
+                        .map(|text| (paragraph, text.to_owned()))
+                })
+        };
+        // The bubble's field opens already bound to the paragraph —
+        // editable on display, no click-to-edit step — without stealing
+        // focus from wherever the user is typing.
+        if let Some((paragraph, text)) = committed {
+            self.bind_press_to_talk_bubble(owner, paragraph, text, cx);
         }
         cx.notify();
     }
@@ -1440,6 +1463,23 @@ mod tests {
         let directives = machine.worker_event(machine.generation, PressToTalkEvent::Connected);
         assert!(directives.is_empty());
         assert_eq!(machine.phase, PressToTalkPhase::Recording);
+    }
+
+    #[test]
+    fn a_starting_hold_claims_no_chrome() {
+        // Capture spins up fast enough that a "Starting microphone…" chip
+        // would only flicker — the indicator appears once recording is
+        // actually live and stays through the drain.
+        let (mut machine, _) = hold();
+        assert!(machine.busy());
+        assert!(!machine.claims_chrome());
+        machine.worker_event(machine.generation, PressToTalkEvent::MicAccess(true));
+        machine.worker_event(machine.generation, PressToTalkEvent::Connected);
+        assert!(machine.claims_chrome());
+        machine.release();
+        assert!(machine.claims_chrome());
+        machine.worker_event(machine.generation, PressToTalkEvent::Completed(Ok(())));
+        assert!(!machine.claims_chrome());
     }
 
     #[test]

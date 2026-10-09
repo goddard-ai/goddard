@@ -6431,6 +6431,9 @@ impl Waku {
             // Submission clears the deliverable page, so capture its routing
             // before extracting the boss command's attachment.
             let queue_background = self.live_deliverable_page().is_some();
+            if let Some(owner) = self.composer_voice_pad_owner() {
+                self.retire_press_to_talk_bubble(owner, cx);
+            }
             let (session_id, submission) =
                 self.boss_command_submission_parts(command, submission, cx);
             self.submit_composer_submission_to_with_canned(
@@ -6451,6 +6454,13 @@ impl Waku {
         let session_id = session.id;
         let is_background = session.status == SessionStatus::Background;
         let is_busy = session.is_busy();
+        // A message leaving this composer retires the transcription
+        // bubble anchored to its pad — hidden nudges keep it.
+        if !submission.hidden
+            && let Some(owner) = self.composer_voice_pad_owner()
+        {
+            self.retire_press_to_talk_bubble(owner, cx);
+        }
         if !submission.hidden {
             self.note_user_message_target(session_id);
             self.record_action(
@@ -6530,6 +6540,11 @@ impl Waku {
             self.restore_composer_submission(session_id, submission, cx);
             return;
         }
+        // The session's pad bubble rides no further than a send — hidden
+        // nudges are the app's own traffic, not the user's message.
+        if !submission.hidden {
+            self.retire_press_to_talk_bubble(session_id, cx);
+        }
         if !submission.hidden {
             self.record_action(
                 Some(session_id),
@@ -6580,6 +6595,11 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
+        if !submission.hidden
+            && let Some(owner) = self.composer_voice_pad_owner()
+        {
+            self.retire_press_to_talk_bubble(owner, cx);
+        }
         if !submission.hidden {
             self.note_user_message_target(session_id);
         }

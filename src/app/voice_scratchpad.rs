@@ -352,6 +352,10 @@ pub(super) struct PressToTalkBubble {
     /// The composer context the hold was bound to — the bubble anchors
     /// there and dies when that context leaves the screen.
     pub(super) context: press_to_talk::PressToTalkContext,
+    /// Hidden because the user typed elsewhere or clicked away — the
+    /// paragraph stays on the pad and the `Voicepad · N lines` pill
+    /// brings the bubble back.
+    pub(super) dismissed: bool,
 }
 
 /// What the X button's one-click clear leaves behind for Undo clear:
@@ -418,6 +422,37 @@ impl VoiceScratchpad {
             press_to_talk_bubble: None,
             clear_undo: None,
         }
+    }
+
+    /// The bubble the composer chrome should paint: absent while
+    /// dismissed, or once its paragraph is gone. At most one bubble is
+    /// live app-wide — a fresh hold clears the rest.
+    pub(super) fn live_bubble(&self) -> Option<PressToTalkBubble> {
+        self.press_to_talk_bubble.filter(|bubble| {
+            !bubble.dismissed && self.transcript.paragraph_text(bubble.paragraph).is_some()
+        })
+    }
+
+    /// The pill's reopen resurfaces a dismissed bubble.
+    pub(super) fn reveal_bubble(&mut self) {
+        if let Some(bubble) = &mut self.press_to_talk_bubble {
+            bubble.dismissed = false;
+        }
+    }
+
+    /// Typing elsewhere or an outside click hides the bubble — the
+    /// paragraph stays put behind the pill.
+    pub(super) fn dismiss_bubble(&mut self) {
+        if let Some(bubble) = &mut self.press_to_talk_bubble {
+            bubble.dismissed = true;
+        }
+    }
+
+    /// Whether the pad holds text Enter would send — the panel itself
+    /// needn't be on screen: a press-to-talk pad is parked hidden by
+    /// design and its committed speech is still a draft.
+    pub(super) fn sendable(&self) -> bool {
+        self.transcript.has_content()
     }
 
     /// A landed cleanup answer rewrote `target` — record the transition
@@ -3601,8 +3636,8 @@ impl Waku {
     }
 
     /// The VP button — a small dark pill with "VP" and a mic glyph,
-    /// immediately left of send. While this owner's pad is live it
-    /// carries the state dot.
+    /// immediately left of send. While this owner's pad is recording it
+    /// carries the red state dot; muted and idle render bare.
     pub(super) fn render_voice_scratchpad_button(
         &self,
         controls: &composer::ComposerControls,
@@ -3621,8 +3656,8 @@ impl Waku {
         let state = self.voice_scratchpad_button_state(owner);
         let theme = Theme::current(cx);
         let enabled = owner.is_some();
-        // The state dot is a pill interior element now, left of the label —
-        // it reads against text where a corner badge sat over the edge.
+        // The dot appears only while the pad is actually recording — a
+        // muted or idle pad reads as the plain button.
         let dot = |color: Hsla| {
             div()
                 .size(px(7.0))
@@ -3648,7 +3683,6 @@ impl Waku {
             .bg(theme.inverse);
         let pill = match state {
             ScratchpadButtonState::Recording => pill.child(dot(rgb(RECORDING_RED).into())),
-            ScratchpadButtonState::Muted => pill.child(dot(theme.text_tertiary)),
             _ => pill,
         };
         let pill = pill
@@ -4365,10 +4399,11 @@ impl Waku {
         cx.notify();
     }
 
-    /// Enter while the panel is up sends the whole transcript as one
-    /// message and ends that owner's session — a typed draft is
-    /// untouched. A hold still finishing on this owner blocks the send —
-    /// its result must land first, never under an emptied scratchpad.
+    /// Enter on a pad holding speech sends the whole transcript as one
+    /// message and ends that owner's session — the panel needn't be up,
+    /// and a typed composer draft rides along appended. A hold still
+    /// finishing on this owner blocks the send — its result must land
+    /// first, never under an emptied scratchpad.
     pub(super) fn submit_voice_scratchpad(&mut self, cx: &mut Context<Self>) {
         let Some(owner) = self.surface_voice_pad_owner() else {
             return;
@@ -4376,6 +4411,9 @@ impl Waku {
         if self.press_to_talk.busy_for(owner) {
             return;
         }
+        // A mid-edit bubble field lands its text on the paragraph
+        // before the transcript serializes.
+        self.commit_press_to_talk_bubble_edit(cx);
         let text = self
             .voice_scratchpads
             .get(&owner)
@@ -4519,13 +4557,20 @@ impl Waku {
         self.maybe_stop_voice_listener();
     }
 
-    /// The visible chat's scratchpad holding text Enter would send — the
-    /// composer's send button mirrors its enabled state on this.
+    /// The surface's scratchpad holding text Enter would send — the
+    /// composer's send button mirrors its enabled state on this. A pad
+    /// parked hidden counts too: press-to-talk content is a draft the
+    /// moment it lands, so Enter sends it even when the ordinary
+    /// composer input is empty.
     pub(super) fn voice_scratchpad_sendable(&self) -> bool {
-        self.voice_scratchpad_visible()
-            && self
-                .selected_voice_scratchpad()
-                .is_some_and(|scratchpad| scratchpad.transcript.has_content())
+        if !self.state.voice_scratchpad_enabled
+            || !self.composer_mounted()
+            || self.big_picture.is_open()
+        {
+            return false;
+        }
+        self.selected_voice_scratchpad()
+            .is_some_and(VoiceScratchpad::sendable)
     }
 
     /// The pad keyed by `owner` — a chat's session id and a deliverable's
@@ -4601,7 +4646,9 @@ impl Waku {
             .press_to_talk_bubble_edit
             .as_ref()
             .is_some_and(|edit| edit.owner == owner && edit.paragraph == bubble.paragraph);
-        let focus_inside = editing || self.press_to_talk_bubble_focused(owner, window, cx);
+        // Binding isn't presence — the field opens bound without
+        // stealing focus — so only actual focus inside counts.
+        let focus_inside = self.press_to_talk_bubble_focused(owner, window, cx);
         if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) {
             scratchpad.transcript.remove_paragraph(bubble.paragraph);
             if scratchpad
@@ -4622,8 +4669,30 @@ impl Waku {
         cx.notify();
     }
 
-    /// The bubble text's activation — click or Enter on the focused
-    /// region opens the shared editor on the represented paragraph.
+    /// Point the shared bubble field at `owner`'s paragraph — called when
+    /// a bubble is created or revealed, so the text area opens already
+    /// editable. A pending edit on the previously bound bubble saves
+    /// first; the snapshot is what a later Escape restores.
+    pub(super) fn bind_press_to_talk_bubble(
+        &mut self,
+        owner: press_to_talk::VoicePadOwner,
+        paragraph: u64,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.commit_press_to_talk_bubble_edit(cx);
+        self.press_to_talk_bubble_edit = Some(PressToTalkBubbleEdit {
+            owner,
+            paragraph,
+            snapshot: text.clone(),
+        });
+        self.press_to_talk_bubble_input
+            .update(cx, |input, cx| input.set_content(&text, cx));
+        cx.notify();
+    }
+
+    /// The unbound bubble's activation — click or Enter binds the shared
+    /// field to its paragraph and focuses it.
     fn begin_press_to_talk_bubble_edit(
         &mut self,
         owner: press_to_talk::VoicePadOwner,
@@ -4631,31 +4700,25 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(scratchpad) = self.voice_scratchpads.get(&owner) else {
+        let Some(text) = self.voice_scratchpads.get(&owner).and_then(|scratchpad| {
+            scratchpad
+                .transcript
+                .paragraph_text(bubble.paragraph)
+                .map(str::to_owned)
+        }) else {
             return;
         };
-        let Some(text) = scratchpad
-            .transcript
-            .paragraph_text(bubble.paragraph)
-            .map(str::to_owned)
-        else {
-            return;
-        };
-        self.press_to_talk_bubble_edit = Some(PressToTalkBubbleEdit {
-            owner,
-            paragraph: bubble.paragraph,
-            snapshot: text.clone(),
-        });
-        self.press_to_talk_bubble_input
-            .update(cx, |input, cx| input.set_content(&text, cx));
+        self.bind_press_to_talk_bubble(owner, bubble.paragraph, text, cx);
         let focus = self.press_to_talk_bubble_input.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
     }
 
-    /// The editor's save — blur commits the field's text over the
-    /// paragraph; editing to whitespace removes the paragraph outright,
-    /// and the bubble dies with it.
+    /// The editor's save — blur, dismissal, and Enter commit the field's
+    /// text over the paragraph; editing to whitespace removes the
+    /// paragraph outright, and the bubble dies with it. An unchanged
+    /// field writes nothing, so parking the bubble never marks the
+    /// paragraph user-edited.
     pub(super) fn commit_press_to_talk_bubble_edit(&mut self, cx: &mut Context<Self>) {
         let Some(edit) = self.press_to_talk_bubble_edit.take() else {
             return;
@@ -4664,20 +4727,123 @@ impl Waku {
             .press_to_talk_bubble_input
             .read(cx)
             .content()
+            .trim()
             .to_owned();
         if let Some(scratchpad) = self.voice_scratchpads.get_mut(&edit.owner) {
-            scratchpad
-                .transcript
-                .set_paragraph_text(edit.paragraph, &text);
-            if scratchpad
+            let unchanged = scratchpad
                 .transcript
                 .paragraph_text(edit.paragraph)
-                .is_none()
-            {
-                scratchpad.press_to_talk_bubble = None;
+                .is_some_and(|current| current == text);
+            if !unchanged {
+                scratchpad
+                    .transcript
+                    .set_paragraph_text(edit.paragraph, &text);
+                if scratchpad
+                    .transcript
+                    .paragraph_text(edit.paragraph)
+                    .is_none()
+                {
+                    scratchpad.press_to_talk_bubble = None;
+                }
             }
         }
         cx.notify();
+    }
+
+    /// Enter in the bubble's field — the edit commits and focus returns
+    /// to the composer the hold was captured over.
+    pub(super) fn submit_press_to_talk_bubble_edit(&mut self, cx: &mut Context<Self>) {
+        let context = self.press_to_talk_bubble_edit.as_ref().map(|edit| {
+            self.voice_scratchpads
+                .get(&edit.owner)
+                .and_then(|scratchpad| scratchpad.press_to_talk_bubble)
+                .filter(|bubble| bubble.paragraph == edit.paragraph)
+                .map(|bubble| bubble.context)
+                .unwrap_or(press_to_talk::PressToTalkContext::Composer { owner: edit.owner })
+        });
+        self.commit_press_to_talk_bubble_edit(cx);
+        let Some(context) = context else {
+            return;
+        };
+        let focus = self.press_to_talk_origin_focus(context, cx);
+        let window_handle = self.window_handle;
+        let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
+    }
+
+    /// Focus leaving the bubble's field — save the edit; when it left
+    /// for anywhere but the bubble's own trash control the bubble hides
+    /// too, the way an outside click hides it. The window deactivating
+    /// isn't a move to another control — commit, but keep the bubble.
+    pub(super) fn press_to_talk_bubble_blurred(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.commit_press_to_talk_bubble_edit(cx);
+        let Some(focused) = window.focused(cx) else {
+            return;
+        };
+        let inside = focused == self.press_to_talk_bubble_input.read(cx).focus()
+            || self.voice_scratchpads.iter().any(|(owner, _)| {
+                focused == self.transcript_control_focus(format!("ptt-bubble-trash-{owner}"), cx)
+            });
+        if !inside {
+            self.dismiss_press_to_talk_bubbles(cx);
+        }
+    }
+
+    /// Retire every live bubble — an outside click or typing bound for
+    /// another field. The pending edit commits first so no typing is
+    /// lost; paragraphs stay on their pads and the `Voicepad · N lines`
+    /// pill brings a bubble back.
+    pub(super) fn dismiss_press_to_talk_bubbles(&mut self, cx: &mut Context<Self>) {
+        self.commit_press_to_talk_bubble_edit(cx);
+        let mut dismissed = false;
+        for scratchpad in self.voice_scratchpads.values_mut() {
+            dismissed |= scratchpad.live_bubble().is_some();
+            scratchpad.dismiss_bubble();
+        }
+        if dismissed {
+            cx.notify();
+        }
+    }
+
+    /// A printable keystroke while the bubble is up: if the text is
+    /// bound for anywhere but the bubble's own field, the bubble hides.
+    /// Called from the keystroke interceptor, ahead of dispatch.
+    pub(super) fn press_to_talk_bubble_typing_dismissal(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.focused(cx) == Some(self.press_to_talk_bubble_input.read(cx).focus()) {
+            return;
+        }
+        if !self
+            .voice_scratchpads
+            .values()
+            .any(|scratchpad| scratchpad.live_bubble().is_some())
+        {
+            return;
+        }
+        self.dismiss_press_to_talk_bubbles(cx);
+    }
+
+    /// A message leaving a surface retires the recording bubble bound to
+    /// its pad — the paragraph itself stays behind the pill. Any pending
+    /// bubble edit commits first so the kept text is the edited one.
+    pub(super) fn retire_press_to_talk_bubble(
+        &mut self,
+        owner: press_to_talk::VoicePadOwner,
+        cx: &mut Context<Self>,
+    ) {
+        self.commit_press_to_talk_bubble_edit(cx);
+        if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner)
+            && scratchpad.press_to_talk_bubble.is_some()
+        {
+            scratchpad.press_to_talk_bubble = None;
+            cx.notify();
+        }
     }
 
     /// Escape's peel for the open editor — the pre-edit text restores
@@ -4774,6 +4940,18 @@ impl Waku {
     /// through the session activation it lives on.
     fn open_voice_pad(&mut self, owner: press_to_talk::VoicePadOwner, cx: &mut Context<Self>) {
         let on_screen = self.voice_pad_owner_on_screen(owner);
+        // The pill also resurfaces a bubble dismissed by typing or an
+        // outside click — the shared field rebinds so the text opens
+        // editable again.
+        let revealed = self.voice_scratchpads.get_mut(&owner).and_then(|pad| {
+            let bubble = pad.press_to_talk_bubble.filter(|bubble| bubble.dismissed)?;
+            let text = pad.transcript.paragraph_text(bubble.paragraph)?.to_owned();
+            pad.reveal_bubble();
+            Some((bubble.paragraph, text))
+        });
+        if let Some((paragraph, text)) = revealed {
+            self.bind_press_to_talk_bubble(owner, paragraph, text, cx);
+        }
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) else {
             return;
         };
@@ -4820,28 +4998,26 @@ impl Waku {
         &self,
         context: press_to_talk::PressToTalkContext,
     ) -> PressToTalkChrome {
-        if self.press_to_talk.busy() && self.press_to_talk.context() == Some(context) {
+        if self.press_to_talk.claims_chrome() && self.press_to_talk.context() == Some(context) {
             return PressToTalkChrome::Hold;
         }
         let bubble = self.voice_scratchpads.values().find_map(|scratchpad| {
-            scratchpad.press_to_talk_bubble.and_then(|bubble| {
-                (bubble.context == context
-                    && scratchpad
-                        .transcript
-                        .paragraph_text(bubble.paragraph)
-                        .is_some())
-                .then_some(bubble)
-            })
+            scratchpad
+                .live_bubble()
+                .filter(|bubble| bubble.context == context)
         });
         if let Some(bubble) = bubble {
             return PressToTalkChrome::Bubble(bubble);
         }
         // `Recorded` never paints — the bubble it points at is the
-        // confirmation — and `Idle` means nothing happened.
+        // confirmation — `Idle` means nothing happened, and `Starting`
+        // is too brief for a chip.
         if self.press_to_talk.notice_context() == Some(context)
             && !matches!(
                 self.press_to_talk.notice(),
-                press_to_talk::PressToTalkNotice::Idle | press_to_talk::PressToTalkNotice::Recorded
+                press_to_talk::PressToTalkNotice::Idle
+                    | press_to_talk::PressToTalkNotice::Recorded
+                    | press_to_talk::PressToTalkNotice::Starting
             )
         {
             return PressToTalkChrome::Notice;
@@ -4896,6 +5072,9 @@ impl Waku {
                 .left(px(10.0))
                 .right(px(10.0))
                 .h(px(PRESS_TO_TALK_CHROME_HEIGHT))
+                // A small berth keeps the recording indicator — and any
+                // other chip in this slot — off the card's top edge.
+                .pb(px(6.0))
                 .flex()
                 .flex_col()
                 .items_start()
@@ -4906,9 +5085,10 @@ impl Waku {
     }
 
     /// The bound hold's live status and provisional text — a status
-    /// chip beside the composer, never a focus target: "Starting…",
-    /// "Recording…" with its red dot, or "Finishing transcription…"
-    /// while the worker drains.
+    /// chip beside the composer, never a focus target: "Recording…"
+    /// with its red dot, or "Finishing transcription…" while the worker
+    /// drains. The Starting window paints nothing — capture begins fast
+    /// enough that a chip would only flicker.
     fn render_press_to_talk_indicator(&self, theme: &Theme) -> AnyElement {
         let label = self
             .press_to_talk
@@ -5024,12 +5204,13 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The latest accepted recording: the represented paragraph's text —
-    /// or the shared editor while it is open on it — the "⌘Z removes"
-    /// hint, and the always-visible trash. The text region is its own
-    /// focus target: click or Enter opens the field, Escape restores
-    /// the pre-edit text, focus leaving saves, and editing to
-    /// whitespace removes the paragraph.
+    /// The latest accepted recording's bubble: the paragraph's text in
+    /// the shared field, editable on display with no click-in step, and
+    /// the always-visible trash. Enter ends the edit and hands focus to
+    /// the composer the hold came from; Escape restores the pre-edit
+    /// text; leaving the field or clicking outside commits and hides
+    /// the bubble — the `Voicepad · N lines` pill brings it back, and
+    /// editing to whitespace removes the paragraph.
     fn render_press_to_talk_bubble(
         &self,
         bubble: PressToTalkBubble,
@@ -5038,23 +5219,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let owner = bubble.context.owner();
-        let editing = self
+        let bound = self
             .press_to_talk_bubble_edit
             .as_ref()
             .is_some_and(|edit| edit.owner == owner && edit.paragraph == bubble.paragraph);
-        let text = self
-            .voice_scratchpads
-            .get(&owner)
-            .and_then(|scratchpad| {
-                scratchpad
-                    .transcript
-                    .paragraph_text(bubble.paragraph)
-                    .map(str::to_owned)
-            })
-            .unwrap_or_default();
         let text_focus = self.transcript_control_focus(format!("ptt-bubble-text-{owner}"), cx);
         let trash_focus = self.transcript_control_focus(format!("ptt-bubble-trash-{owner}"), cx);
-        let body: AnyElement = if editing {
+        let body: AnyElement = if bound {
             div()
                 .flex_1()
                 .min_w_0()
@@ -5063,6 +5234,20 @@ impl Waku {
                 .child(self.press_to_talk_bubble_input.clone())
                 .into_any_element()
         } else {
+            // Defensive — the field binds to the newest bubble at commit,
+            // so a live bubble is bound. If this one isn't, paint its
+            // paragraph in the field's own typography; activating binds
+            // the field here and opens the edit.
+            let text = self
+                .voice_scratchpads
+                .get(&owner)
+                .and_then(|scratchpad| {
+                    scratchpad
+                        .transcript
+                        .paragraph_text(bubble.paragraph)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_default();
             div()
                 .id(SharedString::from(format!("ptt-bubble-text-{surface_key}")))
                 .track_focus(&text_focus)
@@ -5074,6 +5259,7 @@ impl Waku {
                 .rounded(px(5.0))
                 .cursor_text()
                 .text_size(sp(13.0))
+                .line_height(sp(13.0 * 1.618_034))
                 .text_color(theme.text)
                 .focus_visible(|row| row.bg(theme.inset))
                 .tooltip(Tooltip::text(tr!("voice_scratchpad.edit_recording")))
@@ -5095,7 +5281,7 @@ impl Waku {
                 this.cancel_press_to_talk_bubble_edit(window, cx);
             }))
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.commit_press_to_talk_bubble_edit(cx);
+                this.dismiss_press_to_talk_bubbles(cx);
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex_none()
@@ -5112,28 +5298,7 @@ impl Waku {
             .items_start()
             .gap(px(8.0))
             .aria_label(tr!("a11y.latest_voicepad_recording"))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.0))
-                    .child(
-                        div()
-                            .text_size(sp(11.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("voice_scratchpad.latest_recording")),
-                    )
-                    .child(body)
-                    .child(
-                        div()
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("voice_scratchpad.undo_removes_recording")),
-                    ),
-            )
+            .child(div().flex_1().min_w_0().child(body))
             .child(
                 icon_button(
                     SharedString::from(format!("ptt-bubble-remove-{surface_key}")),
@@ -5156,9 +5321,9 @@ impl Waku {
 
     /// The `Voicepad · N lines` pill — opens or resurfaces the pad,
     /// with the X button's one-click clear beside it — or the explicit
-    /// Undo clear the clear leaves behind. Mounts in the card's chip
-    /// line for a composer context, inside the editor card for an
-    /// annotation one.
+    /// Undo clear the clear leaves behind. Mounts above the field like
+    /// the annotation chip for a composer context, inside the editor
+    /// card for an annotation one.
     pub(super) fn render_voice_pad_pill_row(
         &self,
         owner: Uuid,
@@ -7320,6 +7485,59 @@ mod tests {
         // never an index that another cut could slide.
         transcript.remove_paragraph(transcript.paragraphs[0].id);
         assert_eq!(transcript.paragraph_text(id), Some("the latest recording"));
+    }
+
+    #[gpui::test]
+    fn a_dismissed_bubble_hides_until_the_pill_reveals_it(cx: &mut gpui::TestAppContext) {
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            let paragraph = pad
+                .transcript
+                .commit_press_to_talk("a recorded note")
+                .expect("the commit lands");
+            pad.press_to_talk_bubble = Some(PressToTalkBubble {
+                paragraph,
+                context: press_to_talk::PressToTalkContext::Composer { owner: Uuid::nil() },
+                dismissed: false,
+            });
+            assert_eq!(
+                pad.live_bubble().map(|bubble| bubble.paragraph),
+                Some(paragraph)
+            );
+            // Typing elsewhere or an outside click hides the bubble —
+            // the paragraph and the bubble anchor both stay put.
+            pad.dismiss_bubble();
+            assert!(pad.live_bubble().is_none());
+            assert_eq!(
+                pad.transcript.paragraph_text(paragraph),
+                Some("a recorded note")
+            );
+            // The `Voicepad · N lines` pill brings it back.
+            pad.reveal_bubble();
+            assert_eq!(
+                pad.live_bubble().map(|bubble| bubble.paragraph),
+                Some(paragraph)
+            );
+            // A bubble whose paragraph is gone stays hidden either way.
+            pad.transcript.remove_paragraph(paragraph);
+            assert!(pad.live_bubble().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn a_hidden_pad_still_carries_a_sendable_draft(cx: &mut gpui::TestAppContext) {
+        // Press-to-talk parks its pad hidden — `hidden` must not gate the
+        // content Enter sends from the composer.
+        let pad = cx.new(|cx| VoiceScratchpad::new(cx));
+        pad.update(cx, |pad, _| {
+            pad.muted = true;
+            pad.hidden = true;
+            assert!(!pad.sendable());
+            pad.transcript
+                .commit_press_to_talk("one two three four")
+                .expect("the commit lands");
+            assert!(pad.sendable());
+        });
     }
 
     #[test]

@@ -3316,17 +3316,14 @@ voice_scratchpad.open_pad: VoicePad を開く
 voice_scratchpad.clear_pad: VoicePad をクリア
 voice_scratchpad.pad_cleared: VoicePad をクリアしました
 voice_scratchpad.undo_clear: クリアを取り消す
-voice_scratchpad.latest_recording: 最新の VoicePad 録音
 voice_scratchpad.edit_recording: 録音を編集
 voice_scratchpad.remove_recording: 録音を削除
 voice_scratchpad.remove_recording_tooltip: 録音を削除 · ⌘Z
-voice_scratchpad.undo_removes_recording: ⌘Z でこの録音を削除
 voice_scratchpad.ptt_hint: ⌥Space を押し続けて録音
 experiments.voice_scratchpad_backend_label: 文字起こしエンジン
 experiments.press_to_talk_title: プッシュトゥトーク
 experiments.press_to_talk_description: Alt+Space を押し続けると、VoicePad を開かずに録音を追加できます。VoicePad はマイクをミュートした状態で開きます。
 press_to_talk.recorded: VoicePad に追加しました
-press_to_talk.starting: マイクを起動中…
 press_to_talk.recording: 録音中…
 press_to_talk.finishing: 文字起こしを完了中…
 press_to_talk.no_speech: 音声が検出されませんでした

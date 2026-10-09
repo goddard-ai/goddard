@@ -4178,6 +4178,7 @@ pub struct Waku {
     /// the field's undo stack or the workspace's draft-use undo. Lives
     /// for the window's lifetime.
     _press_to_talk_undo_guard: Subscription,
+    _press_to_talk_typing_guard: Subscription,
     /// Highlight under the pointer; `visible` once the hover delay elapsed.
     annotation_hover: Option<annotations::AnnotationHover>,
     /// A mouse-down that landed on a highlight, pending its mouse-up.
@@ -5349,14 +5350,18 @@ impl Waku {
                 .max_lines(10)
                 .accessibility_label(tr!("a11y.pasted_text"))
         });
-        // The bubble's editable text — Enter must break lines, so the
-        // commit path is focus leaving and Escape restores the pre-edit
-        // text rather than submitting anything.
+        // The bubble's text — the bubble IS this field, bound to the
+        // recorded paragraph: editable on display, Enter commits and
+        // returns focus to the composer, and Escape restores the
+        // pre-edit text.
         let press_to_talk_bubble_input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .submit_on_enter()
                 .auto_height()
                 .max_lines(6)
+                .tab_index(0)
+                .text_metrics(13.0, 13.0 * 1.618_034)
                 .accessibility_label(tr!("a11y.latest_voicepad_recording"))
         });
         // While a hold or its bubble is up, ⌘Z belongs to the recording:
@@ -5375,6 +5380,21 @@ impl Waku {
             };
             waku.update(cx, |this, cx| {
                 this.press_to_talk_undo_key(window, cx);
+            });
+        });
+        // A recording bubble survives until the user engages elsewhere —
+        // a printable keystroke bound for any field but the bubble's own
+        // retires it (the in-progress edit commits first). Chords and
+        // navigation keys leave it alone.
+        let press_to_talk_typing_guard = cx.intercept_keystrokes(|event, window, cx| {
+            if sessions::type_to_focus_text(&event.keystroke).is_none() {
+                return;
+            }
+            let Some(Some(waku)) = window.root::<Waku>() else {
+                return;
+            };
+            waku.update(cx, |this, cx| {
+                this.press_to_talk_bubble_typing_dismissal(window, cx);
             });
         });
         let command_palette_search = cx.new(|cx| {
@@ -6071,12 +6091,24 @@ impl Waku {
                 this.set_updater_button_focused(false, cx);
             })
             .detach();
-            // Focus leaving the bubble's field saves the edit — the same
-            // commit a pointer click outside performs.
+            // Focus leaving the bubble's field saves the edit — and when
+            // it left for anywhere but the bubble's own trash, the bubble
+            // hides, the same as a pointer click outside.
             cx.on_blur(
                 &press_to_talk_bubble_input.read(cx).focus(),
                 window,
-                |this: &mut Self, _, cx| this.commit_press_to_talk_bubble_edit(cx),
+                |this: &mut Self, window, cx| this.press_to_talk_bubble_blurred(window, cx),
+            )
+            .detach();
+            // Enter in the bubble's field ends the edit and returns
+            // focus to the composer the hold was captured over.
+            cx.subscribe(
+                &press_to_talk_bubble_input,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Submit(_)) {
+                        this.submit_press_to_talk_bubble_edit(cx);
+                    }
+                },
             )
             .detach();
 
@@ -6192,10 +6224,15 @@ impl Waku {
                     ComposerEvent::Submit(prompt) => {
                         let typed_only =
                             prompt.trim().is_empty() && this.composer_inline_atoms.is_empty();
-                        if this.voice_scratchpad_visible() {
-                            // The scratchpad owns Enter while it's up — the
-                            // typed draft stays in the composer underneath.
+                        if this.voice_scratchpad_sendable() {
+                            // A pad holding speech owns Enter — the panel
+                            // up or parked hidden — and the typed draft
+                            // rides along appended.
                             this.submit_voice_scratchpad(cx);
+                        } else if this.voice_scratchpad_visible() {
+                            // The open-but-empty panel keeps Enter — a
+                            // typed draft stays in the composer
+                            // underneath until the pad fills or closes.
                         } else if this.big_picture.is_open() {
                             // Big Picture routes by its own target — a card's
                             // session or a new task — not the selection.
@@ -7703,6 +7740,7 @@ impl Waku {
                 press_to_talk_bubble_edit: None,
                 press_to_talk_bubble_input,
                 _press_to_talk_undo_guard: press_to_talk_undo_guard,
+                _press_to_talk_typing_guard: press_to_talk_typing_guard,
                 annotation_hover: None,
                 annotation_press: None,
                 sent_annotations: HashMap::new(),
