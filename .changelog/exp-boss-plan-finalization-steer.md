@@ -1,0 +1,1 @@
+- Planning session approvals now reach the Boss immediately when its turn is open, while inactive Boss sessions keep the durable queued handoff.

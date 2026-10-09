@@ -496,21 +496,18 @@ impl WakuBackend {
         // The next prompt re-injects the persona block so the agent learns
         // the plan froze.
         self.boss.reset_context(plan.session_id);
-        // Approval hands implementation to the boss: the handoff rides the
-        // same durable hidden-prompt path employee reports use — the parked
-        // mirror survives a restart, so a failed launch only delays it.
+        // Approval hands implementation to the boss. Deliver into an open
+        // turn immediately; otherwise the hidden prompt is parked durably.
         if let Some(boss_session) = self.boss.document().session_id {
             let handoff = format!(
                 "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,
             );
             let trigger = crate::model::ReportTrigger::plan_finalized(&finalized);
-            if let Err(error) = self.queue_agent_prompt_with_id(
+            if let Err(error) = self.deliver_employee_report(
                 boss_session,
                 handoff,
-                Some(plan.session_id),
-                true,
-                None,
+                plan.session_id,
                 Some(trigger),
                 events,
             ) {

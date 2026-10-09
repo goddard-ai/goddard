@@ -10530,6 +10530,87 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Finalizing a plan steers the current Boss turn so the user gets a prompt
+/// response without waiting for the turn to settle.
+#[test]
+fn finalize_plan_steers_an_open_boss_turn() {
+    use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
+    use waku_protocol::boss::{BossOperation, BossResult};
+    let root = std::env::temp_dir().join(format!("boss-plan-final-steer-{}", Uuid::new_v4()));
+    let (backend, boss) = surface_test_backend(&root);
+    backend.boss.set_session_id(boss).unwrap();
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        boss,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    backend
+        .agent
+        .note_driver_event(boss, &DriverEvent::TurnStarted);
+    let mut settings = backend.settings.get();
+    settings.provider_binary_overrides.insert(
+        ProviderKind::Codex,
+        root.join("missing-codex").display().to_string(),
+    );
+    backend.settings.replace(settings).unwrap();
+    let events = EventSink::detached();
+    assert!(
+        backend
+            .handle_boss_operation(
+                None,
+                BossOperation::CreatePlan {
+                    title: "Auth".into(),
+                    plan_file: "auth.md".into(),
+                    prompt: "plan the auth migration".into(),
+                    provider: Some(ProviderKind::Codex),
+                    model: None,
+                    reasoning_effort: None,
+                },
+                &events,
+            )
+            .is_err()
+    );
+    let plan = backend.boss.plan_for_file("plans/auth.md").unwrap();
+    assert!(matches!(
+        backend
+            .handle_boss_operation(
+                None,
+                BossOperation::FinalizePlan {
+                    plan_file: Some("auth.md".into()),
+                    items: None,
+                },
+                &events,
+            )
+            .unwrap(),
+        BossResult::PlanFinalized { .. }
+    ));
+
+    let steers = capture.steers.lock().clone();
+    assert_eq!(steers.len(), 1);
+    assert!(steers[0].contains("finalized its design"));
+    assert!(steers[0].contains("plans/auth.md"));
+    assert!(!backend.agent.has_queued(boss));
+    let pending = backend
+        .agent
+        .take_pending_steer(boss, &steers[0])
+        .expect("the finalization steer is pending");
+    let trigger = pending
+        .report_trigger
+        .expect("the steer retains its trigger");
+    assert_eq!(trigger.kind, ReportTriggerKind::PlanFinalized);
+    assert_eq!(trigger.boundary, ReportTriggerBoundary::Steer);
+    assert_eq!(trigger.employee, plan.session_id);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Plan finalization is the human's call alone: a scoped caller — the
 /// boss agent, the planning session itself, any other session — is
 /// refused outright, parks no approval request, and leaves the plan a
