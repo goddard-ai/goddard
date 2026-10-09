@@ -87,10 +87,12 @@ impl WakuBackend {
 
     /// The scoped credential's transcript search: the same corpus and
     /// filters as `SearchSessionMessages`, confined to the calling task's
-    /// project. A scoped caller may still write `project:` — it just has to
-    /// name that project. The boss is the exception: its own project holds
-    /// only its session, so it searches every project the daemon knows and
-    /// `project:` may name any of them.
+    /// project — for an employee, the project its assignment registered on
+    /// its session, so the reach covers sibling tasks and earlier employee
+    /// runs there and nowhere else. A scoped caller may still write
+    /// `project:` — it just has to name that project. The boss is the
+    /// exception: its own project holds only its session, so it searches
+    /// every project the daemon knows and `project:` may name any of them.
     pub(super) fn agent_search_sessions(
         &self,
         agent: Option<Uuid>,
@@ -115,11 +117,6 @@ impl WakuBackend {
             .find(|session| session.id == caller)
             .map(|session| session.project_id)
             .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
-        if self.boss.is_employee(caller) {
-            bail!(
-                "employees retrieve authorized transcripts through the Boss transcript operation"
-            );
-        }
         // Resolve the boss's `project:` filters up front so a misspelling
         // errors like the scoped branch instead of silently scanning
         // nothing.

@@ -3711,6 +3711,128 @@ fn boss_search_spans_every_project() {
 }
 
 #[test]
+fn employee_search_stays_inside_its_assigned_project() {
+    let root = std::env::temp_dir().join(format!("waku-employee-search-{}", Uuid::new_v4()));
+    let store = StateStore::daemon(root.join("app.db"));
+    let mut state = PersistedState::fresh(root.join("repo"));
+    // The boss session carries the needle too, but its project is not the
+    // employee's — it must never surface in the employee's results.
+    let boss_id = state.sessions[0].id;
+    let boss_project_name = state.projects[0].name.clone();
+    state.sessions[0].begin_turn("the rare needle phrase");
+    state.sessions[0]
+        .finish_active_turn(crate::model::TurnStatus::Completed);
+    // The employee's assigned project holds a sibling task with the needle.
+    let assigned = Project::from_path(root.join("assigned"));
+    let mut sibling = AgentSession::new(assigned.id, ProviderKind::Codex);
+    sibling.begin_turn("the rare needle phrase");
+    sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+    let sibling_id = sibling.id;
+    // A third project the employee has no claim on also matches.
+    let foreign = Project::from_path(root.join("foreign"));
+    let mut outsider = AgentSession::new(foreign.id, ProviderKind::Codex);
+    outsider.begin_turn("the rare needle phrase");
+    outsider.finish_active_turn(crate::model::TurnStatus::Completed);
+    let outsider_id = outsider.id;
+    state.projects.push(assigned.clone());
+    state.projects.push(foreign.clone());
+    state.push_session(sibling);
+    state.push_session(outsider);
+    store.save(&mut state).unwrap();
+
+    let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+    let mut daemon_settings = settings.get();
+    daemon_settings.agent_tools_enabled = true;
+    settings.replace(daemon_settings).unwrap();
+    let backend = WakuBackend::new(settings, store).unwrap();
+    backend.boss.set_session_id(boss_id).unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let employee = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Search audit".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Goal,
+            None,
+        )
+        .unwrap();
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    let mut employee_session = AgentSession::new(assigned.id, ProviderKind::Codex);
+    employee_session.id = employee_id;
+    employee_session.begin_turn("employee prompt");
+    employee_session.finish_active_turn(crate::model::TurnStatus::Completed);
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(employee_session);
+        backend.task_store.save(&mut state).unwrap();
+    }
+
+    let hits = |query: &str, agent: Uuid| match backend
+        .agent_search_sessions(Some(agent), Uuid::nil(), query, None)
+        .unwrap()
+    {
+        ResponsePayload::AgentSessionSearch { hits } => hits,
+        other => panic!("unexpected payload {other:?}"),
+    };
+
+    // A plain query returns only the sibling: neither the boss's project nor
+    // the foreign project leaks a hit, a snippet, or a task id.
+    let found = hits("rare needle", employee_id);
+    assert_eq!(
+        found.iter().map(|hit| hit.task_id).collect::<Vec<_>>(),
+        vec![sibling_id]
+    );
+    assert_eq!(found[0].project, assigned.name);
+    assert!(found[0].snippet.contains("rare needle"));
+    // A filters-only query lists every task in the assigned project — the
+    // employee's own included — and nothing outside it.
+    let mut listed = hits("status:idle", employee_id)
+        .iter()
+        .map(|hit| hit.task_id)
+        .collect::<Vec<_>>();
+    listed.sort();
+    let mut expected = vec![employee_id, sibling_id];
+    expected.sort();
+    assert_eq!(listed, expected);
+    // The boundary is derived server-side: naming the assigned project is
+    // accepted, naming any other project — the boss's included — is an
+    // error, and no token widens the scan beyond the caller's project.
+    assert_eq!(
+        hits(&format!("project:{} rare needle", assigned.name), employee_id)
+            .iter()
+            .map(|hit| hit.task_id)
+            .collect::<Vec<_>>(),
+        vec![sibling_id]
+    );
+    for query in [
+        format!("project:{boss_project_name} rare needle"),
+        format!("project:{} rare needle", foreign.name),
+        "project:ghost rare needle".to_owned(),
+    ] {
+        assert!(
+            backend
+                .agent_search_sessions(Some(employee_id), Uuid::nil(), &query, None)
+                .is_err(),
+            "{query} should fail"
+        );
+    }
+    // Over the same fixture the boss keeps its daemon-wide search.
+    let mut reached = hits("rare needle", boss_id)
+        .iter()
+        .map(|hit| hit.task_id)
+        .collect::<Vec<_>>();
+    reached.sort();
+    let mut expected = vec![boss_id, sibling_id, outsider_id];
+    expected.sort();
+    assert_eq!(reached, expected);
+
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn boss_transcripts_capture_unopened_employee_turns_and_tool_output() {
     let root = std::env::temp_dir().join(format!("boss-transcript-{}", Uuid::new_v4()));
     let store = StateStore::daemon(root.join("app.db"));

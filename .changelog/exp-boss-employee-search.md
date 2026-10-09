@@ -1,0 +1,1 @@
+- **Boss:** employees can run `goddard-agent search` to search task transcripts inside their assigned project — sibling tasks and earlier employee runs included. Other projects stay out of reach; only the boss still searches across every project.
