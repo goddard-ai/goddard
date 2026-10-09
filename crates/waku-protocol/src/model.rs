@@ -3610,7 +3610,7 @@ pub struct BossSummonCard {
     pub session_id: Uuid,
     pub name: String,
     pub avatar_seed: String,
-    #[serde(default)]
+    #[serde(default = "crate::boss::legacy_avatar_style")]
     pub avatar_style: crate::boss::AvatarStyle,
     #[serde(default)]
     pub job_title: String,
@@ -3629,7 +3629,7 @@ impl BossSummonCard {
                 session_id,
                 name: String::new(),
                 avatar_seed: session_id.to_string(),
-                avatar_style: Default::default(),
+                avatar_style: crate::boss::legacy_avatar_style(),
                 job_title: String::new(),
                 icon: None,
             });

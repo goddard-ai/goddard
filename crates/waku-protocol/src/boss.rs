@@ -10,15 +10,30 @@ use crate::AgentWorkspace;
 use crate::automations::AutomationInput;
 use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode, SessionPlanning};
 
-/// Human-selected avatar generator; old identities retain DiceBear moods.
+/// Human-selected avatar generator. `blobby` was removed and remaps to the
+/// `gaze` default; identities written before the field existed deserialize
+/// through [`legacy_avatar_style`] so their faces stay on DiceBear moods.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AvatarStyle {
-    #[default]
+    /// DiceBear "moods" — labeled Moods in the picker.
     DiceBear,
-    Blobby,
+    /// DiceBear "gaze" — the app's default for new identities.
+    #[default]
+    #[serde(alias = "blobby")]
+    Gaze,
+    Dylan,
+    FunEmoji,
+    LineFace,
     AgentAvatars,
     Avvvatars,
+}
+
+/// `#[serde(default)]` for stored `avatarStyle` fields: records written
+/// before the picker existed rendered DiceBear moods, so a missing value
+/// stays on `DiceBear` even though the app's default is now `Gaze`.
+pub(crate) fn legacy_avatar_style() -> AvatarStyle {
+    AvatarStyle::DiceBear
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -27,7 +42,7 @@ pub struct BossIdentity {
     pub id: Uuid,
     pub name: String,
     pub avatar_seed: String,
-    #[serde(default)]
+    #[serde(default = "legacy_avatar_style")]
     pub avatar_style: AvatarStyle,
 }
 
@@ -2924,7 +2939,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn old_identity_defaults_to_dicebear() {
+    fn old_identity_keeps_moods_and_blobby_maps_to_gaze() {
         let identity: super::BossIdentity = serde_json::from_value(serde_json::json!({
             "id": Uuid::nil(), "name": "Boss", "avatarSeed": "existing"
         }))
@@ -2933,7 +2948,8 @@ mod tests {
         let mut value = serde_json::to_value(identity).unwrap();
         value["avatarStyle"] = serde_json::json!("blobby");
         let identity: super::BossIdentity = serde_json::from_value(value).unwrap();
-        assert_eq!(identity.avatar_style, super::AvatarStyle::Blobby);
+        assert_eq!(identity.avatar_style, super::AvatarStyle::Gaze);
+        assert_eq!(super::AvatarStyle::default(), super::AvatarStyle::Gaze);
     }
 
     #[test]

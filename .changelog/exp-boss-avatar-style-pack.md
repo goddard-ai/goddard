@@ -1,0 +1,1 @@
+- Added Gaze, Dylan, Fun Emoji, and Line Face to the Boss avatar style picker in Settings, and removed Blobby. Gaze is now the default for new identities; Dylan, Fun Emoji, and Line Face render in a circular frame.

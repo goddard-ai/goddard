@@ -2987,15 +2987,22 @@ impl Waku {
     }
 
     pub(super) fn boss_avatar(&self, identity: &BossIdentity, size: f32, cx: &App) -> AnyElement {
+        let circular = boss_moods::circular_frame(identity.avatar_style);
         if let Some(image) = self.boss_avatar_image(identity, size) {
-            return gpui::img(image)
-                .size(px(size))
-                .rounded(px(6.0))
-                .into_any_element();
+            let image = gpui::img(image).size(px(size));
+            return if circular {
+                image.rounded_full().into_any_element()
+            } else {
+                image.rounded(px(6.0)).into_any_element()
+            };
         }
-        div()
-            .size(px(size))
-            .rounded(px(6.0))
+        let placeholder = div().size(px(size));
+        let placeholder = if circular {
+            placeholder.rounded_full()
+        } else {
+            placeholder.rounded(px(6.0))
+        };
+        placeholder
             .bg(Theme::current(cx).overlay)
             .flex()
             .items_center()
@@ -8419,10 +8426,10 @@ mod tests {
     #[test]
     fn avatar_style_setting_targets_the_global_boss_preference() {
         assert!(matches!(
-            global_avatar_style_operation(AvatarStyle::Blobby),
+            global_avatar_style_operation(AvatarStyle::Dylan),
             BossOperation::SetAvatarStyle {
                 session_id: None,
-                avatar_style: AvatarStyle::Blobby,
+                avatar_style: AvatarStyle::Dylan,
             }
         ));
     }
@@ -8430,7 +8437,7 @@ mod tests {
     #[test]
     fn failed_avatar_retries_are_bounded_and_stay_deduplicated() {
         let ui = BossUi::default();
-        let key = (("failed".to_string(), AvatarStyle::Blobby), 24);
+        let key = (("failed".to_string(), AvatarStyle::Dylan), 24);
         ui.avatar_requested.borrow_mut().insert(key.clone());
         for attempt in 1..=AVATAR_MAX_ATTEMPTS {
             ui.retry_avatar(key.0.clone(), key.1, attempt);

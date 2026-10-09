@@ -6390,10 +6390,16 @@ boss.avatar_style:
   en: Avatar style
 boss.avatar_style_description:
   en: Choose the style used for the Boss and all employees.
+boss.avatar_style_gaze:
+  en: "Avatar style: Gaze"
 boss.avatar_style_dicebear:
-  en: "Avatar style: DiceBear"
-boss.avatar_style_blobby:
-  en: "Avatar style: Blobby"
+  en: "Avatar style: Moods"
+boss.avatar_style_dylan:
+  en: "Avatar style: Dylan"
+boss.avatar_style_fun_emoji:
+  en: "Avatar style: Fun Emoji"
+boss.avatar_style_line_face:
+  en: "Avatar style: Line Face"
 boss.avatar_style_agent:
   en: "Avatar style: Agent Avatars"
 boss.avatar_style_avvvatars:
