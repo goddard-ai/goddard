@@ -1,0 +1,1 @@
+- The sidebar no longer lists tasks on a remote host that has never connected this session; once a host has been online, a later drop keeps its tasks visible with an unplug indicator instead of an Offline label.

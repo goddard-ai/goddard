@@ -3205,6 +3205,7 @@ impl Waku {
         }
         let supervisor = link.supervisor;
         self.daemons.add_remote(host, supervisor.clone());
+        self.remote_hosts_seen_online.insert(host);
         // Optimistic until the host answers: every provider stays selectable
         // with its fallback catalog so a session can start before (or
         // despite) detection, and only a completed probe may close one.
@@ -3490,6 +3491,7 @@ impl Waku {
         self.provider_detection_pending.remove(&remote);
         self.remote_errors.remove(&host);
         self.needs_auth_hosts.remove(&host);
+        self.remote_hosts_seen_online.remove(&host);
         self.interactive_connects_pending.remove(&host);
         self.remote_connect_triggers.remove(&host);
         #[cfg(unix)]
@@ -3565,6 +3567,13 @@ impl Waku {
         self.daemons
             .supervisor(waku_client::DaemonKey::Remote(host))
             .is_some_and(|supervisor| supervisor.status() == waku_client::DaemonStatus::Connected)
+    }
+
+    /// Whether the host's tasks belong in the sidebar: while it is
+    /// connected, or after a drop once it has been online this app session.
+    /// A host that has never connected this session hides its tasks.
+    pub(super) fn remote_host_tasks_visible(&self, host: Uuid) -> bool {
+        self.remote_host_connected(host) || self.remote_hosts_seen_online.contains(&host)
     }
 
     /// Keep the ssh channel under a connected host alive: while the record

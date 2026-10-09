@@ -601,6 +601,22 @@ fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uui
     grouped_sessions
 }
 
+/// Whether a session's sidebar row shows given its owning daemon's
+/// reachability: local tasks always list. A remote host's tasks list while
+/// the host is connected — and keep listing through a drop once the host
+/// has been online this app session — but a host that has never connected
+/// this session hides its tasks entirely.
+fn sidebar_task_visible_for_host(
+    host: waku_client::DaemonKey,
+    host_connected: impl Fn(Uuid) -> bool,
+    host_seen_online: impl Fn(Uuid) -> bool,
+) -> bool {
+    match host {
+        waku_client::DaemonKey::Local => true,
+        waku_client::DaemonKey::Remote(host) => host_connected(host) || host_seen_online(host),
+    }
+}
+
 fn project_sidebar_groups(
     sessions: &[&AgentSession],
     projectless_project_ids: &HashSet<Uuid>,
@@ -3725,6 +3741,16 @@ impl Waku {
                 u64::from(session_dormant(session, now, dormant_threshold)),
             );
         }
+        // A remote host's tasks hide until its first connect this session —
+        // the rows a connect reveals move no session field, so each host's
+        // visibility predicate is part of the input.
+        for host in &self.state.remote_hosts {
+            fingerprint = mix_uuid(fingerprint, host.id);
+            fingerprint = mix(
+                fingerprint,
+                u64::from(self.remote_host_tasks_visible(host.id)),
+            );
+        }
         // Planning sessions skip the loop above as boss-managed, but they
         // carry rows of their own — their lifecycle lands on a different
         // sync channel than the boss document's revision, so identity,
@@ -3865,7 +3891,8 @@ impl Waku {
             // open from the friends panel and stay out of local history.
             // Boss-managed sessions have dedicated Boss/Employee rows in
             // the boss section; repeating them as ordinary tasks is a
-            // duplicate.
+            // duplicate. And tasks on a remote host that has never been
+            // online this session hide entirely until it first connects.
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
@@ -3877,6 +3904,11 @@ impl Waku {
                         .is_none_or(|planning| planning.finalized_at.is_none())
                     && (!self.state.boss_experiment_enabled
                         || !self.session_is_boss_managed(session))
+                    && sidebar_task_visible_for_host(
+                        self.session_host(session.id),
+                        |host| self.remote_host_connected(host),
+                        |host| self.remote_hosts_seen_online.contains(&host),
+                    )
             })
             .collect::<Vec<_>>();
         // A focused project narrows the whole history to its tasks — the
@@ -5823,6 +5855,24 @@ impl Waku {
         theme: &Theme,
     ) -> Option<AnyElement> {
         let session_id = session.id;
+        // A task whose remote host is offline wears the unplug marker — its
+        // stored turn state is stale while the host cannot answer.
+        if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
+            && !self.remote_host_connected(host)
+        {
+            return Some(
+                div()
+                    .id(SharedString::from(format!("session-offline-{session_id}")))
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .tooltip(Tooltip::text(tr!("sidebar.offline")))
+                    .child(icon("icons/unplug.svg", 12.0, theme.text_tertiary))
+                    .into_any_element(),
+            );
+        }
         if matches!(
             session.status,
             SessionStatus::Connecting | SessionStatus::Working
@@ -5949,18 +5999,15 @@ impl Waku {
         };
         // Date grouping and Big Picture cards have no project header to carry
         // the host name, so the detail line wears it — plus the host's
-        // offline or needs-auth state while it is disconnected. Selecting
-        // the row is itself the retry path.
+        // needs-auth state while it is disconnected (plain offline is the
+        // row's unplug indicator). Selecting the row is itself the retry
+        // path.
         let (detail_label, session_remote) = match self.session_host(session_id) {
             waku_client::DaemonKey::Remote(host) if !grouped_by_project => {
                 let host_name = self.remote_host_name(host);
-                let state = (!self.remote_host_connected(host)).then(|| {
-                    if self.needs_auth_hosts.contains(&host) {
-                        tr!("sidebar.needs_auth")
-                    } else {
-                        tr!("sidebar.offline")
-                    }
-                });
+                let state = (!self.remote_host_connected(host)
+                    && self.needs_auth_hosts.contains(&host))
+                .then(|| tr!("sidebar.needs_auth"));
                 let label = match (detail_label, host_name, state) {
                     (Some(label), Some(host), Some(state)) => {
                         format!("{label} · {host} · {state}")
@@ -7602,6 +7649,34 @@ mod tests {
         assert!(sidebar_jump_skips_session(&rows, Some(first), third));
         assert!(sidebar_jump_skips_session(&rows, Some(third), first));
         assert!(!sidebar_jump_skips_session(&rows, None, third));
+    }
+
+    /// A remote host's tasks hide while it has never been online this app
+    /// session; the first connect lists them, and a later drop keeps them —
+    /// only the row's status glyph changes to unplugged. Local tasks never
+    /// hide.
+    #[test]
+    fn remote_hosts_hide_sidebar_tasks_until_their_first_connect() {
+        let host = Uuid::from_u128(7);
+        let remote = waku_client::DaemonKey::Remote(host);
+
+        assert!(!sidebar_task_visible_for_host(remote, |_| false, |_| false));
+        assert!(sidebar_task_visible_for_host(remote, |_| true, |_| false));
+        assert!(sidebar_task_visible_for_host(
+            remote,
+            |_| false,
+            |seen| { seen == host }
+        ));
+        assert!(sidebar_task_visible_for_host(
+            remote,
+            |_| true,
+            |seen| seen == host
+        ));
+        assert!(sidebar_task_visible_for_host(
+            waku_client::DaemonKey::Local,
+            |_| false,
+            |_| false
+        ));
     }
 
     #[test]

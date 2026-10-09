@@ -2383,6 +2383,10 @@ pub struct Waku {
     /// Remote hosts whose last interactive auth attempt the user cancelled —
     /// latched so nothing prompts for them again until the next use.
     needs_auth_hosts: HashSet<Uuid>,
+    /// Remote hosts that have connected at least once this app session. A
+    /// host that has never been online hides its sidebar tasks entirely;
+    /// after a first connect a drop keeps them listed, marked unplugged.
+    remote_hosts_seen_online: HashSet<Uuid>,
     /// Per-host connect wake-ups: a user action on an offline host requests
     /// one interactive attempt ahead of the backoff.
     remote_connect_triggers: HashMap<Uuid, smol::channel::Sender<()>>,
@@ -6983,6 +6987,7 @@ impl Waku {
                 daemons,
                 remote_errors: HashMap::new(),
                 needs_auth_hosts: HashSet::new(),
+                remote_hosts_seen_online: HashSet::new(),
                 remote_connect_triggers: HashMap::new(),
                 interactive_connects_pending: HashSet::new(),
                 pending_remote_submissions: HashMap::new(),
