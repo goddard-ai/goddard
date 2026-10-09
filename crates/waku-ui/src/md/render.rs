@@ -4306,10 +4306,6 @@ fn table_row(
             div()
                 .w(relative(widths.get(index).copied().unwrap_or(0.0)))
                 .min_w_0()
-                // Content-sized columns do not wrap: text that outgrows its
-                // share truncates to an ellipsis, and the table's horizontal
-                // scroll reveals the rest.
-                .truncate()
                 .px(px(9.0))
                 .py(px(6.0))
                 .text_size(px(table_text_size(ctx)))

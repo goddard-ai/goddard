@@ -1,1 +1,1 @@
-- Wide markdown tables in task messages now scroll horizontally instead of squeezing every column to fit; a fade marks content hidden past the edge, and cell text too long for its column ends in an ellipsis.
+- Long text in Markdown table cells now wraps within its column, while wide tables still scroll horizontally and show a fade at the edge.

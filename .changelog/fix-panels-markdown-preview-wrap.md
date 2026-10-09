@@ -1,0 +1,1 @@
+- Long lines in Markdown file previews now wrap within the available panel width.

@@ -9205,8 +9205,10 @@ impl Waku {
             .when(centered, |element| element.flex().justify_center())
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .when(centered, |element| {
-                        element.w_full().max_w(px(CONTENT_MAX_WIDTH)).min_w_0()
+                        element.max_w(px(CONTENT_MAX_WIDTH))
                     })
                     .px(px(16.0))
                     .when(index == 0, |element| element.pt(px(14.0)))
