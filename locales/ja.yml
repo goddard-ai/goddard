@@ -3196,6 +3196,12 @@ boss.goals_more_queued: "+%{count} 件キュー中"
 boss.goals_show_details: "詳細を表示: %{title}、%{status}"
 boss.goals_hide_details: "詳細を隠す: %{title}、%{status}"
 boss.goals_open_assignment: "会話を開く: %{label}、%{status}"
+boss.goals_assignment_status: "%{label}、%{status}"
+boss.goals_cause_exited_mid_turn: プロバイダがターン中に終了
+boss.goals_cause_exited_idle: アイドル中にプロバイダが終了
+boss.goals_cause_parked_work: プロンプトが保留のまま
+boss.goals_cause_unanswered_ask: 質問が未回答のまま
+boss.goals_cause_restarted: デーモン再起動により中断
 boss.trigger_interrupted: "%{name} は中断されました"
 boss.trigger_plan: 計画
 boss.trigger_plan_finalized: "%{name} が設計を確定しました"

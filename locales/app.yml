@@ -6336,6 +6336,18 @@ boss.goals_hide_details:
   en: "Hide details: %{title}, %{status}"
 boss.goals_open_assignment:
   en: "Open conversation: %{label}, %{status}"
+boss.goals_assignment_status:
+  en: "%{label}, %{status}"
+boss.goals_cause_exited_mid_turn:
+  en: provider exited mid-turn
+boss.goals_cause_exited_idle:
+  en: provider exited while idle
+boss.goals_cause_parked_work:
+  en: prompts left parked
+boss.goals_cause_unanswered_ask:
+  en: a question went unanswered
+boss.goals_cause_restarted:
+  en: interrupted by a daemon restart
 boss.select_document:
   en: Select a file or persona to view and edit it.
 boss.save:

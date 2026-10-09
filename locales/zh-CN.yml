@@ -3147,6 +3147,12 @@ boss.goals_more_queued: "+%{count} 个排队中"
 boss.goals_show_details: "显示详情：%{title}，%{status}"
 boss.goals_hide_details: "隐藏详情：%{title}，%{status}"
 boss.goals_open_assignment: "打开会话：%{label}，%{status}"
+boss.goals_assignment_status: "%{label}，%{status}"
+boss.goals_cause_exited_mid_turn: 提供方在回合中途退出
+boss.goals_cause_exited_idle: 提供方在空闲时退出
+boss.goals_cause_parked_work: 提示词仍处于搁置状态
+boss.goals_cause_unanswered_ask: 一个问题未得到回答
+boss.goals_cause_restarted: 因守护进程重启而中断
 boss.trigger_interrupted: "%{name} 被中断"
 boss.trigger_plan: 计划
 boss.trigger_plan_finalized: "%{name} 已将设计定稿"
