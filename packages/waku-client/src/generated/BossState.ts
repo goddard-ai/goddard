@@ -8,9 +8,29 @@ import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
+import type { PersonaDefaultNotice } from "./PersonaDefaultNotice";
+import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
-export type BossState = { identity: BossIdentity, personaId: string, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
+export type BossState = { identity: BossIdentity, personaId: string,
+/**
+ * The canonical Employee default persona — the stable identity of
+ * the shipped Employee role regardless of renames; a custom persona
+ * named "Employee" is never it. `None` only on documents that
+ * predate the seeded defaults.
+ */
+employeePersonaId?: string | null,
+/**
+ * Revision provenance for the two shipped default personas —
+ * starting/reviewed/seen revisions, recoverable text, and any open
+ * proposal.
+ */
+personaDefaults: PersonaDefaultsState,
+/**
+ * The consolidated persona-defaults upgrade notice awaiting delivery
+ * into the boss's next natural turn.
+ */
+personaDefaultNotice?: PersonaDefaultNotice | null, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
 /**
  * Retired identities remain available for revival until their name is
  * assigned to another employee. They are not part of the visible roster.

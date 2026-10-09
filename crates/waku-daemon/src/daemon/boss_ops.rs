@@ -925,14 +925,45 @@ impl WakuBackend {
                     BossOperation::RenameEmployee { session_id, .. } => Some(*session_id),
                     _ => None,
                 };
-                let refresh_persona = matches!(&operation, BossOperation::UpsertPersona { persona }
-                    if persona.id == self.boss.document().persona_id);
+                // Persona-text operations re-inject the changed
+                // instructions into the sessions that carry them — the
+                // boss chat for its own persona and each live employee
+                // assigned the edited role — so the next turn (or resume,
+                // or a queued ticket's dispatch) composes the current
+                // saved text while a running turn keeps what it began
+                // with.
+                let personas_before: std::collections::HashMap<Uuid, String> = match operation {
+                    BossOperation::UpsertPersona { .. } | BossOperation::PersonaDefault { .. } => {
+                        self.boss
+                            .document()
+                            .personas
+                            .iter()
+                            .map(|persona| (persona.id, persona.markdown.clone()))
+                            .collect()
+                    }
+                    _ => Default::default(),
+                };
                 let result = self.boss.handle(caller, operation)?;
                 let boss = self.boss.document();
-                if (rename || refresh_persona)
-                    && let Some(session) = boss.session_id
-                {
+                if rename && let Some(session) = boss.session_id {
                     self.boss.reset_context(session);
+                }
+                if !personas_before.is_empty() {
+                    for persona in &boss.personas {
+                        if personas_before.get(&persona.id) == Some(&persona.markdown) {
+                            continue;
+                        }
+                        if let Some(session) =
+                            boss.session_id.filter(|_| persona.id == boss.persona_id)
+                        {
+                            self.boss.reset_context(session);
+                        }
+                        for employee in boss.employees.iter().filter(|employee| {
+                            employee.persona_id == persona.id && !employee.expired
+                        }) {
+                            self.boss.reset_context(employee.session_id);
+                        }
+                    }
                 }
                 if let Some(session_id) = employee_rename {
                     // The renamed employee's next prompt re-injects its

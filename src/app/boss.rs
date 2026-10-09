@@ -5,7 +5,8 @@ use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::boss::{
     BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
-    MemoryOperation, PersonaPermissions,
+    MemoryOperation, PersonaDefaultAction, PersonaDefaultRole, PersonaPermissions,
+    instruction_diff, shipped_persona_default, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
@@ -289,6 +290,12 @@ pub(super) struct BossUi {
     persona_selection: TranscriptSelection,
     persona_scroll: ScrollHandle,
     persona_scrollbar: Rc<ScrollbarState>,
+    /// Per-persona expansion for the shipped-default card — comparison,
+    /// shipped text, and the reset confirmation, keyed by persona id.
+    persona_default_pane: HashMap<Uuid, PersonaDefaultPane>,
+    /// The shipped↔saved diff text for an expanded comparison, keyed to
+    /// the markdown fingerprint it was computed from.
+    persona_diff: RefCell<Option<(Uuid, u64, String)>>,
     /// Every loaded entry under the Boss files root's `memory/` tree —
     /// one flat list; folder rows parent their children by path prefix.
     files: Vec<BossFile>,
@@ -397,6 +404,8 @@ impl Default for BossUi {
             persona_selection: TranscriptSelection::default(),
             persona_scroll: ScrollHandle::new(),
             persona_scrollbar: ScrollbarState::new(),
+            persona_default_pane: HashMap::new(),
+            persona_diff: RefCell::new(None),
             files: Vec::new(),
             files_key: None,
             memory_expanded: HashMap::new(),
@@ -660,6 +669,21 @@ pub(super) enum BossReply {
     /// id marks the press's in-flight window so the chip hides and the
     /// composer seals until the reply lands.
     Finalize(Uuid),
+    /// A shipped-default action — reset, undo, keep, or a proposal
+    /// decision. The result refreshes state like `Saved` without the
+    /// editor bookkeeping.
+    PersonaDefault,
+}
+
+/// Expansion state for one canonical default's instructions card.
+#[derive(Clone, Copy, Default)]
+struct PersonaDefaultPane {
+    /// The saved↔shipped unified diff is on screen.
+    compare: bool,
+    /// The full latest shipped instructions are on screen.
+    shipped: bool,
+    /// The reset confirmation preview is on screen.
+    reset_preview: bool,
 }
 
 /// Sidebar employee order: newest summon first. `created_at` is the
@@ -1874,6 +1898,9 @@ impl Waku {
                             }
                             this.show_toast(tr!("boss.saved"));
                             this.boss_request(key, BossOperation::View, BossReply::List, cx);
+                        }
+                        if matches!(reply, BossReply::PersonaDefault) {
+                            this.show_toast(tr!("boss.default_saved"));
                         }
                     }
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
@@ -5386,7 +5413,7 @@ impl Waku {
             }) {
                 Some(persona) => {
                     let is_boss = persona.id == state.persona_id;
-                    self.render_boss_persona_detail(key, &persona, is_boss, cx)
+                    self.render_boss_persona_detail(key, &persona, is_boss, &state, cx)
                 }
                 None => boss_detail_placeholder(
                     &theme,
@@ -5492,6 +5519,35 @@ impl Waku {
                         .child(tr!("boss.role_boss")),
                 )
             })
+            .when(
+                self.boss_ui.states.get(&key).is_some_and(|state| {
+                    let role = if persona.id == state.persona_id {
+                        Some(PersonaDefaultRole::Boss)
+                    } else if state.employee_persona_id == Some(persona.id) {
+                        Some(PersonaDefaultRole::Employee)
+                    } else {
+                        None
+                    };
+                    role.is_some_and(|role| {
+                        state.persona_default_notice.as_ref().is_some_and(|notice| {
+                            notice
+                                .updates
+                                .iter()
+                                .any(|update| update.role == role && !update.adopted)
+                        })
+                    })
+                }),
+                |row| {
+                    // The quiet upgrade indicator — text, not color alone.
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.info)
+                            .child(tr!("boss.default_update_short")),
+                    )
+                },
+            )
             .into_any_element()
     }
 
@@ -5503,6 +5559,7 @@ impl Waku {
         key: DaemonKey,
         persona: &BossPersona,
         boss_role: bool,
+        state: &BossState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -5613,6 +5670,15 @@ impl Waku {
             .size_full()
         };
         let persona_for_edit = persona.clone();
+        let default_role = if persona.id == state.persona_id {
+            Some(PersonaDefaultRole::Boss)
+        } else if state.employee_persona_id == Some(persona.id) {
+            Some(PersonaDefaultRole::Employee)
+        } else {
+            None
+        };
+        let default_card = default_role
+            .map(|role| self.render_persona_default_card(key, persona, role, state, cx));
         div()
             .flex_1()
             .min_h_0()
@@ -5686,6 +5752,7 @@ impl Waku {
                             ),
                     )
                     .child(info)
+                    .children(default_card)
                     .children(document),
             )
             .child(scrollbar::vertical(
@@ -5694,6 +5761,462 @@ impl Waku {
             ))
             .child(selection_input)
             .into_any_element()
+    }
+
+    /// The shipped-default card on a canonical persona's detail: status
+    /// and revision labels, the quiet update indicator, and the inspect /
+    /// compare / reset / undo / review controls. Reset runs behind a
+    /// preview that names the instruction-only scope and the complete
+    /// replacement; proposals and stale baselines surface their state
+    /// instead of overwriting intervening edits.
+    fn render_persona_default_card(
+        &mut self,
+        key: DaemonKey,
+        persona: &BossPersona,
+        role: PersonaDefaultRole,
+        state: &BossState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let shipped = shipped_persona_default(role);
+        let defaults = state.persona_defaults.get(role);
+        let persona_id = persona.id;
+        let pane = self
+            .boss_ui
+            .persona_default_pane
+            .get(&persona_id)
+            .copied()
+            .unwrap_or_default();
+        let using_latest = persona.markdown == shipped.markdown;
+        let untouched = shipped_persona_revision(role, &persona.markdown);
+        let update_pending = state.persona_default_notice.as_ref().is_some_and(|notice| {
+            notice
+                .updates
+                .iter()
+                .any(|update| update.role == role && !update.adopted)
+        });
+        let undo = defaults.undo.clone();
+        let undo_applies = undo
+            .as_ref()
+            .is_some_and(|undo| undo.applied_markdown == persona.markdown);
+        let proposal = defaults.proposal.clone();
+        let proposal_stale = proposal
+            .as_ref()
+            .is_some_and(|proposal| proposal.baseline_markdown != persona.markdown);
+        let status = if using_latest {
+            tr!("boss.default_latest", revision = shipped.revision)
+        } else if let Some(revision) = untouched {
+            tr!("boss.default_untouched", revision = revision)
+        } else if let Some(revision) = defaults.starting_revision {
+            tr!("boss.default_customized", revision = revision)
+        } else {
+            tr!("boss.default_unknown")
+        };
+        let reviewed_latest = !using_latest && defaults.reviewed_revision == Some(shipped.revision);
+        let diff_text = (pane.compare || pane.reset_preview).then(|| {
+            let fingerprint = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                persona.markdown.hash(&mut hasher);
+                shipped.revision.hash(&mut hasher);
+                hasher.finish()
+            };
+            let mut cache = self.boss_ui.persona_diff.borrow_mut();
+            let stale = !matches!(
+                cache.as_ref(),
+                Some((id, seen, _)) if *id == persona_id && *seen == fingerprint
+            );
+            if stale {
+                *cache = Some((
+                    persona_id,
+                    fingerprint,
+                    instruction_diff(&persona.markdown, shipped.markdown).unwrap_or_default(),
+                ));
+            }
+            cache
+                .as_ref()
+                .map(|(_, _, text)| text.clone())
+                .unwrap_or_default()
+        });
+        let diff_block = diff_text.filter(|text| !text.is_empty()).map(|text| {
+            let code = crate::fonts::current(cx).code;
+            let mut block = div()
+                .w_full()
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .px(px(10.0))
+                .py(px(8.0))
+                .flex()
+                .flex_col();
+            for line in text.lines() {
+                let color = if line.starts_with('+') {
+                    theme.success
+                } else if line.starts_with('-') {
+                    theme.danger
+                } else if line.starts_with('@') {
+                    theme.text_tertiary
+                } else {
+                    theme.text_secondary
+                };
+                block = block.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font(font(code.clone()))
+                        .text_color(color)
+                        .child(line.to_owned()),
+                );
+            }
+            block
+        });
+        let shipped_block = (pane.shipped || pane.reset_preview).then(|| {
+            let mut block = div()
+                .w_full()
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .px(px(10.0))
+                .py(px(8.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.text_tertiary)
+                        .child(tr!(
+                            "boss.default_shipped_label",
+                            revision = shipped.revision
+                        )),
+                );
+            for line in shipped.markdown.lines() {
+                block = block.child(
+                    div()
+                        .mt(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(line.to_owned()),
+                );
+            }
+            block
+        });
+        let proposal_block = proposal.map(|proposal| {
+            let mut block = div()
+                .w_full()
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.border)
+                .px(px(10.0))
+                .py(px(8.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.text_tertiary)
+                        .child(tr!(
+                            "boss.default_proposal",
+                            revision = proposal.target_revision
+                        )),
+                )
+                .when(proposal_stale, |block| {
+                    block.child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(sp(12.0))
+                            .text_color(theme.warning)
+                            .child(tr!("boss.default_proposal_stale")),
+                    )
+                });
+            for line in proposal.markdown.lines() {
+                block = block.child(
+                    div()
+                        .mt(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(line.to_owned()),
+                );
+            }
+            let saved = persona.markdown.clone();
+            let approved = proposal.markdown.clone();
+            block
+                .child(
+                    div()
+                        .mt(px(8.0))
+                        .flex()
+                        .gap(px(8.0))
+                        .when(!proposal_stale, |row| {
+                            row.child(
+                                boss_button(
+                                    "boss-default-adopt",
+                                    tr!("boss.default_adopt"),
+                                    &theme,
+                                )
+                                .child(tr!("boss.default_adopt"))
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        this.boss_request(
+                                            key,
+                                            BossOperation::PersonaDefault {
+                                                action: PersonaDefaultAction::Adopt {
+                                                    role,
+                                                    markdown: approved.clone(),
+                                                    expected_saved: Some(saved.clone()),
+                                                },
+                                            },
+                                            BossReply::PersonaDefault,
+                                            cx,
+                                        );
+                                    },
+                                ),
+                            )
+                        })
+                        .child(
+                            boss_button(
+                                "boss-default-dismiss",
+                                tr!("boss.default_dismiss_proposal"),
+                                &theme,
+                            )
+                            .child(tr!("boss.default_dismiss_proposal"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.boss_request(
+                                    key,
+                                    BossOperation::PersonaDefault {
+                                        action: PersonaDefaultAction::DismissProposal { role },
+                                    },
+                                    BossReply::PersonaDefault,
+                                    cx,
+                                );
+                            }),
+                        ),
+                )
+                .into_any_element()
+        });
+        let mut card = div()
+            .mt(px(14.0))
+            .w_full()
+            .rounded(px(10.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .px(px(12.0))
+            .py(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.default_title")),
+                    )
+                    .when(update_pending, |row| {
+                        row.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .child(icon("icons/info.svg", 11.0, theme.info))
+                                .child(div().text_size(sp(11.5)).text_color(theme.info).child(
+                                    tr!("boss.default_update", revision = shipped.revision),
+                                )),
+                        )
+                    }),
+            );
+        if pane.reset_preview {
+            card = card
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(tr!("boss.default_reset_title", name = persona.name.clone())),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.default_reset_scope")),
+                )
+                .when(!using_latest, |card| {
+                    card.child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.warning)
+                            .child(tr!("boss.default_reset_custom")),
+                    )
+                })
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(match role {
+                            PersonaDefaultRole::Boss => tr!("boss.default_timing_boss"),
+                            PersonaDefaultRole::Employee => tr!("boss.default_timing_employee"),
+                        }),
+                )
+                .children(diff_block)
+                .children(shipped_block)
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            boss_button(
+                                "boss-default-reset-confirm",
+                                tr!("boss.default_reset"),
+                                &theme,
+                            )
+                            .child(tr!("boss.default_reset"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.boss_ui
+                                    .persona_default_pane
+                                    .entry(persona_id)
+                                    .or_default()
+                                    .reset_preview = false;
+                                this.boss_request(
+                                    key,
+                                    BossOperation::PersonaDefault {
+                                        action: PersonaDefaultAction::Reset { role },
+                                    },
+                                    BossReply::PersonaDefault,
+                                    cx,
+                                );
+                            }),
+                        )
+                        .child(
+                            boss_button("boss-default-reset-cancel", tr!("common.cancel"), &theme)
+                                .child(tr!("common.cancel"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_ui
+                                        .persona_default_pane
+                                        .entry(persona_id)
+                                        .or_default()
+                                        .reset_preview = false;
+                                    cx.notify();
+                                }),
+                        ),
+                );
+            return card.into_any_element();
+        }
+        card = card
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text)
+                    .child(status)
+                    .when(reviewed_latest, |line| {
+                        line.child(SharedString::from(format!(
+                            " · {}",
+                            tr!("boss.default_reviewed")
+                        )))
+                    }),
+            )
+            .when(undo.is_some() && !undo_applies, |card| {
+                card.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("boss.default_undo_stale")),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.0))
+                    .child(
+                        boss_button("boss-default-compare", tr!("boss.default_compare"), &theme)
+                            .child(icon("icons/file-diff.svg", 12.0, theme.text_secondary))
+                            .child(if update_pending {
+                                tr!("boss.default_review")
+                            } else {
+                                tr!("boss.default_compare")
+                            })
+                            .on_activation(cx, move |this, _, cx| {
+                                this.boss_ui
+                                    .persona_default_pane
+                                    .entry(persona_id)
+                                    .or_default()
+                                    .compare = !pane.compare;
+                                cx.notify();
+                            }),
+                    )
+                    .child(
+                        boss_button(
+                            "boss-default-shipped",
+                            tr!("boss.default_view_shipped"),
+                            &theme,
+                        )
+                        .child(icon("icons/sparkle.svg", 12.0, theme.text_secondary))
+                        .child(tr!("boss.default_view_shipped"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_ui
+                                .persona_default_pane
+                                .entry(persona_id)
+                                .or_default()
+                                .shipped = !pane.shipped;
+                            cx.notify();
+                        }),
+                    )
+                    .when(!using_latest, |row| {
+                        row.child(
+                            boss_button("boss-default-reset", tr!("boss.default_reset"), &theme)
+                                .child(icon("icons/rotate-ccw.svg", 12.0, theme.text_secondary))
+                                .child(tr!("boss.default_reset"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_ui
+                                        .persona_default_pane
+                                        .entry(persona_id)
+                                        .or_default()
+                                        .reset_preview = true;
+                                    cx.notify();
+                                }),
+                        )
+                        .child(
+                            boss_button("boss-default-keep", tr!("boss.default_keep"), &theme)
+                                .child(icon("icons/check.svg", 12.0, theme.text_secondary))
+                                .child(tr!("boss.default_keep"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_request(
+                                        key,
+                                        BossOperation::PersonaDefault {
+                                            action: PersonaDefaultAction::Keep { role },
+                                        },
+                                        BossReply::PersonaDefault,
+                                        cx,
+                                    );
+                                }),
+                        )
+                    })
+                    .when(undo_applies, |row| {
+                        row.child(
+                            boss_button("boss-default-undo", tr!("boss.default_undo"), &theme)
+                                .child(icon("icons/rotate-ccw.svg", 12.0, theme.text_secondary))
+                                .child(tr!("boss.default_undo"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_request(
+                                        key,
+                                        BossOperation::PersonaDefault {
+                                            action: PersonaDefaultAction::Undo { role },
+                                        },
+                                        BossReply::PersonaDefault,
+                                        cx,
+                                    );
+                                }),
+                        )
+                    }),
+            )
+            .children(diff_block)
+            .children(shipped_block)
+            .children(proposal_block);
+        card.into_any_element()
     }
 
     // ── Plans ────────────────────────────────────────────────────────────
@@ -8200,6 +8723,9 @@ mod tests {
                 avatar_style: Default::default(),
             },
             persona_id: Uuid::from_u128(u128::MAX - 3),
+            employee_persona_id: None,
+            persona_defaults: Default::default(),
+            persona_default_notice: None,
             session_id: None,
             personas: Vec::new(),
             employees: Vec::new(),

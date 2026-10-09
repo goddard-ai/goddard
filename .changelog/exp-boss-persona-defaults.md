@@ -1,0 +1,1 @@
+- **Persona defaults:** Persona settings now show how the Boss and Employee instructions compare with the shipped defaults, can reset either one — instructions only, with Undo — and report shipped updates to the Boss at its next turn for human-approved incorporation. Customized text is never changed automatically.

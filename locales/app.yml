@@ -6508,6 +6508,58 @@ boss.edit:
   en: Edit
 boss.instructions:
   en: Instructions
+boss.default_title:
+  en: Default instructions
+boss.default_latest:
+  en: Using the latest default · revision %{revision}
+boss.default_untouched:
+  en: Unmodified · matches shipped revision %{revision}
+boss.default_customized:
+  en: Customized · based on revision %{revision}
+boss.default_unknown:
+  en: Customized · starting revision unknown
+boss.default_reviewed:
+  en: reviewed latest revision
+boss.default_update:
+  en: Update available — shipped revision %{revision}
+boss.default_update_short:
+  en: Update
+boss.default_compare:
+  en: Compare with shipped
+boss.default_review:
+  en: Review update
+boss.default_view_shipped:
+  en: Latest shipped
+boss.default_shipped_label:
+  en: Latest shipped instructions · revision %{revision}
+boss.default_reset:
+  en: Reset to latest default
+boss.default_undo:
+  en: Undo
+boss.default_undo_stale:
+  en: Undo is unavailable — the instructions were edited after that change.
+boss.default_reset_title:
+  en: Reset %{name} to the latest default?
+boss.default_reset_scope:
+  en: Replaces instructions only — the name, permissions, icon, and pinned documents stay unchanged. The previous text stays recoverable through Undo.
+boss.default_reset_custom:
+  en: Your custom instruction changes will be removed.
+boss.default_timing_boss:
+  en: The Boss keeps its current instructions for the rest of this turn; the new text applies on its next turn.
+boss.default_timing_employee:
+  en: Employees using this role keep their current instructions until their next turn or resume.
+boss.default_saved:
+  en: Default instructions updated.
+boss.default_proposal:
+  en: Proposed update from the Boss · targets revision %{revision}
+boss.default_proposal_stale:
+  en: Stale — the saved instructions changed after this proposal was drafted. Ask the Boss to refresh it.
+boss.default_adopt:
+  en: Approve proposal
+boss.default_dismiss_proposal:
+  en: Dismiss proposal
+boss.default_keep:
+  en: Keep current instructions
 boss.detail_none:
   en: None
 boss.detail_yes:

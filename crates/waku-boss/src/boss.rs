@@ -17,9 +17,12 @@ use waku_protocol::boss::{
     EmployeeGoal, EmployeeLifecycle, EmployeeSettle, ExpiryCause, HandoffResolution,
     INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate, MemoryMigrationReport,
     ModelLimit, NewOutcome, OutcomeHandoff, OutcomeReminder, OutcomeState, OutcomeTransition,
-    OutcomeWait, PermissionOverrides, PersonaPermissions, PlanActor, PlanItem, PlanItemInput,
-    PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition, SummonTicket, WaveMember,
-    WaveMemberOutcome, WaveNotification,
+    OutcomeWait, PermissionOverrides, PersonaDefaultAction, PersonaDefaultInfo,
+    PersonaDefaultNotice, PersonaDefaultNoticeEntry, PersonaDefaultProposal, PersonaDefaultRole,
+    PersonaDefaultState, PersonaDefaultUndo, PersonaDefaultsState, PersonaPermissions, PlanActor,
+    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition,
+    SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification, instruction_diff,
+    shipped_persona_default, shipped_persona_revision, shipped_persona_revisions,
 };
 
 /// What an employee's settle did to its task — the daemon's finish tail
@@ -431,6 +434,7 @@ impl BossService {
             }
         };
         let now = waku_protocol::model::unix_time();
+        reconcile_persona_defaults(&mut state);
         for employee in &mut state.employees {
             if employee.expired && employee.expired_at.is_none() {
                 employee.expired_at = Some(now);
@@ -490,15 +494,7 @@ impl BossService {
                     employee_human_name(existing_names, &mut state.name_cursor);
             }
         }
-        const OLD_EXPIRY_GUIDANCE: &str = "Summon a fresh employee for a new job or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.";
-        for persona in &mut state.personas {
-            if persona.name == "Boss" && persona.markdown.contains(OLD_EXPIRY_GUIDANCE) {
-                persona.markdown = persona.markdown.replace(
-                    OLD_EXPIRY_GUIDANCE,
-                    "Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a distinct job.",
-                );
-            }
-        }
+        reconcile_persona_defaults(&mut state);
         // Older documents recorded only the expired flag, not when the
         // employee finished. Give those entries a full reuse window after
         // this version first sees them.
@@ -2247,7 +2243,46 @@ impl BossService {
         std::mem::take(&mut self.router_entry(session).pending_context)
     }
 
+    /// Deliver the consolidated persona-defaults notice into the boss's
+    /// next natural turn — prefixed to the prompt being sent, marked
+    /// delivered at composition, and never delivered to employees or
+    /// planning sessions. It neither starts a turn nor repeats once
+    /// delivered; open review entries persist for the settings surface.
+    fn prepend_persona_default_notice(&self, session: Uuid, prompt: String) -> String {
+        if !self.is_boss(session) {
+            return prompt;
+        }
+        let pending = self
+            .state
+            .lock()
+            .persona_default_notice
+            .clone()
+            .filter(|notice| !notice.delivered);
+        let Some(notice) = pending else {
+            return prompt;
+        };
+        let text = persona_default_notice_text(&notice);
+        if let Err(error) = self.update(|state| {
+            if let Some(notice) = &mut state.persona_default_notice
+                && !notice.delivered
+            {
+                notice.delivered = true;
+                // Reported adoptions need no review — they drop at
+                // delivery; open reviews stay discoverable in settings.
+                notice.updates.retain(|update| !update.adopted);
+                if notice.updates.is_empty() {
+                    state.persona_default_notice = None;
+                }
+            }
+            Ok(())
+        }) {
+            eprintln!("could not mark persona default notice delivered: {error:#}");
+        }
+        format!("<boss-persona-notice>\n{text}\n</boss-persona-notice>\n\n{prompt}")
+    }
+
     pub fn prompt_with_context(&self, session: Uuid, prompt: String) -> String {
+        let prompt = self.prepend_persona_default_notice(session, prompt);
         if !self.is_managed(session) || !self.injected.lock().insert(session) {
             return prompt;
         }
@@ -2286,7 +2321,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. A summon that returns without error succeeded — do not call `view` just to confirm dispatch state or learn the employee's name; the dispatch notice or next context snapshot carries the name. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. Your persona is {}. You can access every named memory bucket, but their contents are never loaded automatically. Choose the relevant bucket — a project's name resolves to its shared bucket — and use its explicit overview, zoom, scan, record, and summary operations. Record concise, useful notes directly in the appropriate bucket; notes survive sessions, employees, and model changes. Project-assigned employees have automatic read and insert access to that project's shared bucket. Personal buckets remain private unless you grant them deliberately. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish employee outputs as deliverables only when the human explicitly or implicitly requested a report, document, or artifact. Keep routine investigations, audits, matrices, and JSON evidence in employee reports and transcripts. Apply this boundary when creating or refining reusable personas. Write requested Markdown deliverables in plain language with a descriptive title, purpose, context, useful headings, and recommendations for a non-technical product designer; keep agent evidence in the supervisor report. Do not republish internal reports merely because they are useful, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
+                "You are {}, the boss for this daemon. Heavy delegation is your default: promptly assign execution to employees so you stay free for the human. Delegate code changes, research, internet access, builds, code generation, long-running checks and tests, and, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. The employee reports conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and reports the landed SHA on success. Never run or poll long-running commands yourself; assign them to an employee, including any wait or follow-up check. A summon that returns without error succeeded — do not call `view` just to confirm dispatch state or learn the employee's name; the dispatch notice or next context snapshot carries the name. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. You control personas and all employees.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier. Summon accepts `workspace: \"worktree\"` and `baseBranch` to run an employee in a daemon-managed Git worktree rather than the primary checkout, or `workspace: \"adopt\"` with `adoptWorktree` to adopt a finished employee's worktree and continue its work, an optional `reasoningEffort` to pin the employee's effort — the id must be one the resolved model supports or the summon fails — and `workGoal` to fix how its finish lands. `control` with `setWorkspace` moves a live employee between the primary checkout and a fresh worktree as one action — it stops the current turn, rebinds the workspace, and resumes the same transcript, and a failure leaves the employee running in its old workspace. Declare an employee's host-resource needs at summon with `resources` — `{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` names plus `resident_devices`, `desktop_input` for shared input; the employee's own `resource run` calls borrow subsets of the granted set, a contested set queues the ticket instead of erroring, and the broker never steals devices the user claimed. `control` with `setResources` changes a live employee's set — a queued ticket re-enters admission on it and a running employee swaps once capacity frees without interrupting its turn. Never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs, and manual `git worktree` commands are for landing worktrees only when unavoidable. Build a reusable persona library across projects: when work patterns recur, create a named purpose-specific persona such as Researcher, Feature Developer, Bug Investigator, or Verifier, with instructions useful beyond the current project. Before creating one, inspect existing personas and refine a close match rather than making duplicates; update personas as repeated work reveals better responsibilities or boundaries. Use the generic Employee persona only for work that does not fit a reusable role. Keep persona instructions focused on a role's durable methods and limits, not one task's details. Your dedicated tools are `goddard-agent boss` operations: view, summon, control, transcript, context, automation, upsertPersona, personaDefault, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, eval, createPlan, finalizePlan, terminal. `terminal(title, cwd[, command])` creates a pinned standalone terminal in the desktop app; choose an existing directory and use it only for the boss or a planning session, never an employee. `automation` lists, creates, updates, deletes, pauses, and resumes user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call and chain their results; variables persist between evals, and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts for you, not just your own project — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat’s right panel for the user. `speak` voices an utterance through connected clients when their voice feature is on — split it into reusable fragments (proper nouns alone, stock phrases whole) so generated clips are reused and later utterances stay instant. These operations authorize routine delegation without asking the human to approve each employee. Use `goddard-agent schema` for their payloads. `personaDefault` manages the shipped Boss and Employee default instructions — `inspect` returns full shipped text, revision labels, and saved-versus-shipped diffs; `reset` and `undo` replace or restore a default's instructions on a clear human request; `propose` drafts an update for the human's review (`keep`/`adopt` are human-only). Your persona is {}. You can access every named memory bucket, but their contents are never loaded automatically. Choose the relevant bucket — a project's name resolves to its shared bucket — and use its explicit overview, zoom, scan, record, and summary operations. Record concise, useful notes directly in the appropriate bucket; notes survive sessions, employees, and model changes. Project-assigned employees have automatic read and insert access to that project's shared bucket. Personal buckets remain private unless you grant them deliberately. Track active work durably: record which employee owns each worktree, what is in flight, and what has landed, then reconcile those notes as work changes. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed. Queued prompts can be lost when an employee is finishing, so summon a fresh employee for new follow-up work instead of stacking prompts onto someone about to expire. Publish employee outputs as deliverables only when the human explicitly or implicitly requested a report, document, or artifact. Keep routine investigations, audits, matrices, and JSON evidence in employee reports and transcripts. Apply this boundary when creating or refining reusable personas. Write requested Markdown deliverables in plain language with a descriptive title, purpose, context, useful headings, and recommendations for a non-technical product designer; keep agent evidence in the supervisor report. Do not republish internal reports merely because they are useful, and use speak when a concise interruption is timely. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. Your persistent files root is {}. Broader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, such as watching a task, an employee finishing, or a condition to keep rechecking, summon an employee to do the watching and report, then return to the human. Mark every summon `workGoal`: an `errand` reports its finish to you — choose it when you need the completion to continue the work; a `goal` finishes without you — choose it for fire-and-forget work, which lands on the human's Goals page instead. Goal finishes are silent — no prompt arrives — so read outcomes lazily from `view` or `context`; a finish also reaches you when the employee flagged a blocker through its `reportBlocker` operation, its persona grants `alwaysReport`, or its session failed. A blocker report also interrupts your running turn when it can. `createPlan` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — when the plan finalizes, the approved design is reported to your chat and you coordinate its implementation from there; a finalized planning session answers questions about its design but does not implement. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -3411,6 +3446,188 @@ impl BossService {
         Ok(retired)
     }
 
+    /// The `personaDefault` operation — inspect is read-only for the boss
+    /// and human; reset/undo/propose/dismiss run under the ordinary owner
+    /// gate; `keep` and `adopt` are human-only because customized
+    /// instructions change — or get acknowledged — only on the human's
+    /// decision.
+    fn persona_default(
+        &self,
+        caller: Option<Uuid>,
+        action: PersonaDefaultAction,
+    ) -> anyhow::Result<BossResult> {
+        self.require_owner(caller)?;
+        use PersonaDefaultAction::*;
+        if matches!(action, Inspect) {
+            let state = self.document();
+            return Ok(BossResult::PersonaDefaults {
+                defaults: [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee]
+                    .map(|role| persona_default_info(&state, role))
+                    .into(),
+            });
+        }
+        if matches!(action, Keep { .. } | Adopt { .. }) {
+            anyhow::ensure!(
+                caller.is_none(),
+                "only the human can decide on persona default updates"
+            );
+        }
+        let label = |role: PersonaDefaultRole| match role {
+            PersonaDefaultRole::Boss => "Boss",
+            PersonaDefaultRole::Employee => "Employee",
+        };
+        self.update(|state| {
+            let role = match &action {
+                Reset { role }
+                | Undo { role }
+                | Keep { role }
+                | Propose { role, .. }
+                | Adopt { role, .. }
+                | DismissProposal { role } => *role,
+                Inspect => unreachable!("inspect returned above"),
+            };
+            let shipped = shipped_persona_default(role);
+            let Some(index) = default_persona_index(state, role) else {
+                bail!(
+                    "the canonical {} persona is missing — recreate it before managing defaults",
+                    label(role)
+                );
+            };
+            match action {
+                Reset { .. } => {
+                    if state.personas[index].markdown == shipped.markdown {
+                        bail!(
+                            "{} is already using the latest default instructions (revision {})",
+                            label(role),
+                            shipped.revision
+                        );
+                    }
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.undo = Some(PersonaDefaultUndo {
+                        markdown: state.personas[index].markdown.clone(),
+                        starting_revision: defaults.starting_revision,
+                        reviewed_revision: defaults.reviewed_revision,
+                        applied_markdown: shipped.markdown.to_owned(),
+                    });
+                    state.personas[index].markdown = shipped.markdown.to_owned();
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.starting_revision = Some(shipped.revision);
+                    defaults.reviewed_revision = Some(shipped.revision);
+                    defaults.proposal = None;
+                    clear_persona_default_notice(state, role);
+                }
+                Undo { .. } => {
+                    let Some(undo) = state.persona_defaults.get(role).undo.clone() else {
+                        bail!("there is no reset or adoption to undo for {}", label(role));
+                    };
+                    if state.personas[index].markdown != undo.applied_markdown {
+                        bail!(
+                            "{} instructions were edited after that change — restoring would \
+                             discard the newer edits; review the comparison instead",
+                            label(role)
+                        );
+                    }
+                    state.personas[index].markdown = undo.markdown;
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.starting_revision = undo.starting_revision;
+                    defaults.reviewed_revision = undo.reviewed_revision;
+                    defaults.undo = None;
+                    // Restoring pre-review text reopens the review — the
+                    // notice reports it again unless the human already
+                    // acknowledged this revision.
+                    if defaults
+                        .reviewed_revision
+                        .is_none_or(|reviewed| reviewed < shipped.revision)
+                        && shipped_persona_revision(role, &state.personas[index].markdown).is_none()
+                    {
+                        push_persona_default_notice(
+                            state,
+                            PersonaDefaultNoticeEntry {
+                                role,
+                                revision: shipped.revision,
+                                adopted: false,
+                            },
+                        );
+                    }
+                }
+                Keep { .. } => {
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.reviewed_revision = Some(shipped.revision);
+                    defaults.proposal = None;
+                    clear_persona_default_notice(state, role);
+                }
+                Propose { markdown, .. } => {
+                    if markdown.len() > MAX_FILE_BYTES {
+                        bail!("persona is too large");
+                    }
+                    if markdown.trim().is_empty() {
+                        bail!("a proposal needs instructions");
+                    }
+                    state.persona_defaults.get_mut(role).proposal = Some(PersonaDefaultProposal {
+                        markdown,
+                        baseline_markdown: state.personas[index].markdown.clone(),
+                        target_revision: shipped.revision,
+                        created_at: waku_protocol::model::unix_time(),
+                    });
+                }
+                Adopt {
+                    markdown,
+                    expected_saved,
+                    ..
+                } => {
+                    let saved = &state.personas[index].markdown;
+                    if let Some(expected) = &expected_saved
+                        && expected != saved
+                    {
+                        bail!(
+                            "{} instructions changed since the proposal was prepared — refresh \
+                             the comparison before approving",
+                            label(role)
+                        );
+                    }
+                    if let Some(proposal) = &state.persona_defaults.get(role).proposal
+                        && proposal.baseline_markdown != *saved
+                    {
+                        bail!(
+                            "the {} proposal is stale — saved instructions changed after it was \
+                             drafted; refresh the review before approving",
+                            label(role)
+                        );
+                    }
+                    if markdown.len() > MAX_FILE_BYTES {
+                        bail!("persona is too large");
+                    }
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.undo = Some(PersonaDefaultUndo {
+                        markdown: saved.clone(),
+                        starting_revision: defaults.starting_revision,
+                        reviewed_revision: defaults.reviewed_revision,
+                        applied_markdown: markdown.clone(),
+                    });
+                    state.personas[index].markdown = markdown.clone();
+                    let defaults = state.persona_defaults.get_mut(role);
+                    defaults.reviewed_revision = Some(shipped.revision);
+                    // An approved result that lands on shipped text is a
+                    // full adoption; anything else stays customized with
+                    // its original starting point.
+                    if let Some(revision) = shipped_persona_revision(role, &markdown) {
+                        defaults.starting_revision = Some(revision);
+                    }
+                    defaults.proposal = None;
+                    clear_persona_default_notice(state, role);
+                }
+                DismissProposal { .. } => {
+                    state.persona_defaults.get_mut(role).proposal = None;
+                }
+                Inspect => unreachable!("inspect returned above"),
+            }
+            Ok(())
+        })?;
+        Ok(BossResult::State {
+            state: self.document(),
+        })
+    }
+
     fn require_owner(&self, caller: Option<Uuid>) -> anyhow::Result<()> {
         if caller.is_some_and(|id| !self.is_boss_principal(id)) {
             bail!("only the boss or a human can change personas and Boss files");
@@ -3610,6 +3827,12 @@ impl BossService {
                         .ok_or_else(|| anyhow!("this task is not a Boss employee"))?;
                     let persona = employee.persona_id;
                     state.personas.retain(|entry| entry.id == persona);
+                    // Shipped-default provenance, notices, and proposals
+                    // are owner surfaces — an employee's view carries
+                    // none of them.
+                    state.employee_persona_id = None;
+                    state.persona_defaults = PersonaDefaultsState::default();
+                    state.persona_default_notice = None;
                     state.employees.retain(|entry| {
                         entry.session_id == caller || entry.supervisor_id == caller
                     });
@@ -3759,12 +3982,43 @@ impl BossService {
                     } else {
                         state.personas.push(record);
                     }
+                    // Saving a canonical default reclassifies its
+                    // provenance: text matching a shipped revision is
+                    // untouched from it — a hand-applied latest default
+                    // resolves any pending review — while divergent text
+                    // keeps the recorded starting revision and leaves
+                    // open proposals to drift stale on their baseline.
+                    let saved_markdown = state
+                        .personas
+                        .iter()
+                        .find(|entry| entry.id == id)
+                        .map(|entry| entry.markdown.clone())
+                        .unwrap_or_default();
+                    let canonical = if id == state.persona_id {
+                        Some(PersonaDefaultRole::Boss)
+                    } else if state.employee_persona_id == Some(id) {
+                        Some(PersonaDefaultRole::Employee)
+                    } else {
+                        None
+                    };
+                    if let Some(role) = canonical
+                        && let Some(revision) = shipped_persona_revision(role, &saved_markdown)
+                    {
+                        let defaults = state.persona_defaults.get_mut(role);
+                        defaults.starting_revision = Some(revision);
+                        if revision == shipped_persona_default(role).revision {
+                            defaults.reviewed_revision = Some(revision);
+                            defaults.proposal = None;
+                            clear_persona_default_notice(state, role);
+                        }
+                    }
                     Ok(())
                 })?;
                 Ok(BossResult::State {
                     state: self.document(),
                 })
             }
+            BossOperation::PersonaDefault { action } => self.persona_default(caller, action),
             BossOperation::SetEmployeeIcon { session_id, icon } => {
                 self.require_owner(caller)?;
                 if icon.is_some_and(|icon| !icon.is_employee_icon()) {
@@ -5484,18 +5738,306 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A fresh install's provenance record: the seeded defaults are the
+/// current shipped text, seen, and already on the latest revision.
+fn current_persona_default_state(role: PersonaDefaultRole) -> PersonaDefaultState {
+    let revision = shipped_persona_default(role).revision;
+    PersonaDefaultState {
+        starting_revision: Some(revision),
+        reviewed_revision: Some(revision),
+        seen_revision: revision,
+        undo: None,
+        proposal: None,
+    }
+}
+
+/// The canonical persona record for a role — position in `personas`.
+fn default_persona_index(state: &BossState, role: PersonaDefaultRole) -> Option<usize> {
+    let id = match role {
+        PersonaDefaultRole::Boss => Some(state.persona_id),
+        PersonaDefaultRole::Employee => state.employee_persona_id,
+    }?;
+    state.personas.iter().position(|persona| persona.id == id)
+}
+
+/// Upsert or replace a role's entry in the consolidated upgrade notice —
+/// several upgrades collapse to the latest revision, and fresh content
+/// re-arms delivery of an already-delivered notice.
+fn push_persona_default_notice(state: &mut BossState, entry: PersonaDefaultNoticeEntry) {
+    let notice = state
+        .persona_default_notice
+        .get_or_insert_with(|| PersonaDefaultNotice {
+            updates: Vec::new(),
+            delivered: false,
+        });
+    notice.updates.retain(|update| update.role != entry.role);
+    notice.updates.push(entry);
+    notice.delivered = false;
+}
+
+/// Resolve a role's open notice entry — reset, adoption, and keeping the
+/// current text all mean the pending notice should stop reporting it.
+fn clear_persona_default_notice(state: &mut BossState, role: PersonaDefaultRole) {
+    if let Some(notice) = &mut state.persona_default_notice {
+        notice.updates.retain(|update| update.role != role);
+        if notice.updates.is_empty() {
+            state.persona_default_notice = None;
+        }
+    }
+}
+
+/// Align loaded state with this build's shipped persona defaults —
+/// identifies the canonical Employee record, classifies each default's
+/// provenance, adopts a newer shipped text into provably untouched saved
+/// instructions, and queues the consolidated notice for the boss's next
+/// natural turn. Runs on every load; idempotent when nothing changed.
+fn reconcile_persona_defaults(state: &mut BossState) {
+    // The canonical Employee persona predates stable identification:
+    // those documents seeded it first and nothing reorders the list, so
+    // position survives the renames a name match would miss. A document
+    // with no non-boss persona never had defaults seeded — fabricate the
+    // Employee record so reset and review always have a target.
+    let employee_missing = state
+        .employee_persona_id
+        .is_none_or(|id| !state.personas.iter().any(|p| p.id == id));
+    if employee_missing {
+        state.employee_persona_id = match state
+            .personas
+            .iter()
+            .position(|persona| persona.id != state.persona_id)
+        {
+            Some(index) => Some(state.personas[index].id),
+            None => {
+                let id = Uuid::new_v4();
+                state.personas.push(BossPersona {
+                    id,
+                    name: "Employee".into(),
+                    markdown: shipped_persona_default(PersonaDefaultRole::Employee)
+                        .markdown
+                        .to_owned(),
+                    pinned_files: Vec::new(),
+                    permissions: PersonaPermissions::default(),
+                    icon: None,
+                });
+                Some(id)
+            }
+        };
+    }
+    for role in [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee] {
+        let Some(index) = default_persona_index(state, role) else {
+            continue;
+        };
+        let shipped = shipped_persona_default(role);
+        let matched = shipped_persona_revision(role, &state.personas[index].markdown);
+        let mut defaults = state.persona_defaults.get(role).clone();
+        if defaults.seen_revision == 0 {
+            // First load under revision tracking — classify, and let
+            // provably untouched text from an older shipped revision take
+            // the same automatic adoption an upgrade would apply. Text
+            // matching nothing shipped stays: it is customized or of
+            // unknown origin and belongs to the human.
+            defaults.seen_revision = shipped.revision;
+            match matched {
+                Some(revision) if revision == shipped.revision => {
+                    defaults.starting_revision = Some(revision);
+                    defaults.reviewed_revision = Some(revision);
+                    *state.persona_defaults.get_mut(role) = defaults;
+                }
+                Some(_) => {
+                    state.personas[index].markdown = shipped.markdown.to_owned();
+                    defaults.starting_revision = Some(shipped.revision);
+                    defaults.reviewed_revision = Some(shipped.revision);
+                    *state.persona_defaults.get_mut(role) = defaults;
+                    push_persona_default_notice(
+                        state,
+                        PersonaDefaultNoticeEntry {
+                            role,
+                            revision: shipped.revision,
+                            adopted: true,
+                        },
+                    );
+                }
+                None => {}
+            }
+            continue;
+        }
+        if shipped.revision <= defaults.seen_revision {
+            // Same or older installed build — an older version never
+            // replaces a newer saved baseline.
+            continue;
+        }
+        // An upgrade this install has not seen. Untouched text adopts the
+        // latest shipped instructions; customized or unknown-origin text
+        // stays saved and is reported for review. Stamping the revision
+        // keeps the notice from re-arming on every restart.
+        defaults.seen_revision = shipped.revision;
+        let adopted = matched.is_some();
+        if adopted {
+            state.personas[index].markdown = shipped.markdown.to_owned();
+            defaults.starting_revision = Some(shipped.revision);
+            defaults.reviewed_revision = Some(shipped.revision);
+        }
+        *state.persona_defaults.get_mut(role) = defaults;
+        push_persona_default_notice(
+            state,
+            PersonaDefaultNoticeEntry {
+                role,
+                revision: shipped.revision,
+                adopted,
+            },
+        );
+    }
+    // The pending notice reflects the current result: a role already at
+    // the latest text asks for no review, and a reported adoption only
+    // outlives its delivery.
+    if let Some(notice) = &state.persona_default_notice {
+        let delivered = notice.delivered;
+        let mut updates = notice.updates.clone();
+        updates.retain(|update| {
+            let resolved = default_persona_index(state, update.role).is_some_and(|index| {
+                state.personas[index].markdown == shipped_persona_default(update.role).markdown
+            });
+            if !resolved {
+                return true;
+            }
+            update.adopted && !delivered
+        });
+        state.persona_default_notice = if updates.is_empty() {
+            None
+        } else if updates.len() == notice.updates.len() {
+            Some(notice.clone())
+        } else {
+            Some(PersonaDefaultNotice { updates, delivered })
+        };
+    }
+}
+
+/// One role's inspection record for the `personaDefault` op — shipped
+/// text, revision labels, saved provenance, and computed comparisons.
+fn persona_default_info(state: &BossState, role: PersonaDefaultRole) -> PersonaDefaultInfo {
+    let shipped = shipped_persona_default(role);
+    let defaults = state.persona_defaults.get(role);
+    let persona = default_persona_index(state, role).map(|index| &state.personas[index]);
+    let saved = persona.map(|persona| persona.markdown.as_str());
+    let untouched = saved.and_then(|saved| shipped_persona_revision(role, saved));
+    // A starting revision is only as good as the catalog entry behind
+    // it — an unrecognized label collapses to "unknown" rather than
+    // pointing at a comparison that cannot exist.
+    let starting = defaults.starting_revision.and_then(|revision| {
+        shipped_persona_revisions(role)
+            .iter()
+            .find(|entry| entry.revision == revision)
+            .map(|entry| (revision, entry.markdown))
+    });
+    PersonaDefaultInfo {
+        role,
+        persona_id: persona.map(|persona| persona.id),
+        name: persona.map(|persona| persona.name.clone()),
+        saved_markdown: saved.map(str::to_owned),
+        using_latest: saved == Some(shipped.markdown),
+        untouched: untouched.is_some(),
+        starting_revision: starting.map(|(revision, _)| revision).or(untouched),
+        starting_markdown: starting.map(|(_, markdown)| markdown.to_owned()),
+        reviewed_revision: defaults.reviewed_revision,
+        seen_revision: defaults.seen_revision,
+        shipped_revision: shipped.revision,
+        shipped_markdown: shipped.markdown.to_owned(),
+        saved_diff: saved.and_then(|saved| instruction_diff(saved, shipped.markdown)),
+        shipped_diff: starting
+            .and_then(|(_, baseline)| instruction_diff(baseline, shipped.markdown)),
+        update_pending: state.persona_default_notice.as_ref().is_some_and(|notice| {
+            notice
+                .updates
+                .iter()
+                .any(|update| update.role == role && !update.adopted)
+        }),
+        undo_applies: defaults
+            .undo
+            .as_ref()
+            .is_some_and(|undo| saved == Some(undo.applied_markdown.as_str())),
+        undo: defaults.undo.clone(),
+        proposal: defaults.proposal.clone(),
+        proposal_stale: defaults
+            .proposal
+            .as_ref()
+            .is_some_and(|proposal| saved != Some(proposal.baseline_markdown.as_str())),
+    }
+}
+
+/// The notice text delivered into the boss's next turn — what updated
+/// automatically, what stayed customized, and how to inspect or propose.
+fn persona_default_notice_text(notice: &PersonaDefaultNotice) -> String {
+    let mut text = String::from("Goddard's shipped persona default instructions changed.");
+    for update in &notice.updates {
+        let role = match update.role {
+            PersonaDefaultRole::Boss => "Boss",
+            PersonaDefaultRole::Employee => "Employee",
+        };
+        if update.adopted {
+            text.push_str(&format!(
+                " {role} instructions were untouched and adopted shipped revision {} automatically.",
+                update.revision
+            ));
+        } else {
+            text.push_str(&format!(
+                " {role} instructions have a newer shipped revision {} — the saved text was kept because it is customized or of unknown origin and changes only on human approval.",
+                update.revision
+            ));
+        }
+    }
+    text.push_str(
+        " Inspect both defaults with the `personaDefault` operation (`inspect` returns full \
+         shipped texts, revision labels, and saved↔shipped diffs) or point the human at the \
+         Personas settings page; draft a merged proposal with `propose` — `adopt` and `keep` \
+         are human-only. This notice does not interrupt active work.",
+    );
+    text
+}
+
 fn fresh_state() -> BossState {
     let id = Uuid::new_v4();
     let persona_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
     let names = ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
     BossState {
-        identity: BossIdentity { id, name: names[id.as_bytes()[0] as usize % names.len()].into(), avatar_seed: id.to_string(), avatar_style: Default::default() },
+        identity: BossIdentity {
+            id,
+            name: names[id.as_bytes()[0] as usize % names.len()].into(),
+            avatar_seed: id.to_string(),
+            avatar_style: Default::default(),
+        },
         persona_id,
+        employee_persona_id: Some(employee_id),
+        persona_defaults: PersonaDefaultsState {
+            boss: current_persona_default_state(PersonaDefaultRole::Boss),
+            employee: current_persona_default_state(PersonaDefaultRole::Employee),
+        },
+        persona_default_notice: None,
         session_id: None,
         personas: vec![
-            BossPersona { id: employee_id, name: "Employee".into(), markdown: "Complete the bounded job assigned by your supervisor. Report useful results concisely to your supervisor through your final response and full transcript. Publish a user-facing deliverable only when the human explicitly or implicitly asked for a report, document, or artifact; routine technical investigations, audits, matrices, and JSON evidence remain supervisor reports. Write requested Markdown documents in plain language with a descriptive title, purpose, context, useful headings, and recommendations. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions::default() , icon: None },
-            BossPersona { id: persona_id, name: "Boss".into(), markdown: "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in the appropriate memory bucket, and reconcile the notes as work changes. Publish employee outputs as deliverables only when the human explicitly or implicitly requested a report, document, or artifact. Keep routine investigations, audits, matrices, and JSON evidence in employee reports and transcripts. Apply this boundary to reusable personas. Write requested Markdown deliverables for a non-technical product designer, with plain language, a descriptive title, purpose, context, useful headings, and recommendations. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions in explicit named buckets, keep notes concise and scoped, and append corrections rather than rewriting history. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.".into(), pinned_files: Vec::new(), permissions: PersonaPermissions { summon_employees: true, ..Default::default() } , icon: None },
+            BossPersona {
+                id: employee_id,
+                name: "Employee".into(),
+                markdown: shipped_persona_default(PersonaDefaultRole::Employee)
+                    .markdown
+                    .into(),
+                pinned_files: Vec::new(),
+                permissions: PersonaPermissions::default(),
+                icon: None,
+            },
+            BossPersona {
+                id: persona_id,
+                name: "Boss".into(),
+                markdown: shipped_persona_default(PersonaDefaultRole::Boss)
+                    .markdown
+                    .into(),
+                pinned_files: Vec::new(),
+                permissions: PersonaPermissions {
+                    summon_employees: true,
+                    ..Default::default()
+                },
+                icon: None,
+            },
         ],
         employees: Vec::new(),
         retired_employees: Vec::new(),
@@ -5523,6 +6065,9 @@ fn disabled_state() -> BossState {
             avatar_style: Default::default(),
         },
         persona_id: Uuid::nil(),
+        employee_persona_id: None,
+        persona_defaults: PersonaDefaultsState::default(),
+        persona_default_notice: None,
         session_id: None,
         personas: Vec::new(),
         employees: Vec::new(),
@@ -10448,6 +10993,426 @@ mod memory_op_tests {
         service
             .create_outcome(Some(boss), "Legitimate", "criteria")
             .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    /// Fresh state seeds the shipped revision labels and the canonical
+    /// Employee identity, with nothing pending.
+    #[test]
+    fn persona_defaults_seed_the_shipped_revision() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let state = service.document();
+        assert_eq!(state.employee_persona_id, Some(state.personas[0].id));
+        for role in [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee] {
+            let shipped = shipped_persona_default(role);
+            let defaults = state.persona_defaults.get(role);
+            assert_eq!(defaults.seen_revision, shipped.revision);
+            assert_eq!(defaults.starting_revision, Some(shipped.revision));
+            assert_eq!(defaults.reviewed_revision, Some(shipped.revision));
+        }
+        assert!(state.persona_default_notice.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A document written before revision tracking classifies provenance
+    /// on first load: text matching a previous shipped revision adopts the
+    /// latest automatically and reports once; customized text stays and
+    /// queues a review; unknown origin is preserved.
+    #[test]
+    fn persona_default_upgrade_classifies_and_consolidates() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let older_employee = shipped_persona_revisions(PersonaDefaultRole::Employee)[0]
+            .markdown
+            .to_owned();
+        service
+            .update(|state| {
+                // Employee carries an untouched older shipped text; Boss
+                // carries customized instructions.
+                state.personas[0].markdown = older_employee;
+                let boss_index = state
+                    .personas
+                    .iter()
+                    .position(|persona| persona.id == state.persona_id)
+                    .unwrap();
+                state.personas[boss_index].markdown = "Custom boss policy.".into();
+                Ok(())
+            })
+            .unwrap();
+        // Rewrite the document the way a pre-tracking build left it.
+        let path = root.join("boss.json");
+        let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = doc.as_object_mut().unwrap();
+        object.remove("personaDefaults");
+        object.remove("employeePersonaId");
+        object.remove("personaDefaultNotice");
+        fs::write(&path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        drop(service);
+
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        let employee = PersonaDefaultRole::Employee;
+        assert_eq!(
+            state.personas[0].markdown,
+            shipped_persona_default(employee).markdown
+        );
+        assert_eq!(
+            state.persona_defaults.employee.starting_revision,
+            Some(shipped_persona_default(employee).revision)
+        );
+        // The customized Boss text survived untouched.
+        let boss_index = state
+            .personas
+            .iter()
+            .position(|persona| persona.id == state.persona_id)
+            .unwrap();
+        assert_eq!(state.personas[boss_index].markdown, "Custom boss policy.");
+        assert_eq!(state.persona_defaults.boss.starting_revision, None);
+        // One consolidated notice reports the adoption; the customized
+        // Boss text predates this install's baseline, so it earns no
+        // notice entry — only a changed shipped revision does.
+        let notice = state.persona_default_notice.as_ref().unwrap();
+        assert!(!notice.delivered);
+        assert_eq!(notice.updates.len(), 1);
+        assert!(
+            notice
+                .updates
+                .iter()
+                .any(|update| update.role == employee && update.adopted)
+        );
+
+        // The notice lands once, in the boss's next natural turn, and
+        // never reaches an employee prompt.
+        let prompt = restored.prompt_with_context(boss, "hello".into());
+        assert!(prompt.contains("shipped revision"));
+        assert!(prompt.contains("adopted"));
+        let next = restored.prompt_with_context(boss, "again".into());
+        assert!(!next.contains("shipped revision"));
+        // A fully adopted update clears at delivery — nothing left to
+        // review.
+        assert!(restored.document().persona_default_notice.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An upgrade event on customized text: the saved instructions stay,
+    /// the notice reports the open review once, and the entry persists
+    /// after delivery so the settings surface keeps it discoverable.
+    #[test]
+    fn persona_default_upgrade_keeps_customized_text_for_review() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        // Pretend this install last saw revision 1 with customized text —
+        // the running build ships revision 2, so load is an upgrade.
+        service
+            .update(|state| {
+                let employee = state.employee_persona_id.unwrap();
+                state
+                    .personas
+                    .iter_mut()
+                    .find(|persona| persona.id == employee)
+                    .unwrap()
+                    .markdown = "Custom employee policy.".into();
+                let defaults = &mut state.persona_defaults.employee;
+                defaults.seen_revision = 1;
+                defaults.starting_revision = Some(1);
+                defaults.reviewed_revision = None;
+                Ok(())
+            })
+            .unwrap();
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        let employee_id = state.employee_persona_id.unwrap();
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == employee_id)
+            .unwrap();
+        assert_eq!(persona.markdown, "Custom employee policy.");
+        let notice = state.persona_default_notice.as_ref().unwrap();
+        assert_eq!(notice.updates.len(), 1);
+        assert!(!notice.updates[0].adopted);
+        assert_eq!(notice.updates[0].revision, 2);
+        let prompt = restored.prompt_with_context(boss, "hello".into());
+        assert!(prompt.contains("kept"));
+        let document = restored.document();
+        let notice = document.persona_default_notice.as_ref().unwrap();
+        assert!(notice.delivered);
+        assert_eq!(notice.updates.len(), 1);
+        // A restart must not re-arm an already delivered notice.
+        drop(restored);
+        let reloaded = BossService::open(root.clone()).unwrap();
+        let next = reloaded.prompt_with_context(boss, "once more".into());
+        assert!(!next.contains("shipped revision"));
+        // Keeping the current text resolves the open entry.
+        reloaded
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Keep {
+                        role: PersonaDefaultRole::Employee,
+                    },
+                },
+            )
+            .unwrap();
+        assert!(reloaded.document().persona_default_notice.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Reset replaces instructions only and leaves a recoverable undo;
+    /// undo refuses to overwrite intervening edits.
+    #[test]
+    fn persona_default_reset_undo_and_stale_protection() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let employee = service.document().personas[0].id;
+        let shipped = shipped_persona_default(PersonaDefaultRole::Employee);
+        service
+            .update(|state| {
+                let persona = state
+                    .personas
+                    .iter_mut()
+                    .find(|p| p.id == employee)
+                    .unwrap();
+                persona.name = "Renamed Role".into();
+                persona.markdown = "Custom role text.".into();
+                persona.pinned_files = vec!["plans/notes.md".into()];
+                Ok(())
+            })
+            .unwrap();
+
+        // Reset is instruction-only: name, documents, and identity stay.
+        service
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Reset {
+                        role: PersonaDefaultRole::Employee,
+                    },
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        let persona = state.personas.iter().find(|p| p.id == employee).unwrap();
+        assert_eq!(persona.markdown, shipped.markdown);
+        assert_eq!(persona.name, "Renamed Role");
+        assert_eq!(persona.pinned_files, vec!["plans/notes.md".to_string()]);
+
+        // Already at the latest default: the reset reports it, changes
+        // nothing.
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::PersonaDefault {
+                        action: PersonaDefaultAction::Reset {
+                            role: PersonaDefaultRole::Employee,
+                        },
+                    },
+                )
+                .is_err()
+        );
+
+        // Undo restores the previous instructions.
+        service
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Undo {
+                        role: PersonaDefaultRole::Employee,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .document()
+                .personas
+                .iter()
+                .find(|p| p.id == employee)
+                .unwrap()
+                .markdown,
+            "Custom role text."
+        );
+
+        // A later edit blocks undo: the restore previews instead of
+        // overwriting.
+        service
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Reset {
+                        role: PersonaDefaultRole::Employee,
+                    },
+                },
+            )
+            .unwrap();
+        let updated = BossPersonaUpsert {
+            id: employee,
+            name: "Renamed Role".into(),
+            markdown: "Edited after reset.".into(),
+            pinned_files: vec!["plans/notes.md".into()],
+            permissions: PersonaPermissions::default(),
+            icon: Some(None),
+        };
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: updated })
+            .unwrap();
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::PersonaDefault {
+                        action: PersonaDefaultAction::Undo {
+                            role: PersonaDefaultRole::Employee,
+                        },
+                    },
+                )
+                .is_err()
+        );
+        assert_eq!(
+            service
+                .document()
+                .personas
+                .iter()
+                .find(|p| p.id == employee)
+                .unwrap()
+                .markdown,
+            "Edited after reset."
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The review loop: the boss drafts a proposal, the human approves
+    /// it, and only the human decides — `keep`/`adopt` reject the boss
+    /// caller outright.
+    #[test]
+    fn persona_default_review_requires_the_human() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let role = PersonaDefaultRole::Employee;
+        // The boss inspects and drafts; the human's approval is the only
+        // path to changing customized text.
+        let inspect = service
+            .handle(
+                Some(boss),
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Inspect,
+                },
+            )
+            .unwrap();
+        let BossResult::PersonaDefaults { defaults } = inspect else {
+            panic!("inspect returns the defaults report");
+        };
+        assert_eq!(defaults.len(), 2);
+        assert!(defaults.iter().all(|info| info.using_latest));
+
+        service
+            .handle(
+                Some(boss),
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Propose {
+                        role,
+                        markdown: "Merged instructions.".into(),
+                    },
+                },
+            )
+            .unwrap();
+        assert!(
+            service
+                .document()
+                .persona_defaults
+                .employee
+                .proposal
+                .is_some()
+        );
+
+        let caller_is_boss =
+            |action| service.handle(Some(boss), BossOperation::PersonaDefault { action });
+        assert!(
+            caller_is_boss(PersonaDefaultAction::Keep { role }).is_err(),
+            "the boss cannot acknowledge a revision for the human"
+        );
+        assert!(
+            caller_is_boss(PersonaDefaultAction::Adopt {
+                role,
+                markdown: "Merged instructions.".into(),
+                expected_saved: None,
+            })
+            .is_err(),
+            "the boss cannot approve its own proposal"
+        );
+
+        // A stale baseline refuses the write rather than overwriting the
+        // intervening edit.
+        let service_employee = service.document().personas[0].id;
+        service
+            .update(|state| {
+                state
+                    .personas
+                    .iter_mut()
+                    .find(|p| p.id == service_employee)
+                    .unwrap()
+                    .markdown = "Hand-edited meanwhile.".into();
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::PersonaDefault {
+                        action: PersonaDefaultAction::Adopt {
+                            role,
+                            markdown: "Merged instructions.".into(),
+                            expected_saved: None,
+                        },
+                    },
+                )
+                .is_err()
+        );
+
+        // The human keeps the current text — the revision is reviewed and
+        // the proposal clears.
+        service
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Keep { role },
+                },
+            )
+            .unwrap();
+        let state = service.document();
+        assert_eq!(
+            state.persona_defaults.employee.reviewed_revision,
+            Some(shipped_persona_default(role).revision)
+        );
+        assert!(state.persona_defaults.employee.proposal.is_none());
+        assert_eq!(
+            state
+                .personas
+                .iter()
+                .find(|p| p.id == service_employee)
+                .unwrap()
+                .markdown,
+            "Hand-edited meanwhile."
+        );
+
+        // Employees never touch persona defaults at all.
+        let employee = admit(&service, boss, "Worker", None);
+        assert!(
+            service
+                .handle(
+                    Some(employee.session_id),
+                    BossOperation::PersonaDefault {
+                        action: PersonaDefaultAction::Inspect,
+                    },
+                )
+                .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

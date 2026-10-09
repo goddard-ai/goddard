@@ -163,6 +163,358 @@ impl From<BossPersona> for BossPersonaUpsert {
     }
 }
 
+// ── Shipped persona defaults ────────────────────────────────────────────
+//
+// The canonical Boss and Employee personas ship instruction text that
+// evolves with the app. The revision catalog below keeps every text a
+// release has installed so a saved persona that byte-matches one is
+// provably untouched — only those adopt a newer shipped text
+// automatically, while customized or unknown-origin text stays put.
+// Revision labels are per role and monotonic; when editing a shipped
+// default, archive its text under the previous revision and bump the
+// current entry.
+
+/// The canonical instruction roles Goddard ships: `Boss` is the boss
+/// chat's own persona, `Employee` the generic role employees can carry.
+/// Identity is stable across renames — `BossState::persona_id` and
+/// [`BossState::employee_persona_id`] name the records, never the name,
+/// so a custom persona named "Employee" is never a default.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PersonaDefaultRole {
+    Boss,
+    Employee,
+}
+
+/// One shipped revision of a canonical default's instructions —
+/// `markdown` is the exact text that revision installed.
+pub struct PersonaDefaultRevision {
+    pub revision: u32,
+    pub markdown: &'static str,
+}
+
+const EMPLOYEE_DEFAULT_V1: &str = "Complete the bounded job assigned by your supervisor. Report useful results concisely. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.";
+
+const EMPLOYEE_DEFAULT_V2: &str = "Complete the bounded job assigned by your supervisor. Report useful results concisely to your supervisor through your final response and full transcript. Publish a user-facing deliverable only when the human explicitly or implicitly asked for a report, document, or artifact; routine technical investigations, audits, matrices, and JSON evidence remain supervisor reports. Write requested Markdown documents in plain language with a descriptive title, purpose, context, useful headings, and recommendations. You have no memory of your own and must not write memory. Read only the memory granted to or pinned by your persona.";
+
+const EMPLOYEE_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
+    PersonaDefaultRevision {
+        revision: 1,
+        markdown: EMPLOYEE_DEFAULT_V1,
+    },
+    PersonaDefaultRevision {
+        revision: 2,
+        markdown: EMPLOYEE_DEFAULT_V2,
+    },
+];
+
+const BOSS_DEFAULT_V1: &str = "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in the appropriate memory bucket, and reconcile the notes as work changes. Publish useful employee outputs as deliverables. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions in explicit named buckets, keep notes concise and scoped, and append corrections rather than rewriting history. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.";
+
+const BOSS_DEFAULT_V2: &str = "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in the appropriate memory bucket, and reconcile the notes as work changes. Publish employee outputs as deliverables only when the human explicitly or implicitly requested a report, document, or artifact. Keep routine investigations, audits, matrices, and JSON evidence in employee reports and transcripts. Apply this boundary to reusable personas. Write requested Markdown deliverables for a non-technical product designer, with plain language, a descriptive title, purpose, context, useful headings, and recommendations. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions in explicit named buckets, keep notes concise and scoped, and append corrections rather than rewriting history. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.";
+
+const BOSS_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
+    PersonaDefaultRevision {
+        revision: 1,
+        markdown: BOSS_DEFAULT_V1,
+    },
+    PersonaDefaultRevision {
+        revision: 2,
+        markdown: BOSS_DEFAULT_V2,
+    },
+];
+
+/// Every shipped revision of a canonical default, oldest first — the last
+/// entry is the text this build installs.
+pub fn shipped_persona_revisions(role: PersonaDefaultRole) -> &'static [PersonaDefaultRevision] {
+    match role {
+        PersonaDefaultRole::Boss => BOSS_PERSONA_REVISIONS,
+        PersonaDefaultRole::Employee => EMPLOYEE_PERSONA_REVISIONS,
+    }
+}
+
+/// The shipped default this build installs for the role.
+pub fn shipped_persona_default(role: PersonaDefaultRole) -> &'static PersonaDefaultRevision {
+    shipped_persona_revisions(role)
+        .last()
+        .expect("persona default catalogs are never empty")
+}
+
+/// The newest shipped revision whose text byte-matches `markdown` — a
+/// saved persona with a match demonstrably carries no custom edits.
+pub fn shipped_persona_revision(role: PersonaDefaultRole, markdown: &str) -> Option<u32> {
+    shipped_persona_revisions(role)
+        .iter()
+        .rev()
+        .find(|entry| entry.markdown == markdown)
+        .map(|entry| entry.revision)
+}
+
+/// A `@@`-grouped unified line diff between two instruction texts —
+/// `-`/`+`/space markers with three context lines. `None` when identical.
+pub fn instruction_diff(old: &str, new: &str) -> Option<String> {
+    if old == new {
+        return None;
+    }
+    let old_lines = old.lines().collect::<Vec<_>>();
+    let new_lines = new.lines().collect::<Vec<_>>();
+    let diff = similar::TextDiff::from_slices(&old_lines, &new_lines);
+    let mut text = String::new();
+    for group in diff.grouped_ops(3) {
+        text.push_str("@@\n");
+        for op in &group {
+            for change in diff.iter_changes(op) {
+                text.push(match change.tag() {
+                    similar::ChangeTag::Equal => ' ',
+                    similar::ChangeTag::Delete => '-',
+                    similar::ChangeTag::Insert => '+',
+                });
+                text.push_str(change.value());
+                text.push('\n');
+            }
+        }
+    }
+    Some(text)
+}
+
+/// Revision provenance for one canonical default persona. Persisted in
+/// [`BossState`] so untouched detection, review acknowledgment, undo, and
+/// pending notices all survive restarts.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PersonaDefaultState {
+    /// The shipped revision the saved instructions demonstrably began
+    /// from — `None` marks text of unknown origin, which never compares
+    /// as untouched and never adopts automatically.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starting_revision: Option<u32>,
+    /// The newest shipped revision the human acknowledged — keeping the
+    /// current text, approving a proposal, or resetting. Kept separate
+    /// from `starting_revision`: reviewing an update never claims its
+    /// instructions were adopted, and a partial incorporation still reads
+    /// as customized.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewed_revision: Option<u32>,
+    /// The newest shipped revision this installation has loaded — the
+    /// upgrade detector's baseline. First run stamps the current
+    /// revision; a later bump against it is an upgrade event. An older
+    /// installed version never rolls it back, so a downgrade cannot
+    /// replace a newer saved baseline.
+    pub seen_revision: u32,
+    /// The instructions a reset or approved adoption replaced —
+    /// recoverable until another edit lands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub undo: Option<PersonaDefaultUndo>,
+    /// A boss-drafted instruction update awaiting the human's decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub proposal: Option<PersonaDefaultProposal>,
+}
+
+/// The recoverable half of a reset or approved adoption.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaDefaultUndo {
+    /// The instructions the change replaced.
+    pub markdown: String,
+    /// The starting revision that text carried — restored with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starting_revision: Option<u32>,
+    /// The reviewed-revision watermark before the change — restored with
+    /// the text so undoing an adoption reopens the review it resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewed_revision: Option<u32>,
+    /// The text the change wrote. Undo applies only while the saved
+    /// instructions still equal it; a later edit turns undo into a
+    /// reviewable restore rather than a silent overwrite.
+    pub applied_markdown: String,
+}
+
+/// A complete proposed replacement drafted by the boss for human review.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaDefaultProposal {
+    /// The proposed instructions in full.
+    pub markdown: String,
+    /// The saved text the proposal was drafted against — drift between it
+    /// and the current saved text marks the proposal stale so approval
+    /// refreshes rather than overwriting intervening edits.
+    pub baseline_markdown: String,
+    /// The shipped revision the proposal incorporates.
+    pub target_revision: u32,
+    pub created_at: u64,
+}
+
+/// One role's line in the consolidated upgrade notice.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaDefaultNoticeEntry {
+    pub role: PersonaDefaultRole,
+    /// The shipped revision the entry reports.
+    pub revision: u32,
+    /// True when untouched instructions adopted the revision
+    /// automatically — the notice reports the change; false means the
+    /// saved text is customized or unknown and awaits review.
+    pub adopted: bool,
+}
+
+/// The consolidated persona-defaults upgrade notice, delivered once into
+/// the boss's next natural turn and persisted until then. Entries stay
+/// after delivery — delivered, not adopted — so the settings surface can
+/// keep pending reviews discoverable without re-notifying each turn.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaDefaultNotice {
+    pub updates: Vec<PersonaDefaultNoticeEntry>,
+    pub delivered: bool,
+}
+
+/// Both canonical defaults' revision provenance.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PersonaDefaultsState {
+    pub boss: PersonaDefaultState,
+    pub employee: PersonaDefaultState,
+}
+
+impl PersonaDefaultsState {
+    pub fn get(&self, role: PersonaDefaultRole) -> &PersonaDefaultState {
+        match role {
+            PersonaDefaultRole::Boss => &self.boss,
+            PersonaDefaultRole::Employee => &self.employee,
+        }
+    }
+
+    pub fn get_mut(&mut self, role: PersonaDefaultRole) -> &mut PersonaDefaultState {
+        match role {
+            PersonaDefaultRole::Boss => &mut self.boss,
+            PersonaDefaultRole::Employee => &mut self.employee,
+        }
+    }
+}
+
+/// One step in the shipped-default lifecycle — inspect, reset, undo,
+/// keep, propose, adopt, dismiss. See [`BossOperation::PersonaDefault`].
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum PersonaDefaultAction {
+    /// Full shipped texts, revision labels, saved provenance, and ready
+    /// comparisons for both defaults — read-only, no side effects.
+    Inspect,
+    /// Replace the role's saved instructions with the latest shipped
+    /// default — instructions only; name, permissions, pinned documents,
+    /// and identity stay. The replaced text stays recoverable through
+    /// `undo` until another edit lands. No-op bails when already latest.
+    Reset { role: PersonaDefaultRole },
+    /// Restore the instructions a reset or adoption replaced. Applies
+    /// only while the saved text still equals what that action wrote —
+    /// a later edit fails the restore rather than overwriting it.
+    Undo { role: PersonaDefaultRole },
+    /// Keep the current instructions and mark the latest shipped revision
+    /// reviewed — suppresses its pending notice and any open proposal
+    /// without adopting it. Human-only: customized text changes and
+    /// acknowledgments are the human's call.
+    Keep { role: PersonaDefaultRole },
+    /// Store a boss-drafted proposal for the human's review — the saved
+    /// text it was written against is recorded so later edits mark the
+    /// proposal stale instead of being overwritten.
+    Propose {
+        role: PersonaDefaultRole,
+        markdown: String,
+    },
+    /// Human-approved incorporation: writes `markdown` as the saved
+    /// instructions and marks the latest shipped revision reviewed.
+    /// `expected_saved`, when given, must equal the current saved text —
+    /// a mismatch means edits landed since review and the write refuses
+    /// rather than discarding them. Human-only.
+    Adopt {
+        role: PersonaDefaultRole,
+        markdown: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        expected_saved: Option<String>,
+    },
+    /// Drop an open proposal without deciding on the update.
+    DismissProposal { role: PersonaDefaultRole },
+}
+
+/// One canonical default's full inspection record — shipped text,
+/// revision labels, saved provenance, and computed comparisons.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaDefaultInfo {
+    pub role: PersonaDefaultRole,
+    /// The canonical persona record — `None` when the role's persona is
+    /// missing, which the surface reports as an actionable error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub persona_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub saved_markdown: Option<String>,
+    /// The saved text byte-matches the latest shipped instructions.
+    pub using_latest: bool,
+    /// The saved text byte-matches some shipped revision — provably free
+    /// of custom edits, so upgrades may adopt the latest automatically.
+    pub untouched: bool,
+    /// The revision the saved text demonstrably started from — `None`
+    /// reads as "starting revision unknown," and no difference below may
+    /// be labeled a user addition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starting_revision: Option<u32>,
+    /// The shipped text at `starting_revision`, for telling shipped
+    /// changes apart from custom edits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub starting_markdown: Option<String>,
+    /// The newest shipped revision the human acknowledged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewed_revision: Option<u32>,
+    /// The newest shipped revision this installation has loaded.
+    pub seen_revision: u32,
+    pub shipped_revision: u32,
+    pub shipped_markdown: String,
+    /// Saved → latest-shipped unified diff; `None` when identical.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub saved_diff: Option<String>,
+    /// Shipped(starting) → shipped(latest) unified diff — the changes
+    /// Goddard introduced between the saved text's baseline and now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shipped_diff: Option<String>,
+    /// A pending upgrade-notice entry still names this role for review.
+    pub update_pending: bool,
+    /// The recoverable pre-change instructions, when recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub undo: Option<PersonaDefaultUndo>,
+    /// Undo can restore directly — false means later edits landed and a
+    /// restore must go through review.
+    pub undo_applies: bool,
+    /// The proposal awaiting the human's decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub proposal: Option<PersonaDefaultProposal>,
+    /// The saved text moved on since the proposal's baseline — approving
+    /// it would overwrite intervening edits, so refresh instead.
+    pub proposal_stale: bool,
+}
+
 /// The kind of bounded work a summon fixes. The boss picks it in the
 /// summon payload and it never changes afterward — it decides what a
 /// finish does, not the employee's persona or live state.
@@ -1127,6 +1479,21 @@ impl PlanItem {
 pub struct BossState {
     pub identity: BossIdentity,
     pub persona_id: Uuid,
+    /// The canonical Employee default persona — the stable identity of
+    /// the shipped Employee role regardless of renames; a custom persona
+    /// named "Employee" is never it. `None` only on documents that
+    /// predate the seeded defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_persona_id: Option<Uuid>,
+    /// Revision provenance for the two shipped default personas —
+    /// starting/reviewed/seen revisions, recoverable text, and any open
+    /// proposal.
+    #[serde(default)]
+    pub persona_defaults: PersonaDefaultsState,
+    /// The consolidated persona-defaults upgrade notice awaiting delivery
+    /// into the boss's next natural turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_default_notice: Option<PersonaDefaultNotice>,
     pub session_id: Option<Uuid>,
     pub personas: Vec<BossPersona>,
     pub employees: Vec<BossEmployee>,
@@ -2111,6 +2478,13 @@ pub enum BossOperation {
     UpsertPersona {
         persona: BossPersonaUpsert,
     },
+    /// Inspect, reset, or review the shipped Boss/Employee default
+    /// instructions — `action` picks the step. Read actions are
+    /// boss/human; `keep` and `adopt` are human-only since customized
+    /// instructions change only on human approval.
+    PersonaDefault {
+        action: PersonaDefaultAction,
+    },
     SetEmployeeIcon {
         session_id: Uuid,
         #[serde(default)]
@@ -2374,6 +2748,11 @@ pub enum BossResult {
     },
     Transcript {
         transcript: crate::model::AgentSessionTranscript,
+    },
+    /// The shipped-default inspection report — one record per canonical
+    /// role with full texts, revision labels, provenance, and diffs.
+    PersonaDefaults {
+        defaults: Vec<PersonaDefaultInfo>,
     },
     /// The `speak` request was broadcast to this many client connections.
     /// Each receiving client decides whether its voice settings voice it —
