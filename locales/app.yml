@@ -6292,6 +6292,50 @@ boss.goals_worktree:
   en: worktree
 boss.goals_open_task:
   en: "Open task: %{title}, %{employee}, %{status}"
+boss.goals_status_follow_up:
+  en: Needs follow-up
+boss.goals_status_not_started:
+  en: Not started
+boss.goals_status_open:
+  en: Open
+boss.goals_status_cancelled:
+  en: Cancelled
+boss.goals_status_superseded:
+  en: Superseded
+boss.goals_history_unavailable:
+  en: Details unavailable
+boss.goals_entry_attempt:
+  en: "attempt %{number}"
+boss.goals_entry_finisher:
+  en: finisher
+boss.goals_entry_blocked:
+  en: blocked
+boss.goals_entry_unavailable:
+  en: Details unavailable
+boss.goals_unknown_employee:
+  en: Unknown employee
+boss.goals_prereq_failed:
+  en: Blocked — earlier work failed
+boss.goals_handoff_pending:
+  en: Follow-up owed
+boss.goals_handoffs_owed:
+  en: "%{count} awaiting a decision"
+boss.goals_conflict:
+  en: Closure conflict
+boss.goals_wait_until:
+  en: "Waiting until %{time}"
+boss.goals_wait_note:
+  en: "Waiting on %{note}"
+boss.goals_no_assignments:
+  en: No assignments yet
+boss.goals_more_queued:
+  en: "+%{count} queued"
+boss.goals_show_details:
+  en: "Show details: %{title}, %{status}"
+boss.goals_hide_details:
+  en: "Hide details: %{title}, %{status}"
+boss.goals_open_assignment:
+  en: "Open conversation: %{label}, %{status}"
 boss.select_document:
   en: Select a file or persona to view and edit it.
 boss.save:

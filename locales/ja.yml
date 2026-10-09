@@ -3174,6 +3174,28 @@ boss.goals_queue_earlier: 前の作業を待機中
 boss.goals_queue_model: "%{model} を待機中 · %{used}/%{limit} スロット"
 boss.goals_worktree: ワークツリー
 boss.goals_open_task: "タスクを開く: %{title}、%{employee}、%{status}"
+boss.goals_status_follow_up: フォローアップが必要
+boss.goals_status_not_started: 未開始
+boss.goals_status_open: 未完了
+boss.goals_status_cancelled: キャンセル済み
+boss.goals_status_superseded: 置き換え済み
+boss.goals_history_unavailable: 詳細不明
+boss.goals_entry_attempt: "試行 %{number}"
+boss.goals_entry_finisher: 完了担当
+boss.goals_entry_blocked: ブロックあり
+boss.goals_entry_unavailable: 詳細不明
+boss.goals_unknown_employee: 不明なエージェント
+boss.goals_prereq_failed: ブロック — 先行作業が失敗
+boss.goals_handoff_pending: フォローアップ待ち
+boss.goals_handoffs_owed: "%{count} 件が判断待ち"
+boss.goals_conflict: 完了の競合
+boss.goals_wait_until: "%{time} まで待機"
+boss.goals_wait_note: "%{note} を待機中"
+boss.goals_no_assignments: 割り当てなし
+boss.goals_more_queued: "+%{count} 件キュー中"
+boss.goals_show_details: "詳細を表示: %{title}、%{status}"
+boss.goals_hide_details: "詳細を隠す: %{title}、%{status}"
+boss.goals_open_assignment: "会話を開く: %{label}、%{status}"
 boss.trigger_interrupted: "%{name} は中断されました"
 boss.trigger_plan: 計画
 boss.trigger_plan_finalized: "%{name} が設計を確定しました"

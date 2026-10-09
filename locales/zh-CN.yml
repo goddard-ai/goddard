@@ -3125,6 +3125,28 @@ boss.goals_queue_earlier: 等待更早的工作
 boss.goals_queue_model: "等待 %{model} · %{used}/%{limit} 个槽位"
 boss.goals_worktree: 工作树
 boss.goals_open_task: "打开任务：%{title}，%{employee}，%{status}"
+boss.goals_status_follow_up: 需要跟进
+boss.goals_status_not_started: 未开始
+boss.goals_status_open: 未完结
+boss.goals_status_cancelled: 已取消
+boss.goals_status_superseded: 已被取代
+boss.goals_history_unavailable: 详情不可用
+boss.goals_entry_attempt: "第 %{number} 次尝试"
+boss.goals_entry_finisher: 收尾
+boss.goals_entry_blocked: 已阻塞
+boss.goals_entry_unavailable: 详情不可用
+boss.goals_unknown_employee: 未知员工
+boss.goals_prereq_failed: 已阻塞 — 先前工作失败
+boss.goals_handoff_pending: 需要跟进
+boss.goals_handoffs_owed: "%{count} 项待决定"
+boss.goals_conflict: 完结冲突
+boss.goals_wait_until: "等待至 %{time}"
+boss.goals_wait_note: "正在等待：%{note}"
+boss.goals_no_assignments: 暂无分配
+boss.goals_more_queued: "+%{count} 个排队中"
+boss.goals_show_details: "显示详情：%{title}，%{status}"
+boss.goals_hide_details: "隐藏详情：%{title}，%{status}"
+boss.goals_open_assignment: "打开会话：%{label}，%{status}"
 boss.trigger_interrupted: "%{name} 被中断"
 boss.trigger_plan: 计划
 boss.trigger_plan_finalized: "%{name} 已将设计定稿"

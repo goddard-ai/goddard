@@ -186,7 +186,7 @@ pub(super) struct BossUi {
     pub chat_history: HashMap<DaemonKey, super::boss_history::BossChatHistory>,
     /// Scoped to building one archived row; composer and callbacks keep the live owner.
     pub history_render_session: Cell<Option<Uuid>>,
-    pub(super) goal_rows: HashMap<DaemonKey, Arc<Vec<BossGoalRow>>>,
+    pub(super) outcome_rows: HashMap<DaemonKey, Arc<Vec<BossOutcomeRow>>>,
     /// The Goals panel's two scroll regions: a bounded Finished history on
     /// top and the In progress/Pending sections below. Fold and history
     /// choices are honored per Boss daemon across snapshots.
@@ -199,6 +199,9 @@ pub(super) struct BossUi {
     pub(super) goals_ongoing_signature: Option<u64>,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
     pub(super) goals_history_expanded: HashSet<DaemonKey>,
+    /// Outcome rows the user opened for assignment detail — honored per
+    /// Boss daemon across snapshots and section moves.
+    pub(super) goals_row_expanded: HashSet<(DaemonKey, Uuid)>,
     /// The task-content signature the user last dismissed for this daemon —
     /// a manual hide or tab close suppresses the auto-show until the
     /// Tasks surface's content actually changes.
@@ -359,7 +362,7 @@ impl Default for BossUi {
             states: HashMap::new(),
             chat_history: HashMap::new(),
             history_render_session: Cell::new(None),
-            goal_rows: HashMap::new(),
+            outcome_rows: HashMap::new(),
             goals_finished_list: ListState::new(0, ListAlignment::Top, px(240.0)),
             goals_finished_scrollbar: ScrollbarState::new(),
             goals_ongoing_list: ListState::new(0, ListAlignment::Top, px(640.0)),
@@ -369,6 +372,7 @@ impl Default for BossUi {
             goals_ongoing_signature: None,
             goals_collapsed: HashSet::new(),
             goals_history_expanded: HashSet::new(),
+            goals_row_expanded: HashSet::new(),
             goals_panel_dismissed: HashMap::new(),
             projects: HashMap::new(),
             hosts: Vec::new(),
@@ -521,33 +525,72 @@ pub(super) enum BossGoalSection {
     Pending,
 }
 
-/// One employee goal prepared for the Goals panel. Rows carry the boss-owned
-/// record; the render pass joins the cached session snapshot for status,
-/// title, project, workspace, and update time.
+/// One daemon-owned outcome prepared for the Tasks panel — the durable
+/// record plus the roster members linked to it. The panel lists outcomes
+/// only: an assignment without `Assignment::outcome_id` produces no row,
+/// and no synthetic outcome is created to give unlinked work a row.
 #[derive(Clone)]
-pub(super) struct BossGoalRow {
-    pub session_id: Uuid,
-    pub name: String,
-    pub job_title: String,
-    pub lifecycle: waku_protocol::boss::EmployeeLifecycle,
-    /// The attention item the job reported — the row's small reason line.
-    pub blocker: Option<String>,
-    pub created_at: Option<u64>,
-    pub expired_at: Option<u64>,
-    pub queued_at: Option<u64>,
-    /// The queued ticket's first nonempty prompt paragraph — present only
-    /// while the assignment waits; dispatch clears the ticket's prompt.
-    pub queued_objective: Option<String>,
-    /// The project label the summon declared — the Pending row's project
-    /// before its session shell exists.
-    pub queued_project: Option<String>,
+pub(super) struct BossOutcomeRow {
+    /// The durable record — outcome text, stored state, recorded waits,
+    /// handoffs, and the chronological assignment history.
+    pub outcome: waku_protocol::boss::BossOutcome,
+    /// Members linked by `Assignment::outcome_id` — live roster records
+    /// first, then retired ones, each in roster order. Live records drive
+    /// the status join; expired and retired ones still classify their
+    /// settled attempts.
+    pub members: Vec<BossOutcomeMember>,
+    /// Attention derived across both rosters and the durable history —
+    /// an unresolved failure, a flagged blocker, or an open completion
+    /// conflict, including a settled attempt whose roster record is gone.
+    pub attention: bool,
+}
+
+/// An outcome member's roster record plus its queue position. The record
+/// rides along so the render pass reads lifecycle, ticket waits, and
+/// settle evidence without rescanning the roster.
+#[derive(Clone)]
+pub(super) struct BossOutcomeMember {
+    pub employee: waku_protocol::boss::BossEmployee,
     /// 1-based admission order among the daemon's queued employees —
-    /// Pending sorts on it; it is never displayed as a number.
+    /// `None` once dispatched or for members that never queued.
     pub queue_rank: Option<usize>,
-    /// Reserved wave grouping — retained in the prepared data, never
-    /// displayed as a raw id.
-    #[allow(dead_code)]
-    pub group_id: Option<String>,
+}
+
+/// An outcome's attention flag — the roster's unresolved members and any
+/// open completion conflict, extended to settled history rows whose
+/// roster record is gone so a failure cannot lose attention when the
+/// employee retires. Pending handoffs are owed decisions, not attention:
+/// the row surfaces them through its own follow-up state.
+fn boss_outcome_attention(
+    outcome: &waku_protocol::boss::BossOutcome,
+    members: &[BossOutcomeMember],
+) -> bool {
+    if outcome.completion_conflict.is_some()
+        || members.iter().any(|member| {
+            waku_protocol::boss::BossOutcome::assignment_unresolved(&member.employee)
+        })
+    {
+        return true;
+    }
+    // A session's latest recorded attempt still failed or blocked while
+    // its roster record is gone — the durable row is all that remembers
+    // the failure. A rostered member defers to the record's own verdict:
+    // a resume reopens its row, so a settled failure here is one nothing
+    // answered.
+    let mut latest: HashMap<Uuid, &waku_protocol::boss::OutcomeAssignment> = HashMap::new();
+    for row in &outcome.assignments {
+        latest.insert(row.session, row);
+    }
+    latest.values().any(|row| {
+        row.settled.as_ref().is_some_and(|settle| {
+            matches!(
+                settle.verdict,
+                waku_protocol::boss::AssignmentVerdict::Failed
+            ) || settle.blocked
+        }) && !members
+            .iter()
+            .any(|member| member.employee.session_id == row.session)
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -801,13 +844,6 @@ fn viewed_plan_just_finalized(
             .any(|plan| plan.session_id == session_id && plan.finalized_at.is_some())
 }
 
-/// Plan affiliation belongs on Goals regardless of finish-reporting semantics.
-fn employee_belongs_on_goals(employee: &waku_protocol::boss::BossEmployee) -> bool {
-    employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal
-        || employee.plan_id.is_some()
-        || employee.assignment.is_some()
-}
-
 impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
@@ -858,41 +894,32 @@ impl Waku {
             let queue_rank = boss_queue_ranks(&state);
             let rows = Arc::new(
                 state
-                    .employees
+                    .outcomes
                     .iter()
-                    .filter(|employee| employee_belongs_on_goals(employee))
-                    .map(|employee| BossGoalRow {
-                        session_id: employee.session_id,
-                        name: employee.identity.name.clone(),
-                        job_title: employee.job_title.clone(),
-                        lifecycle: employee.lifecycle(),
-                        blocker: employee.blocker.clone(),
-                        created_at: employee.created_at,
-                        expired_at: employee.expired_at,
-                        queued_at: employee.queued_at,
-                        queued_objective: employee.ticket.as_ref().and_then(|ticket| {
-                            ticket
-                                .prompt
-                                .split("\n\n")
-                                .map(str::trim)
-                                .find(|paragraph| !paragraph.is_empty())
-                                .map(str::to_owned)
-                        }),
-                        queued_project: employee
-                            .ticket
-                            .as_ref()
-                            .map(|ticket| ticket.project.trim())
-                            .filter(|project| !project.is_empty())
-                            .map(str::to_owned),
-                        queue_rank: queue_rank.get(&employee.session_id).copied(),
-                        group_id: employee
-                            .ticket
-                            .as_ref()
-                            .and_then(|ticket| ticket.group_id.clone()),
+                    .map(|outcome| {
+                        let members: Vec<BossOutcomeMember> = state
+                            .employees
+                            .iter()
+                            .chain(state.retired_employees.iter())
+                            .filter(|employee| {
+                                employee.assignment.as_ref().is_some_and(|assignment| {
+                                    assignment.outcome_id == outcome.id
+                                })
+                            })
+                            .map(|employee| BossOutcomeMember {
+                                queue_rank: queue_rank.get(&employee.session_id).copied(),
+                                employee: employee.clone(),
+                            })
+                            .collect();
+                        BossOutcomeRow {
+                            attention: boss_outcome_attention(outcome, &members),
+                            outcome: outcome.clone(),
+                            members,
+                        }
                     })
                     .collect(),
             );
-            self.boss_ui.goal_rows.insert(key, rows);
+            self.boss_ui.outcome_rows.insert(key, rows);
             // A plan document write bumps the Boss revision — re-arm every
             // planning session's read so a waiting strip mounts its plan tab
             // once the file holds real contents.
@@ -8698,31 +8725,109 @@ mod tests {
         }
     }
 
-    #[test]
-    fn goals_include_plan_tagged_errands_in_every_lifecycle() {
-        use waku_protocol::boss::{EmployeeGoal, EmployeeLifecycle};
-
-        for lifecycle in [
-            EmployeeLifecycle::Queued,
-            EmployeeLifecycle::Dispatching,
-            EmployeeLifecycle::Working,
-            EmployeeLifecycle::Finishing,
-            EmployeeLifecycle::Expired,
-        ] {
-            let mut employee = employee(1, lifecycle, None);
-            assert!(!employee_belongs_on_goals(&employee));
-
-            employee.item_id = Some(Uuid::from_u128(3));
-            assert!(!employee_belongs_on_goals(&employee));
-
-            employee.plan_id = Some(Uuid::from_u128(2));
-            assert!(employee_belongs_on_goals(&employee));
-            assert_eq!(employee.work_goal, EmployeeGoal::Errand);
-
-            employee.plan_id = None;
-            employee.work_goal = EmployeeGoal::Goal;
-            assert!(employee_belongs_on_goals(&employee));
+    fn outcome(id: u128) -> waku_protocol::boss::BossOutcome {
+        waku_protocol::boss::BossOutcome {
+            id: Uuid::from_u128(id),
+            outcome: "Ship the feature".into(),
+            success_criteria: "checks pass".into(),
+            state: waku_protocol::boss::OutcomeState::Open,
+            finishing_assignment: None,
+            handoffs: Vec::new(),
+            completion_conflict: None,
+            evidence: None,
+            plan_id: None,
+            waiting: None,
+            snoozed_until: None,
+            last_activity_at: 0,
+            unattended_since: None,
+            last_reminder: None,
+            created_at: 0,
+            completed_at: None,
+            history: Vec::new(),
+            assignments: Vec::new(),
         }
+    }
+
+    fn settled_row(
+        session: u128,
+        verdict: waku_protocol::boss::AssignmentVerdict,
+        blocked: bool,
+    ) -> waku_protocol::boss::OutcomeAssignment {
+        waku_protocol::boss::OutcomeAssignment {
+            session: Uuid::from_u128(session),
+            generation: 1,
+            identity: None,
+            job_title: None,
+            finishes_outcome: None,
+            after_success: None,
+            prerequisites: Vec::new(),
+            assigned_at: None,
+            settled: Some(waku_protocol::boss::AssignmentSettle {
+                verdict,
+                cause: None,
+                blocked,
+                at: Some(10),
+            }),
+        }
+    }
+
+    /// Tasks attention survives retirement: a settled failure or blocker
+    /// the roster no longer covers still flags the outcome, while a
+    /// rostered member's own verdict answers for it — a retried attempt
+    /// reopens its row rather than leaving stale attention behind.
+    #[test]
+    fn outcome_attention_outlives_the_roster_record() {
+        use waku_protocol::boss::{AssignmentVerdict, EmployeeLifecycle};
+
+        // A failed attempt with no roster record left still needs attention.
+        let mut task = outcome(1);
+        task.assignments.push(settled_row(9, AssignmentVerdict::Failed, false));
+        assert!(boss_outcome_attention(&task, &[]));
+
+        // A flagged blocker reads as failed evidence the same way.
+        task.assignments[0].settled.as_mut().unwrap().verdict =
+            AssignmentVerdict::Finished;
+        task.assignments[0].settled.as_mut().unwrap().blocked = true;
+        assert!(boss_outcome_attention(&task, &[]));
+
+        // Clean finishes and deliberate cancels leave nothing owed.
+        task.assignments[0].settled.as_mut().unwrap().blocked = false;
+        assert!(!boss_outcome_attention(&task, &[]));
+        task.assignments[0].settled.as_mut().unwrap().verdict =
+            AssignmentVerdict::Cancelled;
+        assert!(!boss_outcome_attention(&task, &[]));
+        task.assignments[0].settled.as_mut().unwrap().verdict =
+            AssignmentVerdict::Superseded;
+        assert!(!boss_outcome_attention(&task, &[]));
+
+        // A rostered member's clean record answers for its own settled
+        // failure — the durable row defers to it.
+        let member = BossOutcomeMember {
+            employee: employee(9, EmployeeLifecycle::Expired, None),
+            queue_rank: None,
+        };
+        task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Failed;
+        assert!(!boss_outcome_attention(&task, &[member.clone()]));
+
+        // The same member's unresolved record flags the outcome itself.
+        let mut failed_member = member;
+        failed_member.employee.expiry = Some(waku_protocol::boss::EmployeeExpiry {
+            cause: waku_protocol::boss::ExpiryCause::Failed,
+            resumable: true,
+            parked_prompts: 0,
+            pending_question: None,
+        });
+        assert!(boss_outcome_attention(&task, &[failed_member]));
+
+        // An open completion conflict flags the outcome on its own.
+        let mut conflicted = outcome(2);
+        conflicted.completion_conflict = Some(waku_protocol::boss::CompletionConflict {
+            assignment: Uuid::from_u128(9),
+            attempt: 1,
+            reason: "handoff still pending".into(),
+            at: 10,
+        });
+        assert!(boss_outcome_attention(&conflicted, &[]));
     }
 
     #[test]
