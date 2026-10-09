@@ -1,6 +1,6 @@
 //! Persistent Boss state and compartment-aware file access.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -2477,7 +2477,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. Your dedicated tools are `goddard-agent boss` operations — `goddard-agent schema` documents every payload: view, roster, summon, control, resume, transcript, context, automation, upsertPersona, personaDefault, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, terminal, eval, createPlan, finalizePlan, memory, and the outcome operations createOutcome, setOutcomeState, setOutcomeWaiting, attachPlan, resolveHandoff.\n\nSummon fields: `personaId` selects a custom role layered on the shared Employee base — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: `control` actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Queued prompts can be lost as an employee finishes — summon a fresh employee for new follow-up work rather than stacking onto one about to expire.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed.\n\nMemory: the `memory` operations reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `upsertPersona` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `personaDefault` manages the shipped Boss and Employee default instructions — `inspect` returns full shipped text, revision labels, and saved-versus-shipped diffs; `reset` and `undo` replace or restore a default's instructions on a clear human request; `propose` drafts an update for the human's review (`keep`/`adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `terminal(title, cwd[, command])` creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `automation` manages user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call; variables persist between evals and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat's right panel for the user. `speak` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `createPlan` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBroader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
+                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. Your dedicated tools are `goddard-agent boss` operations — `goddard-agent schema` documents every payload: view, roster, summon, control, resume, transcript, context, automation, upsertPersona, personaDefault, listFiles, readFile, writeFile, createFolder, rename, publishDeliverable, dismissDeliverable, speak, browse, terminal, eval, createPlan, finalizePlan, memory, and the outcome operations createOutcome, setOutcomeState, setOutcomeWaiting, attachPlan, resolveHandoff.\n\nSummon fields: `personaId` selects an employee role layered on the shared Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: `control` actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Queued prompts can be lost as an employee finishes — summon a fresh employee for new follow-up work rather than stacking onto one about to expire.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `workspace`/`baseBranch` and `setWorkspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Verify completion from the worktree and its commits before reporting a task done; an employee's summary alone is not proof that work was committed.\n\nMemory: the `memory` operations reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `upsertPersona` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `personaDefault` manages the shipped default instructions — the Boss and Employee base roles plus the shipped specialist roles — `inspect` returns full shipped text, revision labels, and saved-versus-shipped diffs; `reset` and `undo` replace or restore a default's instructions on a clear human request; `propose` drafts an update for the human's review (`keep`/`adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `terminal(title, cwd[, command])` creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `automation` manages user automations; employees cannot use it. `eval` runs a Rhai script inside the daemon with the other operations bound as functions — batch related operations into one call; variables persist between evals and `help()` inside a script lists the bindings. `context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `search` scans every project's task transcripts — `project:` narrows to one — and `read` opens any task it surfaces. `browse(url[, title])` opens an http(s) page in the boss chat's right panel for the user. `speak` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `createPlan` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBroader filesystem editing and internet access are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -3634,9 +3634,11 @@ impl BossService {
         if matches!(action, Inspect) {
             let state = self.document();
             return Ok(BossResult::PersonaDefaults {
-                defaults: [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee]
+                defaults: PersonaDefaultRole::ALL
+                    .iter()
+                    .copied()
                     .map(|role| persona_default_info(&state, role))
-                    .into(),
+                    .collect(),
             });
         }
         if matches!(
@@ -3652,6 +3654,9 @@ impl BossService {
             self.update(|state| {
                 if persona_id == state.persona_id {
                     bail!("the Boss persona cannot be the Employee base");
+                }
+                if state.specialist_persona_ids.values().any(|id| *id == persona_id) {
+                    bail!("a shipped specialist role cannot be the Employee base");
                 }
                 if !state
                     .personas
@@ -3672,10 +3677,7 @@ impl BossService {
                 state: self.document(),
             });
         }
-        let label = |role: PersonaDefaultRole| match role {
-            PersonaDefaultRole::Boss => "Boss",
-            PersonaDefaultRole::Employee => "Employee",
-        };
+        let label = |role: PersonaDefaultRole| role.label();
         self.update(|state| {
             let role = match &action {
                 Reset { role }
@@ -4037,6 +4039,7 @@ impl BossService {
                     // are owner surfaces — an employee's view carries
                     // none of them.
                     state.employee_persona_id = None;
+                    state.specialist_persona_ids.clear();
                     state.persona_defaults = PersonaDefaultsState::default();
                     state.persona_default_notice = None;
                     state.employees.retain(|entry| {
@@ -4200,13 +4203,7 @@ impl BossService {
                         .find(|entry| entry.id == id)
                         .map(|entry| entry.markdown.clone())
                         .unwrap_or_default();
-                    let canonical = if id == state.persona_id {
-                        Some(PersonaDefaultRole::Boss)
-                    } else if state.employee_persona_id == Some(id) {
-                        Some(PersonaDefaultRole::Employee)
-                    } else {
-                        None
-                    };
+                    let canonical = state.persona_default_role(id);
                     if let Some(role) = canonical
                         && let Some(revision) = shipped_persona_revision(role, &saved_markdown)
                     {
@@ -6430,10 +6427,7 @@ fn current_persona_default_state(role: PersonaDefaultRole) -> PersonaDefaultStat
 
 /// The canonical persona record for a role — position in `personas`.
 fn default_persona_index(state: &BossState, role: PersonaDefaultRole) -> Option<usize> {
-    let id = match role {
-        PersonaDefaultRole::Boss => Some(state.persona_id),
-        PersonaDefaultRole::Employee => state.employee_persona_id,
-    }?;
+    let id = state.default_persona_id(role)?;
     state.personas.iter().position(|persona| persona.id == id)
 }
 
@@ -6473,9 +6467,13 @@ fn reconcile_persona_defaults(state: &mut BossState) {
     // documents written before the marker existed leave it unset. A
     // marker pointing at a deleted record is restored under the same id,
     // so employees still referencing it keep their assigned role.
-    if state.employee_persona_id == Some(state.persona_id) {
-        // A corrupt marker can name the Boss persona — the two roles are
-        // never the same record.
+    if state.employee_persona_id == Some(state.persona_id)
+        || state
+            .employee_persona_id
+            .is_some_and(|id| state.specialist_persona_ids.values().any(|other| *other == id))
+    {
+        // A corrupt marker can name the Boss persona or a canonical
+        // specialist — the base is never the same record.
         state.employee_persona_id = None;
     }
     if let Some(id) = state
@@ -6494,7 +6492,9 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         });
     }
     if state.employee_persona_id.is_none() {
-        // Legacy candidates are every non-Boss record. A unique survivor
+        // Legacy candidates are every non-Boss, non-specialist record —
+        // a canonical specialist already carries a shipped identity and
+        // is never the base. A unique survivor
         // is unambiguous; among several, only one whose instructions
         // byte-match a shipped Employee revision identifies itself —
         // anything else stays `None` and waits on the human's explicit
@@ -6504,7 +6504,13 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         let candidates: Vec<Uuid> = state
             .personas
             .iter()
-            .filter(|persona| persona.id != state.persona_id)
+            .filter(|persona| {
+                persona.id != state.persona_id
+                    && !state
+                        .specialist_persona_ids
+                        .values()
+                        .any(|id| *id == persona.id)
+            })
             .map(|persona| persona.id)
             .collect();
         state.employee_persona_id = match candidates.as_slice() {
@@ -6551,7 +6557,45 @@ fn reconcile_persona_defaults(state: &mut BossState) {
             }
         };
     }
-    for role in [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee] {
+    // Shipped specialist roles seed on first sight — including existing
+    // installs — as ordinary persona records employees can select. A
+    // custom persona that happens to share a role's name stays a custom
+    // persona; only the recorded id is canonical.
+    let mut claimed: HashSet<Uuid> = [state.persona_id]
+        .into_iter()
+        .chain(state.employee_persona_id)
+        .collect();
+    for role in PersonaDefaultRole::SPECIALISTS.iter().copied() {
+        // A corrupt marker can name a base record or another role's
+        // record — each canonical role owns its own persona.
+        if state
+            .specialist_persona_ids
+            .get(&role)
+            .is_some_and(|id| claimed.contains(id))
+        {
+            state.specialist_persona_ids.remove(&role);
+        }
+        match state.specialist_persona_ids.get(&role).copied() {
+            Some(id) => {
+                claimed.insert(id);
+                // The canonical record is restored under the same id so
+                // employees still referencing it keep their assigned
+                // role — the revision check below classifies its
+                // provenance.
+                if !state.personas.iter().any(|persona| persona.id == id) {
+                    state.personas.push(seeded_persona(id, role));
+                }
+            }
+            None => {
+                let id = Uuid::new_v4();
+                state.personas.push(seeded_persona(id, role));
+                state.specialist_persona_ids.insert(role, id);
+                claimed.insert(id);
+                *state.persona_defaults.get_mut(role) = current_persona_default_state(role);
+            }
+        }
+    }
+    for role in PersonaDefaultRole::ALL.iter().copied() {
         let Some(index) = default_persona_index(state, role) else {
             continue;
         };
@@ -6697,10 +6741,7 @@ fn persona_default_info(state: &BossState, role: PersonaDefaultRole) -> PersonaD
 fn persona_default_notice_text(notice: &PersonaDefaultNotice) -> String {
     let mut text = String::from("Goddard's shipped persona default instructions changed.");
     for update in &notice.updates {
-        let role = match update.role {
-            PersonaDefaultRole::Boss => "Boss",
-            PersonaDefaultRole::Employee => "Employee",
-        };
+        let role = update.role.label();
         if update.adopted {
             text.push_str(&format!(
                 " {role} instructions were untouched and adopted shipped revision {} automatically.",
@@ -6722,11 +6763,56 @@ fn persona_default_notice_text(notice: &PersonaDefaultNotice) -> String {
     text
 }
 
+/// A freshly seeded canonical record — shipped instructions, the role's
+/// display name and default icon, and no grants: role selection never
+/// implies permission.
+fn seeded_persona(id: Uuid, role: PersonaDefaultRole) -> BossPersona {
+    BossPersona {
+        id,
+        name: role.label().into(),
+        markdown: shipped_persona_default(role).markdown.to_owned(),
+        pinned_files: Vec::new(),
+        permissions: PersonaPermissions::default(),
+        icon: role.default_icon(),
+    }
+}
+
 fn fresh_state() -> BossState {
     let id = Uuid::new_v4();
     let persona_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
     let names = ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
+    let specialist_ids: BTreeMap<PersonaDefaultRole, Uuid> = PersonaDefaultRole::SPECIALISTS
+        .iter()
+        .copied()
+        .map(|role| (role, Uuid::new_v4()))
+        .collect();
+    let mut personas = vec![
+        seeded_persona(employee_id, PersonaDefaultRole::Employee),
+        BossPersona {
+            id: persona_id,
+            name: "Boss".into(),
+            markdown: shipped_persona_default(PersonaDefaultRole::Boss)
+                .markdown
+                .into(),
+            pinned_files: Vec::new(),
+            permissions: PersonaPermissions {
+                summon_employees: true,
+                ..Default::default()
+            },
+            icon: None,
+        },
+    ];
+    personas.extend(
+        PersonaDefaultRole::SPECIALISTS
+            .iter()
+            .copied()
+            .map(|role| seeded_persona(specialist_ids[&role], role)),
+    );
+    let mut persona_defaults = PersonaDefaultsState::default();
+    for &role in PersonaDefaultRole::ALL {
+        *persona_defaults.get_mut(role) = current_persona_default_state(role);
+    }
     BossState {
         identity: BossIdentity {
             id,
@@ -6736,37 +6822,11 @@ fn fresh_state() -> BossState {
         },
         persona_id,
         employee_persona_id: Some(employee_id),
-        persona_defaults: PersonaDefaultsState {
-            boss: current_persona_default_state(PersonaDefaultRole::Boss),
-            employee: current_persona_default_state(PersonaDefaultRole::Employee),
-        },
+        specialist_persona_ids: specialist_ids,
+        persona_defaults,
         persona_default_notice: None,
         session_id: None,
-        personas: vec![
-            BossPersona {
-                id: employee_id,
-                name: "Employee".into(),
-                markdown: shipped_persona_default(PersonaDefaultRole::Employee)
-                    .markdown
-                    .into(),
-                pinned_files: Vec::new(),
-                permissions: PersonaPermissions::default(),
-                icon: None,
-            },
-            BossPersona {
-                id: persona_id,
-                name: "Boss".into(),
-                markdown: shipped_persona_default(PersonaDefaultRole::Boss)
-                    .markdown
-                    .into(),
-                pinned_files: Vec::new(),
-                permissions: PersonaPermissions {
-                    summon_employees: true,
-                    ..Default::default()
-                },
-                icon: None,
-            },
-        ],
+        personas,
         employees: Vec::new(),
         retired_employees: Vec::new(),
         deliverables: Vec::new(),
@@ -6794,6 +6854,7 @@ fn disabled_state() -> BossState {
         },
         persona_id: Uuid::nil(),
         employee_persona_id: None,
+        specialist_persona_ids: BTreeMap::new(),
         persona_defaults: PersonaDefaultsState::default(),
         persona_default_notice: None,
         session_id: None,
@@ -12150,21 +12211,233 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
     /// Fresh state seeds the shipped revision labels and the canonical
-    /// Employee identity, with nothing pending.
+    /// identities for every role — the Employee base plus all four
+    /// shipped specialists — with nothing pending.
     #[test]
     fn persona_defaults_seed_the_shipped_revision() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let state = service.document();
         assert_eq!(state.employee_persona_id, Some(state.personas[0].id));
-        for role in [PersonaDefaultRole::Boss, PersonaDefaultRole::Employee] {
+        for &role in PersonaDefaultRole::ALL {
             let shipped = shipped_persona_default(role);
             let defaults = state.persona_defaults.get(role);
             assert_eq!(defaults.seen_revision, shipped.revision);
             assert_eq!(defaults.starting_revision, Some(shipped.revision));
             assert_eq!(defaults.reviewed_revision, Some(shipped.revision));
+            let id = state
+                .default_persona_id(role)
+                .unwrap_or_else(|| panic!("{} has no canonical record", role.label()));
+            let persona = state
+                .personas
+                .iter()
+                .find(|persona| persona.id == id)
+                .unwrap();
+            assert_eq!(persona.name, role.label());
+            assert_eq!(persona.markdown, shipped.markdown);
+            assert_eq!(persona.icon, role.default_icon());
         }
+        assert_eq!(
+            state.specialist_persona_ids.len(),
+            PersonaDefaultRole::SPECIALISTS.len()
+        );
         assert!(state.persona_default_notice.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An install that predates the shipped specialists gains them as
+    /// canonical records on load — existing custom personas, even ones
+    /// sharing a role's name, keep their identity and text, and seeding
+    /// reports no update notice.
+    #[test]
+    fn specialist_personas_seed_on_upgrade_without_touching_custom_roles() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        // Add a user's own role named after a shipped specialist, then
+        // rewrite the document the way a pre-specialist build left it —
+        // no specialist ids, records, or provenance.
+        service
+            .update(|state| {
+                state.personas.push(BossPersona {
+                    id: Uuid::new_v4(),
+                    name: "Researcher".into(),
+                    markdown: "User's own researcher policy.".into(),
+                    pinned_files: Vec::new(),
+                    permissions: PersonaPermissions::default(),
+                    icon: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        let path = root.join("boss.json");
+        let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = doc.as_object_mut().unwrap();
+        object.remove("specialistPersonaIds");
+        let defaults = object
+            .get_mut("personaDefaults")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap();
+        for key in [
+            "researcher",
+            "featureDeveloper",
+            "bugInvestigator",
+            "verifier",
+        ] {
+            defaults.remove(key);
+        }
+        let specialist_ids: Vec<Uuid> = service
+            .document()
+            .specialist_persona_ids
+            .values()
+            .copied()
+            .collect();
+        let personas = object
+            .get_mut("personas")
+            .and_then(serde_json::Value::as_array_mut)
+            .unwrap();
+        personas.retain(|persona| {
+            !specialist_ids.contains(&Uuid::parse_str(persona["id"].as_str().unwrap()).unwrap())
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        drop(service);
+
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        for &role in PersonaDefaultRole::SPECIALISTS {
+            let id = state
+                .specialist_persona_ids
+                .get(&role)
+                .copied()
+                .unwrap_or_else(|| panic!("{} was not seeded", role.label()));
+            let persona = state
+                .personas
+                .iter()
+                .find(|persona| persona.id == id)
+                .unwrap();
+            assert_eq!(persona.markdown, shipped_persona_default(role).markdown);
+            let defaults = state.persona_defaults.get(role);
+            assert_eq!(
+                defaults.seen_revision,
+                shipped_persona_default(role).revision
+            );
+        }
+        // The user's own "Researcher" is a separate custom record —
+        // same name, different identity, text untouched.
+        let custom = state
+            .personas
+            .iter()
+            .find(|persona| persona.markdown == "User's own researcher policy.")
+            .unwrap();
+        assert_eq!(custom.name, "Researcher");
+        assert_eq!(state.persona_default_role(custom.id), None);
+        assert_eq!(state.personas.iter().filter(|p| p.name == "Researcher").count(), 2);
+        // Seeding is not an update — nothing for the boss to report.
+        assert!(state.persona_default_notice.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Customized specialist text survives reloads untouched — the
+    /// revision catalog proves nothing shipped, so the update machinery
+    /// keeps it and a reset restores the shipped instructions.
+    #[test]
+    fn specialist_persona_customization_is_preserved_and_resettable() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let researcher_id = service
+            .document()
+            .specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        service
+            .update(|state| {
+                state
+                    .personas
+                    .iter_mut()
+                    .find(|persona| persona.id == researcher_id)
+                    .unwrap()
+                    .markdown = "Custom researcher policy.".into();
+                Ok(())
+            })
+            .unwrap();
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == researcher_id)
+            .unwrap();
+        assert_eq!(persona.markdown, "Custom researcher policy.");
+        // Customized text claims no shipped provenance and no notice —
+        // nothing newer was installed.
+        assert_eq!(
+            state
+                .persona_defaults
+                .get(PersonaDefaultRole::Researcher)
+                .starting_revision,
+            Some(shipped_persona_default(PersonaDefaultRole::Researcher).revision)
+        );
+        assert!(state.persona_default_notice.is_none());
+        // Reset reaches the specialist the same way it reaches a base.
+        restored
+            .handle(
+                None,
+                BossOperation::PersonaDefault {
+                    action: PersonaDefaultAction::Reset {
+                        role: PersonaDefaultRole::Researcher,
+                    },
+                },
+            )
+            .unwrap();
+        let state = restored.document();
+        assert_eq!(
+            state
+                .personas
+                .iter()
+                .find(|persona| persona.id == researcher_id)
+                .unwrap()
+                .markdown,
+            shipped_persona_default(PersonaDefaultRole::Researcher).markdown
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A specialist role composes over the canonical Employee base when
+    /// summoned — the shared instructions once, then the role layer.
+    #[test]
+    fn employee_prompt_composes_specialist_role_over_base() {
+        let root = std::env::temp_dir().join(format!("boss-compose-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let researcher_id = service
+            .document()
+            .specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        let employee = service
+            .prepare_employee(
+                boss,
+                Some(researcher_id),
+                "Researcher".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        service
+            .update(|state| {
+                state.employees.push(employee.clone());
+                Ok(())
+            })
+            .unwrap();
+        let prompt = service.prompt_with_context(employee.session_id, "start".into());
+        let base_text = shipped_persona_default(PersonaDefaultRole::Employee)
+            .markdown
+            .lines()
+            .next()
+            .unwrap();
+        assert_eq!(prompt.matches(base_text).count(), 1);
+        assert!(prompt.contains("Additional role — Researcher:"));
+        assert!(prompt.contains(shipped_persona_default(
+            PersonaDefaultRole::Researcher
+        )
+        .markdown));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -12540,12 +12813,16 @@ mod memory_op_tests {
         drop(service);
         let service = BossService::open(root.clone()).unwrap();
         let state = service.document();
-        // Every candidate survives untouched; nothing was chosen.
+        // Every candidate survives untouched; nothing was chosen —
+        // canonical specialists are never candidates.
         assert_eq!(state.employee_persona_id, None);
         let non_boss: Vec<_> = state
             .personas
             .iter()
-            .filter(|persona| persona.id != state.persona_id)
+            .filter(|persona| {
+                persona.id != state.persona_id
+                    && state.persona_default_role(persona.id).is_none()
+            })
             .collect();
         assert_eq!(non_boss.len(), 2);
         assert_eq!(
@@ -12912,7 +13189,7 @@ mod memory_op_tests {
         let BossResult::PersonaDefaults { defaults } = inspect else {
             panic!("inspect returns the defaults report");
         };
-        assert_eq!(defaults.len(), 2);
+        assert_eq!(defaults.len(), PersonaDefaultRole::ALL.len());
         assert!(defaults.iter().all(|info| info.using_latest));
 
         service

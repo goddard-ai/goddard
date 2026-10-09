@@ -5759,7 +5759,26 @@ impl Waku {
             )
             .when(
                 self.boss_ui.states.get(&key).is_some_and(|state| {
-                    state.employee_persona_id.is_none() && persona.id != state.persona_id
+                    state.persona_default_role(persona.id).is_some_and(|role| {
+                        role != PersonaDefaultRole::Boss && role != PersonaDefaultRole::Employee
+                    })
+                }),
+                |row| {
+                    // A canonical specialist's marker — a custom persona
+                    // can share its name but never carries this chip.
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.role_default")),
+                    )
+                },
+            )
+            .when(
+                self.boss_ui.states.get(&key).is_some_and(|state| {
+                    state.employee_persona_id.is_none()
+                        && state.persona_default_role(persona.id).is_none()
                 }),
                 |row| {
                     // The Employee base is awaiting the human's choice —
@@ -5775,21 +5794,16 @@ impl Waku {
             )
             .when(
                 self.boss_ui.states.get(&key).is_some_and(|state| {
-                    let role = if persona.id == state.persona_id {
-                        Some(PersonaDefaultRole::Boss)
-                    } else if state.employee_persona_id == Some(persona.id) {
-                        Some(PersonaDefaultRole::Employee)
-                    } else {
-                        None
-                    };
-                    role.is_some_and(|role| {
-                        state.persona_default_notice.as_ref().is_some_and(|notice| {
-                            notice
-                                .updates
-                                .iter()
-                                .any(|update| update.role == role && !update.adopted)
+                    state
+                        .persona_default_role(persona.id)
+                        .is_some_and(|role| {
+                            state.persona_default_notice.as_ref().is_some_and(|notice| {
+                                notice
+                                    .updates
+                                    .iter()
+                                    .any(|update| update.role == role && !update.adopted)
+                            })
                         })
-                    })
                 }),
                 |row| {
                     // The quiet upgrade indicator — text, not color alone.
@@ -5924,24 +5938,22 @@ impl Waku {
             .size_full()
         };
         let persona_for_edit = persona.clone();
-        let default_role = if persona.id == state.persona_id {
-            Some(PersonaDefaultRole::Boss)
-        } else if state.employee_persona_id == Some(persona.id) {
-            Some(PersonaDefaultRole::Employee)
-        } else {
-            None
-        };
+        let default_role = state.persona_default_role(persona.id);
         let default_card = default_role
             .map(|role| self.render_persona_default_card(key, persona, role, state, cx));
         // While the canonical Employee base is unassigned, every saved
         // non-Boss role is a candidate and offers the human's pick —
         // the marker write keeps the record's content and grants intact.
-        let base_choice_card = (state.employee_persona_id.is_none() && !boss_role)
+        let base_choice_card = (state.employee_persona_id.is_none() && default_role.is_none())
             .then(|| self.render_employee_base_choice_card(key, persona, cx));
-        // A custom role composes over the canonical Employee base — the
-        // detail shows the inherited text read-only so the layering is
-        // visible without pretending it is editable here.
-        let base_document: Option<AnyElement> = (default_role.is_none())
+        // A custom or specialist role composes over the canonical
+        // Employee base — the detail shows the inherited text read-only
+        // so the layering is visible without pretending it is editable
+        // here.
+        let base_document: Option<AnyElement> = (!matches!(
+            default_role,
+            Some(PersonaDefaultRole::Boss | PersonaDefaultRole::Employee)
+        ))
             .then(|| {
                 state
                     .personas
@@ -6044,6 +6056,8 @@ impl Waku {
                                             } else if state.employee_persona_id == Some(persona.id)
                                             {
                                                 tr!("boss.role_employee_base")
+                                            } else if default_role.is_some() {
+                                                tr!("boss.role_employee_shipped")
                                             } else {
                                                 tr!("boss.role_employee_custom")
                                             }),
@@ -6436,7 +6450,7 @@ impl Waku {
                         .text_color(theme.text_secondary)
                         .child(match role {
                             PersonaDefaultRole::Boss => tr!("boss.default_timing_boss"),
-                            PersonaDefaultRole::Employee => tr!("boss.default_timing_employee"),
+                            _ => tr!("boss.default_timing_employee"),
                         }),
                 )
                 .children(diff_block)
@@ -8544,6 +8558,7 @@ mod tests {
             },
             persona_id: Uuid::new_v4(),
             employee_persona_id: None,
+            specialist_persona_ids: Default::default(),
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,
@@ -9379,6 +9394,7 @@ mod tests {
             },
             persona_id: Uuid::from_u128(u128::MAX - 3),
             employee_persona_id: None,
+            specialist_persona_ids: Default::default(),
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,

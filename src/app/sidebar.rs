@@ -7497,6 +7497,7 @@ mod tests {
             },
             persona_id: Uuid::new_v4(),
             employee_persona_id: None,
+            specialist_persona_ids: Default::default(),
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,

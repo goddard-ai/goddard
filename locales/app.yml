@@ -6644,10 +6644,14 @@ boss.role_employee:
   en: Employee role
 boss.role_employee_base:
   en: Default base for all employees
+boss.role_employee_shipped:
+  en: Shipped employee role — layered on the default base
 boss.role_employee_custom:
   en: Employee role — layered on the default base
 boss.role_base:
   en: Base
+boss.role_default:
+  en: Default
 boss.base_choice_title:
   en: Choose the Employee base
 boss.base_choice_body:

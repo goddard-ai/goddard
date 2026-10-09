@@ -83,6 +83,12 @@ A persona says how to work; memory says what has already been learned.
 For example, a verification persona can require independent evidence, while
 project memory records a known platform limitation to check.
 
+Every employee composes the shared Employee base persona. On top of it, an
+assignment can select one employee role: a shipped specialist — Researcher,
+Feature Developer, Bug Investigator, or Verifier — or a custom persona you
+have saved. Selecting a role changes only the instructions; memory buckets,
+integrations, and other grants are assigned separately.
+
 Memory is supplementary. Keep the original transcripts for what was said and
 done, and plans for what was reviewed. A memory summary does not replace their
 detail or establish that an outcome's acceptance criteria were met.

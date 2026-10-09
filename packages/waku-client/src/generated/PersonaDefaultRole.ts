@@ -2,9 +2,11 @@
 
 /**
  * The canonical instruction roles Goddard ships: `Boss` is the boss
- * chat's own persona, `Employee` the generic role employees can carry.
- * Identity is stable across renames — `BossState::persona_id` and
- * [`BossState::employee_persona_id`] name the records, never the name,
- * so a custom persona named "Employee" is never a default.
+ * chat's own persona, `Employee` the shared base every employee
+ * composes, and the rest specialist employee roles an assignment can
+ * select like a custom persona. Identity is stable across renames —
+ * `BossState::persona_id`, [`BossState::employee_persona_id`], and
+ * [`BossState::specialist_persona_ids`] name the records, never the
+ * name, so a custom persona named "Employee" is never a default.
  */
-export type PersonaDefaultRole = "boss" | "employee";
+export type PersonaDefaultRole = "boss" | "employee" | "researcher" | "featureDeveloper" | "bugInvestigator" | "verifier";

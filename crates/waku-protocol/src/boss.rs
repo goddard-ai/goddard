@@ -1,5 +1,6 @@
 //! Daemon-owned Boss identities, personas, files, and employee relationships.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -190,15 +191,69 @@ impl From<BossPersona> for BossPersonaUpsert {
 // current entry.
 
 /// The canonical instruction roles Goddard ships: `Boss` is the boss
-/// chat's own persona, `Employee` the generic role employees can carry.
-/// Identity is stable across renames — `BossState::persona_id` and
-/// [`BossState::employee_persona_id`] name the records, never the name,
-/// so a custom persona named "Employee" is never a default.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+/// chat's own persona, `Employee` the shared base every employee
+/// composes, and the rest specialist employee roles an assignment can
+/// select like a custom persona. Identity is stable across renames —
+/// `BossState::persona_id`, [`BossState::employee_persona_id`], and
+/// [`BossState::specialist_persona_ids`] name the records, never the
+/// name, so a custom persona named "Employee" is never a default.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum PersonaDefaultRole {
     Boss,
     Employee,
+    Researcher,
+    FeatureDeveloper,
+    BugInvestigator,
+    Verifier,
+}
+
+impl PersonaDefaultRole {
+    /// Every canonical role in stable order — the base roles first,
+    /// then the shipped specialists.
+    pub const ALL: &'static [PersonaDefaultRole] = &[
+        PersonaDefaultRole::Boss,
+        PersonaDefaultRole::Employee,
+        PersonaDefaultRole::Researcher,
+        PersonaDefaultRole::FeatureDeveloper,
+        PersonaDefaultRole::BugInvestigator,
+        PersonaDefaultRole::Verifier,
+    ];
+
+    /// The shipped specialist employee roles — canonical records seeded
+    /// for every install, layered on the Employee base when assigned.
+    pub const SPECIALISTS: &'static [PersonaDefaultRole] = &[
+        PersonaDefaultRole::Researcher,
+        PersonaDefaultRole::FeatureDeveloper,
+        PersonaDefaultRole::BugInvestigator,
+        PersonaDefaultRole::Verifier,
+    ];
+
+    /// The role's display name — also the seeded record's default name.
+    pub fn label(self) -> &'static str {
+        match self {
+            PersonaDefaultRole::Boss => "Boss",
+            PersonaDefaultRole::Employee => "Employee",
+            PersonaDefaultRole::Researcher => "Researcher",
+            PersonaDefaultRole::FeatureDeveloper => "Feature Developer",
+            PersonaDefaultRole::BugInvestigator => "Bug Investigator",
+            PersonaDefaultRole::Verifier => "Verifier",
+        }
+    }
+
+    /// The icon a freshly seeded record carries. Base roles seed without
+    /// one — the Boss row is drawn separately and the Employee base keeps
+    /// the generic persona glyph.
+    pub fn default_icon(self) -> Option<crate::custom_commands::CustomCommandIcon> {
+        use crate::custom_commands::CustomCommandIcon;
+        match self {
+            PersonaDefaultRole::Researcher => Some(CustomCommandIcon::Search),
+            PersonaDefaultRole::FeatureDeveloper => Some(CustomCommandIcon::Compose),
+            PersonaDefaultRole::BugInvestigator => Some(CustomCommandIcon::Bug),
+            PersonaDefaultRole::Verifier => Some(CustomCommandIcon::CircleCheck),
+            PersonaDefaultRole::Boss | PersonaDefaultRole::Employee => None,
+        }
+    }
 }
 
 /// One shipped revision of a canonical default's instructions —
@@ -256,12 +311,61 @@ const BOSS_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
     },
 ];
 
+// Specialist role texts are additions to the Employee base, not
+// replacements for it — they carry only the role's distinctive methods
+// and limits.
+
+/// Revision 1: the read-only investigation role — evidence with source
+/// references, and a deliverable only when the assignment calls for one.
+const RESEARCHER_DEFAULT_V1: &str = "Investigate the assigned question using read-only methods. Identify the evidence needed to answer it, consult relevant primary sources and granted project context, and distinguish confirmed facts from inference. Support consequential findings with precise source references. Report the useful conclusion, uncertainty, and any decision it informs. Do not modify the project. When the assignment is intended to answer the human's question or requests a report, publish a concise user-facing deliverable; keep supervisory reconnaissance in the supervisor report.";
+
+const RESEARCHER_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[PersonaDefaultRevision {
+    revision: 1,
+    markdown: RESEARCHER_DEFAULT_V1,
+}];
+
+/// Revision 1: the implementation role — trace before editing, focused
+/// changes, project-appropriate verification, framework feedback routed
+/// through its documented mechanism.
+const FEATURE_DEVELOPER_DEFAULT_V1: &str = "Implement the assigned change in the assigned project or workspace. Trace the relevant behavior and its dependencies before editing. Follow nearby patterns, keep the change focused, and verify the requested behavior with the project's appropriate checks. Report material defects in a consumed framework through its documented feedback mechanism, preserving the expected behavior and evidence.";
+
+const FEATURE_DEVELOPER_PERSONA_REVISIONS: &[PersonaDefaultRevision] =
+    &[PersonaDefaultRevision {
+        revision: 1,
+        markdown: FEATURE_DEVELOPER_DEFAULT_V1,
+    }];
+
+/// Revision 1: the failure-diagnosis role — evidence before editing, an
+/// explicit account when reproduction is unavailable, and no fix unless
+/// the assignment authorizes one.
+const BUG_INVESTIGATOR_DEFAULT_V1: &str = "Investigate the assigned failure before changing code. Reproduce it when possible, trace the relevant path, and identify the root cause with evidence. If reproduction is unavailable, distinguish the evidence you have from the behavior you could not observe. Fix only when the assignment authorizes a fix; add regression coverage appropriate to the failure. If the cause remains ambiguous, report supported findings and the smallest next diagnostic step rather than guessing.";
+
+const BUG_INVESTIGATOR_PERSONA_REVISIONS: &[PersonaDefaultRevision] =
+    &[PersonaDefaultRevision {
+        revision: 1,
+        markdown: BUG_INVESTIGATOR_DEFAULT_V1,
+    }];
+
+/// Revision 1: the check-running role — no code edits, actual results
+/// over claims, and a failed check distinguished from a broken
+/// environment.
+const VERIFIER_DEFAULT_V1: &str = "Run the assigned checks against the specified project, revision, and environment. Do not modify project code. Wait for required checks to complete and report what actually ran, what passed, what failed, and what could not be verified. Preserve useful error evidence, with file and line references when available. Distinguish a failed check from an environment or setup failure; do not claim behavior was verified from a build alone.";
+
+const VERIFIER_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[PersonaDefaultRevision {
+    revision: 1,
+    markdown: VERIFIER_DEFAULT_V1,
+}];
+
 /// Every shipped revision of a canonical default, oldest first — the last
 /// entry is the text this build installs.
 pub fn shipped_persona_revisions(role: PersonaDefaultRole) -> &'static [PersonaDefaultRevision] {
     match role {
         PersonaDefaultRole::Boss => BOSS_PERSONA_REVISIONS,
         PersonaDefaultRole::Employee => EMPLOYEE_PERSONA_REVISIONS,
+        PersonaDefaultRole::Researcher => RESEARCHER_PERSONA_REVISIONS,
+        PersonaDefaultRole::FeatureDeveloper => FEATURE_DEVELOPER_PERSONA_REVISIONS,
+        PersonaDefaultRole::BugInvestigator => BUG_INVESTIGATOR_PERSONA_REVISIONS,
+        PersonaDefaultRole::Verifier => VERIFIER_PERSONA_REVISIONS,
     }
 }
 
@@ -406,12 +510,17 @@ pub struct PersonaDefaultNotice {
     pub delivered: bool,
 }
 
-/// Both canonical defaults' revision provenance.
+/// Every canonical default's revision provenance — the base roles plus
+/// one entry per shipped specialist.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PersonaDefaultsState {
     pub boss: PersonaDefaultState,
     pub employee: PersonaDefaultState,
+    pub researcher: PersonaDefaultState,
+    pub feature_developer: PersonaDefaultState,
+    pub bug_investigator: PersonaDefaultState,
+    pub verifier: PersonaDefaultState,
 }
 
 impl PersonaDefaultsState {
@@ -419,6 +528,10 @@ impl PersonaDefaultsState {
         match role {
             PersonaDefaultRole::Boss => &self.boss,
             PersonaDefaultRole::Employee => &self.employee,
+            PersonaDefaultRole::Researcher => &self.researcher,
+            PersonaDefaultRole::FeatureDeveloper => &self.feature_developer,
+            PersonaDefaultRole::BugInvestigator => &self.bug_investigator,
+            PersonaDefaultRole::Verifier => &self.verifier,
         }
     }
 
@@ -426,6 +539,10 @@ impl PersonaDefaultsState {
         match role {
             PersonaDefaultRole::Boss => &mut self.boss,
             PersonaDefaultRole::Employee => &mut self.employee,
+            PersonaDefaultRole::Researcher => &mut self.researcher,
+            PersonaDefaultRole::FeatureDeveloper => &mut self.feature_developer,
+            PersonaDefaultRole::BugInvestigator => &mut self.bug_investigator,
+            PersonaDefaultRole::Verifier => &mut self.verifier,
         }
     }
 }
@@ -1528,7 +1645,13 @@ pub struct BossState {
     /// cannot dispatch or resume until it is recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employee_persona_id: Option<Uuid>,
-    /// Revision provenance for the two shipped default personas —
+    /// The canonical identities of the shipped specialist employee
+    /// roles — like `employee_persona_id`, the id names the record
+    /// regardless of renames, so a custom persona sharing a role's name
+    /// is never its default.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub specialist_persona_ids: BTreeMap<PersonaDefaultRole, Uuid>,
+    /// Revision provenance for the shipped default personas —
     /// starting/reviewed/seen revisions, recoverable text, and any open
     /// proposal.
     #[serde(default)]
@@ -1616,6 +1739,32 @@ pub struct PlanGroup<'a> {
 }
 
 impl BossState {
+    /// The canonical persona record a default role names — the one that
+    /// carries shipped-default provenance and review, regardless of its
+    /// saved name.
+    pub fn default_persona_id(&self, role: PersonaDefaultRole) -> Option<Uuid> {
+        match role {
+            PersonaDefaultRole::Boss => Some(self.persona_id),
+            PersonaDefaultRole::Employee => self.employee_persona_id,
+            _ => self.specialist_persona_ids.get(&role).copied(),
+        }
+    }
+
+    /// The canonical role a saved persona carries, if it is one — a
+    /// custom persona can share a role's name but never its identity.
+    pub fn persona_default_role(&self, persona_id: Uuid) -> Option<PersonaDefaultRole> {
+        if persona_id == self.persona_id {
+            Some(PersonaDefaultRole::Boss)
+        } else if self.employee_persona_id == Some(persona_id) {
+            Some(PersonaDefaultRole::Employee)
+        } else {
+            self.specialist_persona_ids
+                .iter()
+                .find(|(_, id)| **id == persona_id)
+                .map(|(role, _)| *role)
+        }
+    }
+
     /// Plan groups for the Goals ongoing area: every open plan that is
     /// approved or carries at least one tagged employee — a draft plan
     /// earns its row through work alone — ordered by most recent child
@@ -2348,10 +2497,11 @@ pub enum BossOperation {
         action: AutomationOperation,
     },
     Summon {
-        /// The custom role layered on the canonical Employee base.
-        /// `None` assigns the base alone; passing the canonical Employee
-        /// persona is the same default-only assignment, and the canonical
-        /// Boss persona is rejected.
+        /// The employee role layered on the canonical Employee base — a
+        /// shipped specialist or a custom persona. `None` assigns the
+        /// base alone; passing the canonical Employee persona is the same
+        /// default-only assignment, and the canonical Boss persona is
+        /// rejected.
         #[serde(default)]
         persona_id: Option<Uuid>,
         #[serde(alias = "name")]

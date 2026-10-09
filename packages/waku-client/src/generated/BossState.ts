@@ -9,6 +9,7 @@ import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
 import type { PersonaDefaultNotice } from "./PersonaDefaultNotice";
+import type { PersonaDefaultRole } from "./PersonaDefaultRole";
 import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
@@ -22,7 +23,14 @@ export type BossState = { identity: BossIdentity, personaId: string,
  */
 employeePersonaId?: string | null,
 /**
- * Revision provenance for the two shipped default personas —
+ * The canonical identities of the shipped specialist employee
+ * roles — like `employee_persona_id`, the id names the record
+ * regardless of renames, so a custom persona sharing a role's name
+ * is never its default.
+ */
+specialistPersonaIds?: { [key in PersonaDefaultRole]?: string },
+/**
+ * Revision provenance for the shipped default personas —
  * starting/reviewed/seen revisions, recoverable text, and any open
  * proposal.
  */
