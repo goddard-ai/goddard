@@ -202,6 +202,14 @@ pub(super) struct BossUi {
     /// Outcome rows the user opened for assignment detail — honored per
     /// Boss daemon across snapshots and section moves.
     pub(super) goals_row_expanded: HashSet<(DaemonKey, Uuid)>,
+    /// A stable focus handle per focusable Goals item — outcome row,
+    /// expanded attempt entry, or section header — keyed by each item's
+    /// stable id. A row changing sections remounts between the two
+    /// virtualized lists; sharing one handle keeps `Window`'s focus on
+    /// the same element across the move, and seeding it into the list's
+    /// item records keeps a focused item rendering while it sits outside
+    /// the painted range. Handles are pruned as items leave the panel.
+    pub(super) goals_focus_handles: HashMap<(DaemonKey, String), FocusHandle>,
     /// The task-content signature the user last dismissed for this daemon —
     /// a manual hide or tab close suppresses the auto-show until the
     /// Tasks surface's content actually changes.
@@ -373,6 +381,7 @@ impl Default for BossUi {
             goals_collapsed: HashSet::new(),
             goals_history_expanded: HashSet::new(),
             goals_row_expanded: HashSet::new(),
+            goals_focus_handles: HashMap::new(),
             goals_panel_dismissed: HashMap::new(),
             projects: HashMap::new(),
             hosts: Vec::new(),

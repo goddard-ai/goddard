@@ -1982,6 +1982,10 @@ fn boss_outcome_attention_cause(row: &boss::BossOutcomeRow) -> Option<String> {
 /// refresh so the virtualized builder touches only prepared data.
 struct BossOutcomePanelRow {
     outcome: Uuid,
+    /// The row's stable focus handle, held by `boss_ui.goals_focus_handles`
+    /// — a section move remounts the row between the two virtualized
+    /// lists, and the shared handle keeps it the same focused element.
+    focus: FocusHandle,
     height: f32,
     bucket: BossGoalBucket,
     status: BossGoalStatus,
@@ -2012,6 +2016,10 @@ struct BossOutcomePanelRow {
 struct BossOutcomeEntry {
     /// The signature key distinguishing this entry across refreshes.
     key: String,
+    /// The entry's stable focus handle when it is a navigable
+    /// destination — kept by `boss_ui.goals_focus_handles` across its
+    /// outcome's section moves.
+    focus: Option<FocusHandle>,
     /// The conversation the entry opens — assignment sessions and
     /// handoff results navigate when their session is known.
     session: Option<Uuid>,
@@ -2031,11 +2039,47 @@ enum BossOutcomeItem {
         attention: usize,
         collapsed: bool,
         top_gap: bool,
+        /// The header's stable focus handle, held by
+        /// `boss_ui.goals_focus_handles` — a reset that scrolls it out of
+        /// the painted range keeps it rendering instead of dropping focus.
+        focus: FocusHandle,
     },
     Row(Arc<BossOutcomePanelRow>),
     /// A row nested under its expanded outcome — the item's own height
     /// keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
+}
+
+/// Replace a Goals list's items like `reset_with_uniform_height`, also
+/// seeding each item's focus handle into the list's item records — a
+/// focused row, entry, or header scrolled out of the painted range keeps
+/// rendering, so a remount into the sibling list never drops focus.
+fn reset_boss_goals_list(list_state: &ListState, items: &[BossOutcomeItem], row_height: f32) {
+    list_state.reset(items.len());
+    list_state.splice_focusable(
+        0..items.len(),
+        items.iter().map(|item| match item {
+            BossOutcomeItem::Row(row) => Some(row.focus.clone()),
+            BossOutcomeItem::Entry(entry) => entry.focus.clone(),
+            BossOutcomeItem::Header { focus, .. } => Some(focus.clone()),
+        }),
+    );
+    list_state.set_size_hints(
+        0..items.len(),
+        std::iter::repeat_n(Some(px(row_height)), items.len()),
+    );
+}
+
+/// The `boss_ui.goals_focus_handles` key a focusable panel item owns —
+/// each item's stable id, so a remount re-registers the same element.
+fn boss_goals_item_focus_key(item: &BossOutcomeItem) -> Option<String> {
+    match item {
+        BossOutcomeItem::Header { section, .. } => Some(format!("header:{section:?}")),
+        BossOutcomeItem::Row(row) => Some(format!("row:{}", row.outcome)),
+        BossOutcomeItem::Entry(entry) => {
+            entry.destination.then(|| format!("entry:{}", entry.key))
+        }
+    }
 }
 
 /// One disclosure header — quiet label, its trailing chevron, and the
@@ -2048,6 +2092,7 @@ fn boss_goal_section_header(
     attention: usize,
     collapsed: bool,
     top_gap: bool,
+    focus: &FocusHandle,
     key: waku_client::DaemonKey,
     waku: &WeakEntity<Waku>,
     theme: &Theme,
@@ -2058,7 +2103,7 @@ fn boss_goal_section_header(
         .id(SharedString::from(format!(
             "boss-goal-header-{key:?}-{section:?}"
         )))
-        .tab_index(0)
+        .track_focus(focus)
         .when(top_gap, |element| element.mt(px(GOALS_PANEL_SECTION_GAP)))
         .h(px(28.0))
         .w_full()
@@ -2157,7 +2202,7 @@ fn boss_goal_panel_row_element(
     let arrow_waku = waku.clone();
     div()
         .id(SharedString::from(format!("boss-goal-{outcome}")))
-        .tab_index(0)
+        .track_focus(&row.focus)
         .w_full()
         .h(px(row.height))
         .flex_none()
@@ -2371,7 +2416,9 @@ fn boss_goal_entry_element(
             "boss-goal-entry-{}",
             entry.key
         )))
-        .when(entry.destination, |element| element.tab_index(0))
+        .when_some(entry.focus.clone(), |element, focus| {
+            element.track_focus(&focus)
+        })
         .w_full()
         .h_full()
         .flex_none()
@@ -2482,6 +2529,7 @@ mod tests {
                             list(rows, move |index, _, cx| {
                                 let row = Arc::new(BossOutcomePanelRow {
                                     outcome: Uuid::from_u128(index as u128 + 1),
+                                    focus: cx.focus_handle().tab_stop(true),
                                     height: row_height,
                                     bucket: BossGoalBucket::Finished,
                                     status: BossGoalStatus::Attention,
@@ -2553,6 +2601,263 @@ mod tests {
                 assert_eq!(toggle.origin.y, viewport.bottom() + px(4.0));
             }
         }
+    }
+
+    /// The Goals panel's two virtualized lists reduced to what the focus
+    /// contract needs: outcome rows keyed by id, signature-gated resets,
+    /// and the focus-lost fallback the app installs on the window.
+    struct GoalsRowFocusHarness {
+        boss_ui: boss::BossUi,
+        key: waku_client::DaemonKey,
+        /// Outcome ids rendered in each section — moving an id between
+        /// them is the section transition the panel performs.
+        finished: Vec<Uuid>,
+        ongoing: Vec<Uuid>,
+        /// How many rows each list's viewport paints; zero overdraw on
+        /// the states keeps anything past it genuinely unmounted.
+        viewport_rows: usize,
+        fallback_focus: FocusHandle,
+        signature: u64,
+    }
+
+    impl GoalsRowFocusHarness {
+        fn new(
+            window: &mut Window,
+            cx: &mut Context<Self>,
+            viewport_rows: usize,
+            ongoing: Vec<Uuid>,
+        ) -> Self {
+            let fallback_focus = cx.focus_handle();
+            cx.on_focus_lost(window, |this: &mut Self, window, cx| {
+                let focus = this.fallback_focus.clone();
+                window.focus(&focus, cx);
+            })
+            .detach();
+            let mut boss_ui = boss::BossUi::default();
+            // One row of overdraw keeps the painted range nearly the
+            // viewport so a row beyond it is genuinely unmounted.
+            let overdraw = px(GOALS_PANEL_ROW_HEIGHT);
+            boss_ui.goals_finished_list = ListState::new(0, ListAlignment::Top, overdraw);
+            boss_ui.goals_ongoing_list = ListState::new(0, ListAlignment::Top, overdraw);
+            Self {
+                boss_ui,
+                key: waku_client::DaemonKey::Local,
+                finished: Vec::new(),
+                ongoing,
+                viewport_rows,
+                fallback_focus,
+                signature: 0,
+            }
+        }
+
+        fn focus_handle(&self, outcome: Uuid) -> FocusHandle {
+            self.boss_ui.goals_focus_handles[&(self.key, format!("row:{outcome}"))].clone()
+        }
+    }
+
+    impl Render for GoalsRowFocusHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let Self {
+                boss_ui,
+                key,
+                finished,
+                ongoing,
+                viewport_rows,
+                signature,
+                ..
+            } = self;
+            let key = *key;
+            // Prune and seed handles exactly as the panel does.
+            let live_focus_keys: HashSet<String> = finished
+                .iter()
+                .chain(ongoing.iter())
+                .map(|id| format!("row:{id}"))
+                .collect();
+            boss_ui
+                .goals_focus_handles
+                .retain(|(daemon, item_key), _| {
+                    *daemon != key || live_focus_keys.contains(item_key)
+                });
+            let mut build = |ids: &[Uuid], cx: &mut Context<Self>| -> Vec<BossOutcomeItem> {
+                ids.iter()
+                    .map(|id| {
+                        let focus = boss_ui
+                            .goals_focus_handles
+                            .entry((key, format!("row:{id}")))
+                            .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                            .clone();
+                        BossOutcomeItem::Row(Arc::new(BossOutcomePanelRow {
+                            outcome: *id,
+                            focus,
+                            height: GOALS_PANEL_ROW_HEIGHT,
+                            bucket: BossGoalBucket::Pending,
+                            status: BossGoalStatus::Open,
+                            queued_extra: 0,
+                            title: format!("Outcome {id}"),
+                            member_name: None,
+                            avatar: None,
+                            project_label: None,
+                            detail: None,
+                            worktree: false,
+                            updated_label: None,
+                            attention: false,
+                            expanded: false,
+                            aria: "Show details".into(),
+                            updated_sort: 0,
+                            created_sort: 0,
+                        }))
+                    })
+                    .collect()
+            };
+            let finished_items = Arc::new(build(finished, cx));
+            let ongoing_items = Arc::new(build(ongoing, cx));
+            let items_signature = {
+                let mut hasher = DefaultHasher::new();
+                finished.hash(&mut hasher);
+                ongoing.hash(&mut hasher);
+                hasher.finish()
+            };
+            if items_signature != *signature {
+                *signature = items_signature;
+                reset_boss_goals_list(
+                    &boss_ui.goals_finished_list,
+                    &finished_items,
+                    GOALS_PANEL_ROW_HEIGHT,
+                );
+                reset_boss_goals_list(
+                    &boss_ui.goals_ongoing_list,
+                    &ongoing_items,
+                    GOALS_PANEL_ROW_HEIGHT,
+                );
+            }
+            let viewport = px(GOALS_PANEL_ROW_HEIGHT * (*viewport_rows).max(1) as f32);
+            let finished_list = boss_ui.goals_finished_list.clone();
+            let ongoing_list = boss_ui.goals_ongoing_list.clone();
+            let weak = WeakEntity::new_invalid();
+            let weak_ongoing = weak.clone();
+            let render_items = |items: Arc<Vec<BossOutcomeItem>>,
+                                weak: WeakEntity<Waku>|
+             -> Arc<dyn Fn(usize, &mut Window, &mut App) -> AnyElement> {
+                Arc::new(move |index, _window, cx| {
+                    items.get(index).map_or_else(
+                        || div().into_any_element(),
+                        |item| match item {
+                            BossOutcomeItem::Row(row) => {
+                                let tracked = row.outcome;
+                                boss_goal_panel_row_element(row, key, &weak, cx)
+                                    .debug_selector(move || {
+                                        if tracked == TRACKED_OUTCOME {
+                                            "tracked-goal-row".into()
+                                        } else {
+                                            "goal-row".into()
+                                        }
+                                    })
+                                    .into_any_element()
+                            }
+                            _ => div().into_any_element(),
+                        },
+                    )
+                })
+            };
+            let finished_render = render_items(finished_items, weak);
+            let ongoing_render = render_items(ongoing_items, weak_ongoing);
+            div()
+                .id("goals-harness")
+                .w(px(320.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(viewport)
+                        .flex_none()
+                        .child(
+                            list(finished_list, move |index, window, cx| {
+                                finished_render(index, window, cx)
+                            })
+                            .size_full(),
+                        ),
+                )
+                .child(
+                    div()
+                        .h(viewport)
+                        .flex_none()
+                        .child(
+                            list(ongoing_list, move |index, window, cx| {
+                                ongoing_render(index, window, cx)
+                            })
+                            .size_full(),
+                        ),
+                )
+        }
+    }
+
+    const TRACKED_OUTCOME: Uuid = Uuid::from_u128(7);
+
+    /// A focused outcome row keeps focus through the remount a section
+    /// move forces, even when it lands outside the destination list's
+    /// painted range; losing the row entirely sends focus to the app's
+    /// focus-lost fallback.
+    #[gpui::test]
+    fn focused_goals_row_survives_section_moves(cx: &mut gpui::TestAppContext) {
+        let others: Vec<Uuid> = (0..6).map(|i| Uuid::from_u128(i + 100)).collect();
+        let mut ongoing = vec![TRACKED_OUTCOME];
+        ongoing.extend(others.iter().copied());
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            GoalsRowFocusHarness::new(window, cx, 2, ongoing)
+        });
+        cx.run_until_parked();
+
+        let tracked = cx.read(|app| view.read(app).focus_handle(TRACKED_OUTCOME));
+        cx.update(|window, cx| window.focus(&tracked, cx));
+        cx.run_until_parked();
+        assert!(cx.update(|window, _| tracked.is_focused(window)));
+        assert!(cx.debug_bounds("tracked-goal-row").is_some());
+
+        // The row's outcome finishes: it leaves the ongoing list and
+        // mounts inside Finished's viewport — one state change, one
+        // remount.
+        let _ = view.update(cx, |this, cx| {
+            this.ongoing.retain(|id| *id != TRACKED_OUTCOME);
+            this.finished.insert(0, TRACKED_OUTCOME);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(
+            cx.update(|window, _| tracked.is_focused(window)),
+            "a row moving sections keeps focus"
+        );
+        assert!(cx.debug_bounds("tracked-goal-row").is_some());
+
+        // A settled row that is still focused and lands below the new
+        // scroll position keeps rendering — the list renders the focused
+        // item outside the viewport rather than dropping it.
+        let _ = view.update(cx, |this, cx| {
+            this.finished.clear();
+            this.finished.extend(others.iter().copied());
+            this.finished.push(TRACKED_OUTCOME);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(
+            cx.update(|window, _| tracked.is_focused(window)),
+            "a focused row scrolled out of view keeps focus"
+        );
+        assert!(
+            cx.debug_bounds("tracked-goal-row").is_some(),
+            "the focused row keeps rendering off-viewport"
+        );
+
+        // Losing the outcome entirely releases focus to the window's
+        // fallback — the row is unreachable, so focus must not linger.
+        let _ = view.update(cx, |this, cx| {
+            this.finished.clear();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.update(|window, _| !tracked.is_focused(window)));
+        assert!(cx.update(|window, cx| {
+            view.read(cx).fallback_focus.is_focused(window)
+        }));
     }
 
     #[test]
@@ -11002,6 +11307,7 @@ impl Waku {
         key: waku_client::DaemonKey,
         sessions: &HashMap<Uuid, &AgentSession>,
         now: u64,
+        focus: FocusHandle,
     ) -> BossOutcomePanelRow {
         let (bucket, status) = boss_outcome_status(row, sessions, now);
         let status_label = status.label();
@@ -11124,6 +11430,7 @@ impl Waku {
             .contains(&(key, row.outcome.id));
         BossOutcomePanelRow {
             outcome: row.outcome.id,
+            focus,
             height: boss_goal_row_height(self.state.ui_font_size),
             bucket,
             status,
@@ -11257,6 +11564,7 @@ fn boss_outcome_goal_entries(
         let detail = meta.join(" · ");
         let destination = sessions.contains_key(&assignment.session);
         entries.push(BossOutcomeEntry {
+            focus: None,
             key: format!(
                 "{}:{}:{}",
                 row.outcome.id, assignment.session, assignment.generation
@@ -11285,6 +11593,7 @@ fn boss_outcome_goal_entries(
     }
     if let Some(conflict) = &row.outcome.completion_conflict {
         entries.push(BossOutcomeEntry {
+            focus: None,
             key: format!("{}:conflict", row.outcome.id),
             session: None,
             icon: "icons/alert.svg",
@@ -11319,6 +11628,7 @@ fn boss_outcome_goal_entries(
         }
         let destination = sessions.contains_key(&handoff.assignment);
         entries.push(BossOutcomeEntry {
+            focus: None,
             key: format!("{}:handoff:{}", row.outcome.id, handoff.id),
             session: Some(handoff.assignment),
             icon: "icons/bell.svg",
@@ -11344,6 +11654,7 @@ fn boss_outcome_goal_entries(
     }
     if let Some(wait) = boss_outcome_wait_label(&row.outcome, now) {
         entries.push(BossOutcomeEntry {
+            focus: None,
             key: format!("{}:wait", row.outcome.id),
             session: None,
             icon: "icons/hourglass.svg",
@@ -11357,6 +11668,7 @@ fn boss_outcome_goal_entries(
     }
     if entries.is_empty() {
         entries.push(BossOutcomeEntry {
+            focus: None,
             key: format!("{}:empty", row.outcome.id),
             session: None,
             icon: "icons/circle-dot.svg",
@@ -11427,13 +11739,35 @@ impl Waku {
         // keeps its expansion and its focus-friendly outcome id.
         let mut entries: HashMap<Uuid, Vec<Arc<BossOutcomeEntry>>> = HashMap::new();
         for row in rows.iter() {
-            let prepared = Arc::new(self.prepare_boss_outcome_row(row, key, &sessions, now));
+            let focus = self
+                .boss_ui
+                .goals_focus_handles
+                .entry((key, format!("row:{}", row.outcome.id)))
+                .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                .clone();
+            let prepared = Arc::new(self.prepare_boss_outcome_row(
+                row, key, &sessions, now, focus,
+            ));
             if prepared.expanded {
                 entries.insert(
                     row.outcome.id,
                     boss_outcome_goal_entries(row, &sessions, &self.boss_ui.queued, now)
                         .into_iter()
-                        .map(Arc::new)
+                        .map(|entry| {
+                            let mut entry = entry;
+                            if entry.destination {
+                                entry.focus = Some(
+                                    self.boss_ui
+                                        .goals_focus_handles
+                                        .entry((key, format!("entry:{}", entry.key)))
+                                        .or_insert_with(|| {
+                                            cx.focus_handle().tab_stop(true)
+                                        })
+                                        .clone(),
+                                );
+                            }
+                            Arc::new(entry)
+                        })
                         .collect(),
                 );
             }
@@ -11522,11 +11856,33 @@ impl Waku {
                 attention: section_rows.iter().filter(|row| row.attention).count(),
                 collapsed,
                 top_gap: !ongoing_items.is_empty(),
+                focus: self
+                    .boss_ui
+                    .goals_focus_handles
+                    .entry((key, format!("header:{section:?}")))
+                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                    .clone(),
             });
             if !collapsed {
                 ongoing_items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
             }
         }
+        // Focus handles live only while their item renders — a removed
+        // outcome, a collapsed section's rows, or an entry line that
+        // stopped navigating drop out and cannot hold a dead focus.
+        let mut live_focus_keys: HashSet<String> = visible_finished
+            .iter()
+            .chain(ongoing_items.iter())
+            .filter_map(boss_goals_item_focus_key)
+            .collect();
+        // The Finished header mounts beside its list rather than inside
+        // it — account for it by hand.
+        if !finished.is_empty() {
+            live_focus_keys.insert(format!("header:{:?}", boss::BossGoalSection::Finished));
+        }
+        self.boss_ui
+            .goals_focus_handles
+            .retain(|(daemon, item_key), _| *daemon != key || live_focus_keys.contains(item_key));
         // Reset a viewport when its item sequence or scaled row height
         // changes — count-preserving reorders reset too, but title and
         // timestamp ticks never do.
@@ -11576,11 +11932,11 @@ impl Waku {
         let ongoing_list = self.boss_ui.goals_ongoing_list.clone();
         if owner_changed || self.boss_ui.goals_finished_signature != Some(finished_signature) {
             self.boss_ui.goals_finished_signature = Some(finished_signature);
-            finished_list.reset_with_uniform_height(visible_finished.len(), px(row_height));
+            reset_boss_goals_list(&finished_list, &visible_finished, row_height);
         }
         if owner_changed || self.boss_ui.goals_ongoing_signature != Some(ongoing_signature) {
             self.boss_ui.goals_ongoing_signature = Some(ongoing_signature);
-            ongoing_list.reset_with_uniform_height(ongoing_items.len(), px(row_height));
+            reset_boss_goals_list(&ongoing_list, &ongoing_items, row_height);
         }
         self.boss_ui.goals_list_owner = Some(key);
         let offline = matches!(key, waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
@@ -11603,12 +11959,19 @@ impl Waku {
             );
         }
         if !finished.is_empty() {
+            let finished_header_focus = self
+                .boss_ui
+                .goals_focus_handles
+                .entry((key, format!("header:{:?}", boss::BossGoalSection::Finished)))
+                .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                .clone();
             panel = panel.child(boss_goal_section_header(
                 boss::BossGoalSection::Finished,
                 &tr!("boss.goals_section_finished"),
                 0,
                 finished_collapsed,
                 false,
+                &finished_header_focus,
                 key,
                 &waku,
                 &theme,
@@ -11727,11 +12090,12 @@ impl Waku {
                                         attention,
                                         collapsed,
                                         top_gap,
+                                        focus,
                                     } => {
                                         let theme = Theme::current(cx);
                                         boss_goal_section_header(
-                                            *section, label, *attention, *collapsed, *top_gap, key,
-                                            &weak, &theme,
+                                            *section, label, *attention, *collapsed, *top_gap,
+                                            focus, key, &weak, &theme,
                                         )
                                         .into_any_element()
                                     }
