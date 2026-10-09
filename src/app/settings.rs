@@ -8220,10 +8220,26 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(tr!("experiments.press_to_talk_description")),
             )
-            .child(row(
-                tr!("experiments.voice_scratchpad_margin_double_click_title"),
-                margin_toggle.into_any_element(),
-            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(settings_row_label(
+                        "icons/hand.svg",
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!(
+                                "experiments.voice_scratchpad_margin_double_click_title"
+                            )),
+                        theme,
+                    ))
+                    .child(margin_toggle),
+            )
             .into_any_element()
     }
 
