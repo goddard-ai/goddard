@@ -1282,16 +1282,23 @@ impl Project {
             groups.entry(project.name.clone()).or_default().push(index);
         }
         for members in groups.into_values() {
-            if members.len() == 1 {
-                // A since-resolved collision leaves a stale label — the lone
-                // project with this name renders it plainly again.
-                projects[members[0]].resolved_name = None;
+            // Multiple daemons can register the same path. Such entries share
+            // a label; only distinct paths need directory disambiguation.
+            let distinct_paths = members
+                .iter()
+                .map(|index| &projects[*index].path)
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            if distinct_paths == 1 {
+                // Clear stale labels once no distinct path shares the name.
+                for member in members {
+                    projects[member].resolved_name = None;
+                }
                 continue;
             }
             // Depth counts the name itself plus the parents prepended to it:
             // 2 renders `parent/name`. Stop once labels are distinct or no
-            // member's path can supply more ancestors — identical paths tie
-            // at full depth, which no labeling can fix.
+            // member's path can supply more ancestors.
             let deepest = members
                 .iter()
                 .map(|index| projects[*index].path.components().count())
@@ -1307,7 +1314,7 @@ impl Project {
                     .iter()
                     .collect::<std::collections::HashSet<_>>()
                     .len()
-                    == members.len()
+                    == distinct_paths
                     || depth >= deepest
                 {
                     for (member, label) in members.iter().zip(labels) {
@@ -8878,6 +8885,42 @@ mod tests {
         Project::resolve_display_names(&mut projects);
         assert_eq!(projects[0].display_name(), "a/x/dev");
         assert_eq!(projects[1].display_name(), "b/x/dev");
+    }
+
+    #[test]
+    fn resolve_display_names_does_not_expand_for_duplicate_registrations() {
+        // A merged catalog can register the same path on multiple daemons.
+        // Duplicates must not force this group to expand to absolute paths.
+        for root in ["/worktrees", "C:/worktrees"] {
+            let mut projects = vec![
+                Project::from_path(PathBuf::from(format!("{root}/goddard/dev"))),
+                Project::from_path(PathBuf::from(format!("{root}/goddard/dev"))),
+                Project::from_path(PathBuf::from(format!("{root}/text-coral/dev"))),
+            ];
+            Project::resolve_display_names(&mut projects);
+            assert_eq!(projects[0].display_name(), "goddard/dev");
+            assert_eq!(projects[1].display_name(), "goddard/dev");
+            assert_eq!(projects[2].display_name(), "text-coral/dev");
+
+            projects.pop();
+            Project::resolve_display_names(&mut projects);
+            assert_eq!(projects[0].display_name(), "dev");
+            assert_eq!(projects[1].display_name(), "dev");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_display_names_handles_windows_duplicate_path_spellings() {
+        let mut projects = vec![
+            Project::from_path(PathBuf::from(r"C:\worktrees\goddard\dev")),
+            Project::from_path(PathBuf::from("C:/worktrees/goddard/dev/")),
+            Project::from_path(PathBuf::from(r"C:\worktrees\text-coral\dev")),
+        ];
+        Project::resolve_display_names(&mut projects);
+        assert_eq!(projects[0].display_name(), "goddard/dev");
+        assert_eq!(projects[1].display_name(), "goddard/dev");
+        assert_eq!(projects[2].display_name(), "text-coral/dev");
     }
 
     #[test]

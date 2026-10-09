@@ -1,0 +1,1 @@
+- Fixed duplicate project registrations causing project names to expand into absolute paths, including on Windows.
