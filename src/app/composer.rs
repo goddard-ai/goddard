@@ -4462,7 +4462,7 @@ impl Waku {
     pub(super) fn restore_composer_submission(
         &mut self,
         session_id: Uuid,
-        submission: ComposerSubmission,
+        mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
         if submission.hidden {
@@ -4480,6 +4480,17 @@ impl Waku {
             .map(ComposerAttachment::from)
             .collect();
         if !submission.annotations.is_empty() {
+            // The bubble's quote blocks are the annotations' own
+            // presentation — a draft keeps only what was typed, and the
+            // structured set returning to the stores re-chips on resubmit.
+            if let Some(display) = submission.display_content.as_mut()
+                && let Some(typed) = display.strip_prefix(&annotation_bubble_content(
+                    &submission.annotations,
+                    "",
+                ))
+            {
+                *display = typed.to_owned();
+            }
             // The drain consumed the highlights; hand them back so the
             // restored draft still carries its comments — file annotations
             // return to their editors, plan annotations to their session's
@@ -4519,14 +4530,31 @@ impl Waku {
             }
         }
         // A restored draft gets the payloads, never the chip markup: the
-        // bubble's atom spans splice back to pasted text and session tokens
-        // the way a queued message's edit already pulls them inline.
+        // bubble's atom spans splice back to pasted text and session
+        // tokens. A queued message's edit instead reseats its chips — its
+        // submission carries the wire atoms but none of the composer's own.
+        let mut seated_atoms = Vec::new();
         let content = submission.human_content.unwrap_or_else(|| {
             submission
                 .display_content
-                .map(|display| atom_payload_content(&display, &submission.message_atoms))
+                .map(|display| {
+                    if submission.atoms.is_empty() {
+                        let (content, atoms) =
+                            atom_marker_content(&display, &submission.message_atoms);
+                        seated_atoms = atoms;
+                        content
+                    } else {
+                        atom_payload_content(&display, &submission.message_atoms)
+                    }
+                })
                 .unwrap_or(submission.prompt)
         });
+        if !seated_atoms.is_empty() {
+            // The markers ride in the restored text — the seats an earlier
+            // draft held left with the content set_content replaces.
+            self.composer_inline_atoms = seated_atoms;
+            self.pasted_text_editor = None;
+        }
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
         // Restored atoms fold back in as inline mentions, appended after the
@@ -4549,28 +4577,52 @@ impl Waku {
     fn restore_side_chat_submission(
         &mut self,
         session_id: Uuid,
-        submission: ComposerSubmission,
+        mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        if !submission.annotations.is_empty()
-            && let Some(view) = self.side_chat_views.get(&session_id)
-        {
-            view.selection
-                .annotations
-                .borrow_mut()
-                .items
-                .extend(submission.annotations);
+        if !submission.annotations.is_empty() {
+            // Same split as the main restore — a draft keeps the typed
+            // text, not the bubble's quote blocks.
+            if let Some(display) = submission.display_content.as_mut()
+                && let Some(typed) = display.strip_prefix(&annotation_bubble_content(
+                    &submission.annotations,
+                    "",
+                ))
+            {
+                *display = typed.to_owned();
+            }
+            if let Some(view) = self.side_chat_views.get(&session_id) {
+                view.selection
+                    .annotations
+                    .borrow_mut()
+                    .items
+                    .extend(submission.annotations);
+            }
         }
-        // Same contract as the main restore — payloads, never chip markup.
+        // Same contract as the main restore — a queued edit reseats its
+        // chips, anything else gets payloads, never chip markup.
+        let mut seated_atoms = Vec::new();
         let content = submission.human_content.unwrap_or_else(|| {
             submission
                 .display_content
-                .map(|display| atom_payload_content(&display, &submission.message_atoms))
+                .map(|display| {
+                    if submission.atoms.is_empty() {
+                        let (content, atoms) =
+                            atom_marker_content(&display, &submission.message_atoms);
+                        seated_atoms = atoms;
+                        content
+                    } else {
+                        atom_payload_content(&display, &submission.message_atoms)
+                    }
+                })
                 .unwrap_or(submission.prompt)
         });
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
+        if !seated_atoms.is_empty() {
+            chat.atoms = seated_atoms;
+        }
         chat.composer
             .update(cx, |input, cx| input.set_content(content, cx));
         for atom in submission.atoms {
@@ -9459,31 +9511,81 @@ fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -
         .line_height(sp(18.0))
         .text_size(sp(12.5))
         .text_color(theme.text)
-        .children(parts.into_iter().enumerate().flat_map(|(index, part)| {
-            match part {
-                QueuedPreviewPart::Text(text) => {
-                    // Keep each word as its own flex item. A whole text run is
-                    // measured as one item and can consume the row before a
-                    // following chip gets a chance to flow beside it.
-                    text.split_inclusive(char::is_whitespace)
-                        .map(|word| {
-                            div()
-                                .flex_none()
-                                .max_w_full()
-                                .child(SharedString::from(word.to_owned()))
-                                .into_any_element()
-                        })
-                        .collect::<Vec<_>>()
-                }
-                QueuedPreviewPart::Chip { icon, label } => vec![queued_preview_chip(
+        .children(queued_preview_items(&parts).into_iter().enumerate().map(
+            |(index, item)| match item {
+                // Keep each word as its own flex item. A whole text run is
+                // measured as one item and can consume the row before a
+                // following chip gets a chance to flow beside it.
+                QueuedPreviewItem::Word(word) => div()
+                    .flex_none()
+                    .max_w_full()
+                    .child(SharedString::from(word))
+                    .into_any_element(),
+                // A source newline ends the row outright — a full-width
+                // item wraps the flow, and its zero height keeps the break
+                // from adding a blank row of its own.
+                QueuedPreviewItem::Break => div().w_full().h(px(0.0)).into_any_element(),
+                QueuedPreviewItem::Chip { icon, label } => queued_preview_chip(
                     SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),
                     icon,
                     label,
                     theme,
                 )
-                .into_any_element()],
+                .into_any_element(),
+            },
+        ))
+}
+
+/// One laid-out item in a chip-bearing queued preview's flow: a word of
+/// text, a chip, or a row break an explicit newline forces. Words never
+/// contain a line break — each source newline is a full-width zero-height
+/// item the wrap honors, so breaks stay flow-wide instead of hiding inside
+/// a vertically centered child.
+#[derive(Debug, PartialEq)]
+pub(super) enum QueuedPreviewItem {
+    Word(String),
+    Chip {
+        icon: Option<&'static str>,
+        label: SharedString,
+    },
+    Break,
+}
+
+/// Flatten preview parts into flow items: chips pass through, text splits
+/// into whitespace-bound words, and every line break becomes a
+/// [`QueuedPreviewItem::Break`]. `\r\n` reads as one break; a lone `\r`
+/// still ends the row. An empty line keeps a space word so the blank row
+/// it stands for still measures a line tall.
+pub(super) fn queued_preview_items(parts: &[QueuedPreviewPart]) -> Vec<QueuedPreviewItem> {
+    let mut items = Vec::new();
+    for part in parts {
+        match part {
+            QueuedPreviewPart::Chip { icon, label } => items.push(QueuedPreviewItem::Chip {
+                icon: *icon,
+                label: label.clone(),
+            }),
+            QueuedPreviewPart::Text(text) => {
+                for (index, line) in text
+                    .replace("\r\n", "\n")
+                    .split(['\n', '\r'])
+                    .enumerate()
+                {
+                    if index > 0 {
+                        items.push(QueuedPreviewItem::Break);
+                    }
+                    if line.is_empty() {
+                        items.push(QueuedPreviewItem::Word(" ".to_owned()));
+                        continue;
+                    }
+                    items.extend(
+                        line.split_inclusive(char::is_whitespace)
+                            .map(|word| QueuedPreviewItem::Word(word.to_owned())),
+                    );
+                }
             }
-        }))
+        }
+    }
+    items
 }
 
 /// `prompt` with each [`INLINE_ATOM_MARKER`] replaced by its transcript
@@ -9581,6 +9683,140 @@ pub(super) fn atom_payload_content(
     }
     out.push_str(rest);
     out
+}
+
+/// `display_content` with each atom span traded for an
+/// [`INLINE_ATOM_MARKER`] seated where the span stood, plus the composer
+/// atoms those spans described — the inverse of [`atom_display_content`]
+/// for a draft that reopens with its chips rather than their spliced
+/// payloads. A span whose atom cannot rebuild a chip splices its payload,
+/// and one past the atom list keeps its label — the same fallbacks
+/// [`atom_payload_content`] reaches.
+pub(super) fn atom_marker_content(
+    display_content: &str,
+    atoms: &[waku_protocol::model::MessageAtom],
+) -> (String, Vec<ComposerInlineAtom>) {
+    use waku_protocol::model::{MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN};
+    if !display_content.contains(OPEN) {
+        return (display_content.to_owned(), Vec::new());
+    }
+    let mut content = String::with_capacity(display_content.len());
+    let mut seated = Vec::new();
+    let mut rest = display_content;
+    let mut atoms = atoms.iter();
+    let open_len = OPEN.len_utf8();
+    let end_len = END.len_utf8();
+    while let Some(start) = rest.find(OPEN) {
+        content.push_str(&rest[..start]);
+        let after_open = &rest[start + open_len..];
+        let Some(end) = after_open.find(END) else {
+            // An unterminated span is not markup — keep the rest verbatim.
+            content.push_str(&rest[start..]);
+            return (content, seated);
+        };
+        let text = match atoms.next() {
+            Some(atom) => match queued_atom_chip(&after_open[..end], atom) {
+                Some((kind, paste_category)) => {
+                    let marker = content.len();
+                    content.push(crate::input::INLINE_ATOM_MARKER);
+                    seated.push(ComposerInlineAtom {
+                        marker,
+                        kind,
+                        revision: Uuid::new_v4(),
+                        paste_category,
+                    });
+                    rest = &after_open[end + end_len..];
+                    continue;
+                }
+                // The payload still edits as text when its chip cannot be
+                // rebuilt.
+                None => atom.payload.clone(),
+            },
+            // A span without a recorded atom keeps its unescaped label.
+            None => waku_protocol::model::atom_visible_text(
+                &rest[start..start + open_len + end + end_len],
+            ),
+        };
+        content.push_str(&text);
+        rest = &after_open[end + end_len..];
+    }
+    content.push_str(rest);
+    (content, seated)
+}
+
+/// The composer atom a queued message's span restores: the span's own
+/// header says what the chip was — a `REF` mark and kind nibble, a session
+/// id's selector run, or nothing for a folded paste — and the paired
+/// atom's payload holds the token or text it splices back. `None` when the
+/// payload cannot regenerate its own token, leaving the splice to keep it
+/// literal.
+fn queued_atom_chip(
+    span_inner: &str,
+    atom: &waku_protocol::model::MessageAtom,
+) -> Option<(ComposerAtomKind, Option<String>)> {
+    use waku_protocol::model::{MESSAGE_ATOM_REF as REF, decode_atom_session_id};
+    if let Some(inner) = span_inner.strip_prefix(REF) {
+        let kind = waku_protocol::model::AtomRefKind::from_mark(inner.chars().next()?)?;
+        let (tag, name, key, target) = parse_atom_token(&atom.payload)?;
+        if tag != kind.tag() || key != kind.operand_key() {
+            return None;
+        }
+        return Some((
+            ComposerAtomKind::Ref(ComposerRef {
+                kind,
+                name: SharedString::from(name),
+                target: SharedString::from(target),
+                // The row detail is pool-side chrome; a restored atom never
+                // lists again.
+                detail: SharedString::default(),
+            }),
+            None,
+        ));
+    }
+    if decode_atom_session_id(span_inner).0.is_some() {
+        let (tag, name, key, target) = parse_atom_token(&atom.payload)?;
+        if tag != "session" || key != "task_id" {
+            return None;
+        }
+        return Some((
+            ComposerAtomKind::SessionRef {
+                session_id: Uuid::parse_str(target).ok()?,
+                title: SharedString::from(name),
+            },
+            None,
+        ));
+    }
+    Some((
+        ComposerAtomKind::PastedText(atom.payload.clone()),
+        pasted_atom_category(&atom.label),
+    ))
+}
+
+/// Split a generated `[tag "name" (key: target)]` token back into parts —
+/// the inverse of [`session_token`] and [`ref_token`]. The name is cut at
+/// the last `" (` so an earlier quote inside it cannot truncate the
+/// operand.
+fn parse_atom_token(payload: &str) -> Option<(&str, &str, &str, &str)> {
+    let inner = payload.strip_prefix('[')?.strip_suffix(")]")?;
+    let (tag, rest) = inner.split_once(" \"")?;
+    let (name, rest) = rest.rsplit_once("\" (")?;
+    let (key, target) = rest.split_once(": ")?;
+    Some((tag, name, key, target))
+}
+
+/// The category word a pasted atom's chip label opened with — a restored
+/// atom keeps it so the chip reads as it did. The label's ` (N lines)`
+/// tail is a count, not part of the name.
+fn pasted_atom_category(label: &str) -> Option<String> {
+    let category = label
+        .rsplit_once(" (")
+        .and_then(|(head, tail)| {
+            tail.strip_suffix(')')
+                .map(|count| count.trim_end_matches('s').ends_with(" line"))
+                .and_then(|is_count| is_count.then_some(head))
+        })
+        .unwrap_or(label);
+    (!category.is_empty()).then(|| category.to_owned())
 }
 
 /// The prompt a submission sends: the typed text plus one token per staged

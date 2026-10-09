@@ -963,6 +963,194 @@ fn queued_preview_degrades_when_the_blocks_do_not_match() {
 }
 
 #[test]
+fn queued_preview_items_turn_line_breaks_into_row_breaks() {
+    use super::composer::{QueuedPreviewItem, QueuedPreviewPart, queued_preview_items};
+    use QueuedPreviewItem::{Break, Chip, Word};
+
+    let parts = vec![
+        QueuedPreviewPart::Text("first line\n\nsecond".to_owned()),
+        QueuedPreviewPart::Chip {
+            icon: None,
+            label: "chip".into(),
+        },
+        QueuedPreviewPart::Text(" tail\r\nend".to_owned()),
+    ];
+    assert_eq!(
+        queued_preview_items(&parts),
+        vec![
+            Word("first ".into()),
+            Word("line".into()),
+            Break,
+            // The blank line keeps a line-tall spacer so the break is
+            // visible, not collapsed.
+            Word(" ".into()),
+            Break,
+            Word("second".into()),
+            Chip {
+                icon: None,
+                label: "chip".into()
+            },
+            // A leading space is its own separator item.
+            Word(" ".into()),
+            Word("tail".into()),
+            Break,
+            Word("end".into()),
+        ]
+    );
+    // No text item may carry a line break — that is what centered the
+    // flow's rows unevenly.
+    for item in queued_preview_items(&parts) {
+        if let Word(word) = item {
+            assert!(!word.contains(['\n', '\r']), "word carries a break: {word:?}");
+        }
+    }
+}
+
+#[test]
+fn queued_edit_reseats_atom_spans_as_composer_chips() {
+    use super::composer::atom_marker_content;
+    use crate::input::INLINE_ATOM_MARKER as M;
+    use waku_protocol::model::{AtomRefKind, MessageAtom};
+
+    // A parked follow-up as `take_composer_submission` wrote it: three
+    // chips — a paste, a session reference, a project — in order.
+    let atoms = vec![
+        ComposerInlineAtom {
+            marker: 0,
+            revision: Uuid::new_v4(),
+            paste_category: Some("Pasted diff".to_owned()),
+            kind: ComposerAtomKind::PastedText("pasted\nbody".to_owned()),
+        },
+        session_atom(0),
+        ComposerInlineAtom {
+            marker: 0,
+            revision: Uuid::new_v4(),
+            paste_category: None,
+            kind: ComposerAtomKind::Ref(ComposerRef {
+                kind: AtomRefKind::Project,
+                name: "Goddard".into(),
+                target: "/abs/repo".into(),
+                detail: "".into(),
+            }),
+        },
+    ];
+    let typed = format!("fix {M} and {M} now {M}");
+    let display = atom_display_content(&typed, &atoms);
+    let wire: Vec<MessageAtom> = atoms.iter().map(ComposerInlineAtom::message_atom).collect();
+
+    // Editing the parked prompt reseats each chip where its span stood —
+    // the composer text carries markers, not spliced payloads.
+    let (content, seated) = atom_marker_content(&display, &wire);
+    assert_eq!(content, typed);
+    assert_eq!(seated.len(), 3);
+
+    // Chip identity and order survive: splicing the seats reproduces the
+    // provider-facing text unchanged.
+    assert_eq!(
+        splice_inline_atoms(&content, &seated),
+        concat!(
+            "fix pasted\nbody and ",
+            "[session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] ",
+            "now [project \"Goddard\" (path: /abs/repo)]"
+        )
+    );
+    match &seated[0].kind {
+        ComposerAtomKind::PastedText(text) => assert_eq!(text, "pasted\nbody"),
+        _ => panic!("paste chip lost"),
+    }
+    assert_eq!(seated[0].paste_category.as_deref(), Some("Pasted diff"));
+    match &seated[1].kind {
+        ComposerAtomKind::SessionRef { session_id, title } => {
+            assert_eq!(*session_id, Uuid::nil());
+            assert_eq!(&**title, "Big refactor");
+        }
+        _ => panic!("session chip lost"),
+    }
+    match &seated[2].kind {
+        ComposerAtomKind::Ref(reference) => {
+            assert_eq!(reference.kind, AtomRefKind::Project);
+            assert_eq!(&*reference.name, "Goddard");
+            assert_eq!(&*reference.target, "/abs/repo");
+        }
+        _ => panic!("reference chip lost"),
+    }
+}
+
+#[test]
+fn queued_edit_splices_spans_that_cannot_rebuild_a_chip() {
+    use super::composer::atom_marker_content;
+    use waku_protocol::model::{
+        MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, MessageAtom,
+        encode_atom_session_id,
+    };
+
+    // A span past the atom list keeps its label as text, the same
+    // fallback `atom_payload_content` uses.
+    let display = format!("use {OPEN}Pasted text{END} twice");
+    let (content, seated) = atom_marker_content(&display, &[]);
+    assert_eq!(content, "use Pasted text twice");
+    assert!(seated.is_empty());
+
+    // A session span whose stored payload is no longer its token splices
+    // the payload verbatim rather than fabricating a chip.
+    let display = format!(
+        "see {OPEN}{id}Big refactor{END} done",
+        id = encode_atom_session_id(Uuid::nil())
+    );
+    let atoms = vec![MessageAtom {
+        label: "Big refactor".into(),
+        payload: "loose text".into(),
+        session_id: Some(Uuid::nil()),
+    }];
+    let (content, seated) = atom_marker_content(&display, &atoms);
+    assert_eq!(content, "see loose text done");
+    assert!(seated.is_empty());
+
+    // And a text-only queued prompt restores untouched.
+    let (content, seated) = atom_marker_content("plain follow-up", &[]);
+    assert_eq!(content, "plain follow-up");
+    assert!(seated.is_empty());
+}
+
+#[test]
+fn editing_a_queued_prompt_round_trips_through_the_composer() {
+    use super::composer::atom_marker_content;
+    use crate::input::INLINE_ATOM_MARKER as M;
+
+    // The parked entry carries the provider text, the chip-marked
+    // display, and the wire atoms `into_queued_message` stored.
+    let atoms = vec![session_atom(0)];
+    let display = atom_display_content(&format!("ship {M} first"), &atoms);
+    let mut message = QueuedMessage::new(
+        "ship [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] first",
+    );
+    message.display_content = Some(display.clone());
+    message.atoms = atoms.iter().map(ComposerInlineAtom::message_atom).collect();
+
+    // The edit path: from_queued_message keeps the wire atoms and no
+    // composer atoms, so the restore reseats chips from the display.
+    let submission = ComposerSubmission::from_queued_message(message);
+    assert!(submission.atoms.is_empty());
+    let (content, seated) = atom_marker_content(
+        submission.display_content.as_deref().unwrap(),
+        &submission.message_atoms,
+    );
+    assert_eq!(content, format!("ship {M} first"));
+    assert_eq!(seated.len(), 1);
+    assert!(matches!(
+        seated[0].kind,
+        ComposerAtomKind::SessionRef { .. }
+    ));
+    // A re-park of the untouched draft regenerates the same provider text
+    // and chip presentation.
+    assert_eq!(
+        splice_inline_atoms(&content, &seated),
+        "ship [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] first"
+    );
+    assert_eq!(atom_display_content(&content, &seated), display);
+}
+
+#[test]
 fn session_mentions_offer_only_the_composers_project() {
     let project = Uuid::new_v4();
     let mut same = started_session(Uuid::new_v4());
