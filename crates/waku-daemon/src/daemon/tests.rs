@@ -6396,6 +6396,105 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A queued ticket holds on the unresolved Employee base instead of
+/// dispatching under a guessed persona, and the human's recorded pick
+/// releases it into the normal launch path.
+#[test]
+fn a_queued_employee_holds_until_the_human_chooses_the_employee_base() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeLifecycle, PersonaDefaultAction,
+    };
+    let root = std::env::temp_dir().join(format!("summon-base-hold-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("a valid summon is accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+
+    // Rewrite the document the way an ambiguous legacy install reads:
+    // no canonical marker, and two candidates whose text identifies
+    // neither.
+    let path = root.join("boss/boss.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let object = doc.as_object_mut().unwrap();
+    object.remove("employeePersonaId");
+    let personas = object["personas"].as_array_mut().unwrap();
+    personas[0]["markdown"] = serde_json::json!("Custom helper policy.");
+    let mut extra = personas[0].clone();
+    extra["id"] = serde_json::json!(Uuid::new_v4());
+    extra["name"] = serde_json::json!("Reviewer");
+    extra["markdown"] = serde_json::json!("Reviewer scope only.");
+    personas.push(extra);
+    std::fs::write(&path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    assert!(backend.boss.document().employee_persona_id.is_none());
+
+    // Fresh summons fail outright and the queued ticket holds with the
+    // human-facing wait reason rather than launching degraded.
+    assert!(
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(&backend, &root, "blocked job", ProviderKind::Codex, None),
+                &EventSink::detached(),
+            )
+            .is_err()
+    );
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(
+        employee.ticket.as_ref().is_some_and(|ticket| ticket
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(blocker, AdmissionBlocker::EmployeeBase { .. }))),
+        "expected the base-choice wait reason: {:?}",
+        employee.ticket.as_ref().map(|ticket| &ticket.blocked_by)
+    );
+
+    // The human's pick clears the hold — the choice itself wakes the
+    // scheduler, which dispatches into the fixture's deterministic
+    // launch failure, same as any ticket.
+    let base_id = backend.boss.document().personas[0].id;
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::PersonaDefault {
+                action: PersonaDefaultAction::ChooseEmployeeBase {
+                    persona_id: base_id,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired, "the choice released the queued ticket");
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A queued ticket's unstarted task shell is what the roster click
 /// selects — the catalog must project it even though no turn ran.
 /// Unstarted rows the boss does not manage stay excluded: they are

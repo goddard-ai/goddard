@@ -390,6 +390,19 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
+        // An unresolved Employee base holds the ticket rather than
+        // dispatching under a persona the reconciler could not identify —
+        // the human's choice in Persona settings clears the wait.
+        if !self.boss.employee_base_resolved() {
+            self.boss.record_blocked(
+                session_id,
+                vec![waku_protocol::boss::AdmissionBlocker::EmployeeBase {
+                    detail: "waiting for the human to choose the Employee base in Persona settings"
+                        .to_owned(),
+                }],
+            )?;
+            return Ok(false);
+        }
         // A linked assignment holds at the queue head until its readiness
         // lands — the finishing assignment waits on the outcome's
         // completion conditions, an ordinary one on its prerequisites.

@@ -478,6 +478,12 @@ pub enum PersonaDefaultAction {
     },
     /// Drop an open proposal without deciding on the update.
     DismissProposal { role: PersonaDefaultRole },
+    /// Record which saved persona is the canonical Employee base — the
+    /// resolution for a legacy document whose stored marker is missing
+    /// and whose candidates identity cannot decide. Every candidate
+    /// record stays intact; only the marker moves. Human-only: choosing
+    /// the base is the human's call, never a daemon or boss guess.
+    ChooseEmployeeBase { persona_id: Uuid },
 }
 
 /// One canonical default's full inspection record — shipped text,
@@ -923,6 +929,9 @@ pub enum AdmissionBlocker {
     /// assignment waits on the outcome's completion conditions, an
     /// ordinary one on its prerequisites.
     OutcomeWait { detail: String },
+    /// The canonical Employee base is unresolved — a human choice in
+    /// the Personas settings clears it.
+    EmployeeBase { detail: String },
 }
 
 /// Admission status attached to `Summoned` and control results — the
@@ -1514,8 +1523,9 @@ pub struct BossState {
     pub persona_id: Uuid,
     /// The canonical Employee default persona — the stable identity of
     /// the shipped Employee role regardless of renames; a custom persona
-    /// named "Employee" is never it. `None` only on documents that
-    /// predate the seeded defaults.
+    /// named "Employee" is never it. `None` while the human's choice
+    /// between ambiguous legacy candidates is still open — employees
+    /// cannot dispatch or resume until it is recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub employee_persona_id: Option<Uuid>,
     /// Revision provenance for the two shipped default personas —

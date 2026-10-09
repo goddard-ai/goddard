@@ -953,7 +953,18 @@ impl WakuBackend {
                     }
                     _ => Default::default(),
                 };
+                // Recording the Employee base choice can release tickets
+                // held on the unresolved marker — re-run the dispatch pass.
+                let base_choice = matches!(
+                    operation,
+                    BossOperation::PersonaDefault {
+                        action: waku_protocol::boss::PersonaDefaultAction::ChooseEmployeeBase { .. },
+                    }
+                );
                 let result = self.boss.handle(caller, operation)?;
+                if base_choice {
+                    self.wake_summon_queue();
+                }
                 let boss = self.boss.document();
                 if rename && let Some(session) = boss.session_id {
                     self.boss.reset_context(session);

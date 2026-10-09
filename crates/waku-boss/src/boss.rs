@@ -548,6 +548,13 @@ impl BossService {
         !self.state.lock().outcomes.is_empty()
     }
 
+    /// Whether the canonical Employee base marker is recorded — queued
+    /// tickets hold while the human's choice between ambiguous legacy
+    /// candidates is still open.
+    pub fn employee_base_resolved(&self) -> bool {
+        self.state.lock().employee_persona_id.is_some()
+    }
+
     /// The pair `BossOperation::Open` needs — identity plus chat session id —
     /// without cloning the whole document.
     pub fn identity_and_session(&self) -> (BossIdentity, Option<Uuid>) {
@@ -1924,7 +1931,11 @@ impl BossService {
         persona_id: Option<Uuid>,
     ) -> anyhow::Result<Uuid> {
         let base = state.employee_persona_id.ok_or_else(|| {
-            anyhow!("the Employee base persona is unavailable — restore it through the Boss persona defaults")
+            anyhow!(
+                "the Employee base persona is unresolved — several saved personas could be the \
+                 default, so employees cannot dispatch until the human chooses the base in \
+                 Settings → Boss → Personas"
+            )
         })?;
         let persona_id = persona_id.unwrap_or(base);
         if persona_id == state.persona_id {
@@ -1956,12 +1967,21 @@ impl BossService {
         Self::resolve_employee_persona(&state, Some(employee.persona_id))
             .map(|_| ())
             .map_err(|error| {
-                anyhow!(
-                    "employee {}'s assigned persona cannot be applied ({error:#}) — \
-                     set a replacement role with `control` `setPersona` or leave the \
-                     base only",
-                    employee.identity.name
-                )
+                if state.employee_persona_id.is_none() {
+                    // An unresolved base is the human's pending choice,
+                    // not a role problem setPersona can fix.
+                    anyhow!(
+                        "employee {} cannot resume — {error:#}",
+                        employee.identity.name
+                    )
+                } else {
+                    anyhow!(
+                        "employee {}'s assigned persona cannot be applied ({error:#}) — \
+                         set a replacement role with `control` `setPersona` or leave the \
+                         base only",
+                        employee.identity.name
+                    )
+                }
             })
     }
 
@@ -3601,11 +3621,38 @@ impl BossService {
                     .into(),
             });
         }
-        if matches!(action, Keep { .. } | Adopt { .. }) {
+        if matches!(
+            action,
+            Keep { .. } | Adopt { .. } | ChooseEmployeeBase { .. }
+        ) {
             anyhow::ensure!(
                 caller.is_none(),
                 "only the human can decide on persona default updates"
             );
+        }
+        if let ChooseEmployeeBase { persona_id } = action {
+            self.update(|state| {
+                if persona_id == state.persona_id {
+                    bail!("the Boss persona cannot be the Employee base");
+                }
+                if !state
+                    .personas
+                    .iter()
+                    .any(|persona| persona.id == persona_id)
+                {
+                    bail!("unknown persona");
+                }
+                // The marker is the whole write: the record keeps its
+                // name, instructions, permissions, icon, and pinned
+                // documents, and the reconciler classifies the provenance
+                // the same way a load would.
+                state.employee_persona_id = Some(persona_id);
+                reconcile_persona_defaults(state);
+                Ok(())
+            })?;
+            return Ok(BossResult::State {
+                state: self.document(),
+            });
         }
         let label = |role: PersonaDefaultRole| match role {
             PersonaDefaultRole::Boss => "Boss",
@@ -3619,10 +3666,16 @@ impl BossService {
                 | Propose { role, .. }
                 | Adopt { role, .. }
                 | DismissProposal { role } => *role,
-                Inspect => unreachable!("inspect returned above"),
+                Inspect | ChooseEmployeeBase { .. } => unreachable!("handled above"),
             };
             let shipped = shipped_persona_default(role);
             let Some(index) = default_persona_index(state, role) else {
+                if role == PersonaDefaultRole::Employee && state.employee_persona_id.is_none() {
+                    bail!(
+                        "the Employee base is awaiting the human's choice — pick a saved \
+                         persona as the base in Settings → Boss → Personas first"
+                    );
+                }
                 bail!(
                     "the canonical {} persona is missing — recreate it before managing defaults",
                     label(role)
@@ -3754,7 +3807,7 @@ impl BossService {
                 DismissProposal { .. } => {
                     state.persona_defaults.get_mut(role).proposal = None;
                 }
-                Inspect => unreachable!("inspect returned above"),
+                Inspect | ChooseEmployeeBase { .. } => unreachable!("handled above"),
             }
             Ok(())
         })?;
@@ -5928,12 +5981,9 @@ fn clear_persona_default_notice(state: &mut BossState, role: PersonaDefaultRole)
 /// natural turn. Runs on every load; idempotent when nothing changed.
 fn reconcile_persona_defaults(state: &mut BossState) {
     // The canonical Employee persona predates stable identification:
-    // those documents seeded it first and nothing reorders the list, so
-    // position survives the renames a name match would miss. A document
-    // with no non-boss persona never had defaults seeded — fabricate the
-    // Employee record so reset and review always have a target. A marker
-    // pointing at a deleted record is restored under the same id, so
-    // employees still referencing it keep their assigned role.
+    // documents written before the marker existed leave it unset. A
+    // marker pointing at a deleted record is restored under the same id,
+    // so employees still referencing it keep their assigned role.
     if state.employee_persona_id == Some(state.persona_id) {
         // A corrupt marker can name the Boss persona — the two roles are
         // never the same record.
@@ -5955,13 +6005,24 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         });
     }
     if state.employee_persona_id.is_none() {
-        state.employee_persona_id = match state
+        // Legacy candidates are every non-Boss record. A unique survivor
+        // is unambiguous; among several, only one whose instructions
+        // byte-match a shipped Employee revision identifies itself —
+        // anything else stays `None` and waits on the human's explicit
+        // choice in Persona settings rather than a positional or name
+        // guess. While the marker is unset, employee dispatch and resume
+        // fail closed and every candidate keeps identity and content.
+        let candidates: Vec<Uuid> = state
             .personas
             .iter()
-            .position(|persona| persona.id != state.persona_id)
-        {
-            Some(index) => Some(state.personas[index].id),
-            None => {
+            .filter(|persona| persona.id != state.persona_id)
+            .map(|persona| persona.id)
+            .collect();
+        state.employee_persona_id = match candidates.as_slice() {
+            [] => {
+                // A document with no non-boss persona never had defaults
+                // seeded — fabricate the record so reset and review
+                // always have a target.
                 let id = Uuid::new_v4();
                 state.personas.push(BossPersona {
                     id,
@@ -5974,6 +6035,30 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                     icon: None,
                 });
                 Some(id)
+            }
+            [only] => Some(*only),
+            several => {
+                let identifiable: Vec<Uuid> = several
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        state
+                            .personas
+                            .iter()
+                            .find(|persona| persona.id == *id)
+                            .is_some_and(|persona| {
+                                shipped_persona_revision(
+                                    PersonaDefaultRole::Employee,
+                                    &persona.markdown,
+                                )
+                                .is_some()
+                            })
+                    })
+                    .collect();
+                match identifiable.as_slice() {
+                    [only] => Some(*only),
+                    _ => None,
+                }
             }
         };
     }
@@ -11444,6 +11529,185 @@ mod memory_op_tests {
                     .unwrap()
             )
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Strip the canonical Employee marker the way a document written
+    /// before stable identification stored it.
+    fn strip_employee_marker(root: &std::path::Path) {
+        let path = root.join("boss.json");
+        let mut doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        doc.as_object_mut().unwrap().remove("employeePersonaId");
+        fs::write(&path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    }
+
+    /// One surviving non-Boss record is the unambiguous legacy Employee —
+    /// a rename or custom text carries no doubt because there is nothing
+    /// else the marker could have meant.
+    #[test]
+    fn reconcile_keeps_the_unique_legacy_employee_candidate() {
+        let root = std::env::temp_dir().join(format!("boss-unique-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let candidate = service.document().personas[0].id;
+        service
+            .update(|state| {
+                state.personas[0].name = "Teammate".into();
+                state.personas[0].markdown = "Custom employee policy.".into();
+                Ok(())
+            })
+            .unwrap();
+        strip_employee_marker(&root);
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        let state = service.document();
+        assert_eq!(state.employee_persona_id, Some(candidate));
+        assert_eq!(state.personas[0].name, "Teammate");
+        assert_eq!(state.personas[0].markdown, "Custom employee policy.");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Among several legacy candidates the one carrying provably
+    /// untouched shipped text is identifiable on its own evidence — the
+    /// marker lands on it even when another record sits first in the
+    /// list, never on position or name.
+    #[test]
+    fn reconcile_identifies_the_employee_base_by_shipped_text() {
+        let root = std::env::temp_dir().join(format!("boss-identify-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let untouched = shipped_persona_revisions(PersonaDefaultRole::Employee)[0].markdown;
+        let identifiable = Uuid::new_v4();
+        service
+            .update(|state| {
+                // The seeded record came first but its text is custom —
+                // the later record is the untouched shipped default.
+                state.personas[0].name = "Helper".into();
+                state.personas[0].markdown = "Custom helper policy.".into();
+                state.personas.push(BossPersona {
+                    id: identifiable,
+                    name: "Employee".into(),
+                    markdown: untouched.to_owned(),
+                    pinned_files: Vec::new(),
+                    permissions: PersonaPermissions::default(),
+                    icon: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        strip_employee_marker(&root);
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        let state = service.document();
+        assert_eq!(state.employee_persona_id, Some(identifiable));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A legacy document whose candidates the content cannot tell apart
+    /// keeps every record intact and leaves the canonical marker unset —
+    /// summon, queued dispatch, and resume fail closed until the human
+    /// records the pick, and the pick alone moves the marker.
+    #[test]
+    fn ambiguous_legacy_employee_base_waits_for_the_humans_choice() {
+        let root = std::env::temp_dir().join(format!("boss-ambiguous-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let employee = admit(&service, boss, "Worker", None);
+        let first = service.document().personas[0].id;
+        let second = Uuid::new_v4();
+        service
+            .update(|state| {
+                // Two candidates, neither identifiable: a renamed record
+                // with custom text beside a custom role.
+                state.personas[0].name = "Helper".into();
+                state.personas[0].markdown = "Custom helper policy.".into();
+                state.personas.push(BossPersona {
+                    id: second,
+                    name: "Employee".into(),
+                    markdown: "Reviewer scope only.".into(),
+                    pinned_files: Vec::new(),
+                    permissions: PersonaPermissions::default(),
+                    icon: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        strip_employee_marker(&root);
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        let state = service.document();
+        // Every candidate survives untouched; nothing was chosen.
+        assert_eq!(state.employee_persona_id, None);
+        let non_boss: Vec<_> = state
+            .personas
+            .iter()
+            .filter(|persona| persona.id != state.persona_id)
+            .collect();
+        assert_eq!(non_boss.len(), 2);
+        assert_eq!(
+            non_boss
+                .iter()
+                .find(|persona| persona.id == first)
+                .map(|persona| persona.markdown.as_str()),
+            Some("Custom helper policy.")
+        );
+        assert_eq!(
+            non_boss
+                .iter()
+                .find(|persona| persona.id == second)
+                .map(|persona| persona.markdown.as_str()),
+            Some("Reviewer scope only.")
+        );
+        // Dispatch and resume fail closed with the human-facing cause.
+        let error = service
+            .prepare_employee(
+                boss,
+                None,
+                "Worker".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("unresolved"), "{error:#}");
+        let error = service
+            .ensure_employee_role(employee.session_id)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("cannot resume"), "{error:#}");
+        // Neither the boss nor an unknown or Boss record can settle it.
+        let choose = |id: Uuid| BossOperation::PersonaDefault {
+            action: PersonaDefaultAction::ChooseEmployeeBase { persona_id: id },
+        };
+        assert!(service.handle(Some(boss), choose(second)).is_err());
+        assert!(service.handle(None, choose(state.persona_id)).is_err());
+        assert!(service.handle(None, choose(Uuid::new_v4())).is_err());
+        // The human's pick records the marker and nothing else changes.
+        service.handle(None, choose(second)).unwrap();
+        let state = service.document();
+        assert_eq!(state.employee_persona_id, Some(second));
+        assert_eq!(
+            state
+                .personas
+                .iter()
+                .find(|persona| persona.id == second)
+                .map(|persona| persona.markdown.as_str()),
+            Some("Reviewer scope only.")
+        );
+        service
+            .prepare_employee(
+                boss,
+                None,
+                "Worker".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        service.ensure_employee_role(employee.session_id).unwrap();
+        // The chosen record composes as the base; the employee's own
+        // assignment layers on it.
+        let prompt = service.prompt_with_context(employee.session_id, "start".into());
+        assert!(prompt.contains("Reviewer scope only."));
+        assert!(prompt.contains("Custom helper policy."));
         fs::remove_dir_all(root).unwrap();
     }
 

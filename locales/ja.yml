@@ -3255,6 +3255,12 @@ boss.role_employee: 従業員の役割
 boss.role_employee_base: すべての従業員の既定ベース
 boss.role_employee_custom: 従業員の役割 — 既定ベースの上に重ねられます
 boss.role_base: ベース
+boss.base_choice_title: Employee ベースを選択
+boss.base_choice_body: 保存された複数の役割が共有 Employee ベースになり得るため、Goddard は推測で決めませんでした。すべての従業員が継承する役割を選んでください。選択するまで従業員の呼び出しと再開はできません。役割の指示・権限・アイコン・ピン留めドキュメントは保存されたままです。
+boss.base_choice_action: Employee ベースにする
+boss.base_choice_hint: 共有 Employee ベースにする保存済みの役割を選んでください
+boss.base_choice_short: ベース？
+boss.base_choice_saved: Employee ベースを設定しました。
 boss.persona_base_section: 継承されるEmployeeベース — すべての従業員に適用されます
 boss.persona_scope_base_hint: この既定を編集すると、すべての従業員が次のターンで受け取る指示が変わります。
 boss.assignment_persona_layered: "%{base} + %{role}"

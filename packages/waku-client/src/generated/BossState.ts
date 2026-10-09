@@ -16,8 +16,9 @@ export type BossState = { identity: BossIdentity, personaId: string,
 /**
  * The canonical Employee default persona — the stable identity of
  * the shipped Employee role regardless of renames; a custom persona
- * named "Employee" is never it. `None` only on documents that
- * predate the seeded defaults.
+ * named "Employee" is never it. `None` while the human's choice
+ * between ambiguous legacy candidates is still open — employees
+ * cannot dispatch or resume until it is recorded.
  */
 employeePersonaId?: string | null,
 /**

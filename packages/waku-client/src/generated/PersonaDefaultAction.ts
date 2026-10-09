@@ -5,4 +5,4 @@ import type { PersonaDefaultRole } from "./PersonaDefaultRole";
  * One step in the shipped-default lifecycle — inspect, reset, undo,
  * keep, propose, adopt, dismiss. See [`BossOperation::PersonaDefault`].
  */
-export type PersonaDefaultAction = { "type": "inspect" } | { "type": "reset", role: PersonaDefaultRole, } | { "type": "undo", role: PersonaDefaultRole, } | { "type": "keep", role: PersonaDefaultRole, } | { "type": "propose", role: PersonaDefaultRole, markdown: string, } | { "type": "adopt", role: PersonaDefaultRole, markdown: string, expectedSaved?: string, } | { "type": "dismissProposal", role: PersonaDefaultRole, };
+export type PersonaDefaultAction = { "type": "inspect" } | { "type": "reset", role: PersonaDefaultRole, } | { "type": "undo", role: PersonaDefaultRole, } | { "type": "keep", role: PersonaDefaultRole, } | { "type": "propose", role: PersonaDefaultRole, markdown: string, } | { "type": "adopt", role: PersonaDefaultRole, markdown: string, expectedSaved?: string, } | { "type": "dismissProposal", role: PersonaDefaultRole, } | { "type": "chooseEmployeeBase", personaId: string, };

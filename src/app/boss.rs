@@ -678,6 +678,9 @@ pub(super) enum BossReply {
     /// decision. The result refreshes state like `Saved` without the
     /// editor bookkeeping.
     PersonaDefault,
+    /// The human's pick of the canonical Employee base — reports its own
+    /// toast rather than the instruction-update one.
+    BaseChoice,
 }
 
 /// Expansion state for one canonical default's instructions card.
@@ -1906,6 +1909,9 @@ impl Waku {
                         }
                         if matches!(reply, BossReply::PersonaDefault) {
                             this.show_toast(tr!("boss.default_saved"));
+                        }
+                        if matches!(reply, BossReply::BaseChoice) {
+                            this.show_toast(tr!("boss.base_choice_saved"));
                         }
                     }
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
@@ -5401,6 +5407,26 @@ impl Waku {
                 has_boss_persona,
             ));
         }
+        if state.employee_persona_id.is_none() {
+            // The canonical Employee base is awaiting the human's pick —
+            // the choice lives on each candidate's detail.
+            list_column = list_column.child(
+                div()
+                    .flex_none()
+                    .px(px(12.0))
+                    .pb(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(icon("icons/info.svg", 11.0, theme.info))
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.info)
+                            .child(tr!("boss.base_choice_hint")),
+                    ),
+            );
+        }
         if self.boss_ui.rows.is_empty() {
             list_column = list_column.child(
                 div()
@@ -5573,6 +5599,22 @@ impl Waku {
             )
             .when(
                 self.boss_ui.states.get(&key).is_some_and(|state| {
+                    state.employee_persona_id.is_none() && persona.id != state.persona_id
+                }),
+                |row| {
+                    // The Employee base is awaiting the human's choice —
+                    // every candidate gets the same quiet marker.
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.info)
+                            .child(tr!("boss.base_choice_short")),
+                    )
+                },
+            )
+            .when(
+                self.boss_ui.states.get(&key).is_some_and(|state| {
                     let role = if persona.id == state.persona_id {
                         Some(PersonaDefaultRole::Boss)
                     } else if state.employee_persona_id == Some(persona.id) {
@@ -5731,6 +5773,11 @@ impl Waku {
         };
         let default_card = default_role
             .map(|role| self.render_persona_default_card(key, persona, role, state, cx));
+        // While the canonical Employee base is unassigned, every saved
+        // non-Boss role is a candidate and offers the human's pick —
+        // the marker write keeps the record's content and grants intact.
+        let base_choice_card = (state.employee_persona_id.is_none() && !boss_role)
+            .then(|| self.render_employee_base_choice_card(key, persona, cx));
         // A custom role composes over the canonical Employee base — the
         // detail shows the inherited text read-only so the layering is
         // visible without pretending it is editable here.
@@ -5858,6 +5905,7 @@ impl Waku {
                     )
                     .child(info)
                     .children(default_card)
+                    .children(base_choice_card)
                     .children(document)
                     .children(base_document),
             )
@@ -5866,6 +5914,70 @@ impl Waku {
                 &self.boss_ui.persona_scrollbar,
             ))
             .child(selection_input)
+            .into_any_element()
+    }
+
+    /// The pending Employee-base decision on a candidate's detail — the
+    /// reconciler could not tell which saved persona is the canonical
+    /// base, so the choice waits on the human. Picking a card records the
+    /// marker; the role's instructions, permissions, icon, and pinned
+    /// documents stay exactly as saved.
+    fn render_employee_base_choice_card(
+        &mut self,
+        key: DaemonKey,
+        persona: &BossPersona,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let persona_id = persona.id;
+        div()
+            .mt(px(14.0))
+            .w_full()
+            .rounded(px(10.0))
+            .border(hairline())
+            .border_color(theme.border)
+            .px(px(12.0))
+            .py(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(icon("icons/info.svg", 11.0, theme.info))
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.base_choice_title")),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("boss.base_choice_body")),
+            )
+            .child(
+                div().flex().gap(px(8.0)).child(
+                    boss_button("boss-base-choice", tr!("boss.base_choice_action"), &theme)
+                        .child(icon("icons/check.svg", 12.0, theme.text_secondary))
+                        .child(tr!("boss.base_choice_action"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_request(
+                                key,
+                                BossOperation::PersonaDefault {
+                                    action: PersonaDefaultAction::ChooseEmployeeBase { persona_id },
+                                },
+                                BossReply::BaseChoice,
+                                cx,
+                            );
+                        }),
+                ),
+            )
             .into_any_element()
     }
 
@@ -7908,7 +8020,8 @@ fn boss_queue_detail(
             limit = limit
         ),
         Some(waku_protocol::boss::AdmissionBlocker::HostResources { detail })
-        | Some(waku_protocol::boss::AdmissionBlocker::OutcomeWait { detail }) => detail.clone(),
+        | Some(waku_protocol::boss::AdmissionBlocker::OutcomeWait { detail })
+        | Some(waku_protocol::boss::AdmissionBlocker::EmployeeBase { detail }) => detail.clone(),
         None => {
             if rank == Some(1) {
                 tr!("boss.goals_queue_admission")

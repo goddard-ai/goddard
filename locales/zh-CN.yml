@@ -3206,6 +3206,12 @@ boss.role_employee: 员工角色
 boss.role_employee_base: 所有员工的默认基础
 boss.role_employee_custom: 员工角色 — 叠加在默认基础之上
 boss.role_base: 基础
+boss.base_choice_title: 选择 Employee 基础角色
+boss.base_choice_body: 有多个已保存角色都可能是共享的 Employee 基础角色，因此 Goddard 没有擅自猜测。请选择所有员工都应继承的角色——在你选择之前，无法召唤或恢复员工。该角色的指令、权限、图标和置顶文档保持原样。
+boss.base_choice_action: 设为 Employee 基础角色
+boss.base_choice_hint: 请选择一个已保存角色作为共享 Employee 基础角色
+boss.base_choice_short: 基础？
+boss.base_choice_saved: 已设置 Employee 基础角色。
 boss.persona_base_section: 继承的 Employee 基础 — 应用于所有员工
 boss.persona_scope_base_hint: 编辑此默认值会更改每个员工在下一轮收到的指令。
 boss.assignment_persona_layered: "%{base} + %{role}"

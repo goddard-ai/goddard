@@ -6592,6 +6592,18 @@ boss.role_employee_custom:
   en: Employee role — layered on the default base
 boss.role_base:
   en: Base
+boss.base_choice_title:
+  en: Choose the Employee base
+boss.base_choice_body:
+  en: "More than one saved role could be the shared Employee base, so Goddard did not guess. Pick the role every employee should inherit — employees cannot be summoned or resumed until you choose. The role's instructions, permissions, icon, and pinned documents stay exactly as saved."
+boss.base_choice_action:
+  en: Use as the Employee base
+boss.base_choice_hint:
+  en: Pick which saved role is the shared Employee base
+boss.base_choice_short:
+  en: Base?
+boss.base_choice_saved:
+  en: Employee base set.
 boss.persona_base_section:
   en: Inherited Employee base — applies to every employee
 boss.persona_scope_base_hint:
