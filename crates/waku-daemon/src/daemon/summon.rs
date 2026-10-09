@@ -961,7 +961,7 @@ impl WakuBackend {
     pub(super) fn summon_employee(
         &self,
         caller: Option<Uuid>,
-        persona_id: Uuid,
+        persona_id: Option<Uuid>,
         job_title: String,
         prompt: String,
         project: String,
@@ -1391,6 +1391,12 @@ impl WakuBackend {
                 self.boss
                     .set_employee_permissions(caller, session_id, permissions)?;
                 self.boss.reset_context(session_id);
+                self.agent.mark_memory_undelivered(session_id);
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetPersona { persona_id } => {
+                self.boss.set_employee_persona(session_id, persona_id)?;
+                self.boss.reset_context(session_id);
                 Ok(BossResult::Saved)
             }
             EmployeeControl::SetPlan { plan, item } => {
@@ -1614,6 +1620,9 @@ impl WakuBackend {
         session_id: Uuid,
         adjust: impl FnOnce(&mut waku_protocol::boss::SummonTicket, bool),
     ) -> anyhow::Result<()> {
+        // Role validation precedes the parked-prompt move so a rejected
+        // resume leaves the queue mirror untouched.
+        self.boss.ensure_employee_role(session_id)?;
         let (base, started) = self.ticket_base_for(session_id)?;
         let mut parked = Vec::new();
         {

@@ -6580,6 +6580,22 @@ boss.role_boss:
   en: Boss persona
 boss.role_employee:
   en: Employee role
+boss.role_employee_base:
+  en: Default base for all employees
+boss.role_employee_custom:
+  en: Employee role — layered on the default base
+boss.role_base:
+  en: Base
+boss.persona_base_section:
+  en: Inherited Employee base — applies to every employee
+boss.persona_scope_base_hint:
+  en: Editing this default changes the instructions every employee receives on its next turn.
+boss.assignment_persona_layered:
+  en: "%{base} + %{role}"
+boss.assignment_persona_missing:
+  en: "%{base} — assigned role unavailable"
+boss.assignment_persona_invalid:
+  en: "%{base} — Boss persona cannot apply to an employee"
 boss.section_boss:
   en: Boss
 boss.section_roles:

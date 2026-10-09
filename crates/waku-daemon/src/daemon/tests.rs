@@ -3850,12 +3850,12 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
     let root = std::env::temp_dir().join(format!("boss-finish-{}", Uuid::new_v4()));
     let (backend, supervisor) = surface_test_backend(&root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Goal,
@@ -3941,12 +3941,12 @@ fn employee_finish_fixture(
 ) {
     let (backend, supervisor) = surface_test_backend(root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Goal,
@@ -5093,12 +5093,12 @@ fn an_expiring_employee_notifies_attached_clients() {
     let root = std::env::temp_dir().join(format!("boss-expire-notify-{}", Uuid::new_v4()));
     let (backend, supervisor) = surface_test_backend(&root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Goal,
@@ -5197,12 +5197,12 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     let root = std::env::temp_dir().join(format!("boss-revive-{}", Uuid::new_v4()));
     let (backend, supervisor) = surface_test_backend(&root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -5348,7 +5348,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -5436,12 +5436,12 @@ fn a_retired_employees_task_stays_boss_managed() {
     let root = std::env::temp_dir().join(format!("boss-retired-{}", Uuid::new_v4()));
     let (backend, supervisor) = surface_test_backend(&root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Release checks".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -5544,11 +5544,12 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
     );
     backend.settings.replace(daemon_settings).unwrap();
 
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
-            persona_id: persona,
+            persona_id: Some(persona),
+
             job_title: "Worktree job".into(),
             prompt: "Summarize the diff".into(),
             project: project.display().to_string(),
@@ -5628,11 +5629,12 @@ fn boss_summon_marker_freezes_the_card_identity() {
     );
     backend.settings.replace(daemon_settings).unwrap();
 
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
-            persona_id: persona,
+            persona_id: Some(persona),
+
             job_title: "Release checks".into(),
             prompt: "Summarize the diff".into(),
             project: project.display().to_string(),
@@ -5773,7 +5775,7 @@ impl AdoptFixture {
         self.backend.handle_boss_operation(
             Some(self.boss),
             BossOperation::Summon {
-                persona_id: self.backend.boss.document().personas[1].id,
+                persona_id: Some(self.backend.boss.document().personas[0].id),
                 job_title: "Adopt job".into(),
                 prompt: "Continue the work".into(),
                 project: self.project.display().to_string(),
@@ -5941,7 +5943,7 @@ fn boss_summon_rejects_unadoptable_worktrees() {
         .boss
         .prepare_employee(
             fixture.boss,
-            fixture.backend.boss.document().personas[1].id,
+            Some(fixture.backend.boss.document().personas[0].id),
             "Live job".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -6085,7 +6087,8 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         backend.handle_boss_operation(
             Some(boss),
             BossOperation::Summon {
-                persona_id: persona,
+                persona_id: Some(persona),
+
                 job_title: "Verify".into(),
                 prompt: "Check the build".into(),
                 project: project.display().to_string(),
@@ -6245,7 +6248,7 @@ fn summon_op(
     model: Option<&str>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
-        persona_id: backend.boss.document().personas[1].id,
+        persona_id: Some(backend.boss.document().personas[0].id),
         job_title: job.into(),
         prompt: format!("Work on {job}"),
         project: root.join("repo").display().to_string(),
@@ -9258,12 +9261,12 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     let (backend, supervisor) = surface_test_backend(&root);
     let backend = Arc::new(backend);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Move job".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -10342,7 +10345,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
         .boss
         .prepare_employee(
             plan.session_id,
-            persona,
+            Some(persona),
             "Follow-up".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -10415,7 +10418,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
             .boss
             .prepare_employee(
                 plan.session_id,
-                persona,
+                Some(persona),
                 "Follow-up".into(),
                 None,
                 waku_protocol::boss::EmployeeGoal::Errand,
@@ -10788,7 +10791,8 @@ fn summon_with_tag(
     request_id: Option<Uuid>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
-        persona_id: persona,
+        persona_id: Some(persona),
+
         job_title: "Tagged job".into(),
         prompt: "Summarize the diff".into(),
         project: project.display().to_string(),
@@ -10858,7 +10862,7 @@ fn boss_summon_plan_tag_persists_and_validates_references() {
         root.join("missing-codex").display().to_string(),
     );
     backend.settings.replace(daemon_settings).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let events = EventSink::detached();
 
     // A still-open draft plan tags; the item link rides along.
@@ -10963,7 +10967,7 @@ fn boss_summon_request_id_fingerprint_covers_the_plan_tag() {
         root.join("missing-codex").display().to_string(),
     );
     backend.settings.replace(daemon_settings).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let events = EventSink::detached();
     backend
         .boss
@@ -11037,7 +11041,7 @@ fn boss_control_set_plan_retags_an_admitted_employee() {
         root.join("missing-codex").display().to_string(),
     );
     backend.settings.replace(daemon_settings).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let events = EventSink::detached();
     let plan = boss_plan("plans/auth.md", &["Probe"]);
     let item = plan.items[0].id;
@@ -11474,12 +11478,12 @@ fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
     let root = std::env::temp_dir().join(format!("employee-retention-{}", Uuid::new_v4()));
     let (backend, supervisor) = surface_test_backend(&root);
     backend.boss.set_session_id(supervisor).unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let employee = backend
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Evidence".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -11618,7 +11622,7 @@ fn outcome_employee_fixture(
         .boss
         .create_outcome(None, "Make transfers fail cleanly", criteria)
         .unwrap();
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let assignment = backend
         .boss
         .assignment_admission(
@@ -11635,7 +11639,7 @@ fn outcome_employee_fixture(
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Repair transfers".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,
@@ -11771,7 +11775,7 @@ fn a_finishing_conflict_reports_and_leaves_the_outcome_open() {
     // after the finisher's designation.
     let (backend, supervisor, _sibling, outcome, parent_capture) =
         outcome_employee_fixture(&root, "every failure names a cause", false, None);
-    let persona = backend.boss.document().personas[1].id;
+    let persona = backend.boss.document().personas[0].id;
     let assignment = backend
         .boss
         .assignment_admission(Some(outcome), None, true, None, Vec::new(), None)
@@ -11781,7 +11785,7 @@ fn a_finishing_conflict_reports_and_leaves_the_outcome_open() {
         .boss
         .prepare_employee(
             supervisor,
-            persona,
+            Some(persona),
             "Verify and land".into(),
             None,
             waku_protocol::boss::EmployeeGoal::Errand,

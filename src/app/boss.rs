@@ -287,6 +287,10 @@ pub(super) struct BossUi {
     /// Read-only persona instructions — the detail pane's markdown cache,
     /// selection, and scroll position, keyed to the selected persona.
     persona_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
+    /// The read-only inherited Employee base shown under a custom role's
+    /// detail — a second cache because the role's own text owns
+    /// `persona_markdown`.
+    persona_base_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
     persona_selection: TranscriptSelection,
     persona_scroll: ScrollHandle,
     persona_scrollbar: Rc<ScrollbarState>,
@@ -401,6 +405,7 @@ impl Default for BossUi {
             persona_query: String::new(),
             persona_search: None,
             persona_markdown: RefCell::new(None),
+            persona_base_markdown: RefCell::new(None),
             persona_selection: TranscriptSelection::default(),
             persona_scroll: ScrollHandle::new(),
             persona_scrollbar: ScrollbarState::new(),
@@ -5160,11 +5165,36 @@ impl Waku {
         state: &BossState,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> Vec<(String, String)> {
-        let persona_name = state
+        // The assigned role composes over the canonical Employee base —
+        // the popover names both so "Employee + Researcher" reads as
+        // layered rather than replaced.
+        let base_name = state
+            .employee_persona_id
+            .and_then(|id| state.personas.iter().find(|persona| persona.id == id))
+            .map(|persona| persona.name.clone());
+        let role_name = state
             .personas
             .iter()
             .find(|persona| persona.id == employee.persona_id)
+            .filter(|persona| Some(persona.id) != state.employee_persona_id)
             .map(|persona| persona.name.clone());
+        let persona_name = match (base_name, role_name) {
+            (Some(base), Some(role)) => Some(tr!(
+                "boss.assignment_persona_layered",
+                base = base,
+                role = role
+            )),
+            (Some(base), None) => {
+                if Some(employee.persona_id) == state.employee_persona_id {
+                    Some(base)
+                } else if state.persona_id == employee.persona_id {
+                    Some(tr!("boss.assignment_persona_invalid", base = base))
+                } else {
+                    Some(tr!("boss.assignment_persona_missing", base = base))
+                }
+            }
+            (None, role) => role,
+        };
         let workspace = match &session.workspace {
             SessionWorkspace::Local => tr!("boss.assignment_workspace_local"),
             SessionWorkspace::NewWorktree { .. } => tr!("boss.assignment_workspace_new"),
@@ -5520,6 +5550,21 @@ impl Waku {
                 )
             })
             .when(
+                self.boss_ui
+                    .states
+                    .get(&key)
+                    .is_some_and(|state| state.employee_persona_id == Some(persona.id)),
+                |row| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("boss.role_base")),
+                    )
+                },
+            )
+            .when(
                 self.boss_ui.states.get(&key).is_some_and(|state| {
                     let role = if persona.id == state.persona_id {
                         Some(PersonaDefaultRole::Boss)
@@ -5679,6 +5724,56 @@ impl Waku {
         };
         let default_card = default_role
             .map(|role| self.render_persona_default_card(key, persona, role, state, cx));
+        // A custom role composes over the canonical Employee base — the
+        // detail shows the inherited text read-only so the layering is
+        // visible without pretending it is editable here.
+        let base_document: Option<AnyElement> = (default_role.is_none())
+            .then(|| {
+                state
+                    .personas
+                    .iter()
+                    .find(|persona| Some(persona.id) == state.employee_persona_id)
+            })
+            .flatten()
+            .filter(|base| !base.markdown.trim().is_empty())
+            .map(|base| {
+                let mut cache = self.boss_ui.persona_base_markdown.borrow_mut();
+                if !matches!(cache.as_ref(), Some((cached, _)) if *cached == persona.id) {
+                    *cache = Some((persona.id, MarkdownView::document()));
+                }
+                let (_, view) = cache.as_mut().expect("entry ensured above");
+                view.set_text(&base.markdown, false);
+                let ctx = MarkdownCtx::new(
+                    format!("persona-base-md-{}", persona.id),
+                    &palette,
+                    MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
+                    self.boss_ui.persona_selection.clone(),
+                )
+                .with_families(crate::fonts::current(cx))
+                .with_math_enabled(self.state.render_math)
+                .with_guided_reading(self.guided_reading())
+                .with_link_items(self.markdown_link_menu_items.clone())
+                .with_link_handler(self.markdown_link_handler.clone())
+                .with_standalone_context_menu(self.menu_handle("persona-base-math", cx));
+                div()
+                    .mt(px(16.0))
+                    .pt(px(14.0))
+                    .border_t_1()
+                    .border_color(theme.separator)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_ghost)
+                            .child(tr!("boss.persona_base_section")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(10.0))
+                            .text_color(theme.text_secondary)
+                            .children(md::render::markdown(view, &ctx)),
+                    )
+                    .into_any_element()
+            });
         div()
             .flex_1()
             .min_h_0()
@@ -5732,8 +5827,11 @@ impl Waku {
                                             .text_color(theme.text_tertiary)
                                             .child(if boss_role {
                                                 tr!("boss.role_boss")
+                                            } else if state.employee_persona_id == Some(persona.id)
+                                            {
+                                                tr!("boss.role_employee_base")
                                             } else {
-                                                tr!("boss.role_employee")
+                                                tr!("boss.role_employee_custom")
                                             }),
                                     ),
                             )
@@ -5753,7 +5851,8 @@ impl Waku {
                     )
                     .child(info)
                     .children(default_card)
-                    .children(document),
+                    .children(document)
+                    .children(base_document),
             )
             .child(scrollbar::vertical(
                 &self.boss_ui.persona_scroll,
@@ -7581,6 +7680,11 @@ impl Waku {
                     }),
             );
         }
+        let editing_base = self
+            .boss_ui
+            .states
+            .get(&editor.key)
+            .is_some_and(|state| state.employee_persona_id == Some(editor.persona));
         let body = div()
             .flex_1()
             .min_h_0()
@@ -7592,7 +7696,11 @@ impl Waku {
                     div()
                         .text_size(sp(12.0))
                         .text_color(theme.text_tertiary)
-                        .child(tr!("boss.persona_scope_hint")),
+                        .child(if editing_base {
+                            tr!("boss.persona_scope_base_hint")
+                        } else {
+                            tr!("boss.persona_scope_hint")
+                        }),
                 )
                 .child(
                     div()

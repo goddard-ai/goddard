@@ -446,8 +446,17 @@ impl WakuBackend {
             return None;
         }
         let project = self.session_memory_project(session_id)?;
+        // The access line reflects the session's live grants: every
+        // project task reaches its shared bucket; an employee's extra
+        // persona buckets widen it without changing the commands.
+        let granted_buckets = self
+            .boss
+            .employee(session_id)
+            .map(|employee| employee.permissions.bucket_ids.len())
+            .unwrap_or(0);
         Some(project_memory_block(
             self.boss.project_memory_digest(&project).as_deref(),
+            granted_buckets,
         ))
     }
 
@@ -621,24 +630,41 @@ impl WakuBackend {
 /// The `<project-memory>` block: what the bucket is for and how the
 /// session's `goddard-agent memory` surface reaches it, then the bucket's
 /// compacted overview — never a raw note dump — when notes exist.
-fn project_memory_block(digest: Option<&str>) -> String {
-    let mut block = String::from(
+fn project_memory_block(digest: Option<&str>, granted_buckets: usize) -> String {
+    let access = if granted_buckets == 0 {
+        "Your access: this project's shared bucket. `buckets` is \
+         authoritative for your current grants — each listed bucket \
+         supports reading and recording."
+            .to_owned()
+    } else {
+        format!(
+            "Your access: this project's shared bucket plus {granted_buckets} \
+             additional granted bucket(s). `buckets` is authoritative for \
+             your current grants — each listed bucket supports reading and \
+             recording."
+        )
+    };
+    let mut block = format!(
         "<project-memory>\nThis project has a shared memory bucket — durable \
          notes recorded by the boss, employees, and tasks working here \
          survive across sessions. Reach it through `goddard-agent memory`: \
-         `overview` returns this compacted view, `scan QUERY` matches note \
-         text, `zoom START END` expands a note range, `record \
+         `overview` returns a bucket's compacted view, `scan QUERY` matches \
+         note text, `zoom START END` expands a note range, `record \
          --json|--json-file` appends a note, `summary` answers a pending \
-         compression request, and `buckets` lists every bucket you can see. \
-         Record durable facts, decisions, and gotchas a future session would \
-         need — not progress on the current task.",
+         compression request, and `buckets` lists every bucket you can use. \
+         Memory is append-only — corrections are new notes and a repeated \
+         retry key never duplicates one; bucket creation and legacy import \
+         are Boss-only. {access} Record durable facts, decisions, and \
+         gotchas a future session would need — not progress on the current \
+         task. A rejected operation reports its reason and persists \
+         nothing; a failed `record` is not saved anywhere else.",
     );
     match digest {
         Some(digest) => {
-            block.push_str("\n\nOverview so far:\n");
+            block.push_str("\n\nOverview so far — the project bucket only:\n");
             block.push_str(digest);
         }
-        None => block.push_str("\n\nNo notes are recorded yet."),
+        None => block.push_str("\n\nNo notes are recorded yet in the project bucket."),
     }
     block.push_str("\n</project-memory>");
     block

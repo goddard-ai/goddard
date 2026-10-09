@@ -3203,6 +3203,14 @@ boss.detail_summon: 召唤员工
 boss.detail_computer: 计算机操作
 boss.role_boss: 老板角色设定
 boss.role_employee: 员工角色
+boss.role_employee_base: 所有员工的默认基础
+boss.role_employee_custom: 员工角色 — 叠加在默认基础之上
+boss.role_base: 基础
+boss.persona_base_section: 继承的 Employee 基础 — 应用于所有员工
+boss.persona_scope_base_hint: 编辑此默认值会更改每个员工在下一轮收到的指令。
+boss.assignment_persona_layered: "%{base} + %{role}"
+boss.assignment_persona_missing: "%{base} — 分配的角色不可用"
+boss.assignment_persona_invalid: "%{base} — Boss 角色设定无法应用于员工"
 boss.section_boss: 老板
 boss.section_roles: 角色
 boss.roles_empty: 还没有员工角色。

@@ -257,6 +257,12 @@ impl AgentState {
         self.memory_delivered.lock().insert(session_id);
     }
 
+    /// Re-owe the memory block — a grant change makes the delivered copy's
+    /// access line stale, so the next prompt carries the revision.
+    pub fn mark_memory_undelivered(&self, session_id: Uuid) {
+        self.memory_delivered.lock().remove(&session_id);
+    }
+
     /// Whether this session's launch carried the project-memory surface —
     /// its credential answers `memory` operations, so its first-prompt
     /// context is owed the block.

@@ -49,7 +49,7 @@ exist only during this script invocation; use named memory buckets for durable s
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,item?,requestId?})
+  summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's

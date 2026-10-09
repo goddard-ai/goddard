@@ -22,7 +22,14 @@ import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon", personaId: string, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
+export type BossOperation = { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
+/**
+ * The custom role layered on the canonical Employee base.
+ * `None` assigns the base alone; passing the canonical Employee
+ * persona is the same default-only assignment, and the canonical
+ * Boss persona is rejected.
+ */
+personaId: string | null, jobTitle: string, prompt: string, project: string, provider: ProviderKind | null, model: string | null,
 /**
  * Optional effort pin for the employee's session, validated
  * against the resolved model's catalog — an unsupported id fails

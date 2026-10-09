@@ -1,0 +1,1 @@
+- **Boss employees:** The shared memory guidance in a task's first prompt now states the session's actual bucket access — the project bucket plus any granted buckets — describes append-only correction and failure semantics, and re-delivers when an employee's grants change between turns.

@@ -593,7 +593,16 @@ impl WakuBackend {
                             permissions.clone(),
                         )?;
                         // The employee's next prompt re-injects its persona
-                        // block so the revised grants reach it.
+                        // block so the revised grants reach it — and its
+                        // memory block re-delivers with the new access line.
+                        self.boss.reset_context(session_id);
+                        self.agent.mark_memory_undelivered(session_id);
+                        return Ok(BossResult::Saved);
+                    }
+                    if let EmployeeControl::SetPersona { persona_id } = &action {
+                        // The deliberate replacement for an unavailable
+                        // custom role — live and expired records alike.
+                        self.boss.set_employee_persona(session_id, *persona_id)?;
                         self.boss.reset_context(session_id);
                         return Ok(BossResult::Saved);
                     }
@@ -725,6 +734,7 @@ impl WakuBackend {
                         }
                         EmployeeControl::SetModel { .. }
                         | EmployeeControl::SetPermissions { .. }
+                        | EmployeeControl::SetPersona { .. }
                         | EmployeeControl::SetWorkspace { .. }
                         | EmployeeControl::SetResources { .. }
                         | EmployeeControl::SetPlan { .. } => {
@@ -953,14 +963,29 @@ impl WakuBackend {
                         if personas_before.get(&persona.id) == Some(&persona.markdown) {
                             continue;
                         }
-                        if let Some(session) =
-                            boss.session_id.filter(|_| persona.id == boss.persona_id)
-                        {
-                            self.boss.reset_context(session);
+                        if persona.id == boss.persona_id {
+                            // The boss chat and every planning session
+                            // compose the Boss persona.
+                            if let Some(session) = boss.session_id {
+                                self.boss.reset_context(session);
+                            }
+                            for plan in &boss.planning {
+                                self.boss.reset_context(plan.session_id);
+                            }
                         }
-                        for employee in boss.employees.iter().filter(|employee| {
-                            employee.persona_id == persona.id && !employee.expired
-                        }) {
+                        // The canonical Employee base sits beneath every
+                        // employee's custom role — editing it reaches the
+                        // whole roster, not just employees holding it as
+                        // their selected persona.
+                        let base_edit = boss.employee_persona_id == Some(persona.id);
+                        // Expired employees reset too — a later resume
+                        // composes the current text rather than the
+                        // injection cached from its last turn.
+                        for employee in boss
+                            .employees
+                            .iter()
+                            .filter(|employee| base_edit || employee.persona_id == persona.id)
+                        {
                             self.boss.reset_context(employee.session_id);
                         }
                     }
