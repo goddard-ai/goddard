@@ -111,6 +111,10 @@ can resume its previous session with the intervening context.
 
 ## Core concepts
 
+For delegated work in experimental Boss, see
+[Boss concepts](docs/boss-concepts.md): employees, assignments, outcomes,
+plans, personas, and memory, including how approval differs from completion.
+
 ### Projects
 
 A project is a folder on your machine (or on the daemon host, for remote

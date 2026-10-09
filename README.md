@@ -52,6 +52,9 @@ Some capabilities require an opt-in under **Settings → Experiments**;
 Jev routing and suggested actions have their own controls under
 **Settings → Jev**.
 
+For the model of delegated work and its current implementation limits, see
+[Boss concepts](docs/boss-concepts.md).
+
 - **Jev routing and suggested actions.** Route tasks to models you choose,
   assess turn outcomes, and suggest or automatically run follow-up actions.
   Requires a configured inference provider for Jev evaluations.
