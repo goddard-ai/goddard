@@ -4421,6 +4421,11 @@ impl BossService {
         if employee.expired {
             bail!("this employee has expired");
         }
+        // Plan documents are shared supervisor context: every live employee
+        // reads beneath `plans/` regardless of persona pins.
+        if path == "plans" || path.starts_with("plans/") {
+            return Ok(());
+        }
         let persona = state
             .personas
             .iter()
@@ -6436,6 +6441,162 @@ mod tests {
                     BossOperation::WriteFile {
                         path: "docs/release.md".into(),
                         content: "changed".into()
+                    }
+                )
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_employee_reads_plans_regardless_of_persona() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        for (path, content) in [
+            ("plans/auth.md", "auth plan"),
+            ("plans/deep/draft.md", "nested plan"),
+            ("docs/private.md", "private"),
+            ("memory/work/secret.md", "secret"),
+        ] {
+            service
+                .handle(
+                    None,
+                    BossOperation::WriteFile {
+                        path: path.into(),
+                        content: content.into(),
+                    },
+                )
+                .unwrap();
+        }
+        // A custom persona with no pins — the grant cannot come from the
+        // persona or the employee record.
+        let mut custom = BossPersonaUpsert::from(service.document().personas[1].clone());
+        custom.id = Uuid::nil();
+        custom.name = "Auditor".into();
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: custom })
+            .unwrap();
+        let boss_persona = service.document().personas[0].id;
+        let default_persona = service.document().personas[1].id;
+        let custom_persona = service
+            .document()
+            .personas
+            .iter()
+            .find(|persona| persona.name == "Auditor")
+            .unwrap()
+            .id;
+        let mut employees = Vec::new();
+        for persona_id in [default_persona, custom_persona] {
+            let session_id = Uuid::new_v4();
+            service
+                .update(|state| {
+                    state.employees.push(BossEmployee {
+                        session_id,
+                        supervisor_id: Uuid::new_v4(),
+                        identity: BossIdentity {
+                            id: session_id,
+                            name: "Employee".into(),
+                            avatar_seed: session_id.to_string(),
+                            avatar_style: Default::default(),
+                        },
+                        job_title: "Employee".into(),
+                        persona_id,
+                        work_goal: EmployeeGoal::Errand,
+                        created_at: None,
+                        icon: None,
+                        permissions: PersonaPermissions::default(),
+                        pinned_files: Vec::new(),
+                        expired: false,
+                        expired_at: None,
+                        blocker: None,
+                        cancelled: false,
+                        expiry: None,
+                        state: EmployeeLifecycle::Working,
+                        ticket: None,
+                        queued_at: None,
+                        request_id: None,
+                        request_fingerprint: None,
+                        plan_id: None,
+                        item_id: None,
+                        assignment: None,
+                    });
+                    Ok(())
+                })
+                .unwrap();
+            employees.push(session_id);
+        }
+        for session_id in &employees {
+            let caller = Some(*session_id);
+            // plans/ opens for every persona, including nested documents
+            // and the legacy memory/plans spelling.
+            for path in [
+                "plans/auth.md",
+                "plans/deep/draft.md",
+                "memory/plans/auth.md",
+            ] {
+                assert!(
+                    matches!(
+                        service.handle(
+                            caller,
+                            BossOperation::ReadFile { path: path.into() }
+                        ),
+                        Ok(BossResult::File { .. })
+                    ),
+                    "{path} should be readable"
+                );
+            }
+            let BossResult::Files { files } = service
+                .handle(caller, BossOperation::ListFiles { path: "plans".into() })
+                .unwrap()
+            else {
+                panic!("listing plans should succeed")
+            };
+            assert!(files.iter().any(|file| file.path == "plans/auth.md"));
+            let BossResult::Files { files } = service
+                .handle(caller, BossOperation::ListFiles { path: String::new() })
+                .unwrap()
+            else {
+                panic!("listing the root should succeed")
+            };
+            assert!(
+                files
+                    .iter()
+                    .any(|file| file.path == "plans" && file.directory)
+            );
+            // Nothing outside plans/ opens: unpinned documents, memory,
+            // other personas' files, and writes all stay denied.
+            for path in [
+                "docs/private.md",
+                "memory/work/secret.md",
+                "boss.json",
+                &format!("personas/{boss_persona}/PERSONA.md"),
+            ] {
+                assert!(
+                    service
+                        .handle(caller, BossOperation::ReadFile { path: path.into() })
+                        .is_err(),
+                    "{path} should be denied"
+                );
+            }
+            assert!(
+                service
+                    .handle(
+                        caller,
+                        BossOperation::WriteFile {
+                            path: "plans/auth.md".into(),
+                            content: "changed".into()
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        // A session outside the roster still cannot read plans.
+        assert!(
+            service
+                .handle(
+                    Some(Uuid::new_v4()),
+                    BossOperation::ReadFile {
+                        path: "plans/auth.md".into()
                     }
                 )
                 .is_err()

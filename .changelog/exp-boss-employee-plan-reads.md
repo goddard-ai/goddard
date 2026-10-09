@@ -1,0 +1,1 @@
+- Employees can read Boss plan documents under `plans/` — such as an approved design handed off for implementation — without needing the file pinned to their persona.
