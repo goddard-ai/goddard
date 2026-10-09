@@ -247,6 +247,10 @@ pub(super) struct BossUi {
     pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
+    /// Rotated Boss chats: retired session id → replacement session id.
+    /// Composer draft keys resolve through this so a swap mid-draft re-keys
+    /// the slot instead of stranding the text on the archived row.
+    pub(super) rotated_chat_drafts: HashMap<Uuid, Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
     /// Cached `ListBuckets` replies per daemon — the `@` mention pool's
     /// memory-bucket source. Fetched lazily the first time a boss surface's
@@ -415,6 +419,7 @@ impl Default for BossUi {
             projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),
+            rotated_chat_drafts: HashMap::new(),
             identities: HashMap::new(),
             buckets: HashMap::new(),
             buckets_requested: RefCell::new(HashSet::new()),
@@ -989,6 +994,7 @@ impl Waku {
             self.boss_ui.states.insert(key, state);
             if let Some((from, to)) = rotated_session {
                 self.migrate_voice_scratchpad(from, to);
+                self.migrate_boss_composer_draft(from, to, cx);
             }
             for plan in planning {
                 self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, true, cx);
@@ -1851,9 +1857,11 @@ impl Waku {
                                 let id = session.id;
                                 if let Some(from) = rotated_from {
                                     // An Open answer can beat the pushed
-                                    // state to the swap — carry the pad over
-                                    // here too so no ordering strands it.
+                                    // state to the swap — carry the pad and
+                                    // the draft over here too so no ordering
+                                    // strands them.
                                     this.migrate_voice_scratchpad(from, id);
+                                    this.migrate_boss_composer_draft(from, id, cx);
                                 }
                                 this.daemons.claim_session(id, key);
                                 if let Some(existing) =

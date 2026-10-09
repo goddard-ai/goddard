@@ -213,6 +213,32 @@ impl ComposerDraftStore {
         *latest_write = latest_write.saturating_add(1);
         Ok(())
     }
+
+    /// Re-key one draft under the same mutation lock `apply_changes` uses.
+    /// Boss rotation retires a chat's session id; its unsent draft belongs
+    /// to the replacement session, not the archived row. An occupied
+    /// destination keeps its own draft and the source stays parked, matching
+    /// [`ComposerDrafts::move_to_empty`].
+    pub fn move_draft(
+        &self,
+        source: ComposerDraftKey,
+        destination: ComposerDraftKey,
+    ) -> io::Result<()> {
+        let mut latest_write = self.latest_write.lock();
+        let mut drafts = self.load()?;
+        if !drafts.move_to_empty(source, destination) {
+            return Ok(());
+        }
+        let data = serde_json::to_vec_pretty(&drafts).map_err(to_io_error)?;
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let temporary = self.path.with_extension("json.tmp");
+        fs::write(&temporary, data)?;
+        fs::rename(temporary, &self.path)?;
+        *latest_write = latest_write.saturating_add(1);
+        Ok(())
+    }
 }
 
 /// Desktop-owned, user-editable configuration.

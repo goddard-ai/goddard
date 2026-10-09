@@ -66,6 +66,30 @@ impl From<MessageAttachment> for ComposerAttachment {
     }
 }
 
+/// A rotated Boss chat's draft slot resolves to its replacement session:
+/// edits the composer captured before the swap finished navigating still
+/// file under the live chat rather than parking on the archived
+/// predecessor. Rotations can chain, so follow the map to its end.
+/// Incognito sessions keep their own key — their text must never become
+/// persistable by re-keying onto a recorded session.
+fn rotated_draft_key(
+    key: crate::persistence::ComposerDraftKey,
+    rotated: &HashMap<Uuid, Uuid>,
+    is_incognito: impl Fn(Uuid) -> bool,
+) -> crate::persistence::ComposerDraftKey {
+    let mut resolved = key;
+    while let crate::persistence::ComposerDraftKey::Session(session_id) = resolved {
+        let Some(next) = rotated.get(&session_id) else {
+            break;
+        };
+        if is_incognito(session_id) || is_incognito(*next) {
+            break;
+        }
+        resolved = crate::persistence::ComposerDraftKey::Session(*next);
+    }
+    resolved
+}
+
 impl Waku {
     pub(super) fn selected_composer_draft_key(
         &self,
@@ -79,6 +103,19 @@ impl Waku {
                     .find(|session| session.id == selected)
             })
             .map(crate::persistence::ComposerDraftKey::for_session)
+            .map(|key| self.rotated_draft_key(key))
+    }
+
+    /// Resolve the retired-session half of a Boss rotation to its
+    /// replacement. Ordinary keys pass straight through — the map only ever
+    /// holds rotated Boss chats.
+    pub(super) fn rotated_draft_key(
+        &self,
+        key: crate::persistence::ComposerDraftKey,
+    ) -> crate::persistence::ComposerDraftKey {
+        rotated_draft_key(key, &self.boss_ui.rotated_chat_drafts, |id| {
+            self.session_incognito(id)
+        })
     }
 
     /// The draft slot the live composer is editing right now. While Big
@@ -91,7 +128,10 @@ impl Waku {
     /// chat transcript underneath.
     pub(super) fn composer_draft_key(&self) -> Option<crate::persistence::ComposerDraftKey> {
         if self.big_picture.is_open() {
-            return self.big_picture.draft_key;
+            return self
+                .big_picture
+                .draft_key
+                .map(|key| self.rotated_draft_key(key));
         }
         if let Some((_, deliverable_id)) = self.live_deliverable_page() {
             return Some(crate::persistence::ComposerDraftKey::Deliverable(
@@ -203,6 +243,36 @@ impl Waku {
         if self.capture_current_composer_draft(cx) {
             self.schedule_composer_draft_save(cx);
         }
+    }
+
+    /// A Boss rotation re-keyed its chat's session — the composer's unsent
+    /// draft follows to the replacement the way the voice pad does instead
+    /// of parking on the archived predecessor. The recorded redirect makes
+    /// the retired slot resolve to the new one: the re-capture below files
+    /// the live composer's text under the replacement directly, and the
+    /// same resolution keeps working for edits captured between the swap
+    /// and the chat's re-selection.
+    pub(super) fn migrate_boss_composer_draft(
+        &mut self,
+        from: Uuid,
+        to: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_ui.rotated_chat_drafts.insert(from, to);
+        // The replacement session lives on the predecessor's daemon —
+        // claim it now so a draft save can't misroute before the catalog
+        // update or the `Open` reply records the ownership.
+        self.daemons
+            .claim_session(to, self.daemons.session_owner(from));
+        let source = crate::persistence::ComposerDraftKey::Session(from);
+        let destination = crate::persistence::ComposerDraftKey::Session(to);
+        if self.composer_drafts.move_to_empty(source, destination) {
+            // Draft-use undos track the payload wherever it lands — a ⌘Z
+            // after the swap pulls the text back from the live chat's slot.
+            self.retarget_draft_use_undos(source, destination);
+            self.schedule_composer_draft_save(cx);
+        }
+        self.capture_and_save_current_composer_draft(cx);
     }
 
     /// A project choice in the composer changes where the current unsent task
@@ -617,5 +687,76 @@ impl Waku {
             }
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotation_resolves_a_retired_chat_key_to_its_replacement() {
+        let from = Uuid::new_v4();
+        let to = Uuid::new_v4();
+        let rotated = HashMap::from([(from, to)]);
+        let not_incognito = |_| false;
+
+        assert_eq!(
+            rotated_draft_key(
+                crate::persistence::ComposerDraftKey::Session(from),
+                &rotated,
+                not_incognito,
+            ),
+            crate::persistence::ComposerDraftKey::Session(to)
+        );
+        // New-session and deliverable slots are not session-keyed — they
+        // cannot belong to a rotated chat.
+        let project_key = crate::persistence::ComposerDraftKey::NewSession(from);
+        assert_eq!(
+            rotated_draft_key(project_key, &rotated, not_incognito),
+            project_key
+        );
+        let deliverable_key = crate::persistence::ComposerDraftKey::Deliverable(from);
+        assert_eq!(
+            rotated_draft_key(deliverable_key, &rotated, not_incognito),
+            deliverable_key
+        );
+        // An ordinary task's key is untouched.
+        let untracked = Uuid::new_v4();
+        let session_key = crate::persistence::ComposerDraftKey::Session(untracked);
+        assert_eq!(
+            rotated_draft_key(session_key, &rotated, not_incognito),
+            session_key
+        );
+    }
+
+    #[test]
+    fn rotation_key_resolution_follows_chained_swaps() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        let rotated = HashMap::from([(first, second), (second, third)]);
+        assert_eq!(
+            rotated_draft_key(
+                crate::persistence::ComposerDraftKey::Session(first),
+                &rotated,
+                |_| false,
+            ),
+            crate::persistence::ComposerDraftKey::Session(third)
+        );
+    }
+
+    #[test]
+    fn rotation_key_resolution_never_files_incognito_text() {
+        // An incognito session's draft identity must not resolve to a
+        // recorded session — otherwise its unsaved text would persist.
+        let from = Uuid::new_v4();
+        let to = Uuid::new_v4();
+        let rotated = HashMap::from([(from, to)]);
+        let from_incognito = |id| id == from;
+        let key = crate::persistence::ComposerDraftKey::Session(from);
+        assert_eq!(rotated_draft_key(key, &rotated, from_incognito), key);
+        let to_incognito = |id| id == to;
+        assert_eq!(rotated_draft_key(key, &rotated, to_incognito), key);
     }
 }

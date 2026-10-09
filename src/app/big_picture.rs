@@ -527,6 +527,7 @@ impl Waku {
         // a card's session draft or the new-task draft — before the selected
         // session's draft takes the composer back.
         if let Some(key) = self.big_picture.draft_key.take() {
+            let key = self.rotated_draft_key(key);
             if !self.draft_key_incognito(key) {
                 let draft = self.current_composer_draft(Some(key), cx);
                 if self.composer_drafts.set(key, draft) {
@@ -561,6 +562,7 @@ impl Waku {
         // just drop the overlay state.
         self.project_switcher.dismiss();
         if let Some(key) = self.big_picture.draft_key.take() {
+            let key = self.rotated_draft_key(key);
             if !self.draft_key_incognito(key) {
                 let draft = self.current_composer_draft(Some(key), cx);
                 if self.composer_drafts.set(key, draft) {
@@ -650,6 +652,7 @@ impl Waku {
                 .new_task_project
                 .map(ComposerDraftKey::NewSession),
         }
+        .map(|key| self.rotated_draft_key(key))
     }
 
     /// Point the docked composer at the draft its current target owns: stash
@@ -662,6 +665,7 @@ impl Waku {
             return;
         }
         if let Some(previous) = self.big_picture.draft_key {
+            let previous = self.rotated_draft_key(previous);
             // Incognito drafts never enter the store — the text dies with
             // the mounted composer like the main lane's gate.
             if !self.draft_key_incognito(previous) {

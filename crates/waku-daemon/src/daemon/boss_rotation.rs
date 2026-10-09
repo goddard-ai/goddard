@@ -186,6 +186,18 @@ impl WakuBackend {
         self.retire_archived_runtimes(&[intent.old_session_id]);
         journal.commit(now)?;
         journal.persist(&path)?;
+        // The retired chat's unsent composer draft belongs to its
+        // replacement — re-key the persisted slot so clients that load
+        // drafts after the swap still see the text. A draft-store failure
+        // must not fault the committed rotation.
+        if settings.composer_drafts_experiment_enabled
+            && let Err(error) = self.composer_drafts.move_draft(
+                crate::persistence::ComposerDraftKey::Session(intent.old_session_id),
+                crate::persistence::ComposerDraftKey::Session(intent.new_session_id),
+            )
+        {
+            eprintln!("Boss session rotation: composer draft carry failed: {error}");
+        }
         self.boss.router_defer_context(intent.new_session_id);
         if let Some(notifier) = self.task_notifier.lock().clone() {
             notifier();

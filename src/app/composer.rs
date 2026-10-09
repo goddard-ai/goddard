@@ -4283,7 +4283,8 @@ impl Waku {
         }
         let session_id = session.id;
         let was_incognito = session.incognito;
-        let draft_key = crate::persistence::ComposerDraftKey::for_session(session);
+        let draft_key =
+            self.rotated_draft_key(crate::persistence::ComposerDraftKey::for_session(session));
         if !was_incognito {
             let return_focus = self.composer_focus(cx);
             if self.require_incognito_disclosure(

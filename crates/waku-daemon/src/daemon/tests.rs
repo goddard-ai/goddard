@@ -11520,6 +11520,84 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
 }
 
 #[test]
+fn boss_rotation_carries_the_persisted_composer_draft() {
+    let root = std::env::temp_dir().join(format!("boss-rotation-draft-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.composer_drafts_experiment_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let old = rotation_boss(&backend);
+    // The client's incremental write path, not a hand-built file.
+    backend
+        .composer_drafts
+        .apply_changes(vec![crate::persistence::ComposerDraftChange {
+            target: crate::persistence::ComposerDraftTarget::Session { session_id: old },
+            draft: Some(crate::persistence::ComposerDraft {
+                text: "hold the release until QA lands".into(),
+                attachments: vec![crate::persistence::ComposerDraftAttachment {
+                    path: PathBuf::from("/tmp/notes.md"),
+                    mention: "/tmp/notes.md".into(),
+                    name: "notes.md".into(),
+                    is_dir: false,
+                    is_image: false,
+                    blob_reference: None,
+                    pasted_text_preview: None,
+                    session_id: None,
+                }],
+                annotations: Vec::new(),
+                inline_atoms: Vec::new(),
+            }),
+        }])
+        .unwrap();
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 81,
+            window: Some(100),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    let drafts = backend.composer_drafts.load().unwrap();
+    let carried = drafts
+        .get(crate::persistence::ComposerDraftKey::Session(next))
+        .expect("the unsent draft follows the chat to its replacement session");
+    assert_eq!(carried.text, "hold the release until QA lands");
+    assert_eq!(carried.attachments.len(), 1);
+    assert!(
+        drafts
+            .get(crate::persistence::ComposerDraftKey::Session(old))
+            .is_none(),
+        "nothing stays parked on the archived predecessor"
+    );
+
+    // The carried draft runs the ordinary lifecycle afterward — a client
+    // clearing the slot after submit (or discarding the draft) removes it.
+    backend
+        .composer_drafts
+        .apply_changes(vec![crate::persistence::ComposerDraftChange {
+            target: crate::persistence::ComposerDraftTarget::Session { session_id: next },
+            draft: None,
+        }])
+        .unwrap();
+    assert!(
+        backend
+            .composer_drafts
+            .load()
+            .unwrap()
+            .get(crate::persistence::ComposerDraftKey::Session(next))
+            .is_none()
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
     let root = std::env::temp_dir().join(format!("boss-rotation-opt-out-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
