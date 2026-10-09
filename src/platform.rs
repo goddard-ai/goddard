@@ -406,27 +406,39 @@ mod voice_gate {
             .collect()
     }
 
-    /// The AudioDeviceID behind a device UID, when the device is attached.
-    fn resolve_device_uid(uid: &str) -> Option<AudioObjectID> {
-        audio_input_devices()
-            .into_iter()
-            .find(|(_, device_uid, _)| device_uid == uid)
-            .map(|(id, _, _)| id)
+    /// Which attached device the engine binds to: the pinned UID
+    /// resolved against the attached set — a pinned selection is never
+    /// replaced by the default; a missing one binds nothing — or the
+    /// current default when unpinned. Pure so the pinning rule is
+    /// testable without hardware.
+    fn target_device(
+        preferred_uid: Option<&str>,
+        inputs: &[(AudioObjectID, String, String)],
+        default_input: Option<AudioObjectID>,
+    ) -> Option<AudioObjectID> {
+        match preferred_uid {
+            Some(uid) => inputs
+                .iter()
+                .find(|(_, device_uid, _)| device_uid == uid)
+                .map(|(id, _, _)| *id),
+            None => default_input,
+        }
     }
 
     /// The device the engine should bind to right now: the pinned device,
     /// or the current default input when nothing is pinned. `None` means
     /// the wanted device is gone (or, unpinned, that no default exists).
     fn current_target_device() -> Option<AudioObjectID> {
-        match PREFERRED_INPUT_UID.lock().unwrap().as_deref() {
-            Some(uid) => resolve_device_uid(uid),
-            None => audio_property_u32(
+        target_device(
+            PREFERRED_INPUT_UID.lock().unwrap().as_deref(),
+            &audio_input_devices(),
+            audio_property_u32(
                 kAudioObjectSystemObject as AudioObjectID,
                 kAudioHardwarePropertyDefaultInputDevice,
                 kAudioObjectPropertyScopeGlobal,
             )
             .filter(|id| *id != 0),
-        }
+        )
     }
 
     /// Whether the wanted input can capture at all — the pinned device is
@@ -831,6 +843,27 @@ mod voice_gate {
                 session.request.endAudio();
                 session.task.cancel();
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn device(id: AudioObjectID, uid: &str) -> (AudioObjectID, String, String) {
+            (id, uid.to_owned(), format!("device {id}"))
+        }
+
+        /// A pinned UID binds its own device or nothing — availability or
+        /// default-route moves must never substitute the system default.
+        #[test]
+        fn pinned_device_is_never_replaced_by_the_default() {
+            let inputs = vec![device(11, "airpods-uid"), device(22, "builtin-uid")];
+            assert_eq!(target_device(Some("airpods-uid"), &inputs, Some(22)), Some(11));
+            assert_eq!(target_device(Some("gone-uid"), &inputs, Some(22)), None);
+            assert_eq!(target_device(Some("gone-uid"), &[], Some(22)), None);
+            assert_eq!(target_device(None, &inputs, Some(22)), Some(22));
+            assert_eq!(target_device(None, &inputs, None), None);
         }
     }
 }

@@ -1,0 +1,1 @@
+- **VoicePad:** Fixed the pad sticking on "microphone unavailable" after AirPods or another Bluetooth headset connects — a momentary input gap during the profile switch no longer latches the warning.

@@ -429,6 +429,41 @@ pub(super) fn transcribe_dictation(
     Ok(transcript)
 }
 
+/// Whether a fresh device-set verdict counts as a live input. While a
+/// consumer holds the tap the engine must actually be running; with no
+/// consumer the engine is parked by design, so the device set alone
+/// answers — otherwise a stopped listener would read as an outage.
+fn voice_input_ready(available: bool, wanted: bool, engine_running: bool) -> bool {
+    available && (!wanted || engine_running)
+}
+
+/// What one availability sample does to the "microphone unavailable"
+/// row and the outage clock — pure so the grace policy is testable
+/// without a GPUI context. Arming the retry poll is the caller's call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VoiceInputVerdict {
+    /// The wanted input can capture — clear the row and the clock.
+    Ready,
+    /// The first missing sample — start the clock; the row stays put
+    /// while the gap could still be a profile switch.
+    OutageStarted,
+    /// Missing inside the grace window — nothing changes yet.
+    InGrace,
+    /// Missing past the grace — raise the row.
+    Unavailable,
+}
+
+fn voice_input_verdict(ready: bool, down_for: Option<std::time::Duration>) -> VoiceInputVerdict {
+    if ready {
+        return VoiceInputVerdict::Ready;
+    }
+    match down_for {
+        None => VoiceInputVerdict::OutageStarted,
+        Some(elapsed) if elapsed >= VOICE_INPUT_GRACE => VoiceInputVerdict::Unavailable,
+        Some(_) => VoiceInputVerdict::InGrace,
+    }
+}
+
 impl Waku {
     pub(super) fn toggle_dictation(&mut self, cx: &mut Context<Self>) {
         match &self.dictation_state {
@@ -1061,27 +1096,29 @@ impl Waku {
     /// unavailable" row at once; a missing one only raises the row after
     /// the grace, and arms the retry poll — the HAL does not reliably
     /// report a device gaining input channels in place, so events alone
-    /// can leave a returning headset waiting.
+    /// can leave a returning headset waiting. The grace applies whether
+    /// or not a consumer holds the tap: a parked engine samples the same
+    /// transient misses a live one does, and mirroring one straight into
+    /// the row can leave it stuck behind an event that never comes.
     pub(super) fn sync_voice_input(&mut self, available: bool, cx: &mut Context<Self>) {
-        let ready = available && crate::platform::voice_listener_running();
-        if ready {
-            self.voice_input_down_since = None;
-            self.set_voice_input_unavailable(false, cx);
-            return;
-        }
-        if !self.voice_listener_wanted() {
-            // Nobody owns the tap — mirror the device set as before but
-            // run no clock; the next start re-checks on its own.
-            self.voice_input_down_since = None;
-            self.set_voice_input_unavailable(!available, cx);
-            return;
-        }
-        match self.voice_input_down_since {
-            None => self.voice_input_down_since = Some(Instant::now()),
-            Some(since) if since.elapsed() >= VOICE_INPUT_GRACE => {
+        let ready = voice_input_ready(
+            available,
+            self.voice_listener_wanted(),
+            crate::platform::voice_listener_running(),
+        );
+        match voice_input_verdict(ready, self.voice_input_down_since.map(|since| since.elapsed())) {
+            VoiceInputVerdict::Ready => {
+                self.voice_input_down_since = None;
+                self.set_voice_input_unavailable(false, cx);
+                return;
+            }
+            VoiceInputVerdict::OutageStarted => {
+                self.voice_input_down_since = Some(Instant::now());
+            }
+            VoiceInputVerdict::Unavailable => {
                 self.set_voice_input_unavailable(true, cx);
             }
-            _ => {}
+            VoiceInputVerdict::InGrace => {}
         }
         self.schedule_voice_input_retry(cx);
     }
@@ -1418,5 +1455,39 @@ pub(super) mod tests {
         };
         assert!(picked_clip(Some(&generate), &candidates).is_none());
         assert!(picked_clip(None, &candidates).is_none());
+    }
+
+    /// A transient miss — the AirPods connect storm — starts the outage
+    /// clock without raising the "microphone unavailable" row; only a gap
+    /// that outlives the grace raises it, and any ready sample clears it.
+    #[test]
+    fn voice_input_verdict_hides_outages_inside_the_grace() {
+        use std::time::Duration;
+        assert_eq!(
+            voice_input_verdict(false, None),
+            VoiceInputVerdict::OutageStarted
+        );
+        assert_eq!(
+            voice_input_verdict(false, Some(VOICE_INPUT_GRACE - Duration::from_millis(1))),
+            VoiceInputVerdict::InGrace
+        );
+        assert_eq!(
+            voice_input_verdict(false, Some(VOICE_INPUT_GRACE)),
+            VoiceInputVerdict::Unavailable
+        );
+        assert_eq!(voice_input_verdict(true, None), VoiceInputVerdict::Ready);
+        assert_eq!(
+            voice_input_verdict(true, Some(VOICE_INPUT_POLL_CAP)),
+            VoiceInputVerdict::Ready
+        );
+    }
+
+    /// With no consumer the engine is parked, so readiness rests on the
+    /// device set alone — a stopped listener must not read as an outage.
+    #[test]
+    fn parked_engine_still_counts_a_present_input_as_ready() {
+        assert!(voice_input_ready(true, false, false));
+        assert!(!voice_input_ready(true, true, false));
+        assert!(!voice_input_ready(false, false, true));
     }
 }
