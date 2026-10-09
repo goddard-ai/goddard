@@ -1,0 +1,1 @@
+- **Boss:** Boss and employee avatars in the sidebar occasionally hop when they use the Gaze style. The hop respects the system's reduce-motion setting; other avatar styles stay still.

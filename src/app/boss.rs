@@ -83,6 +83,39 @@ fn avatar_scale(bucket: u32) -> f32 {
     bucket as f32 / AVATAR_SOURCE_SIZE
 }
 
+/// One hop-and-settle per period: long enough between hops that a mounted
+/// avatar reads as occasionally alive rather than bouncing.
+const GAZE_HOP_PERIOD: Duration = Duration::from_millis(4_800);
+
+/// Share of the period spent airborne — a ~650ms lift inside an otherwise
+/// still cycle.
+const GAZE_HOP_IN_FLIGHT: f32 = 0.135;
+
+/// Peak lift as a share of the avatar's rendered size.
+const GAZE_HOP_LIFT: f32 = 0.16;
+
+/// Whether a sidebar avatar rides the pulse clock: Gaze rasters only, and
+/// never under reduce-motion, which keeps the exact static element.
+fn gaze_hops(style: AvatarStyle, reduce_motion: bool) -> bool {
+    style == AvatarStyle::Gaze && !reduce_motion
+}
+
+/// Lift in pixels at `phase` of the hop period — a parabola peaking mid-hop
+/// inside the airborne window, zero (the static pose) everywhere else.
+fn gaze_hop_lift(phase: f32, size: f32) -> f32 {
+    let t = phase.fract() / GAZE_HOP_IN_FLIGHT;
+    if t >= 1.0 {
+        return 0.0;
+    }
+    size * GAZE_HOP_LIFT * 4.0 * t * (1.0 - t)
+}
+
+/// Per-seed phase offset in `[0, 1)` so neighboring Gaze avatars on a roster
+/// do not hop in sync.
+fn gaze_hop_shift(seed: &str) -> f32 {
+    (sidebar::mix_str(0, seed) % 1024) as f32 / 1024.0
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BossTab {
     Memory,
@@ -3114,6 +3147,47 @@ impl Waku {
             .into_any_element()
     }
 
+    /// `boss_avatar` for surfaces that can afford a recurring pulse lease —
+    /// sidebar rows, whose subtree already rebuilds for `spin_slow` loaders.
+    /// A Gaze raster hops once per period; every other style, and every style
+    /// under reduce-motion, returns the static element untouched.
+    pub(super) fn boss_avatar_hopping(
+        &self,
+        identity: &BossIdentity,
+        size: f32,
+        cx: &App,
+    ) -> AnyElement {
+        let avatar = self.boss_avatar(identity, size, cx);
+        if !gaze_hops(identity.avatar_style, cx.reduce_motion()) {
+            return avatar;
+        }
+        let shift = gaze_hop_shift(&identity.avatar_seed);
+        // A fixed-size wrapper holds the row slot while the inner element's
+        // absolute offset carries the lift — only `Svg` takes a
+        // `Transformation`, so the raster moves by position, not transform.
+        // Resting frames return the avatar element itself, identical to the
+        // static path.
+        motion::pulse(GAZE_HOP_PERIOD, move |phase| {
+            let lift = gaze_hop_lift(phase + shift, size);
+            if lift == 0.0 {
+                return avatar;
+            }
+            div()
+                .size(px(size))
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(-lift))
+                        .size(px(size))
+                        .child(avatar),
+                )
+                .into_any_element()
+        })
+        .every(2)
+        .into_any_element()
+    }
+
     fn pump_boss_avatars(&mut self, cx: &mut Context<Self>) {
         while self.boss_ui.avatar_active < 4 {
             let Some((seed, style, bucket, attempt)) =
@@ -3236,7 +3310,7 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
-            .child(self.boss_avatar(&state.identity, 24.0, cx))
+            .child(self.boss_avatar_hopping(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
                 subtitle,
@@ -3432,7 +3506,7 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
-            .child(self.boss_avatar(identity, 24.0, cx))
+            .child(self.boss_avatar_hopping(identity, 24.0, cx))
             .child(boss_sidebar_label(
                 identity.name.clone(),
                 detail.unwrap_or_default(),
@@ -8759,6 +8833,56 @@ mod tests {
         assert_eq!(avatar_bucket(16.0), 16);
         assert_eq!(avatar_bucket(18.0), 24);
         assert_eq!(avatar_bucket(54.0), 56);
+    }
+
+    #[test]
+    fn gaze_hop_sits_at_rest_outside_its_airborne_window() {
+        // Phase 0 is the rest pose — the frame a reduce-motion render and a
+        // non-leasing tick both have to match.
+        for phase in [0.0, GAZE_HOP_IN_FLIGHT, 0.5, 0.999, 1.0, 7.3] {
+            assert_eq!(gaze_hop_lift(phase, 24.0), 0.0, "phase {phase}");
+        }
+    }
+
+    #[test]
+    fn gaze_hop_lifts_and_settles_inside_its_window() {
+        let apex = gaze_hop_lift(GAZE_HOP_IN_FLIGHT / 2.0, 24.0);
+        assert!(
+            (apex - 24.0 * GAZE_HOP_LIFT).abs() < 0.01,
+            "mid-hop is the peak lift, got {apex}"
+        );
+        let rising = gaze_hop_lift(GAZE_HOP_IN_FLIGHT / 4.0, 24.0);
+        let settling = gaze_hop_lift(GAZE_HOP_IN_FLIGHT * 0.75, 24.0);
+        assert!(rising > 0.0 && rising < apex);
+        assert!(
+            (rising - settling).abs() < 0.01,
+            "the parabola is symmetric about mid-hop: {rising} vs {settling}"
+        );
+    }
+
+    #[test]
+    fn gaze_hop_shift_stays_in_phase_and_is_deterministic() {
+        for seed in ["boss", "zadie", "", "existing"] {
+            let shift = gaze_hop_shift(seed);
+            assert!((0.0..1.0).contains(&shift), "{seed} shifted to {shift}");
+            assert_eq!(shift, gaze_hop_shift(seed));
+        }
+    }
+
+    #[test]
+    fn only_gaze_avatars_hop_and_never_under_reduce_motion() {
+        for style in [
+            AvatarStyle::DiceBear,
+            AvatarStyle::Dylan,
+            AvatarStyle::FunEmoji,
+            AvatarStyle::LineFace,
+            AvatarStyle::AgentAvatars,
+            AvatarStyle::Avvvatars,
+        ] {
+            assert!(!gaze_hops(style, false), "{style:?} keeps its static raster");
+        }
+        assert!(gaze_hops(AvatarStyle::Gaze, false));
+        assert!(!gaze_hops(AvatarStyle::Gaze, true));
     }
 
     #[test]
