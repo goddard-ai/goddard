@@ -6386,6 +6386,8 @@ boss.new_face:
   en: New face
 boss.avatar_style:
   en: Avatar style
+boss.avatar_style_description:
+  en: Choose the style used for the Boss and all employees.
 boss.avatar_style_dicebear:
   en: "Avatar style: DiceBear"
 boss.avatar_style_blobby:

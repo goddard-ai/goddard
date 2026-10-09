@@ -13,6 +13,7 @@ use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
 use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
 use waku_protocol::auto_prompts::{AutoPromptQuestion, AutoPromptRule};
+use waku_protocol::boss::AvatarStyle;
 use waku_protocol::inference::{InferenceContext, InferenceProvider};
 use waku_protocol::integrations::{IntegrationAuthKind, IntegrationAuthState};
 use waku_protocol::routing::{ALL_TASK_CLASSES, RouteClassTarget, TaskClass};
@@ -11051,6 +11052,42 @@ impl Waku {
                 .map(|matched| self.render_theme_preview(preview_open, matched, cx))
         };
 
+        let avatar_style_row = self
+            .state
+            .boss_experiment_enabled
+            .then(|| {
+                let key = self
+                    .selected_surface_boss_key()
+                    .unwrap_or(waku_client::DaemonKey::Local);
+                let selected_style = self
+                    .boss_ui
+                    .states
+                    .get(&key)
+                    .map(|state| state.identity.avatar_style)
+                    .unwrap_or_default();
+                settings_row(
+                    "icons/user-round.svg",
+                    tr!("boss.avatar_style"),
+                    tr!("boss.avatar_style_description"),
+                    self.setting_selector(
+                        "boss-avatar-style-selector",
+                        vec![
+                            (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
+                            (AvatarStyle::Blobby, tr!("boss.avatar_style_blobby")),
+                            (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
+                            (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
+                        ],
+                        selected_style,
+                        160.0,
+                        cx,
+                        move |this, style, _, cx| this.set_boss_avatar_style(key, style, cx),
+                    ),
+                    theme,
+                    search,
+                )
+            })
+            .flatten();
+
         // Vibrancy is a macOS-only effect; on other platforms the sidebar is
         // already a solid fill and there is nothing to switch.
         let transparency_rows = if cfg!(target_os = "macos") {
@@ -11144,6 +11181,7 @@ impl Waku {
                 theme,
                 search,
             ),
+            avatar_style_row,
             settings_row(
                 "icons/sun.svg",
                 tr!("settings.light_theme"),

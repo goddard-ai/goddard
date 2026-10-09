@@ -2570,7 +2570,7 @@ impl Waku {
 
     /// The generator style is a global Boss setting shared by the boss and
     /// every employee.
-    fn set_boss_avatar_style(
+    pub(super) fn set_boss_avatar_style(
         &mut self,
         key: DaemonKey,
         avatar_style: AvatarStyle,
@@ -4146,10 +4146,6 @@ impl Waku {
         };
         let identity_handle = self.menu_handle("boss-identity", cx);
         let weak = cx.entity().downgrade();
-        let selected_style = state
-            .map(|state| state.identity.avatar_style)
-            .unwrap_or_default();
-        let avatar_key = key.clone();
         let identity_menu = dropdown_menu(
             MenuChip::new("boss-identity-trigger")
                 .icon("icons/user-round.svg", theme.text_tertiary)
@@ -4163,7 +4159,7 @@ impl Waku {
             move |_| {
                 let rename = weak.clone();
                 let face = weak.clone();
-                let mut items = vec![
+                let items = vec![
                     MenuItem::new(tr!("common.rename"), move |window, cx| {
                         let _ = rename.update(cx, |this, cx| {
                             if let Some(session_id) = session_id {
@@ -4183,23 +4179,6 @@ impl Waku {
                     .icon("icons/rotate-cw.svg")
                     .disabled(session_id.is_none()),
                 ];
-                for (style, label) in [
-                    (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
-                    (AvatarStyle::Blobby, tr!("boss.avatar_style_blobby")),
-                    (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
-                    (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
-                ] {
-                    let weak = weak.clone();
-                    let key = avatar_key.clone();
-                    items.push(
-                        MenuItem::new(label, move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_boss_avatar_style(key.clone(), style, cx)
-                            });
-                        })
-                        .selected(style == selected_style),
-                    );
-                }
                 items
             },
         );
