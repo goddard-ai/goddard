@@ -1,0 +1,1 @@
+- Approval requests stay clear of suggested actions, VoicePad transcription bubbles, and floating turn-status markers above the composer.

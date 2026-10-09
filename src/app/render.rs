@@ -14,6 +14,19 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
+// Floats normally borrow the transcript's bottom padding. An approval card
+// interrupts that adjacency, so reserve their airspace inside the composer lane.
+#[track_caller]
+fn composer_lane(approval_visible: bool, voice_chrome_visible: bool) -> Div {
+    div().flex_none().relative().pt(px(if !approval_visible {
+        0.0
+    } else if voice_chrome_visible {
+        voice_scratchpad::PRESS_TO_TALK_CHROME_HEIGHT
+    } else {
+        32.0
+    }))
+}
+
 impl Waku {
     pub(super) fn render_panel_resize_handle(
         &self,
@@ -669,6 +682,7 @@ impl Render for Waku {
         let empty = should_render_empty_state(self.selected_session());
         let projects_page = self.projects_page;
         let permission = self.render_permission(cx);
+        let approval_visible = permission.is_some();
         // A started Antigravity session shows its TUI terminal as the whole
         // surface — no transcript, no composer.
         let agy_surface = self.selected_session().is_some_and(|session| {
@@ -944,7 +958,7 @@ impl Render for Waku {
                                 .into_any_element()
                         },
                     )
-                    .children(permission)
+                    .children(permission.map(|card| div().flex_none().child(card)))
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
                     // pages own no composer at all. While the overlay is
@@ -957,23 +971,24 @@ impl Render for Waku {
                         } else {
                             let lane_height = self.composer_lane_height.clone();
                             element.child(
-                                div()
-                                    .flex_none()
-                                    .relative()
-                                    .child(
-                                        canvas(
-                                            move |bounds, _, _| {
-                                                lane_height.set(f32::from(bounds.size.height))
-                                            },
-                                            |_, _, _, _| (),
-                                        )
-                                        .absolute()
-                                        .inset_0(),
+                                composer_lane(
+                                    approval_visible,
+                                    self.main_composer_press_to_talk_claimed(),
+                                )
+                                .child(
+                                    canvas(
+                                        move |bounds, _, _| {
+                                            lane_height.set(f32::from(bounds.size.height))
+                                        },
+                                        |_, _, _, _| (),
                                     )
-                                    .children(self.render_action_suggestion(window, cx))
-                                    .children(self.render_queued_messages(cx))
-                                    .child(self.render_composer(window, cx))
-                                    .child(self.render_workspace_footer(cx)),
+                                    .absolute()
+                                    .inset_0(),
+                                )
+                                .children(self.render_action_suggestion(window, cx))
+                                .children(self.render_queued_messages(cx))
+                                .child(self.render_composer(window, cx))
+                                .child(self.render_workspace_footer(cx)),
                             )
                         }
                     })
@@ -1697,5 +1712,142 @@ impl Waku {
             .justify_center()
             .child(motion::modal_enter("ssh-prompt-card-enter", card));
         Some(gpui::deferred(layer).with_priority(4).into_any_element())
+    }
+}
+
+#[cfg(test)]
+mod approval_layout_tests {
+    use super::*;
+
+    struct ApprovalLaneHarness {
+        width: f32,
+        approval: bool,
+        voice: bool,
+        queue_height: f32,
+    }
+
+    impl Render for ApprovalLaneHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(self.width))
+                .h(px(600.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div().flex_1().min_h_0().relative().child(
+                        div()
+                            .id("sticky-marker")
+                            .debug_selector(|| "sticky-marker".into())
+                            .absolute()
+                            .bottom(px(8.0))
+                            .h(px(24.0))
+                            .w(px(100.0)),
+                    ),
+                )
+                .when(self.approval, |root| {
+                    root.child(
+                        div()
+                            .id("approval-card")
+                            .debug_selector(|| "approval-card".into())
+                            .flex_none()
+                            .h(px(140.0)),
+                    )
+                })
+                .child(
+                    composer_lane(self.approval, self.voice)
+                        .child(div().h(px(0.0)).relative().when(!self.voice, |row| {
+                            row.child(
+                                div()
+                                    .id("suggestion-chip")
+                                    .debug_selector(|| "suggestion-chip".into())
+                                    .absolute()
+                                    .bottom(px(8.0))
+                                    .h(px(24.0))
+                                    .w(px(100.0)),
+                            )
+                        }))
+                        .child(div().h(px(self.queue_height)))
+                        .child(
+                            div()
+                                .id("composer-card")
+                                .debug_selector(|| "composer-card".into())
+                                .relative()
+                                .h(px(60.0))
+                                .when(!self.voice, |card| {
+                                    card.child(
+                                        div()
+                                            .id("plan-chip")
+                                            .debug_selector(|| "plan-chip".into())
+                                            .absolute()
+                                            .top(px(-32.0 - self.queue_height))
+                                            .h(px(24.0))
+                                            .w(px(100.0)),
+                                    )
+                                })
+                                .when(self.voice, |card| {
+                                    card.child(
+                                        div()
+                                            .id("voice-chrome")
+                                            .debug_selector(|| "voice-chrome".into())
+                                            .absolute()
+                                            .top(px(-voice_scratchpad::PRESS_TO_TALK_CHROME_HEIGHT))
+                                            .h(px(voice_scratchpad::PRESS_TO_TALK_CHROME_HEIGHT))
+                                            .left(px(10.0))
+                                            .right(px(10.0)),
+                                    )
+                                }),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn approval_lane_keeps_floats_clear_across_widths_and_lifecycle(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| ApprovalLaneHarness {
+            width: 800.0,
+            approval: true,
+            voice: false,
+            queue_height: 0.0,
+        });
+        for width in [800.0, 280.0] {
+            for queue_height in [0.0, 72.0] {
+                for voice in [false, true, false] {
+                    view.update(cx, |view, cx| {
+                        view.width = width;
+                        view.queue_height = queue_height;
+                        view.voice = voice;
+                        view.approval = true;
+                        cx.notify();
+                    });
+                    cx.run_until_parked();
+                    let approval = cx.debug_bounds("approval-card").unwrap();
+                    let marker = cx.debug_bounds("sticky-marker").unwrap();
+                    let chrome = cx
+                        .debug_bounds(if voice {
+                            "voice-chrome"
+                        } else {
+                            "suggestion-chip"
+                        })
+                        .unwrap();
+                    assert!(marker.bottom() <= approval.top());
+                    assert!(
+                        approval.bottom() <= chrome.top(),
+                        "width={width}, queue={queue_height}, voice={voice}"
+                    );
+                    assert!(chrome.bottom() <= cx.debug_bounds("composer-card").unwrap().top());
+                    if !voice {
+                        assert!(approval.bottom() <= cx.debug_bounds("plan-chip").unwrap().top());
+                    }
+                }
+            }
+        }
+        view.update(cx, |view, cx| {
+            view.approval = false;
+            view.voice = false;
+            view.queue_height = 0.0;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(cx.debug_bounds("composer-card").unwrap().top(), px(540.0));
     }
 }

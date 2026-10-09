@@ -56,7 +56,7 @@ pub(super) const AUDIO_QUEUE_CAP: usize = 256;
 /// The reserved strip above a composer card the Press to Talk float
 /// occupies — pinned to the card's top edge, tall enough for the
 /// bubble's bounded scroll so it never pushes the field down.
-const PRESS_TO_TALK_CHROME_HEIGHT: f32 = 156.0;
+pub(super) const PRESS_TO_TALK_CHROME_HEIGHT: f32 = 156.0;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Steady-state socket poll — short enough that queued audio and inbound
