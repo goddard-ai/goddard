@@ -9458,7 +9458,7 @@ fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -
         .line_height(sp(18.0))
         .text_size(sp(12.5))
         .text_color(theme.text)
-        .children(parts.into_iter().enumerate().map(|(index, part)| {
+        .children(parts.into_iter().enumerate().flat_map(|(index, part)| {
             match part {
                 QueuedPreviewPart::Text(text) => {
                     // Keep each word as its own flex item. A whole text run is
@@ -9474,13 +9474,13 @@ fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -
                         })
                         .collect::<Vec<_>>()
                 }
-                QueuedPreviewPart::Chip { icon, label } => queued_preview_chip(
+                QueuedPreviewPart::Chip { icon, label } => vec![queued_preview_chip(
                     SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),
                     icon,
                     label,
                     theme,
                 )
-                .into_any_element(),
+                .into_any_element()],
             }
         }))
 }
