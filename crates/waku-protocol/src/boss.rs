@@ -1812,6 +1812,134 @@ pub enum OutcomeStatus {
     Cancelled,
 }
 
+/// The coarse verdict a settled assignment attempt carries — frozen at
+/// settle time so the row still classifies after the roster record is
+/// gone. The finer-grained [`ExpiryCause`] rides beside it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AssignmentVerdict {
+    /// The admission ended cleanly. Records too old to carry a cause
+    /// read as finished rather than as phantom failures, matching
+    /// [`BossOutcome::assignment_succeeded`].
+    Finished,
+    /// The admission failed or interrupted — a failed turn or launch, a
+    /// provider exit mid-turn, a restart, or a settle that left parked
+    /// prompts or an unanswered ask. A flagged blocker lands here too:
+    /// the job could not finish on its own.
+    Failed,
+    /// A supervisor stopped the admission.
+    Cancelled,
+    /// A live requeue replaced the admission before it settled — a
+    /// model/provider reconfiguration relaunches the same job under a
+    /// new generation rather than settling this one.
+    Superseded,
+    /// The attempt ended before durable history recorded it — only a
+    /// reference or a generation number survived, never a result. A
+    /// row reads this as "details unavailable", never as success.
+    Unavailable,
+}
+
+impl AssignmentVerdict {
+    /// The wire label — digests and lists render the verdict compactly.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Superseded => "superseded",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// How one settled assignment attempt ended — the roster record's verdict
+/// frozen at expiry so the row still answers after retirement, name
+/// reuse, or restart removes the employee.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentSettle {
+    pub verdict: AssignmentVerdict,
+    /// The settle classification the expired record carried — `None` on
+    /// records that predate `expiry` and on rows recovered from a
+    /// reference that proves the verdict without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cause: Option<ExpiryCause>,
+    /// The employee flagged a blocker before it settled.
+    #[serde(default)]
+    pub blocked: bool,
+    /// When the admission settled — `None` where no durable record
+    /// carried the time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub at: Option<u64>,
+}
+
+/// One admission's durable record on an outcome — appended when the
+/// assignment links the employee to the outcome and resolved when the
+/// admission settles. The outcome owns the list, so employee retirement,
+/// name reuse, and daemon restart cannot drop the history, and every
+/// re-admission — resume, retry, requeue — lands as a distinct row under
+/// a fresh generation rather than rewriting the settled one.
+///
+/// `session` doubles as the conversation reference: the task transcript
+/// is keyed by session id and survives the roster record under the
+/// ordinary retention policy, so the row references the conversation
+/// rather than copying it.
+///
+/// Rows written before this record existed are recovered at load where
+/// durable evidence survives: a roster record fills every field, while a
+/// dangling handoff, finisher, or prerequisite reference yields a sparse
+/// row whose missing fields stay `None` — unavailable, never invented.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OutcomeAssignment {
+    /// The assignment's employee session id — its identity and
+    /// conversation reference in one.
+    pub session: Uuid,
+    /// The admission generation the attempt ran — 1+ for ticketed
+    /// admissions; 0 where the admission predates tickets or its
+    /// generation is unrecoverable.
+    #[serde(default)]
+    pub generation: u64,
+    /// The assignee's identity frozen at admission — `None` on rows
+    /// whose roster record was already gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub identity: Option<BossIdentity>,
+    /// The job title captured at admission — `None` where it could not
+    /// be recovered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub job_title: Option<String>,
+    /// Whether this was the designated finishing assignment — `None`
+    /// where the completion behavior could not be recovered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finishes_outcome: Option<bool>,
+    /// The follow-up intent captured at admission — `None` for
+    /// finishers, which carry none, and where it is unrecoverable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub after_success: Option<String>,
+    /// The sibling session ids this admission waited on — kept so a
+    /// waiting row can still name its dependency after the
+    /// prerequisite's record is gone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prerequisites: Vec<Uuid>,
+    /// When the admission entered — `None` where no surviving record
+    /// carried the time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub assigned_at: Option<u64>,
+    /// The settle verdict — `None` while the admission is still in
+    /// flight; a recovered row whose outcome is lost carries
+    /// [`AssignmentVerdict::Unavailable`] rather than staying open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub settled: Option<AssignmentSettle>,
+}
+
 /// A daemon-owned outcome: the durable record assignments serve. One
 /// level of nesting — assignments are employees linked by
 /// `Assignment::outcome_id`; at most one of them is the designated finishing
@@ -1897,6 +2025,13 @@ pub struct BossOutcome {
     /// order, each with actor and time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<OutcomeTransition>,
+    /// Durable assignment history — one row per admission attempt, in
+    /// admission order. The outcome owns the list so the history reads
+    /// the same after the employees' roster records retire or the
+    /// daemon restarts; rows recovered from older data carry only what
+    /// survived.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assignments: Vec<OutcomeAssignment>,
 }
 
 /// A tracked pause on a task — why nothing is assigned right now. A

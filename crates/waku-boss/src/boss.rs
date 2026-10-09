@@ -11,18 +11,19 @@ use uuid::Uuid;
 #[cfg(test)]
 use waku_protocol::boss::BossPersonaUpsert;
 use waku_protocol::boss::{
-    AdmissionBlocker, Assignment, BossDeliverable, BossEmployee, BossFile, BossIdentity,
-    BossOperation, BossOutcome, BossPersona, BossPlan, BossResourcePolicy, BossResult, BossState,
-    BossWave, CompletionConflict, DEFAULT_AFTER_SUCCESS, DispatchNotification, EmployeeExpiry,
-    EmployeeGoal, EmployeeLifecycle, EmployeeSettle, ExpiryCause, HandoffResolution,
-    INTERRUPTION_HISTORY_CAP, InterruptionRecord, MemoryMigrationCandidate, MemoryMigrationReport,
-    ModelLimit, NewOutcome, OutcomeHandoff, OutcomeReminder, OutcomeState, OutcomeTransition,
-    OutcomeWait, PermissionOverrides, PersonaDefaultAction, PersonaDefaultInfo,
-    PersonaDefaultNotice, PersonaDefaultNoticeEntry, PersonaDefaultProposal, PersonaDefaultRole,
-    PersonaDefaultState, PersonaDefaultUndo, PersonaDefaultsState, PersonaPermissions, PlanActor,
-    PlanItem, PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition,
-    SummonTicket, WaveMember, WaveMemberOutcome, WaveNotification, instruction_diff,
-    shipped_persona_default, shipped_persona_revision, shipped_persona_revisions,
+    AdmissionBlocker, Assignment, AssignmentSettle, AssignmentVerdict, BossDeliverable,
+    BossEmployee, BossFile, BossIdentity, BossOperation, BossOutcome, BossPersona, BossPlan,
+    BossResourcePolicy, BossResult, BossState, BossWave, CompletionConflict, DEFAULT_AFTER_SUCCESS,
+    DispatchNotification, EmployeeExpiry, EmployeeGoal, EmployeeLifecycle, EmployeeSettle,
+    ExpiryCause, HandoffResolution, INTERRUPTION_HISTORY_CAP, InterruptionRecord,
+    MemoryMigrationCandidate, MemoryMigrationReport, ModelLimit, NewOutcome, OutcomeAssignment,
+    OutcomeHandoff, OutcomeReminder, OutcomeState, OutcomeTransition, OutcomeWait,
+    PermissionOverrides, PersonaDefaultAction, PersonaDefaultInfo, PersonaDefaultNotice,
+    PersonaDefaultNoticeEntry, PersonaDefaultProposal, PersonaDefaultRole, PersonaDefaultState,
+    PersonaDefaultUndo, PersonaDefaultsState, PersonaPermissions, PlanActor, PlanItem,
+    PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition, SummonTicket,
+    WaveMember, WaveMemberOutcome, WaveNotification, instruction_diff, shipped_persona_default,
+    shipped_persona_revision, shipped_persona_revisions,
 };
 
 /// What an employee's settle did to its task — the daemon's finish tail
@@ -442,6 +443,7 @@ impl BossService {
             normalize_lifecycle(employee);
         }
         reconcile_waves(&mut state, now);
+        reconcile_outcome_assignments(&mut state);
         *self.state.lock() = state;
         *self.interrupted.lock() = self
             .state
@@ -506,6 +508,7 @@ impl BossService {
             normalize_lifecycle(employee);
         }
         reconcile_waves(&mut state, now);
+        reconcile_outcome_assignments(&mut state);
         let service = Self {
             root,
             active: std::sync::atomic::AtomicBool::new(true),
@@ -582,8 +585,10 @@ impl BossService {
     }
 
     pub fn add_employee(&self, employee: BossEmployee) -> anyhow::Result<()> {
+        let now = waku_protocol::model::unix_time();
         self.update(|state| {
-            state.employees.push(employee);
+            state.employees.push(employee.clone());
+            record_assignment_admission(state, &employee, now);
             Ok(())
         })
     }
@@ -1163,6 +1168,7 @@ impl BossService {
             created_at: now,
             completed_at: None,
             history: Vec::new(),
+            assignments: Vec::new(),
         })
     }
 
@@ -2604,6 +2610,7 @@ impl BossService {
                     entry.blocker = None;
                     entry.cancelled = false;
                     entry.expiry = None;
+                    record_assignment_reopened(state, &entry);
                     state.employees.push(entry);
                     wave_member_in_flight(state, session);
                     revived = true;
@@ -2620,6 +2627,8 @@ impl BossService {
                 entry.blocker = None;
                 entry.cancelled = false;
                 entry.expiry = None;
+                let snapshot = entry.clone();
+                record_assignment_reopened(state, &snapshot);
                 revived = true;
             }
             if revived {
@@ -2922,6 +2931,8 @@ impl BossService {
                 reservations.extend(ticket.pending_reservation.take());
                 ticket.pending_resources = None;
             }
+            let employee = entry.clone();
+            record_assignment_settle(state, &employee, now);
             Ok(())
         })?;
         Ok(reservations)
@@ -3055,6 +3066,7 @@ impl BossService {
             }
             employee.ticket = Some(ticket);
             state.employees.push(employee.clone());
+            record_assignment_admission(state, &employee, now);
             Ok(())
         })?;
         Ok(employee)
@@ -3399,11 +3411,17 @@ impl BossService {
             employee.expiry = None;
             employee.queued_at = Some(now);
             employee.ticket = Some(ticket);
-            outcome = Some((employee.clone(), stale_reservations));
+            let snapshot = employee.clone();
+            outcome = Some((snapshot.clone(), stale_reservations));
             // A re-admitted member is back in flight — its recorded
             // outcome clears, and a resolved wave reopens for one more
             // resolution.
             wave_member_in_flight(state, session);
+            // The admission the requeue replaces ends superseded; the
+            // fresh generation's row lands beside it so retries stay
+            // distinct entries rather than rewrites.
+            record_assignment_superseded(state, &snapshot, generation - 1, now);
+            record_assignment_admission(state, &snapshot, now);
             Ok(())
         })?;
         outcome.context("not a Boss employee")
@@ -5903,6 +5921,477 @@ fn reconcile_waves(state: &mut BossState, now: u64) {
                 record_wave_outcome(state, &group, session, *supervisor, *outcome, now);
             }
         }
+    }
+}
+
+/// The verdict a settle's recorded facts yield — a supervisor stop is
+/// cancelled, a flagged blocker or a reporting settle cause is failed,
+/// and anything else finished. Shared by the settle write and the
+/// load-time recovery so a row classifies the same way the roster
+/// record would have.
+fn assignment_verdict(
+    cause: Option<ExpiryCause>,
+    cancelled: bool,
+    blocked: bool,
+) -> AssignmentVerdict {
+    if cancelled || cause == Some(ExpiryCause::Stopped) {
+        AssignmentVerdict::Cancelled
+    } else if blocked || cause.is_some_and(|cause| cause.reports()) {
+        AssignmentVerdict::Failed
+    } else {
+        AssignmentVerdict::Finished
+    }
+}
+
+/// The settle record a roster entry carries — `None` while it is live.
+fn recorded_settle(employee: &BossEmployee) -> Option<AssignmentSettle> {
+    employee.expired.then(|| AssignmentSettle {
+        verdict: assignment_verdict(
+            employee.expiry.as_ref().map(|expiry| expiry.cause),
+            employee.cancelled,
+            employee.blocker.is_some(),
+        ),
+        cause: employee.expiry.as_ref().map(|expiry| expiry.cause),
+        blocked: employee.blocker.is_some(),
+        at: employee.expired_at,
+    })
+}
+
+/// Append or refresh the outcome's durable row for an admission — a
+/// summon enqueue, a requeue's fresh generation, and the legacy roster
+/// push all record here so the row lands in the same durable write as
+/// the roster record. A row already standing for the attempt gets its
+/// live fields refreshed; a recorded settle is never rewritten.
+fn record_assignment_admission(state: &mut BossState, employee: &BossEmployee, now: u64) {
+    let Some(assignment) = &employee.assignment else {
+        return;
+    };
+    let generation = employee
+        .ticket
+        .as_ref()
+        .map(|ticket| ticket.generation)
+        .unwrap_or(0);
+    let Some(task) = state
+        .outcomes
+        .iter_mut()
+        .find(|task| task.id == assignment.outcome_id)
+    else {
+        return;
+    };
+    let row = OutcomeAssignment {
+        session: employee.session_id,
+        generation,
+        identity: Some(employee.identity.clone()),
+        job_title: Some(employee.job_title.clone()),
+        finishes_outcome: Some(assignment.finishes_outcome),
+        // A finisher carries no follow-up intent by admission contract.
+        after_success: (!assignment.finishes_outcome).then(|| assignment.after_success.clone()),
+        prerequisites: assignment.prerequisites.clone(),
+        // The admission's own entry time — `queued_at` is the current
+        // generation's queued-stint start; `created_at` is the original
+        // summon's and would misdate a retry.
+        assigned_at: employee.queued_at.or(Some(now)),
+        settled: recorded_settle(employee),
+    };
+    match task
+        .assignments
+        .iter_mut()
+        .find(|entry| entry.session == row.session && entry.generation == row.generation)
+    {
+        Some(existing) => {
+            existing.identity = row.identity;
+            existing.job_title = row.job_title;
+            existing.finishes_outcome = row.finishes_outcome;
+            existing.after_success = row.after_success;
+            existing.prerequisites = row.prerequisites;
+            existing.assigned_at = existing.assigned_at.or(row.assigned_at);
+            if existing.settled.is_none() {
+                existing.settled = row.settled;
+            }
+        }
+        None => task.assignments.push(row),
+    }
+}
+
+/// Resolve the admission's row in the same durable write that expires
+/// the roster record. A settle landing without a row — a record written
+/// before rows existed — appends the resolved row outright so the
+/// outcome still names the attempt.
+fn record_assignment_settle(state: &mut BossState, employee: &BossEmployee, now: u64) {
+    let Some(assignment) = &employee.assignment else {
+        return;
+    };
+    let generation = employee
+        .ticket
+        .as_ref()
+        .map(|ticket| ticket.generation)
+        .unwrap_or(0);
+    let Some(task) = state
+        .outcomes
+        .iter_mut()
+        .find(|task| task.id == assignment.outcome_id)
+    else {
+        return;
+    };
+    let settle = AssignmentSettle {
+        verdict: assignment_verdict(
+            employee.expiry.as_ref().map(|expiry| expiry.cause),
+            employee.cancelled,
+            employee.blocker.is_some(),
+        ),
+        cause: employee.expiry.as_ref().map(|expiry| expiry.cause),
+        blocked: employee.blocker.is_some(),
+        at: employee.expired_at.or(Some(now)),
+    };
+    match task
+        .assignments
+        .iter_mut()
+        .find(|entry| entry.session == employee.session_id && entry.generation == generation)
+    {
+        Some(row) => row.settled = Some(settle),
+        None => task.assignments.push(OutcomeAssignment {
+            session: employee.session_id,
+            generation,
+            identity: Some(employee.identity.clone()),
+            job_title: Some(employee.job_title.clone()),
+            finishes_outcome: Some(assignment.finishes_outcome),
+            after_success: (!assignment.finishes_outcome).then(|| assignment.after_success.clone()),
+            prerequisites: assignment.prerequisites.clone(),
+            // `created_at` dates the original summon — only the first
+            // generation may claim it; later admissions keep `queued_at`
+            // or stay undated.
+            assigned_at: employee
+                .queued_at
+                .or_else(|| employee.created_at.filter(|_| generation <= 1)),
+            settled: Some(settle),
+        }),
+    }
+}
+
+/// Mark the row a live requeue leaves behind — the replaced generation
+/// never settles; the fresh admission supersedes it. Rows that already
+/// settled — an expired record's last admission — stand untouched.
+fn record_assignment_superseded(
+    state: &mut BossState,
+    employee: &BossEmployee,
+    generation: u64,
+    now: u64,
+) {
+    let Some(assignment) = &employee.assignment else {
+        return;
+    };
+    let Some(row) = state
+        .outcomes
+        .iter_mut()
+        .find(|task| task.id == assignment.outcome_id)
+        .and_then(|task| {
+            task.assignments.iter_mut().find(|entry| {
+                entry.session == employee.session_id && entry.generation == generation
+            })
+        })
+    else {
+        return;
+    };
+    if row.settled.is_none() {
+        row.settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Superseded,
+            cause: None,
+            blocked: false,
+            at: Some(now),
+        });
+    }
+}
+
+/// Reviving an employee in place re-opens the attempt its row recorded —
+/// clear the settle so the row reads in flight again and the next expiry
+/// records the outcome afresh.
+fn record_assignment_reopened(state: &mut BossState, employee: &BossEmployee) {
+    let Some(assignment) = &employee.assignment else {
+        return;
+    };
+    let generation = employee
+        .ticket
+        .as_ref()
+        .map(|ticket| ticket.generation)
+        .unwrap_or(0);
+    if let Some(row) = state
+        .outcomes
+        .iter_mut()
+        .find(|task| task.id == assignment.outcome_id)
+        .and_then(|task| {
+            task.assignments.iter_mut().find(|entry| {
+                entry.session == employee.session_id && entry.generation == generation
+            })
+        })
+    {
+        row.settled = None;
+    }
+}
+
+/// Load-time recovery for outcomes written before assignment rows
+/// existed — the same role [`reconcile_waves`] plays for wave tallies.
+/// Rebuilds each outcome's rows from the evidence that survives: every
+/// linked roster record — live or retired — fills a complete row, gaps
+/// in its generation count become `Unavailable` rows (the counter
+/// proves the attempts existed), and references the outcome already
+/// held — handoffs, a completion conflict, the finishing designation,
+/// sibling prerequisites — yield sparse rows for assignments whose
+/// records are gone. Missing fields stay missing: an unrecovered name,
+/// job, or date is never invented. The pass is idempotent — the rows it
+/// appends cover the same evidence on the next load.
+fn reconcile_outcome_assignments(state: &mut BossState) {
+    // Snapshot the linked roster once so the per-outcome pass can borrow
+    // the assignments list mutably.
+    let linked: Vec<BossEmployee> = state
+        .employees
+        .iter()
+        .chain(state.retired_employees.iter())
+        .filter(|entry| entry.assignment.is_some())
+        .cloned()
+        .collect();
+    for task in &mut state.outcomes {
+        // References the record itself carries: handoffs prove an
+        // ordinary assignment's accepted success — its attempt, settle
+        // time, and captured intent — and a completion conflict proves
+        // the finisher's. Each yields a row keyed to its attempt.
+        let mut refs: std::collections::BTreeMap<(Uuid, u64), OutcomeAssignment> =
+            std::collections::BTreeMap::new();
+        for handoff in &task.handoffs {
+            refs.entry((handoff.assignment, handoff.attempt))
+                .or_insert_with(|| OutcomeAssignment {
+                    session: handoff.assignment,
+                    generation: handoff.attempt,
+                    identity: None,
+                    job_title: None,
+                    finishes_outcome: Some(false),
+                    after_success: Some(handoff.intent.clone()),
+                    prerequisites: Vec::new(),
+                    assigned_at: None,
+                    settled: Some(AssignmentSettle {
+                        verdict: AssignmentVerdict::Finished,
+                        cause: None,
+                        blocked: false,
+                        at: Some(handoff.created_at),
+                    }),
+                });
+        }
+        if let Some(conflict) = &task.completion_conflict {
+            refs.entry((conflict.assignment, conflict.attempt))
+                .or_insert_with(|| OutcomeAssignment {
+                    session: conflict.assignment,
+                    generation: conflict.attempt,
+                    identity: None,
+                    job_title: None,
+                    finishes_outcome: Some(true),
+                    after_success: None,
+                    prerequisites: Vec::new(),
+                    assigned_at: None,
+                    settled: Some(AssignmentSettle {
+                        verdict: AssignmentVerdict::Finished,
+                        cause: None,
+                        blocked: false,
+                        at: Some(conflict.at),
+                    }),
+                });
+        }
+        // Session-level references — the finishing designation and the
+        // sibling prerequisites a linked employee still names — prove an
+        // assignment existed but not which generation ran it.
+        let mut ref_sessions: Vec<(Uuid, Option<bool>)> = Vec::new();
+        if let Some(finisher) = task.finishing_assignment {
+            ref_sessions.push((finisher, Some(true)));
+        }
+        let roster: Vec<&BossEmployee> = linked
+            .iter()
+            .filter(|entry| {
+                entry
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == task.id)
+            })
+            .collect();
+        for employee in &roster {
+            for prerequisite in &employee.assignment.as_ref().unwrap().prerequisites {
+                ref_sessions.push((*prerequisite, None));
+            }
+        }
+        // Pending rows carry a sort key — the known admission or settle
+        // time, else the end — so recovered history lands in
+        // deterministic chronological order: an employee's earlier
+        // generations always precede its latest.
+        let mut pending: Vec<(u64, Uuid, u64, OutcomeAssignment)> = Vec::new();
+        let covered = |assignments: &[OutcomeAssignment],
+                       pending: &[(u64, Uuid, u64, OutcomeAssignment)],
+                       session: Uuid,
+                       generation: u64| {
+            assignments
+                .iter()
+                .chain(pending.iter().map(|(.., row)| row))
+                .any(|row| row.session == session && row.generation == generation)
+        };
+        let mut roster_sorted = roster;
+        roster_sorted.sort_by_key(|entry| (entry.created_at.unwrap_or(u64::MAX), entry.session_id));
+        for employee in roster_sorted {
+            let assignment = employee.assignment.as_ref().unwrap();
+            let session = employee.session_id;
+            let generation = employee
+                .ticket
+                .as_ref()
+                .map(|ticket| ticket.generation)
+                .unwrap_or(0);
+            let key = employee.created_at.unwrap_or(u64::MAX);
+            // Every generation before the ticket's current one provably
+            // ended — the admission count survives even when the results
+            // do not. Recorded interruptions pair with those generations
+            // in order, but only when the count matches exactly: a
+            // settle that never counted as an interruption would skew
+            // the pairing, so partial evidence stays unassigned.
+            let interruptions = employee
+                .ticket
+                .as_ref()
+                .map(|ticket| ticket.interruptions.as_slice())
+                .unwrap_or_default();
+            let pairable = interruptions.len() as u64 == generation.saturating_sub(1);
+            for prior in 1..generation {
+                if covered(&task.assignments, &pending, session, prior) {
+                    continue;
+                }
+                let row = if let Some(row) = refs.remove(&(session, prior)) {
+                    row
+                } else {
+                    let settle = if pairable {
+                        let record = &interruptions[(prior - 1) as usize];
+                        AssignmentSettle {
+                            verdict: assignment_verdict(Some(record.cause), false, false),
+                            cause: Some(record.cause),
+                            blocked: false,
+                            at: Some(record.at),
+                        }
+                    } else {
+                        AssignmentSettle {
+                            verdict: AssignmentVerdict::Unavailable,
+                            cause: None,
+                            blocked: false,
+                            at: None,
+                        }
+                    };
+                    // The admission's own fields are fixed at summon, so
+                    // the surviving record still speaks for them — only
+                    // the attempt's own timing and result are lost.
+                    OutcomeAssignment {
+                        session,
+                        generation: prior,
+                        identity: Some(employee.identity.clone()),
+                        job_title: Some(employee.job_title.clone()),
+                        finishes_outcome: Some(assignment.finishes_outcome),
+                        after_success: (!assignment.finishes_outcome)
+                            .then(|| assignment.after_success.clone()),
+                        prerequisites: assignment.prerequisites.clone(),
+                        assigned_at: None,
+                        settled: Some(settle),
+                    }
+                };
+                pending.push((key, session, prior, row));
+            }
+            // The current generation's row — a fresh append, or a fill
+            // of whatever a sparse recovered row still lacks.
+            if let Some(row) = task
+                .assignments
+                .iter_mut()
+                .find(|entry| entry.session == session && entry.generation == generation)
+            {
+                if row.identity.is_none() {
+                    row.identity = Some(employee.identity.clone());
+                }
+                if row.job_title.is_none() {
+                    row.job_title = Some(employee.job_title.clone());
+                }
+                if row.finishes_outcome.is_none() {
+                    row.finishes_outcome = Some(assignment.finishes_outcome);
+                }
+                if row.after_success.is_none() && !assignment.finishes_outcome {
+                    row.after_success = Some(assignment.after_success.clone());
+                }
+                if row.prerequisites.is_empty() {
+                    row.prerequisites = assignment.prerequisites.clone();
+                }
+                if row.assigned_at.is_none() {
+                    // Same dating rule as the admission write: only a
+                    // first generation may claim the summon time.
+                    row.assigned_at = employee
+                        .queued_at
+                        .or_else(|| employee.created_at.filter(|_| generation <= 1));
+                }
+                if row.settled.is_none() {
+                    row.settled = recorded_settle(employee);
+                }
+            } else {
+                pending.push((
+                    key,
+                    session,
+                    generation,
+                    OutcomeAssignment {
+                        session,
+                        generation,
+                        identity: Some(employee.identity.clone()),
+                        job_title: Some(employee.job_title.clone()),
+                        finishes_outcome: Some(assignment.finishes_outcome),
+                        after_success: (!assignment.finishes_outcome)
+                            .then(|| assignment.after_success.clone()),
+                        prerequisites: assignment.prerequisites.clone(),
+                        assigned_at: employee
+                            .queued_at
+                            .or_else(|| employee.created_at.filter(|_| generation <= 1)),
+                        settled: recorded_settle(employee),
+                    },
+                ));
+            }
+        }
+        // Attempt-level references no roster row covered — the record is
+        // gone; the sparse row is the honest remainder.
+        for ((session, attempt), row) in refs {
+            if covered(&task.assignments, &pending, session, attempt) {
+                continue;
+            }
+            let key = row.settled.as_ref().and_then(|settle| settle.at);
+            pending.push((key.unwrap_or(u64::MAX), session, attempt, row));
+        }
+        // Session-level references prove only that the assignment
+        // existed — generation, timing, and result are all unavailable.
+        for (session, finishes_outcome) in ref_sessions {
+            let known = task
+                .assignments
+                .iter()
+                .chain(pending.iter().map(|(.., row)| row))
+                .any(|row| row.session == session);
+            if known {
+                continue;
+            }
+            pending.push((
+                u64::MAX,
+                session,
+                0,
+                OutcomeAssignment {
+                    session,
+                    generation: 0,
+                    identity: None,
+                    job_title: None,
+                    finishes_outcome,
+                    after_success: None,
+                    prerequisites: Vec::new(),
+                    assigned_at: None,
+                    settled: Some(AssignmentSettle {
+                        verdict: AssignmentVerdict::Unavailable,
+                        cause: None,
+                        blocked: false,
+                        at: None,
+                    }),
+                },
+            ));
+        }
+        pending.sort_by_key(|(key, session, generation, _)| (*key, *session, *generation));
+        task.assignments
+            .extend(pending.into_iter().map(|(.., row)| row));
     }
 }
 
@@ -11208,6 +11697,386 @@ mod memory_op_tests {
                 .unwrap()
                 .contains(&other.id),
             "completion suppresses the pending reminder silently"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A ticket stamped for the summon path — outcome linkage rides the
+    /// ticket like the daemon's dispatch does.
+    fn test_ticket(outcome_id: Option<Uuid>) -> SummonTicket {
+        SummonTicket {
+            sequence: 0,
+            generation: 1,
+            provider: ProviderKind::Codex,
+            model: "gpt-5.5".into(),
+            reasoning_effort: None,
+            prompt: "do it".into(),
+            project: "/tmp".into(),
+            workspace: None,
+            base_branch: None,
+            adopt_worktree: None,
+            resources: waku_protocol::resources::ResourceSet::default(),
+            allow_burst: false,
+            pending_prompts: Vec::new(),
+            group_id: None,
+            priority: None,
+            outcome_id,
+            reservation: None,
+            pending_resources: None,
+            pending_reservation: None,
+            blocked_by: Vec::new(),
+            dispatch_event: None,
+            interruptions: Vec::new(),
+            resume_count: 0,
+            last_resumed_cause: None,
+        }
+    }
+
+    /// The daemon's summon path in miniature — the employee carries its
+    /// assignment and a ticket stamped for the outcome into the one
+    /// durable admission write.
+    fn admit_ticketed(
+        service: &BossService,
+        boss: Uuid,
+        outcome_id: Uuid,
+        title: &str,
+    ) -> BossEmployee {
+        let assignment = service
+            .assignment_admission(Some(outcome_id), None, false, None, Vec::new(), None)
+            .unwrap()
+            .unwrap();
+        let mut employee = service
+            .prepare_employee(
+                boss,
+                Some(service.document().personas[0].id),
+                title.into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.assignment = Some(assignment);
+        service
+            .enqueue_ticket(employee, test_ticket(Some(outcome_id)))
+            .unwrap()
+    }
+
+    /// Every admission writes a durable row on the outcome — employee,
+    /// job, and settle verdict read the same after the roster record
+    /// retires and the service restarts, in admission order.
+    #[test]
+    fn assignment_history_survives_retirement_and_restart() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-history-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Ship durable history", "criteria")
+            .unwrap();
+        let first = admit_ticketed(&service, boss, task.id, "Probe the failure");
+        let second = admit_ticketed(&service, boss, task.id, "Land the fix");
+        // The first attempt fails; the second finishes.
+        service
+            .begin_finishing(first.session_id, false, false, ExpiryCause::Failed)
+            .unwrap();
+        service.complete_expiry(first.session_id, None).unwrap();
+        settle_ok(&service, second.session_id);
+
+        let rows = outcome(&service, task.id).assignments;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].session, first.session_id);
+        assert_eq!(rows[0].generation, 1);
+        assert_eq!(rows[0].job_title.as_deref(), Some("Probe the failure"));
+        assert_eq!(rows[0].identity.as_ref().unwrap().name, first.identity.name);
+        assert!(rows[0].assigned_at.is_some());
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Failed
+        );
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().cause,
+            Some(ExpiryCause::Failed)
+        );
+        assert_eq!(rows[1].session, second.session_id);
+        assert_eq!(
+            rows[1].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Finished
+        );
+
+        // Retirement empties the roster; the rows are the outcome's own.
+        service
+            .update(|state| {
+                for employee in &mut state.employees {
+                    employee.expired_at = Some(100);
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(service.retire_expired(3_700).unwrap().len(), 2);
+        assert!(service.document().employees.is_empty());
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        let rows = outcome(&restored, task.id).assignments;
+        assert_eq!(
+            rows.len(),
+            2,
+            "history outlives the roster records and the restart"
+        );
+        assert_eq!(rows[0].identity.as_ref().unwrap().name, first.identity.name);
+        assert_eq!(rows[1].job_title.as_deref(), Some("Land the fix"));
+        // Even losing every roster record cannot take the history — the
+        // outcome owns the rows itself.
+        restored
+            .update(|state| {
+                state.retired_employees.clear();
+                Ok(())
+            })
+            .unwrap();
+        let rows = outcome(&restored, task.id).assignments;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].job_title.as_deref(), Some("Probe the failure"));
+        assert_eq!(
+            rows[1].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Finished
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A requeue is a distinct attempt — the row for the generation it
+    /// replaces stays beside the fresh one, a live replacement records
+    /// superseded rather than fabricating a settle, and a failed retry
+    /// is never rewritten as success.
+    #[test]
+    fn retries_land_as_distinct_history_rows() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-retry-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Ship durable history", "criteria")
+            .unwrap();
+        let employee = admit_ticketed(&service, boss, task.id, "Probe the failure");
+        // Drive the first generation to working, then requeue it — the
+        // live replacement ends the admission superseded.
+        service
+            .mark_dispatching(employee.session_id, 1, None)
+            .unwrap();
+        service.mark_working(employee.session_id, 1).unwrap();
+        service
+            .requeue_employee(employee.session_id, test_ticket(Some(task.id)), |_| {})
+            .unwrap();
+        let rows = outcome(&service, task.id).assignments;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].generation, 1);
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Superseded
+        );
+        assert_eq!(rows[1].generation, 2);
+        assert!(rows[1].settled.is_none(), "the fresh attempt is live");
+        // The second generation's own settle lands on its own row.
+        service
+            .begin_finishing(employee.session_id, false, false, ExpiryCause::Failed)
+            .unwrap();
+        service.complete_expiry(employee.session_id, None).unwrap();
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        let rows = outcome(&restored, task.id).assignments;
+        assert_eq!(rows.len(), 2, "both attempts survive the restart");
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Superseded
+        );
+        assert_eq!(
+            rows[1].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Failed
+        );
+        // A resumed third attempt appends — the failed row stands.
+        restored
+            .requeue_employee(employee.session_id, test_ticket(Some(task.id)), |_| {})
+            .unwrap();
+        let rows = outcome(&restored, task.id).assignments;
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[1].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Failed
+        );
+        assert_eq!(rows[2].generation, 3);
+        assert!(rows[2].settled.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Recovery for documents written before assignment rows existed:
+    /// roster records fill complete rows, gaps in a ticket's generation
+    /// count pair with its recorded interruptions only when the count
+    /// matches exactly, and references the outcome already held yield
+    /// sparse rows — unavailable, never invented.
+    #[test]
+    fn legacy_outcomes_recover_honest_assignment_history() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-legacy-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Audit the ledgers", "criteria")
+            .unwrap();
+        // A retired employee on its third ticketed generation: the two
+        // prior admissions provably ended, and its recorded
+        // interruptions pair with them in order.
+        let mut veteran = service
+            .prepare_employee(
+                boss,
+                Some(service.document().personas[0].id),
+                "Ledger audit".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        veteran.assignment = Some(Assignment {
+            outcome_id: task.id,
+            after_success: DEFAULT_AFTER_SUCCESS.into(),
+            finishes_outcome: false,
+            prerequisites: Vec::new(),
+        });
+        veteran.created_at = Some(1_000);
+        veteran.set_lifecycle(EmployeeLifecycle::Expired, 2_500);
+        veteran.expiry = Some(EmployeeExpiry::settle(ExpiryCause::Finished));
+        let mut ticket = test_ticket(Some(task.id));
+        ticket.generation = 3;
+        ticket.interruptions = vec![
+            InterruptionRecord {
+                cause: ExpiryCause::Restarted,
+                at: 1_400,
+            },
+            InterruptionRecord {
+                cause: ExpiryCause::ExitedMidTurn,
+                at: 1_900,
+            },
+        ];
+        veteran.ticket = Some(ticket);
+        let veteran_name = veteran.identity.name.clone();
+        // A ticketless record — its generation predates admission
+        // tickets — still linked and still live.
+        let mut legacy = service
+            .prepare_employee(
+                boss,
+                Some(service.document().personas[0].id),
+                "Reconcile the books".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        legacy.assignment = Some(Assignment {
+            outcome_id: task.id,
+            after_success: "report up".into(),
+            finishes_outcome: false,
+            prerequisites: Vec::new(),
+        });
+        legacy.created_at = Some(1_200);
+        let legacy_name = legacy.identity.name.clone();
+        // Dangling evidence: a handoff and the finisher pointer name
+        // assignments whose roster records are gone.
+        let veteran_session = veteran.session_id;
+        let legacy_session = legacy.session_id;
+        let ghost_handoff = Uuid::new_v4();
+        let ghost_finisher = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.retired_employees.push(veteran);
+                state.employees.push(legacy);
+                let task = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|task| task.id == task.id)
+                    .unwrap();
+                task.handoffs.push(OutcomeHandoff {
+                    id: Uuid::new_v4(),
+                    assignment: ghost_handoff,
+                    attempt: 1,
+                    intent: "report up".into(),
+                    created_at: 1_100,
+                    resolution: None,
+                });
+                task.finishing_assignment = Some(ghost_finisher);
+                Ok(())
+            })
+            .unwrap();
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        let rows = outcome(&restored, task.id).assignments;
+        // Order is admission-chronological by the evidence that survives:
+        // the veteran's admissions first (its summon predates the ghost
+        // handoff's settle), then the ghost handoff at its recorded time,
+        // the live legacy record, and the dateless finisher reference
+        // last.
+        let order: Vec<(Uuid, u64)> = rows
+            .iter()
+            .map(|row| (row.session, row.generation))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                (veteran_session, 1),
+                (veteran_session, 2),
+                (veteran_session, 3),
+                (ghost_handoff, 1),
+                (legacy_session, 0),
+                (ghost_finisher, 0),
+            ]
+        );
+        // The veteran's earlier generations pair with its recorded
+        // interruptions — real causes and times, not invented detail.
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().cause,
+            Some(ExpiryCause::Restarted)
+        );
+        assert_eq!(rows[0].settled.as_ref().unwrap().at, Some(1_400));
+        assert_eq!(
+            rows[0].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Failed
+        );
+        assert_eq!(rows[0].identity.as_ref().unwrap().name, veteran_name);
+        assert!(rows[0].assigned_at.is_none(), "the attempt's start is lost");
+        assert_eq!(
+            rows[1].settled.as_ref().unwrap().cause,
+            Some(ExpiryCause::ExitedMidTurn)
+        );
+        // Its current generation recovers the record — but not the
+        // admission time: a third generation's start is not on the
+        // ticket, so the row stays honestly undated rather than claiming
+        // the original summon.
+        assert_eq!(rows[2].job_title.as_deref(), Some("Ledger audit"));
+        assert_eq!(rows[2].assigned_at, None);
+        assert_eq!(
+            rows[2].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Finished
+        );
+        // The handoff's row proves a finished success — its attempt,
+        // intent, and settle time — with identity honestly absent.
+        assert_eq!(rows[3].finishes_outcome, Some(false));
+        assert_eq!(rows[3].after_success.as_deref(), Some("report up"));
+        assert_eq!(
+            rows[3].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Finished
+        );
+        assert!(rows[3].identity.is_none() && rows[3].job_title.is_none());
+        // The ticketless record reads as generation 0, still in flight.
+        assert_eq!(rows[4].identity.as_ref().unwrap().name, legacy_name);
+        assert!(rows[4].settled.is_none());
+        // The finisher reference yields only what it can prove — the
+        // session and its role; everything else stays unavailable.
+        assert_eq!(rows[5].finishes_outcome, Some(true));
+        assert!(rows[5].identity.is_none() && rows[5].job_title.is_none());
+        assert!(rows[5].assigned_at.is_none());
+        assert_eq!(
+            rows[5].settled.as_ref().unwrap().verdict,
+            AssignmentVerdict::Unavailable
+        );
+        // The pass is idempotent — a second open recovers nothing twice.
+        drop(restored);
+        let again = BossService::open(root.clone()).unwrap();
+        let rows = outcome(&again, task.id).assignments;
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.session, row.generation))
+                .collect::<Vec<_>>(),
+            order
         );
         fs::remove_dir_all(root).unwrap();
     }
