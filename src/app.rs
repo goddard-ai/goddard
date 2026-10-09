@@ -3039,10 +3039,10 @@ pub struct Waku {
     /// source for the `daemon.recovery` analytics event.
     daemon_recovery_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
     daemon_recovery_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonRecovery)>,
-    /// The local supervisor's reachability stream — drives the degraded
-    /// banner; remote hosts read their supervisor directly instead.
-    daemon_status_tx: Sender<waku_client::DaemonStatus>,
-    daemon_status_events: Receiver<waku_client::DaemonStatus>,
+    /// Supervisor reachability changes drive the local degraded banner and
+    /// repaint sidebar rows for remote hosts already seen online.
+    daemon_status_tx: Sender<(waku_client::DaemonKey, waku_client::DaemonStatus)>,
+    daemon_status_events: Receiver<(waku_client::DaemonKey, waku_client::DaemonStatus)>,
     /// The local daemon's latest announced reachability — mirrors the
     /// supervisor's status for the banner.
     local_daemon_status: waku_client::DaemonStatus,

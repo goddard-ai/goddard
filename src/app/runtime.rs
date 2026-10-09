@@ -1504,24 +1504,20 @@ impl Waku {
                 }
             })
             .ok();
-        // Only the local daemon gets a status surface — remote outages
-        // belong to the host settings row, not a workspace banner.
-        if key == waku_client::DaemonKey::Local {
-            let statuses = supervisor.subscribe_status();
-            let status_updates = self.daemon_status_tx.clone();
-            let status_wake = self.event_wake_tx.clone();
-            std::thread::Builder::new()
-                .name("waku-daemon-status".into())
-                .spawn(move || {
-                    while let Ok(status) = statuses.recv() {
-                        if status_updates.send(status).is_err() {
-                            return;
-                        }
-                        signal_event_pump(&status_wake);
+        let statuses = supervisor.subscribe_status();
+        let status_updates = self.daemon_status_tx.clone();
+        let status_wake = self.event_wake_tx.clone();
+        std::thread::Builder::new()
+            .name(format!("waku-daemon-status-{key:?}"))
+            .spawn(move || {
+                while let Ok(status) = statuses.recv() {
+                    if status_updates.send((key, status)).is_err() {
+                        return;
                     }
-                })
-                .ok();
-        }
+                    signal_event_pump(&status_wake);
+                }
+            })
+            .ok();
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
             .spawn(move || {
@@ -1774,9 +1770,16 @@ impl Waku {
     /// latest announced status.
     fn drain_daemon_status_events(&mut self, _cx: &mut Context<Self>) -> bool {
         let mut changed = false;
-        while let Ok(status) = self.daemon_status_events.try_recv() {
-            changed |= self.local_daemon_status != status;
-            self.local_daemon_status = status;
+        while let Ok((key, status)) = self.daemon_status_events.try_recv() {
+            changed |= daemon_status_change_repaints_sidebar(
+                key,
+                self.local_daemon_status,
+                status,
+                &self.remote_hosts_seen_online,
+            );
+            if key == waku_client::DaemonKey::Local {
+                self.local_daemon_status = status;
+            }
         }
         changed
     }
@@ -8069,6 +8072,51 @@ impl Waku {
             self.save();
         }
         changed || selected_changed
+    }
+}
+
+fn daemon_status_change_repaints_sidebar(
+    key: waku_client::DaemonKey,
+    local_status: waku_client::DaemonStatus,
+    status: waku_client::DaemonStatus,
+    remote_hosts_seen_online: &HashSet<Uuid>,
+) -> bool {
+    match key {
+        waku_client::DaemonKey::Local => local_status != status,
+        waku_client::DaemonKey::Remote(host) => remote_hosts_seen_online.contains(&host),
+    }
+}
+
+#[cfg(test)]
+mod daemon_status_sidebar_tests {
+    use super::daemon_status_change_repaints_sidebar;
+    use std::collections::HashSet;
+    use uuid::Uuid;
+
+    #[test]
+    fn remote_disconnect_repaints_seen_host_but_not_first_connect_visibility() {
+        let host = Uuid::from_u128(7);
+        let remote = waku_client::DaemonKey::Remote(host);
+        let seen = HashSet::from([host]);
+
+        assert!(daemon_status_change_repaints_sidebar(
+            remote,
+            waku_client::DaemonStatus::Connected,
+            waku_client::DaemonStatus::Unreachable,
+            &seen,
+        ));
+        assert!(!daemon_status_change_repaints_sidebar(
+            remote,
+            waku_client::DaemonStatus::Connected,
+            waku_client::DaemonStatus::Unreachable,
+            &HashSet::new(),
+        ));
+        assert!(!daemon_status_change_repaints_sidebar(
+            waku_client::DaemonKey::Local,
+            waku_client::DaemonStatus::Connected,
+            waku_client::DaemonStatus::Connected,
+            &seen,
+        ));
     }
 }
 
