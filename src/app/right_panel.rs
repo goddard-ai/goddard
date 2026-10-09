@@ -9996,17 +9996,20 @@ impl Waku {
                 .filter(|title| !title.is_empty() && *title != row.name)
                 .map(str::to_owned)
         });
-        let title = session_title
-            .or_else(|| {
-                session
-                    .and_then(|session| session.thread_goal.as_ref())
-                    .map(|goal| goal.objective.trim())
-                    .filter(|objective| !objective.is_empty())
-                    .map(str::to_owned)
-            })
-            .or_else(|| row.queued_objective.clone())
-            .or_else(|| (!row.job_title.is_empty()).then(|| row.job_title.clone()))
-            .unwrap_or_else(|| tr!("boss.goals_untitled"));
+        let title = if !row.job_title.trim().is_empty() {
+            row.job_title.trim().to_owned()
+        } else {
+            session_title
+                .or_else(|| {
+                    session
+                        .and_then(|session| session.thread_goal.as_ref())
+                        .map(|goal| goal.objective.trim())
+                        .filter(|objective| !objective.is_empty())
+                        .map(str::to_owned)
+                })
+                .or_else(|| row.queued_objective.clone())
+                .unwrap_or_else(|| tr!("boss.goals_untitled"))
+        };
         let project = session.and_then(|session| {
             self.state
                 .projects

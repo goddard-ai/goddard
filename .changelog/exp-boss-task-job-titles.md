@@ -1,0 +1,1 @@
+- Boss employee tasks in the Tasks tab now show the employee's job title. When no job title is set, the existing task title fallback remains in effect.
