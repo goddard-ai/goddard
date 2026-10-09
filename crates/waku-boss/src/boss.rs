@@ -2494,7 +2494,7 @@ impl BossService {
                 if plan.finalized_at.is_some() {
                     format!("\nThis planning session's design doc {} is finalized and frozen — the document can no longer be edited. Implementation is the boss's job now: the approval was reported to the boss chat, which coordinates the work from there. Your remaining role is answering questions about the approved design — direct implementation requests back to the boss chat.", plan.plan_file)
                 } else {
-                    format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at {} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. While drafting you may summon employees for design research and audits, but never to build. When the design is ready, let the user review it and click Finalize plan in this session when they are ready. Do not call `finalizePlan` on your own; finalization freezes the document immediately. Approval ends your design work: the finalized doc is reported to the boss chat and the boss coordinates implementation from there.", plan.idea, plan.plan_file)
+                    format!("\nThis is a planning session for \"{}\", and your role is product designer. Draft and revise the design doc at {} with `writeFile`: cover the user experience, flows, behaviors, edge cases, tradeoffs, and decisions with their rationale — implementation details like file paths and code structure are out of scope; the employees who implement it decide the technical how. When outlining work, identify which items can run in parallel. Do not serialize independent work merely to avoid merge conflicts; employees can resolve conflicts. Mark dependencies only for real prerequisites or shared-state constraints. While drafting you may summon employees for design research and audits, but never to build. When the design is ready, let the user review it and click Finalize plan in this session when they are ready. Do not call `finalizePlan` on your own; finalization freezes the document immediately. Approval ends your design work: the finalized doc is reported to the boss chat and the boss coordinates implementation from there.", plan.idea, plan.plan_file)
                 }
             })
             .map(|instructions| {
@@ -9733,6 +9733,42 @@ mod memory_op_tests {
         ] {
             assert!(normalize_plan_file(spelling).is_err(), "{spelling}");
         }
+    }
+
+    /// New planning sessions inherit work breakdown guidance from their
+    /// planning role even when no execution has started yet.
+    #[test]
+    fn new_planning_sessions_receive_parallel_work_guidance() {
+        let root = std::env::temp_dir().join(format!("boss-plan-parallel-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        let planning = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                state.planning.push(BossPlan {
+                    id: Uuid::new_v4(),
+                    session_id: planning,
+                    plan_file: "plans/parallel.md".into(),
+                    idea: "Parallel work".into(),
+                    finalized_at: None,
+                    items: Vec::new(),
+                    outcome: None,
+                    history: Vec::new(),
+                });
+                Ok(())
+            })
+            .unwrap();
+
+        let prompt = service.prompt_with_context(planning, "start planning".into());
+        assert!(prompt.contains("identify which items can run in parallel"));
+        assert!(prompt.contains(
+            "Do not serialize independent work merely to avoid merge conflicts"
+        ));
+        assert!(prompt.contains(
+            "Mark dependencies only for real prerequisites or shared-state constraints"
+        ));
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// A planning session is the same principal as the boss chat for

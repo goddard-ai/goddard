@@ -1,0 +1,1 @@
+- Planning sessions now mark independent work that can run in parallel and reserve dependencies for real prerequisites or shared-state constraints.
