@@ -4300,7 +4300,7 @@ impl BossService {
                     fs::create_dir_all(parent)?;
                 }
                 atomic_write(&file, content.as_bytes())?;
-                self.update(|_| Ok(()))?;
+                self.touch()?;
                 Ok(BossResult::Saved)
             }
             BossOperation::CreateFolder { path } => {
@@ -4308,7 +4308,7 @@ impl BossService {
                 validate_relative(&path, false)?;
                 let path = remap_plan_path(&path);
                 fs::create_dir_all(self.file_path(&path, false)?)?;
-                self.update(|_| Ok(()))?;
+                self.touch()?;
                 Ok(BossResult::Saved)
             }
             BossOperation::PublishDeliverable {
@@ -4851,7 +4851,7 @@ impl BossService {
         &self,
         change: impl FnOnce(&mut BossState) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        let mut state = self.state.lock();
+        let state = self.state.lock();
         let mut next = state.clone();
         change(&mut next)?;
         // A change that lands nothing — e.g. a scheduler pass over an
@@ -4860,6 +4860,23 @@ impl BossService {
         if serde_json::to_vec(&next)? == serde_json::to_vec(&*state)? {
             return Ok(());
         }
+        self.commit(state, next)
+    }
+
+    /// A write whose effect lives outside `BossState` — a Boss file or
+    /// folder — has no field for `update`'s change detection to notice, but
+    /// subscribers still re-arm cached reads off the broadcast revision.
+    fn touch(&self) -> anyhow::Result<()> {
+        let state = self.state.lock();
+        let next = state.clone();
+        self.commit(state, next)
+    }
+
+    fn commit(
+        &self,
+        mut state: parking_lot::MutexGuard<'_, BossState>,
+        mut next: BossState,
+    ) -> anyhow::Result<()> {
         next.revision = next.revision.saturating_add(1);
         self.save(&next)?;
         *state = next;
@@ -7515,6 +7532,49 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&persona_file).unwrap(),
             "revised persona"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn file_writes_bump_the_revision_and_notify() {
+        let root = std::env::temp_dir().join(format!("boss-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let notifications = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let count = notifications.clone();
+        service.set_task_notifier(std::sync::Arc::new(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }));
+        // File and folder writes land outside BossState, so `update`'s
+        // change detection sees nothing — they still owe subscribers the
+        // revision bump that re-arms cached document reads.
+        let revision = service.document().revision;
+        service
+            .handle(
+                None,
+                BossOperation::WriteFile {
+                    path: "plans/auth.md".into(),
+                    content: "draft".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(service.document().revision, revision + 1);
+        assert_eq!(
+            notifications.load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        service
+            .handle(
+                None,
+                BossOperation::CreateFolder {
+                    path: "guides".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(service.document().revision, revision + 2);
+        assert_eq!(
+            notifications.load(std::sync::atomic::Ordering::Relaxed),
+            2
         );
         fs::remove_dir_all(root).unwrap();
     }

@@ -1,0 +1,1 @@
+- Fixed the plan document preview keeping a stale copy after a planning session rewrote its plan — the plan tab and the Boss Plans detail now refresh on every write.
