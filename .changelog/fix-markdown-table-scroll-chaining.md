@@ -1,1 +1,1 @@
-- Horizontal scrolling in Markdown tables no longer moves the containing page vertically during the same gesture.
+- Vertical scrolling over a Markdown table continues moving the transcript, while horizontal table scrolling stays contained until it reaches an edge.

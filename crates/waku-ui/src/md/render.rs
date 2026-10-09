@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Div, Font,
     FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollDelta,
-    ScrollHandle, SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun,
-    UnderlineStyle, Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
+    SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window,
+    canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 use unicode_script::{Script, UnicodeScript};
@@ -4086,23 +4086,20 @@ fn render_table(
         viewport = viewport.track_scroll(handle);
     }
     let wheel_scroll = scroll.clone();
-    viewport = viewport.on_scroll_wheel(move |event, _, cx| {
-        let delta_x = match event.delta {
-            ScrollDelta::Pixels(delta) => delta.x,
-            ScrollDelta::Lines(delta) if delta.x != 0.0 => px(delta.x),
-            ScrollDelta::Lines(_) => px(0.0),
-        };
+    // GPUI scrolls the tracked handle with its gesture-filtered delta before
+    // calling this listener, so the offset change identifies what the table
+    // actually consumed without maintaining a second gesture-axis state.
+    let previous_offset_x = scroll.as_ref().map(|handle| Cell::new(handle.offset().x));
+    viewport = viewport.on_scroll_wheel(move |_, _, cx| {
         let Some(handle) = &wheel_scroll else {
             return;
         };
         let offset = handle.offset().x;
         let max_offset = handle.max_offset().x;
-        let can_scroll_horizontally = max_offset > px(0.5)
-            && offset >= -max_offset
-            && offset <= px(0.0)
-            && ((delta_x > px(0.0) && offset < px(0.0))
-                || (delta_x < px(0.0) && offset > -max_offset));
-        if can_scroll_horizontally {
+        let previous_offset = previous_offset_x
+            .as_ref()
+            .map_or(offset, |previous| previous.replace(offset));
+        if table_scroll_consumed_delta(previous_offset, offset, max_offset) {
             cx.stop_propagation();
         }
     });
@@ -4122,6 +4119,15 @@ fn render_table(
             ));
     }
     outer.into_any_element()
+}
+
+fn table_scroll_consumed_delta(previous: Pixels, offset: Pixels, max_offset: Pixels) -> bool {
+    max_offset > px(0.5)
+        && previous != offset
+        && previous >= -max_offset
+        && previous <= px(0.0)
+        && offset >= -max_offset
+        && offset <= px(0.0)
 }
 
 /// The pointer target over one column boundary: a 9px strip centered on the
@@ -5620,6 +5626,41 @@ mod tests {
         }
     }
 
+    struct ScrollableTableHarness {
+        palette: Palette,
+        markdown: MarkdownView,
+        parent_scroll: ScrollHandle,
+        width: f32,
+        height: f32,
+    }
+
+    impl Render for ScrollableTableHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let ctx = Ctx::new(
+                "table-row",
+                &self.palette,
+                Metrics::BODY,
+                TranscriptSelection::default(),
+            );
+            div()
+                .id("table-parent-scroll")
+                .w(px(self.width))
+                .h(px(self.height))
+                .overflow_y_scroll()
+                .track_scroll(&self.parent_scroll)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            markdown(&self.markdown, &ctx)
+                                .unwrap_or_else(|| div().into_any_element()),
+                        )
+                        .child(div().h(px(600.0))),
+                )
+        }
+    }
+
     fn table_scroll_handle(
         view: &gpui::Entity<TableHarness>,
         cx: &gpui::VisualTestContext,
@@ -5636,13 +5677,51 @@ mod tests {
         })
     }
 
-    #[gpui::test]
-    fn a_wide_table_scrolls_horizontally_instead_of_squishing(cx: &mut gpui::TestAppContext) {
+    fn scrollable_table_scroll_handle(
+        view: &gpui::Entity<ScrollableTableHarness>,
+        cx: &gpui::VisualTestContext,
+    ) -> ScrollHandle {
+        view.read_with(cx, |harness, _| {
+            harness
+                .markdown
+                .table_scroll
+                .borrow()
+                .values()
+                .next()
+                .cloned()
+                .unwrap()
+        })
+    }
+
+    fn wide_table_markdown() -> MarkdownView {
         let mut markdown = MarkdownView::new();
         markdown.set_text(
             "| name | description | status |\n| --- | --- | --- |\n| alpha | a fairly long piece of descriptive text here | green |\n| beta | another generously worded description column | red |\n",
             false,
         );
+        markdown
+    }
+
+    fn simulate_table_scroll(
+        cx: &mut gpui::VisualTestContext,
+        handle: &ScrollHandle,
+        delta: Point<Pixels>,
+    ) {
+        let bounds = handle.bounds();
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: point(
+                bounds.origin.x + bounds.size.width / 2.0,
+                bounds.origin.y + bounds.size.height / 2.0,
+            ),
+            delta: gpui::ScrollDelta::Pixels(delta),
+            modifiers: Default::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+    }
+
+    #[gpui::test]
+    fn a_wide_table_scrolls_horizontally_instead_of_squishing(cx: &mut gpui::TestAppContext) {
+        let markdown = wide_table_markdown();
         let (view, cx) = cx.add_window_view(|_, _| TableHarness {
             palette: palette(),
             markdown,
@@ -5667,6 +5746,50 @@ mod tests {
     }
 
     #[gpui::test]
+    fn vertical_scroll_with_horizontal_drift_moves_the_transcript(cx: &mut gpui::TestAppContext) {
+        let parent_scroll = ScrollHandle::new();
+        let (view, cx) = cx.add_window_view(|_, _| ScrollableTableHarness {
+            palette: palette(),
+            markdown: wide_table_markdown(),
+            parent_scroll: parent_scroll.clone(),
+            width: 320.0,
+            height: 180.0,
+        });
+        let table_scroll = scrollable_table_scroll_handle(&view, cx);
+
+        simulate_table_scroll(cx, &table_scroll, point(px(-1.0), px(-30.0)));
+
+        assert_eq!(table_scroll.offset().x, px(0.0));
+        assert!(
+            parent_scroll.offset().y < px(0.0),
+            "{:?}",
+            parent_scroll.offset()
+        );
+    }
+
+    #[gpui::test]
+    fn horizontal_table_scroll_stays_contained_from_the_transcript(cx: &mut gpui::TestAppContext) {
+        let parent_scroll = ScrollHandle::new();
+        let (view, cx) = cx.add_window_view(|_, _| ScrollableTableHarness {
+            palette: palette(),
+            markdown: wide_table_markdown(),
+            parent_scroll: parent_scroll.clone(),
+            width: 320.0,
+            height: 180.0,
+        });
+        let table_scroll = scrollable_table_scroll_handle(&view, cx);
+
+        simulate_table_scroll(cx, &table_scroll, point(px(-30.0), px(-1.0)));
+
+        assert!(
+            table_scroll.offset().x < px(0.0),
+            "{:?}",
+            table_scroll.offset()
+        );
+        assert_eq!(parent_scroll.offset().y, px(0.0));
+    }
+
+    #[gpui::test]
     fn a_narrow_table_still_fills_the_row(cx: &mut gpui::TestAppContext) {
         let mut markdown = MarkdownView::new();
         markdown.set_text("| a | b |\n| --- | --- |\n| 1 | 2 |\n", false);
@@ -5684,6 +5807,28 @@ mod tests {
             (f32::from(strip.size.width) - 320.0).abs() < 1.0,
             "{strip:?}"
         );
+    }
+
+    #[test]
+    fn table_scroll_contains_only_consumed_horizontal_deltas() {
+        let max_offset = px(100.0);
+        assert!(table_scroll_consumed_delta(
+            px(-40.0),
+            px(-30.0),
+            max_offset
+        ));
+        assert!(!table_scroll_consumed_delta(
+            px(-40.0),
+            px(-40.0),
+            max_offset
+        ));
+        assert!(!table_scroll_consumed_delta(px(0.0), px(10.0), max_offset));
+        assert!(!table_scroll_consumed_delta(
+            px(-100.0),
+            px(-110.0),
+            max_offset
+        ));
+        assert!(!table_scroll_consumed_delta(px(0.0), px(-10.0), px(0.0)));
     }
 
     #[test]
