@@ -193,6 +193,10 @@ pub(super) enum ScratchpadEvent {
     /// The stream failed or ended and reconnects ran out — the transcript
     /// stays and the panel offers Retry.
     Failed,
+    WhistleCompleted {
+        pcm: Arc<Vec<i16>>,
+        result: Result<String, String>,
+    },
     /// The stream dropped mid-session and the worker is already
     /// reconnecting — surfaces as `Connecting`, transcript intact.
     Reconnecting,
@@ -291,6 +295,10 @@ pub(super) struct VoiceScratchpad {
     /// Flags the current worker out; the audio channel disconnecting says
     /// the same. A respawn mints a fresh flag so firing it stays final.
     stop: Arc<AtomicBool>,
+    whistle_capture: bool,
+    whistle_finish: Arc<AtomicBool>,
+    whistle_finishing: bool,
+    whistle_audio: Option<Arc<Vec<i16>>>,
     audio_tx: Sender<AudioChunk>,
     audio_rx: Receiver<AudioChunk>,
     scroll: ScrollHandle,
@@ -403,6 +411,10 @@ impl VoiceScratchpad {
             confirm_discard: false,
             generation: 0,
             stop: Arc::new(AtomicBool::new(false)),
+            whistle_capture: false,
+            whistle_finish: Arc::new(AtomicBool::new(false)),
+            whistle_finishing: false,
+            whistle_audio: None,
             audio_tx,
             audio_rx,
             scroll: ScrollHandle::new(),
@@ -633,6 +645,8 @@ impl VoiceScratchpad {
     /// drops rather than leaking into the reconnect. The transcript and
     /// panel state survive — resume reconnects through `muted`.
     fn stop_capture(&mut self) {
+        self.whistle_finishing = false;
+        self.whistle_audio = None;
         self.stop.store(true, Ordering::Relaxed);
         self.generation = self.generation.wrapping_add(1);
         while self.audio_rx.try_recv().is_ok() {}
@@ -3386,98 +3400,8 @@ enum TranscriptionStart {
     Whistle,
 }
 
-/// Speech-quiet boundaries for continuous Whistle dictation: the daemon's
-/// engine answers one clip at a time, so the stream's audio cuts into
-/// utterances here. A boundary is this much trailing silence after real
-/// speech — or the engine's clip cap, whichever comes first.
-const WHISTLE_SILENCE_GAP_MS: f64 = 700.0;
-/// A block whose RMS sits under this reads as quiet — room tone and
-/// handling noise land well below it.
-const WHISTLE_SILENCE_RMS: f32 = 0.015;
-/// A segment must hold this much audio before a gap may close it — a
-/// lone click never becomes a clip.
-const WHISTLE_MIN_CLIP_MS: f64 = 400.0;
-/// Just under the engine's 30-second bound at 16 kHz mono s16.
-const WHISTLE_MAX_CLIP_BYTES: usize = 28_000 * 32;
-
-/// One clip's worth of tap blocks, resampled and energy-tracked for the
-/// silence boundary.
-struct WhistleClip {
-    resampler: PcmResampler,
-    /// s16le mono at the model rate.
-    pcm: Vec<u8>,
-    /// Audio since the clip opened — quiet stretches included, so a
-    /// mid-sentence pause doesn't shrink the speech accounting.
-    elapsed_ms: f64,
-    /// Trailing quiet.
-    silence_ms: f64,
-    /// Real energy has arrived — a gap only closes a clip that spoke.
-    voiced: bool,
-}
-
-impl WhistleClip {
-    fn new() -> Self {
-        Self {
-            resampler: PcmResampler::new(TRANSCRIPTION_SAMPLE_RATE),
-            pcm: Vec::new(),
-            elapsed_ms: 0.0,
-            silence_ms: 0.0,
-            voiced: false,
-        }
-    }
-
-    /// Fold a tap block in — `true` means the clip is ready to
-    /// transcribe: enough speech followed by a gap, or the engine cap.
-    fn push(&mut self, chunk: &AudioChunk) -> bool {
-        let ms = chunk.samples.len() as f64 * 1000.0 / chunk.rate.max(1.0);
-        let rms = if chunk.samples.is_empty() {
-            0.0
-        } else {
-            (chunk
-                .samples
-                .iter()
-                .map(|sample| sample * sample)
-                .sum::<f32>()
-                / chunk.samples.len() as f32)
-                .sqrt()
-        };
-        self.elapsed_ms += ms;
-        if rms >= WHISTLE_SILENCE_RMS {
-            self.voiced = true;
-            self.silence_ms = 0.0;
-        } else {
-            self.silence_ms += ms;
-        }
-        self.resampler
-            .push(&chunk.samples, chunk.rate, &mut self.pcm);
-        self.pcm.len() >= WHISTLE_MAX_CLIP_BYTES
-            || (self.voiced
-                && self.elapsed_ms >= WHISTLE_MIN_CLIP_MS
-                && self.silence_ms >= WHISTLE_SILENCE_GAP_MS)
-    }
-
-    /// The clip as the daemon's `i16` vector — `None` when nothing
-    /// arrived or nothing spoke.
-    fn take(&mut self) -> Option<Vec<i16>> {
-        if self.pcm.is_empty() || !self.voiced {
-            *self = Self::new();
-            return None;
-        }
-        let pcm = std::mem::take(&mut self.pcm)
-            .chunks_exact(2)
-            .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]]))
-            .collect();
-        *self = Self::new();
-        Some(pcm)
-    }
-}
-
-/// Continuous dictation through Whistle: the tap's audio cuts into
-/// utterance clips at silence boundaries; each rides `Command::Transcribe`
-/// on its own thread so transcription never starves the capture drain,
-/// and answers land as `Final` in clip order. Whistle reports no interim
-/// text — the pad's interim tail stays empty under this engine, which is
-/// the honest shape of a one-shot backend.
+/// Whistle buffers until Mute. Cancellation is separate from finish, so a
+/// navigation/discard cannot publish a late answer or flush unwanted audio.
 fn run_whistle_transcription_worker(
     session_id: Uuid,
     generation: u64,
@@ -3486,82 +3410,54 @@ fn run_whistle_transcription_worker(
     events: Sender<(Uuid, u64, ScratchpadEvent)>,
     wake: smol::channel::Sender<()>,
     stop: Arc<AtomicBool>,
+    finish: Arc<AtomicBool>,
 ) {
-    let send = |event: ScratchpadEvent| {
+    let send = |event| {
         let _ = events.send((session_id, generation, event));
         signal_event_pump(&wake);
     };
     send(ScratchpadEvent::Connected);
-    // Clips transcribe on a second thread — the daemon call blocks long
-    // enough that running it inline would drop tap blocks off the bounded
-    // queue. The channel keeps answers in clip order.
-    let (clips_tx, clips_rx) = crossbeam_channel::unbounded::<Vec<i16>>();
-    let answers = events.clone();
-    let answers_wake = wake.clone();
-    let transcriber = thread::Builder::new()
-        .name("voice-scratchpad-whistle-transcribe".to_owned())
-        .spawn(move || {
-            while let Ok(pcm) = clips_rx.recv() {
-                match daemon.request(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    waku_client::Command::Transcribe {
-                        pcm,
-                        language: None,
-                        keywords: None,
-                    },
-                ) {
-                    Ok(waku_client::ResponsePayload::Transcription { text, .. }) => {
-                        if !text.trim().is_empty() {
-                            let _ = answers.send((
-                                session_id,
-                                generation,
-                                ScratchpadEvent::Final(text),
-                            ));
-                            signal_event_pump(&answers_wake);
-                        }
-                    }
-                    Ok(_) => {
-                        eprintln!("Goddard: Whistle answered with an unexpected payload");
-                    }
-                    // A failed clip drops its words — the session lives
-                    // on; the next clip still lands.
-                    Err(error) => {
-                        eprintln!("Goddard: Whistle transcription failed: {error:#}");
-                    }
-                }
-            }
-        });
-    let mut clip = WhistleClip::new();
+    let mut resampler = PcmResampler::new(TRANSCRIPTION_SAMPLE_RATE);
+    let mut bytes = Vec::new();
     loop {
         if stop.load(Ordering::Relaxed) {
-            break;
+            return;
         }
-        // The poll cadence the gateway worker uses — a plain `recv`
-        // would park forever on a mute, since the scratchpad keeps a
-        // sender after the sink drops.
-        match audio.recv_timeout(READ_POLL) {
-            Ok(chunk) => {
-                if clip.push(&chunk)
-                    && let Some(pcm) = clip.take()
-                {
-                    let _ = clips_tx.send(pcm);
-                }
+        let chunk = if finish.load(Ordering::Relaxed) {
+            match audio.try_recv() {
+                Ok(chunk) => chunk,
+                Err(_) => break,
             }
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-        }
+        } else {
+            match audio.recv_timeout(READ_POLL) {
+                Ok(chunk) => chunk,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+            }
+        };
+        resampler.push(&chunk.samples, chunk.rate, &mut bytes);
     }
-    // The tail end of the last utterance goes too — dropping the sender
-    // closes the transcriber once it drains.
-    if !stop.load(Ordering::Relaxed)
-        && let Some(pcm) = clip.take()
-    {
-        let _ = clips_tx.send(pcm);
-    }
-    drop(clips_tx);
-    if let Ok(transcriber) = transcriber {
-        let _ = transcriber.join();
+    let pcm = Arc::new(
+        bytes
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect::<Vec<_>>(),
+    );
+    let result = super::speech::transcribe_dictation(&pcm, |clip| {
+        anyhow::ensure!(!stop.load(Ordering::Relaxed), "recording cancelled");
+        daemon.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::Transcribe {
+                pcm: clip,
+                language: None,
+                keywords: None,
+            },
+        )
+    })
+    .map_err(|error| format!("{error:#}"));
+    if !stop.load(Ordering::Relaxed) {
+        send(ScratchpadEvent::WhistleCompleted { pcm, result });
     }
 }
 
@@ -3860,6 +3756,46 @@ impl Waku {
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
+        if scratchpad.whistle_finishing {
+            return;
+        }
+        if let Some(pcm) = scratchpad.whistle_audio.clone() {
+            scratchpad.muted = true;
+            scratchpad.whistle_finishing = true;
+            scratchpad.status = ScratchpadStatus::Connecting;
+            let generation = scratchpad.generation;
+            let stop = scratchpad.stop.clone();
+            let daemon = self.daemon.client();
+            let events = self.voice_scratchpad_tx.clone();
+            let wake = self.event_wake_tx.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    let result = super::speech::transcribe_dictation(&pcm, |clip| {
+                        anyhow::ensure!(!stop.load(Ordering::Relaxed), "recording cancelled");
+                        daemon.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::Transcribe {
+                                pcm: clip,
+                                language: None,
+                                keywords: None,
+                            },
+                        )
+                    })
+                    .map_err(|error| format!("{error:#}"));
+                    if !stop.load(Ordering::Relaxed) {
+                        let _ = events.send((
+                            session_id,
+                            generation,
+                            ScratchpadEvent::WhistleCompleted { pcm, result },
+                        ));
+                        signal_event_pump(&wake);
+                    }
+                })
+                .detach();
+            cx.notify();
+            return;
+        }
         // A mute that landed while the permission prompt was in flight
         // leaves capture off — only an unmuted session owns the tap.
         if scratchpad.muted {
@@ -3906,10 +3842,13 @@ impl Waku {
         scratchpad.status = ScratchpadStatus::Connecting;
         let audio = scratchpad.audio_rx.clone();
         let stop = scratchpad.stop.clone();
+        scratchpad.whistle_finish = Arc::new(AtomicBool::new(false));
+        let finish = scratchpad.whistle_finish.clone();
         let events = self.voice_scratchpad_tx.clone();
         let wake = self.event_wake_tx.clone();
         let daemon = self.daemon.client();
         let backend = self.state.voice_transcription_backend;
+        scratchpad.whistle_capture = backend == VoiceTranscriptionBackend::Whistle;
         // Each provider's preparation resolves to the worker it spawns:
         // the gateway needs a fresh credential, Whistle needs its model.
         let prepare = daemon.clone();
@@ -3949,7 +3888,9 @@ impl Waku {
                 let Some(scratchpad) = this.voice_scratchpads.get_mut(&session_id) else {
                     return;
                 };
-                if scratchpad.generation != generation || !scratchpad.capture_live {
+                if scratchpad.generation != generation
+                    || (!scratchpad.capture_live && !scratchpad.whistle_finishing)
+                {
                     return;
                 }
                 match start {
@@ -3972,6 +3913,7 @@ impl Waku {
                             .spawn(move || {
                                 run_whistle_transcription_worker(
                                     session_id, generation, daemon, audio, events, wake, stop,
+                                    finish,
                                 );
                             })
                         {
@@ -4020,6 +3962,20 @@ impl Waku {
         let Some(scratchpad) = self.voice_scratchpads.get_mut(&session_id) else {
             return;
         };
+        if scratchpad.whistle_finishing {
+            return;
+        }
+        if muted && scratchpad.capture_live && scratchpad.whistle_capture {
+            scratchpad.muted = true;
+            scratchpad.capture_live = false;
+            scratchpad.whistle_finishing = true;
+            self.detach_voice_sink();
+            if let Some(pad) = self.voice_scratchpads.get(&session_id) {
+                pad.whistle_finish.store(true, Ordering::Relaxed);
+            }
+            cx.notify();
+            return;
+        }
         match scratchpad.apply_mute(muted) {
             CaptureDirective::Idle => return,
             CaptureDirective::Muted { detach_sink } => {
@@ -5675,6 +5631,23 @@ impl Waku {
                 scratchpad.status = ScratchpadStatus::Live;
             }
             match event {
+                ScratchpadEvent::WhistleCompleted { pcm, result } => {
+                    scratchpad.whistle_finishing = false;
+                    match result {
+                        Ok(text) => {
+                            scratchpad.whistle_audio = None;
+                            scratchpad.status = ScratchpadStatus::Live;
+                            scratchpad.transcript.append_finalized(&text);
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "Goddard: Whistle transcription failed; audio retained: {error}"
+                            );
+                            scratchpad.whistle_audio = Some(pcm);
+                            scratchpad.status = ScratchpadStatus::ConnectionLost;
+                        }
+                    }
+                }
                 ScratchpadEvent::MicAccess(_) | ScratchpadEvent::Cleaned { .. } => {}
                 ScratchpadEvent::Connected => {
                     if matches!(
@@ -6763,6 +6736,10 @@ impl Waku {
     fn render_scratchpad_status(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<Div> {
         let scratchpad = self.selected_voice_scratchpad()?;
         let (message, can_retry, system_settings) = match scratchpad.status {
+            _ if scratchpad.whistle_finishing => (tr!("press_to_talk.finishing"), false, false),
+            _ if scratchpad.whistle_audio.is_some() => {
+                (tr!("voice_scratchpad.recording_retained"), true, false)
+            }
             ScratchpadStatus::MicDenied => (tr!("voice_scratchpad.mic_denied"), true, true),
             _ if scratchpad.input_unavailable => {
                 (tr!("voice_scratchpad.mic_unavailable"), false, false)
@@ -6798,6 +6775,8 @@ impl Waku {
                     row.child(
                         div()
                             .id("vs-status-retry")
+                            .tab_index(0)
+                            .focus_visible(|row| row.bg(theme.overlay))
                             .h(px(24.0))
                             .px(px(10.0))
                             .rounded(px(6.0))
@@ -6810,7 +6789,7 @@ impl Waku {
                             .cursor_default()
                             .hover(|row| row.bg(theme.overlay))
                             .child(tr!("voice_scratchpad.retry"))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_activation(cx, |this, _, cx| {
                                 let session_id = this.surface_voice_pad_owner();
                                 let denied = this
                                     .selected_voice_scratchpad()
@@ -6850,7 +6829,7 @@ impl Waku {
                                     // respawned worker has anything to stream.
                                     this.begin_voice_capture(session_id, cx);
                                 }
-                            })),
+                            }),
                     )
                 })
                 .when(system_settings, |row| {
@@ -7395,6 +7374,52 @@ fn scratchpad_cleanup_spinner(text_size: f32, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whistle_voicepad_waits_for_mute_and_keeps_the_tail() {
+        let (daemon, requests) = super::super::speech::tests::whistle_daemon();
+        let (audio_tx, audio) = crossbeam_channel::unbounded();
+        let (events, received) = crossbeam_channel::unbounded();
+        let (wake, _) = smol::channel::unbounded();
+        let finish = Arc::new(AtomicBool::new(false));
+        let worker_finish = finish.clone();
+        let worker = thread::spawn(move || {
+            run_whistle_transcription_worker(
+                Uuid::nil(),
+                1,
+                daemon,
+                audio,
+                events,
+                wake,
+                Arc::new(AtomicBool::new(false)),
+                worker_finish,
+            )
+        });
+        assert!(matches!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap().2,
+            ScratchpadEvent::Connected
+        ));
+        audio_tx
+            .send(AudioChunk {
+                samples: vec![0.5; 65 * 16000],
+                rate: 16000.0,
+            })
+            .unwrap();
+        assert!(
+            requests.recv_timeout(Duration::from_millis(200)).is_err(),
+            "request before mute"
+        );
+        assert!(received.try_recv().is_err(), "text before mute");
+        finish.store(true, Ordering::Relaxed);
+        let (_, _, event) = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        let ScratchpadEvent::WhistleCompleted { pcm, result } = event else {
+            panic!("unexpected event");
+        };
+        assert_eq!(pcm.len(), 65 * 16000);
+        assert_eq!(result.unwrap(), "test segment test segment test segment");
+        worker.join().unwrap();
+        assert_eq!(requests.try_iter().sum::<usize>(), 65 * 16000);
+    }
 
     #[test]
     fn margin_double_click_only_accepts_enabled_double_clicks_outside_content() {

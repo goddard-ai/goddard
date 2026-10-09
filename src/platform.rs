@@ -665,12 +665,9 @@ mod voice_gate {
             return;
         };
         *sample_rate = rate;
-        let available = ((*sample_rate as usize).saturating_mul(30)).saturating_sub(samples.len());
-        let count = frames.min(available);
-        if count == 0 {
-            return;
-        }
-        for frame in 0..count {
+        // Request duration is bounded by the transcriber after explicit stop,
+        // not by capture: dropping the tail here silently loses dictation.
+        for frame in 0..frames {
             let mono = (0..channels)
                 .map(|channel| unsafe { *(*channel_data.add(channel)).as_ptr().add(frame) })
                 .sum::<f32>()
@@ -690,27 +687,12 @@ mod voice_gate {
         true
     }
 
-    pub fn finish_dictation() -> Option<Vec<i16>> {
+    pub fn finish_dictation() -> Option<super::DictationAudio> {
         let (rate, samples) = DICTATION_CAPTURE.lock().ok()?.take()?;
         if samples.is_empty() {
             return None;
         }
-        let count = samples.len().saturating_mul(16_000) / rate as usize;
-        if count == 0 {
-            return None;
-        }
-        Some(
-            (0..count)
-                .map(|index| {
-                    let source = index as f64 * rate as f64 / 16_000.0;
-                    let left = (source.floor() as usize).min(samples.len() - 1);
-                    let right = (left + 1).min(samples.len() - 1);
-                    let fraction = (source - left as f64) as f32;
-                    let sample = samples[left] * (1.0 - fraction) + samples[right] * fraction;
-                    (sample * i16::MAX as f32).round() as i16
-                })
-                .collect(),
-        )
+        Some(super::DictationAudio { rate, samples })
     }
 
     /// Stop the engine and any consent session, and reset the VAD window.
@@ -966,6 +948,29 @@ pub fn voice_audio_sink_active() -> bool {
     voice_gate::audio_sink_active()
 }
 
+/// Captured native-rate mono audio. Detach on the UI thread; resample only
+/// on the background transcriber, where long recordings cannot block input.
+pub struct DictationAudio {
+    rate: u32,
+    samples: Vec<f32>,
+}
+
+impl DictationAudio {
+    pub fn pcm(&self) -> Vec<i16> {
+        let count = self.samples.len().saturating_mul(16_000) / self.rate as usize;
+        (0..count)
+            .map(|index| {
+                let source = index as f64 * self.rate as f64 / 16_000.0;
+                let left = (source.floor() as usize).min(self.samples.len() - 1);
+                let right = (left + 1).min(self.samples.len() - 1);
+                let fraction = (source - left as f64) as f32;
+                let sample = self.samples[left] * (1.0 - fraction) + self.samples[right] * fraction;
+                (sample * i16::MAX as f32).round() as i16
+            })
+            .collect()
+    }
+}
+
 /// Whether a composer dictation capture is mid-record — keeps the mic
 /// engine alive until it finishes.
 #[cfg(target_os = "macos")]
@@ -1024,7 +1029,7 @@ pub fn begin_dictation_capture() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-pub fn finish_dictation_capture() -> Option<Vec<i16>> {
+pub fn finish_dictation_capture() -> Option<DictationAudio> {
     voice_gate::finish_dictation()
 }
 
@@ -1059,7 +1064,7 @@ pub fn begin_dictation_capture() -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn finish_dictation_capture() -> Option<Vec<i16>> {
+pub fn finish_dictation_capture() -> Option<DictationAudio> {
     None
 }
 

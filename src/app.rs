@@ -2583,6 +2583,9 @@ pub struct Waku {
     /// TCC prompts fire once per run; their answers arrive as pump events.
     voice_mic_requested: bool,
     dictation_state: DictationState,
+    /// Retained through transcription failures; activating the mic retries it.
+    dictation_audio: Option<std::sync::Arc<crate::platform::DictationAudio>>,
+    dictation_owner: Option<Uuid>,
     dictation_pending_permission: bool,
     whistle_model_downloaded: bool,
     whistle_model_download_pending: bool,
@@ -7094,6 +7097,8 @@ impl Waku {
                 press_to_talk_events,
                 voice_mic_requested: false,
                 dictation_state: DictationState::Idle,
+                dictation_audio: None,
+                dictation_owner: None,
                 dictation_pending_permission: false,
                 whistle_model_downloaded: false,
                 whistle_model_download_pending: false,

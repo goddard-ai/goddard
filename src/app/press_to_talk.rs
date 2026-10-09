@@ -17,9 +17,8 @@
 //! Two engines can transcribe a hold: the streaming AI Gateway session —
 //! deltas and partials while held, a bounded drain for the final after
 //! release — and the daemon-owned Whistle model, which answers one clip
-//! at a time with no interim text. The same Whistle worker, run in
-//! segments, also backs ordinary continuous VoicePad when it is the
-//! selected provider (see `voice_scratchpad.rs`).
+//! at a time with no interim text. Holds and ordinary VoicePad buffer
+//! until explicit finish, then combine bounded requests into one result.
 
 use std::sync::atomic::AtomicBool;
 use std::thread;
@@ -42,9 +41,6 @@ use super::*;
 /// reporting what it has — long enough for the model's flush, short
 /// enough that a wedged stream can't park the hold forever.
 const FINAL_DRAIN: Duration = Duration::from_secs(6);
-/// Whistle's engine bound — the daemon rejects clips past 30 s at 16 kHz;
-/// the collector cuts a hair under it so the bound is never the splitter's.
-const WHISTLE_MAX_CLIP_MS: usize = 28_000;
 /// A hold's transcript needs this many words to land outside the
 /// transcript-annotation context — punctuation-only tokens and recognizer
 /// noise don't count, and CJK ideographs count by character since UAX #29
@@ -137,6 +133,10 @@ pub(super) enum PressToTalkEvent {
     /// connection, startup, or transcription failure. No further events
     /// for the hold follow either way.
     Completed(Result<(), String>),
+    AudioFailed {
+        pcm: Vec<i16>,
+        cause: String,
+    },
 }
 
 /// What a state-machine step asks the app to perform — the machine
@@ -198,6 +198,7 @@ pub(super) struct PressToTalk {
     stop: Arc<AtomicBool>,
     audio_tx: Sender<AudioChunk>,
     audio_rx: Receiver<AudioChunk>,
+    failed_audio: Option<(PressToTalkContext, Vec<i16>)>,
 }
 
 impl PressToTalk {
@@ -216,6 +217,7 @@ impl PressToTalk {
             stop: Arc::new(AtomicBool::new(false)),
             audio_tx,
             audio_rx,
+            failed_audio: None,
         }
     }
 
@@ -378,6 +380,7 @@ impl PressToTalk {
     /// The unfinished hold's text discards; committed content is
     /// untouched.
     pub(super) fn cancel(&mut self) -> Vec<PressToTalkDirective> {
+        self.failed_audio = None;
         if self.phase == PressToTalkPhase::Ready {
             return Vec::new();
         }
@@ -413,6 +416,12 @@ impl PressToTalk {
             return Vec::new();
         }
         match event {
+            PressToTalkEvent::AudioFailed { pcm, cause } => {
+                if let Some(context) = self.context {
+                    self.failed_audio = Some((context, pcm));
+                }
+                self.worker_event(generation, PressToTalkEvent::Completed(Err(cause)))
+            }
             PressToTalkEvent::MicAccess(granted) => {
                 if self.phase != PressToTalkPhase::Starting {
                     return Vec::new();
@@ -485,7 +494,11 @@ impl PressToTalk {
                 let was_active = self.phase != PressToTalkPhase::Ready;
                 self.reset_hold();
                 if was_active {
-                    self.notice = PressToTalkNotice::Error(cause);
+                    self.notice = PressToTalkNotice::Error(if self.failed_audio.is_some() {
+                        format!("{cause}. {}", tr!("press_to_talk.retry_recording"))
+                    } else {
+                        cause
+                    });
                 }
                 Vec::new()
             }
@@ -750,6 +763,7 @@ impl Waku {
     /// Bubbles and the clear-recovery snapshot die with the contexts
     /// that anchored them — returning does not restore either.
     pub(super) fn press_to_talk_navigation(&mut self, cx: &mut Context<Self>) {
+        self.pause_dictation_on_navigation(cx);
         if self.press_to_talk.busy()
             && !self
                 .press_to_talk
@@ -758,6 +772,14 @@ impl Waku {
         {
             let directives = self.press_to_talk.cancel();
             self.apply_press_to_talk_directives(directives, cx);
+        }
+        if self
+            .press_to_talk
+            .failed_audio
+            .as_ref()
+            .is_some_and(|(context, _)| !self.press_to_talk_context_alive(*context))
+        {
+            self.press_to_talk.failed_audio = None;
         }
         let mut expired_bubbles = Vec::new();
         let mut expired_undos = Vec::new();
@@ -906,6 +928,37 @@ impl Waku {
         let (audio_tx, audio_rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAP);
         self.press_to_talk.audio_tx = audio_tx.clone();
         self.press_to_talk.audio_rx = audio_rx;
+        if self
+            .press_to_talk
+            .failed_audio
+            .as_ref()
+            .is_some_and(|(owner, _)| Some(*owner) == self.press_to_talk.context)
+        {
+            let (_, pcm) = self
+                .press_to_talk
+                .failed_audio
+                .take()
+                .expect("failed hold checked");
+            let daemon = self.daemon.client();
+            let events = self.press_to_talk_tx.clone();
+            let wake = self.event_wake_tx.clone();
+            let stop = self.press_to_talk.stop.clone();
+            let audio = self.press_to_talk.audio_rx.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    run_press_to_talk_whistle_worker(
+                        generation,
+                        daemon,
+                        audio,
+                        events,
+                        wake,
+                        stop,
+                        Some(pcm),
+                    );
+                })
+                .detach();
+            return;
+        }
         crate::platform::set_voice_audio_sink(Some(Box::new(move |samples, rate| {
             let _ = audio_tx.try_send(AudioChunk {
                 samples: samples.to_vec(),
@@ -1001,7 +1054,7 @@ impl Waku {
                                     .name("press-to-talk-whistle".to_owned())
                                     .spawn(move || {
                                         run_press_to_talk_whistle_worker(
-                                            generation, daemon, audio, events, wake, stop,
+                                            generation, daemon, audio, events, wake, stop, None,
                                         );
                                     })
                                 {
@@ -1054,6 +1107,7 @@ impl Waku {
     /// retires the worker, a fresh channel disconnects its audio source,
     /// and its remaining events land on a bumped generation.
     fn abort_press_to_talk_capture(&mut self) {
+        self.press_to_talk.failed_audio = None;
         self.press_to_talk.stop.store(true, Ordering::Relaxed);
         self.detach_voice_sink();
         let (audio_tx, audio_rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAP);
@@ -1176,8 +1230,7 @@ pub(super) async fn ensure_whistle_model(daemon: &waku_client::DaemonClient) -> 
     }
 }
 
-/// Buffered mic audio as Whistle's input — mono s16 at 16 kHz, capped
-/// just under the engine's 30-second bound.
+/// Buffered mic audio for an explicit hold; request bounds apply after release.
 struct WhistleCollector {
     resampler: PcmResampler,
     pcm: Vec<u8>,
@@ -1193,10 +1246,9 @@ impl WhistleCollector {
 
     /// Resample a tap block into the clip — returns `true` once the cap
     /// says the clip is full.
-    fn push(&mut self, chunk: &AudioChunk) -> bool {
+    fn push(&mut self, chunk: &AudioChunk) {
         self.resampler
             .push(&chunk.samples, chunk.rate, &mut self.pcm);
-        self.pcm.len() >= WHISTLE_MAX_CLIP_MS * 32
     }
 
     /// The clip as the daemon's `i16` vector — `None` on silence.
@@ -1357,9 +1409,8 @@ fn run_press_to_talk_gateway_worker(
     send(PressToTalkEvent::Completed(Ok(())));
 }
 
-/// The Whistle hold: buffer the tap's audio for the whole hold — bounded
-/// by the engine's clip cap — then one `Command::Transcribe` answers the
-/// final. No partials exist to stream; the indicator shows the hold's
+/// The Whistle hold: buffer until release, then transcribe bounded clips
+/// and publish a single combined answer. No partials exist to stream; the indicator shows the hold's
 /// own state until the answer lands.
 fn run_press_to_talk_whistle_worker(
     generation: u64,
@@ -1368,6 +1419,7 @@ fn run_press_to_talk_whistle_worker(
     events: Sender<(u64, PressToTalkEvent)>,
     wake: smol::channel::Sender<()>,
     stop: Arc<AtomicBool>,
+    retry: Option<Vec<i16>>,
 ) {
     let send = |event: PressToTalkEvent| {
         let _ = events.send((generation, event));
@@ -1383,13 +1435,7 @@ fn run_press_to_talk_whistle_worker(
         // after the sink drops, so a plain `recv` would park a canceled
         // hold forever.
         match audio.recv_timeout(READ_POLL) {
-            Ok(chunk) => {
-                if collector.push(&chunk) {
-                    // The cap hit — treat it like a release so the clip
-                    // transcribes rather than silently growing.
-                    break;
-                }
-            }
+            Ok(chunk) => collector.push(&chunk),
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         }
@@ -1397,29 +1443,38 @@ fn run_press_to_talk_whistle_worker(
     if stop.load(Ordering::Relaxed) {
         return;
     }
-    let Some(pcm) = collector.pcm() else {
+    let Some(pcm) = retry.or_else(|| collector.pcm()) else {
         send(PressToTalkEvent::Completed(Ok(())));
         return;
     };
-    match daemon.request(
-        Uuid::nil(),
-        Uuid::nil(),
-        waku_client::Command::Transcribe {
-            pcm,
-            language: None,
-            keywords: None,
-        },
-    ) {
-        Ok(waku_client::ResponsePayload::Transcription { text, .. }) => {
-            if !text.trim().is_empty() {
+    let result = super::speech::transcribe_dictation(&pcm, |clip| {
+        anyhow::ensure!(!stop.load(Ordering::Relaxed), "recording cancelled");
+        daemon.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::Transcribe {
+                pcm: clip,
+                language: None,
+                keywords: None,
+            },
+        )
+    });
+    if stop.load(Ordering::Relaxed) {
+        return;
+    }
+    match result {
+        Ok(text) => {
+            if !text.is_empty() {
                 send(PressToTalkEvent::Segment(text));
             }
             send(PressToTalkEvent::Completed(Ok(())));
         }
-        Ok(_) => send(PressToTalkEvent::Completed(Err(
-            "daemon answered transcription with an unexpected payload".to_owned(),
-        ))),
-        Err(error) => send(PressToTalkEvent::Completed(Err(format!("{error:#}")))),
+        Err(error) => {
+            send(PressToTalkEvent::AudioFailed {
+                pcm,
+                cause: format!("{error:#}"),
+            });
+        }
     }
 }
 
@@ -1748,25 +1803,69 @@ mod tests {
     }
 
     #[test]
-    fn whistle_collector_caps_the_clip_and_skips_empty() {
-        // Nothing arrived — the worker reports an empty completion, never
-        // a zero-byte clip to the daemon.
-        let mut collector = WhistleCollector::new();
-        assert!(collector.pcm().is_none());
-        // Any buffered audio becomes a clip; enough of it reports full.
-        let chunk = AudioChunk {
-            samples: vec![0.5; 1600],
-            rate: 16000.0,
-        };
-        let mut full = false;
-        for _ in 0..(WHISTLE_MAX_CLIP_MS / 100 + 2) {
-            if collector.push(&chunk) {
-                full = true;
-                break;
-            }
-        }
-        assert!(full);
-        assert!(collector.pcm().is_some());
+    fn failed_whistle_hold_retains_audio_and_cancel_retires_it() {
+        let (mut machine, _) = hold();
+        machine.worker_event(machine.generation, PressToTalkEvent::MicAccess(true));
+        machine.worker_event(machine.generation, PressToTalkEvent::Connected);
+        machine.space_up();
+        let pcm = vec![9; 65 * 16000];
+        machine.worker_event(
+            machine.generation,
+            PressToTalkEvent::AudioFailed {
+                pcm: pcm.clone(),
+                cause: "failed second clip".into(),
+            },
+        );
+        assert_eq!(machine.phase, PressToTalkPhase::Ready);
+        assert_eq!(machine.failed_audio, Some((COMPOSER, pcm)));
+        assert!(matches!(machine.notice, PressToTalkNotice::Error(_)));
+        machine.cancel();
+        assert!(machine.failed_audio.is_none());
+    }
+
+    #[test]
+    fn whistle_hold_waits_for_release_past_thirty_seconds() {
+        let (daemon, requests) = super::super::speech::tests::whistle_daemon();
+        let (audio_tx, audio) = crossbeam_channel::unbounded();
+        let (events, received) = crossbeam_channel::unbounded();
+        let (wake, _) = smol::channel::unbounded();
+        let worker = thread::spawn(move || {
+            run_press_to_talk_whistle_worker(
+                1,
+                daemon,
+                audio,
+                events,
+                wake,
+                Arc::new(AtomicBool::new(false)),
+                None,
+            )
+        });
+        assert!(matches!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap().1,
+            PressToTalkEvent::Connected
+        ));
+        audio_tx
+            .send(AudioChunk {
+                samples: vec![0.5; 65 * 16000],
+                rate: 16000.0,
+            })
+            .unwrap();
+        assert!(
+            requests.recv_timeout(Duration::from_millis(200)).is_err(),
+            "request before release"
+        );
+        assert!(received.try_recv().is_err(), "text before release");
+        drop(audio_tx);
+        let (_, event) = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(event, PressToTalkEvent::Segment(text) if text == "test segment test segment test segment")
+        );
+        assert!(matches!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap().1,
+            PressToTalkEvent::Completed(Ok(()))
+        ));
+        worker.join().unwrap();
+        assert_eq!(requests.try_iter().sum::<usize>(), 65 * 16000);
     }
 
     #[test]

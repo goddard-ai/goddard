@@ -6689,3 +6689,12 @@ press_to_talk.no_credential:
   en: No AI Gateway credential — set one under Inference providers
 press_to_talk.cancelled:
   en: Recording cancelled
+
+composer.dictation_retry:
+  en: Activate the microphone to retry the saved recording.
+press_to_talk.retry_recording:
+  en: Hold and release again to retry the saved recording.
+voice_scratchpad.recording_retained:
+  en: Transcription failed — recording saved for Retry
+composer.dictation_return_to_retry:
+  en: Return to the original chat and activate the microphone to retry the saved recording.

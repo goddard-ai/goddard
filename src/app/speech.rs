@@ -406,16 +406,53 @@ async fn resolve_speech_clips(
         .collect()
 }
 
+/// Whistle accepts at most 30 seconds per request. Keep all answers private
+/// until every clip succeeds, so a failed tail never inserts a partial draft.
+pub(super) fn transcribe_dictation(
+    pcm: &[i16],
+    mut request: impl FnMut(Vec<i16>) -> anyhow::Result<waku_client::ResponsePayload>,
+) -> anyhow::Result<String> {
+    let mut transcript = String::new();
+    for clip in pcm.chunks(16_000 * 28) {
+        let response = request(clip.to_vec())?;
+        let waku_client::ResponsePayload::Transcription { text, .. } = response else {
+            anyhow::bail!("daemon answered transcription with an unexpected payload");
+        };
+        let text = text.trim();
+        if !text.is_empty() {
+            if !transcript.is_empty() {
+                transcript.push(' ');
+            }
+            transcript.push_str(text);
+        }
+    }
+    Ok(transcript)
+}
+
 impl Waku {
     pub(super) fn toggle_dictation(&mut self, cx: &mut Context<Self>) {
         match &self.dictation_state {
             super::DictationState::Recording => self.finish_dictation(cx),
             super::DictationState::Transcribing | super::DictationState::ModelDownloading => {}
+            super::DictationState::Error(_) if self.dictation_audio.is_some() => {
+                self.transcribe_captured_dictation(cx);
+            }
             _ => self.prepare_dictation(cx),
         }
     }
 
+    pub(super) fn pause_dictation_on_navigation(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.dictation_state, super::DictationState::Recording)
+            && self.dictation_owner != self.composer_session_id()
+        {
+            // Detach and retain the owner's audio, without publishing into
+            // the newly selected composer's draft.
+            self.finish_dictation(cx);
+        }
+    }
+
     fn prepare_dictation(&mut self, cx: &mut Context<Self>) {
+        self.dictation_owner = self.composer_session_id();
         self.dictation_state = super::DictationState::ModelDownloading;
         cx.notify();
         let client = self.daemon.client();
@@ -479,6 +516,11 @@ impl Waku {
     }
 
     fn begin_dictation_capture(&mut self, cx: &mut Context<Self>) {
+        if self.dictation_owner != self.composer_session_id() {
+            self.dictation_state = super::DictationState::Idle;
+            cx.notify();
+            return;
+        }
         crate::platform::end_consent_recognition();
         self.dictation_state = if crate::platform::begin_dictation_capture() {
             super::DictationState::Recording
@@ -486,19 +528,6 @@ impl Waku {
             super::DictationState::Error(tr!("composer.dictation_capture_failed"))
         };
         cx.notify();
-        if matches!(&self.dictation_state, super::DictationState::Recording) {
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_secs(30))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    if matches!(&this.dictation_state, super::DictationState::Recording) {
-                        this.finish_dictation(cx);
-                    }
-                });
-            })
-            .detach();
-        }
     }
 
     fn finish_dictation(&mut self, cx: &mut Context<Self>) {
@@ -509,42 +538,66 @@ impl Waku {
             return;
         };
         self.maybe_stop_voice_listener();
+        self.dictation_audio = Some(std::sync::Arc::new(pcm));
+        self.transcribe_captured_dictation(cx);
+    }
+
+    fn transcribe_captured_dictation(&mut self, cx: &mut Context<Self>) {
+        if self.dictation_owner != self.composer_session_id() {
+            self.dictation_state =
+                super::DictationState::Error(tr!("composer.dictation_return_to_retry"));
+            cx.notify();
+            return;
+        }
+        let Some(pcm) = self.dictation_audio.clone() else {
+            return;
+        };
         self.dictation_state = super::DictationState::Transcribing;
         cx.notify();
         let client = self.daemon.client();
         let work = cx.background_executor().spawn(async move {
-            client.request(
-                Uuid::nil(),
-                Uuid::nil(),
-                waku_client::Command::Transcribe {
-                    pcm,
-                    language: None,
-                    keywords: None,
-                },
-            )
+            transcribe_dictation(&pcm.pcm(), |pcm| {
+                client.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::Transcribe {
+                        pcm,
+                        language: None,
+                        keywords: None,
+                    },
+                )
+            })
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
-            let _ = this.update(cx, |this, cx| match result {
-                Ok(waku_client::ResponsePayload::Transcription { text, .. }) => {
-                    if !text.trim().is_empty() {
-                        this.composer
-                            .update(cx, |input, cx| input.insert_text(&text, cx));
-                        this.dictation_state = super::DictationState::Idle;
-                    } else {
-                        this.dictation_state =
-                            super::DictationState::Error(tr!("composer.dictation_not_recognized"));
-                    }
-                    cx.notify();
-                }
-                Ok(_) => {
+            let _ = this.update(cx, |this, cx| {
+                if this.dictation_owner != this.composer_session_id() {
                     this.dictation_state =
-                        super::DictationState::Error(tr!("composer.dictation_unexpected_response"));
+                        super::DictationState::Error(tr!("composer.dictation_return_to_retry"));
                     cx.notify();
+                    return;
                 }
-                Err(error) => {
-                    this.dictation_state = super::DictationState::Error(error.to_string());
-                    cx.notify();
+                match result {
+                    Ok(text) => {
+                        this.dictation_audio = None;
+                        if !text.trim().is_empty() {
+                            this.composer
+                                .update(cx, |input, cx| input.insert_text(&text, cx));
+                            this.dictation_state = super::DictationState::Idle;
+                        } else {
+                            this.dictation_state = super::DictationState::Error(tr!(
+                                "composer.dictation_not_recognized"
+                            ));
+                        }
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        this.dictation_state = super::DictationState::Error(format!(
+                            "{error}. {}",
+                            tr!("composer.dictation_retry")
+                        ));
+                        cx.notify();
+                    }
                 }
             });
         })
@@ -1124,8 +1177,114 @@ impl Waku {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+
+    /// A real local RPC connection; only the external recognizer is replaced.
+    pub(in crate::app) fn whistle_daemon() -> (
+        waku_client::DaemonClient,
+        crossbeam_channel::Receiver<usize>,
+    ) {
+        use waku_protocol::{ClientMessage, PROTOCOL_VERSION, ResponseOutcome, ServerMessage};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (seen, requests) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            while let Ok(tungstenite::Message::Text(text)) = socket.read() {
+                let message: ClientMessage = serde_json::from_str(text.as_ref()).unwrap();
+                let response = match message {
+                    ClientMessage::Hello { .. } => ServerMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                    },
+                    ClientMessage::Request(request) => {
+                        let waku_client::Command::Transcribe { pcm, .. } = request.command else {
+                            panic!("unexpected request");
+                        };
+                        assert!(!pcm.is_empty() && pcm.len() <= 30 * 16000);
+                        seen.send(pcm.len()).unwrap();
+                        ServerMessage::Response {
+                            request_id: request.request_id,
+                            outcome: ResponseOutcome::Ok {
+                                payload: waku_client::ResponsePayload::Transcription {
+                                    text: "test segment".into(),
+                                    language: "en".into(),
+                                    words: Vec::new(),
+                                },
+                            },
+                        }
+                    }
+                    _ => break,
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::to_string(&response).unwrap().into(),
+                    ))
+                    .unwrap();
+            }
+        });
+        (
+            waku_client::DaemonClient::connect(&address, "test".into()).unwrap(),
+            requests,
+        )
+    }
+
+    #[test]
+    fn long_dictation_preserves_all_audio_and_publishes_one_answer() {
+        let pcm: Vec<i16> = (0..65 * 16000)
+            .map(|index| (index % 32767) as i16)
+            .collect();
+        let mut received = Vec::new();
+        let mut calls = 0;
+        let text = transcribe_dictation(&pcm, |clip| {
+            assert!(clip.len() <= 30 * 16000);
+            received.extend(clip);
+            calls += 1;
+            Ok(waku_client::ResponsePayload::Transcription {
+                text: format!(" part{calls} "),
+                language: "en".into(),
+                words: Vec::new(),
+            })
+        })
+        .unwrap();
+        assert_eq!(received, pcm);
+        assert_eq!(text, "part1 part2 part3");
+    }
+
+    #[test]
+    fn failed_tail_returns_no_partial_transcript_and_can_retry_original_audio() {
+        let pcm = vec![7; 65 * 16000];
+        let original = pcm.clone();
+        let mut calls = 0;
+        let result = transcribe_dictation(&pcm, |_| {
+            calls += 1;
+            if calls == 2 {
+                anyhow::bail!("provider failed");
+            }
+            Ok(waku_client::ResponsePayload::Transcription {
+                text: "private first segment".into(),
+                language: "en".into(),
+                words: Vec::new(),
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(pcm, original);
+        let mut retried_samples = 0;
+        transcribe_dictation(&pcm, |clip| {
+            retried_samples += clip.len();
+            Ok(waku_client::ResponsePayload::Transcription {
+                text: "recovered".into(),
+                language: "en".into(),
+                words: Vec::new(),
+            })
+        })
+        .unwrap();
+        assert_eq!(retried_samples, original.len());
+    }
 
     fn clip(text: &str) -> SpeechClip {
         clip_expiring(text, u64::MAX)
