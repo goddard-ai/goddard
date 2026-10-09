@@ -111,6 +111,9 @@ impl WakuBackend {
     fn deliver_settled_employee_updates(&self) {
         let events = self.event_source.lock().clone();
         for target in self.employee_update_targets() {
+            if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state) {
+                continue;
+            }
             let sender = self
                 .task_state
                 .lock()
@@ -1908,7 +1911,9 @@ impl WakuBackend {
                 });
             trigger
         });
-        if employee_update_streaming(target, Some(sender), &self.agent, &self.boss) {
+        if self.boss.is_boss(target)
+            || employee_update_streaming(target, Some(sender), &self.agent, &self.boss)
+        {
             return self.queue_agent_prompt_with_id(
                 target,
                 prompt,

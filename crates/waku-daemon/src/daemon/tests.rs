@@ -3996,6 +3996,51 @@ fn employee_finish_fixture(
     )
 }
 
+/// Point the boss pointer at a real but uninvolved session and admit the
+/// fixture's supervisor as its employee, so reports keep landing on the
+/// supervisor under the employee-supervisor steering contract — a Boss
+/// chat would hold employee notifications behind its open turn instead.
+/// The decoy gets a capture runtime: managed sessions refuse a cold start
+/// without the daemon's bound address, which test backends never set.
+fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
+    let project_id = backend.task_state.lock().sessions[0].project_id;
+    let decoy = AgentSession::new(project_id, ProviderKind::Codex);
+    let decoy_id = decoy.id;
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(decoy);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.sessions.lock().insert(
+        decoy_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: std::env::temp_dir(),
+        },
+    );
+    backend.boss.set_session_id(decoy_id).unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let mut employee = backend
+        .boss
+        .prepare_employee(
+            decoy_id,
+            Some(persona),
+            "Supervisor".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Goal,
+            None,
+        )
+        .unwrap();
+    employee.session_id = supervisor;
+    backend.boss.add_employee(employee).unwrap();
+    decoy_id
+}
+
 /// The settle signal classifies the expiry on the durable record —
 /// every cause lands with its resumable verdict so a bare dead row
 /// is never the whole story.
@@ -4256,6 +4301,7 @@ fn an_interruption_report_steers_into_a_busy_supervisor() {
     use waku_protocol::boss::EmployeeSettle;
     let root = std::env::temp_dir().join(format!("boss-report-steer-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    detach_boss_session(&backend, supervisor);
     backend
         .agent
         .note_driver_event(supervisor, &DriverEvent::TurnStarted);
@@ -4586,6 +4632,7 @@ fn a_blocker_steer_marks_its_accepted_boundary() {
     use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
     let root = std::env::temp_dir().join(format!("boss-steer-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    detach_boss_session(&backend, supervisor);
     // The supervisor's turn is open and parked — the steer lands in it
     // rather than opening a fresh turn.
     backend
@@ -4722,11 +4769,24 @@ fn employee_updates_wait_for_the_complete_source_turn() {
         backend.agent.note_driver_event(employee_id, &finished);
         backend.run_summon_scheduler();
         backend.run_summon_scheduler();
-        let prompts = if busy_supervisor {
-            parent.steers.lock()
-        } else {
-            parent.prompts.lock()
-        };
+        assert!(parent.steers.lock().is_empty());
+        if busy_supervisor {
+            assert!(parent.prompts.lock().is_empty());
+            backend.agent.note_driver_event(supervisor, &finished);
+            backend.run_summon_scheduler();
+        }
+        assert_eq!(parent.prompts.lock().len(), 1);
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            supervisor,
+            &finished,
+        )
+        .unwrap();
+        backend.agent.note_driver_event(supervisor, &finished);
+        backend.run_summon_scheduler();
+        backend.run_summon_scheduler();
+        let prompts = parent.prompts.lock();
         assert_eq!(prompts.len(), 2);
         assert!(prompts[0].contains("first update"));
         assert!(prompts[1].contains("second update"));
@@ -4748,6 +4808,135 @@ fn employee_updates_wait_for_the_complete_source_turn() {
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// Settlement before the client drains a user follow-up must not wake
+/// Boss with a report. Durable recovery keeps hidden reports ordered once.
+#[test]
+fn boss_notifications_yield_to_user_prompts_and_recover_in_order() {
+    let root = std::env::temp_dir().join(format!("boss-priority-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee, parent, _child) = employee_finish_fixture(&root);
+    let events = EventSink::detached();
+    let finished = DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    };
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+    // Both urgent causes park during an open Boss turn, including a parked turn.
+    for (kind, text) in [
+        (
+            crate::model::ReportTriggerKind::Blocker,
+            "first notification",
+        ),
+        (
+            crate::model::ReportTriggerKind::Interrupted,
+            "second notification",
+        ),
+    ] {
+        let trigger =
+            crate::model::ReportTrigger::new(&backend.boss.employee(employee).unwrap(), kind);
+        backend
+            .deliver_employee_report(supervisor, text.into(), employee, Some(trigger), &events)
+            .unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnParked);
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    assert!(parent.steers.lock().is_empty());
+    let user = crate::model::QueuedMessage::new("user follow-up");
+    {
+        let mut state = backend.task_state.lock();
+        state
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == supervisor)
+            .unwrap()
+            .queued_messages
+            .push(user.clone());
+        state.mark_session_dirty(supervisor);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.agent.note_driver_event(supervisor, &finished);
+    let driver = DriverHandle::from_control(parent.clone());
+    // The normal settlement drain and scheduler both yield to the user.
+    backend
+        .drain_agent_queue(supervisor, &driver, &events)
+        .unwrap();
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    let stale = backend.agent.pop_queued(supervisor).unwrap();
+    backend.agent.requeue_front(supervisor, stale.clone());
+    // Simulate restart: lose memory and reload the persisted session mirror.
+    backend.agent.clear_session(supervisor);
+    *backend.task_state.lock() = backend.task_store.load().unwrap();
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == supervisor)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.queued_messages.retain(|q| q.id != user.id);
+        session.begin_turn("user follow-up");
+        state.mark_session_dirty(supervisor);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    for expected in ["first notification", "second notification"] {
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            supervisor,
+            &finished,
+        )
+        .unwrap();
+        backend.agent.note_driver_event(supervisor, &finished);
+        backend.run_summon_scheduler();
+        backend.run_summon_scheduler();
+        assert!(parent.prompts.lock().last().unwrap().contains(expected));
+    }
+    // A second drain that already popped this id cannot deliver it twice.
+    record_boss_event(&backend.task_state, &backend.task_store, supervisor, &finished).unwrap();
+    backend.agent.note_driver_event(supervisor, &finished);
+    backend.agent.enqueue(supervisor, stale);
+    backend.drain_agent_queue(supervisor, &driver, &events).unwrap();
+    assert_eq!(parent.prompts.lock().len(), 2);
+    assert!(parent.steers.lock().is_empty());
+    assert!(!backend.agent.has_queued(supervisor));
+    let mut state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == supervisor)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    assert!(session.queued_messages.is_empty());
+    let reports: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| m.report_trigger.is_some())
+        .collect();
+    assert_eq!(reports.len(), 2);
+    assert!(
+        reports
+            .iter()
+            .all(|m| m.hidden && m.sent_by_task == Some(employee))
+    );
+    assert_ne!(reports[0].id, reports[1].id);
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// A report parked behind a busy supervisor keeps its trigger through
@@ -4932,6 +5121,7 @@ fn report_blocker_interrupts_the_supervisor_and_marks_the_finish() {
     use waku_protocol::boss::BossOperation;
     let root = std::env::temp_dir().join(format!("boss-blocker-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    let decoy = detach_boss_session(&backend, supervisor);
     let stranger = Uuid::new_v4();
     assert!(
         backend
@@ -4987,7 +5177,7 @@ fn report_blocker_interrupts_the_supervisor_and_marks_the_finish() {
     assert!(
         backend
             .handle_boss_operation(
-                Some(supervisor),
+                Some(decoy),
                 BossOperation::ReportBlocker {
                     message: "self".into(),
                 },
@@ -8379,6 +8569,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
 fn an_employee_prompt_reaches_its_supervisor_and_refuses_elsewhere() {
     let root = std::env::temp_dir().join(format!("boss-report-channel-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    let decoy = detach_boss_session(&backend, supervisor);
     let mut settings = backend.settings.get();
     settings.agent_tools_enabled = true;
     backend.settings.replace(settings).unwrap();
@@ -8496,7 +8687,7 @@ fn an_employee_prompt_reaches_its_supervisor_and_refuses_elsewhere() {
     assert!(
         backend
             .agent_prompt(
-                Some(supervisor),
+                Some(decoy),
                 None,
                 None,
                 None,
@@ -10952,8 +11143,8 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Finalizing a plan steers the current Boss turn so the user gets a prompt
-/// response without waiting for the turn to settle.
+/// Finalizing a plan parks its handoff behind the open Boss turn like any
+/// employee notification; the prompt lands once the turn settles.
 #[test]
 fn finalize_plan_steers_an_open_boss_turn() {
     use crate::model::{ReportTriggerBoundary, ReportTriggerKind};
@@ -11015,21 +11206,43 @@ fn finalize_plan_steers_an_open_boss_turn() {
         BossResult::PlanFinalized { .. }
     ));
 
-    let steers = capture.steers.lock().clone();
-    assert_eq!(steers.len(), 1);
-    assert!(steers[0].contains("finalized its design"));
-    assert!(steers[0].contains("plans/auth.md"));
+    // The handoff waits out the open Boss turn — employee notifications
+    // never cut ahead of a turn the user is watching.
+    assert!(capture.steers.lock().is_empty());
+    assert!(capture.prompts.lock().is_empty());
+    assert!(backend.agent.has_queued(boss));
+    let finished = DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    };
+    record_boss_event(&backend.task_state, &backend.task_store, boss, &finished).unwrap();
+    backend.agent.note_driver_event(boss, &finished);
+    let driver = DriverHandle::from_control(capture.clone());
+    backend.drain_agent_queue(boss, &driver, &events).unwrap();
+    let prompts = capture.prompts.lock().clone();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("finalized its design"));
+    assert!(prompts[0].contains("plans/auth.md"));
     assert!(!backend.agent.has_queued(boss));
-    let pending = backend
-        .agent
-        .take_pending_steer(boss, &steers[0])
-        .expect("the finalization steer is pending");
-    let trigger = pending
-        .report_trigger
-        .expect("the steer retains its trigger");
+    let mut state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == boss)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    let report = session
+        .messages
+        .iter()
+        .find(|message| message.report_trigger.is_some())
+        .expect("the parked handoff delivers with its marker");
+    let trigger = report.report_trigger.as_ref().unwrap();
     assert_eq!(trigger.kind, ReportTriggerKind::PlanFinalized);
-    assert_eq!(trigger.boundary, ReportTriggerBoundary::Steer);
+    assert_eq!(trigger.boundary, ReportTriggerBoundary::Opening);
     assert_eq!(trigger.employee, plan.session_id);
+    assert_eq!(trigger.event_id, report.id);
+    drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
 

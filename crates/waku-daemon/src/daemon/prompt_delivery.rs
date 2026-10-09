@@ -59,6 +59,31 @@ pub(super) fn employee_update_streaming(
     })
 }
 
+/// Boss notifications yield to open turns and composer-owned follow-ups.
+/// Check the durable queue: settlement can run before the client dequeues
+/// the user's next prompt, and restart recovery has no in-memory user queue.
+pub(super) fn boss_notification_waiting(
+    target: Uuid,
+    agent: &crate::agent::AgentState,
+    boss: &crate::boss::BossService,
+    task_state: &Mutex<PersistedState>,
+) -> bool {
+    boss.is_boss(target)
+        && (agent.has_open_turn(target)
+            || agent.is_working(target)
+            || task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == target)
+                .is_none_or(|session| {
+                    session.active_turn_id().is_some()
+                        || session.queued_messages.iter().any(|message| {
+                            matches!(message.source, crate::model::QueuedMessageSource::User)
+                        })
+                }))
+}
+
 /// Urgent reports keep their interrupt delivery after waiting for the sender.
 pub(super) fn employee_report_interrupts(entry: &crate::agent::AgentPrompt) -> bool {
     entry.report_trigger.as_ref().is_some_and(|trigger| {
@@ -87,6 +112,10 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
+    if boss_notification_waiting(session_id, agent, boss, task_state) {
+        agent.requeue_front(session_id, entry);
+        return Ok(());
+    }
     if driver.supports_steer()
         && (agent.has_parked_turn(session_id)
             || (employee_report_interrupts(&entry) && agent.has_open_turn(session_id)))
@@ -137,7 +166,7 @@ pub(super) fn deliver_agent_prompt(
                 worktree: session.workspace.path().map(Path::to_path_buf),
             })
         });
-    persist_agent_prompt(
+    match persist_agent_prompt(
         task_state,
         task_store,
         session_id,
@@ -149,7 +178,15 @@ pub(super) fn deliver_agent_prompt(
         entry.hidden,
         entry.report_trigger.clone(),
         reference_context.clone(),
-    )?;
+        boss.is_boss(session_id),
+    )? {
+        PromptPersistence::Submitted => {}
+        PromptPersistence::Waiting => {
+            agent.requeue_front(session_id, entry);
+            return Ok(());
+        }
+        PromptPersistence::Duplicate => return Ok(()),
+    }
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
         turn_id,
@@ -213,6 +250,12 @@ pub(super) fn wrap_boss_outbound_prompt(
     format!("<goddard-boss-context>\n{block}\n</goddard-boss-context>\n\n{prompt}")
 }
 
+pub(super) enum PromptPersistence {
+    Submitted,
+    Waiting,
+    Duplicate,
+}
+
 /// Mirror an accepted agent prompt into the daemon's stored copy of the
 /// task, so the message and its sender provenance persist even when no
 /// client is attached to adopt it. `queued_id` names the parked chip the
@@ -229,7 +272,8 @@ pub(super) fn persist_agent_prompt(
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
     reference_context: Option<crate::model::ReferenceContext>,
-) -> anyhow::Result<()> {
+    boss_notification: bool,
+) -> anyhow::Result<PromptPersistence> {
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
@@ -240,6 +284,26 @@ pub(super) fn persist_agent_prompt(
     };
     task_store.hydrate(session)?;
     anyhow::ensure!(session.archived_at.is_none(), "task is archived");
+    if boss_notification {
+        // Claim the durable id under the same lock as the user queue and
+        // active turn. A competing settlement/scheduler delivery may have
+        // rehydrated this entry before the first delivery removed its mirror.
+        if session
+            .messages
+            .iter()
+            .any(|message| message.id == message_id)
+        {
+            return Ok(PromptPersistence::Duplicate);
+        }
+        if session.active_turn_id().is_some()
+            || session
+                .queued_messages
+                .iter()
+                .any(|message| matches!(message.source, crate::model::QueuedMessageSource::User))
+        {
+            return Ok(PromptPersistence::Waiting);
+        }
+    }
     let dequeued = queued_id.is_some_and(|queued_id| {
         let before = session.queued_messages.len();
         session
@@ -266,7 +330,7 @@ pub(super) fn persist_agent_prompt(
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
     }
-    Ok(())
+    Ok(PromptPersistence::Submitted)
 }
 
 /// Park an agent prompt in the session document's follow-up queue so every

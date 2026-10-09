@@ -574,7 +574,8 @@ pub(super) fn forward_driver_events(
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if agent.is_working(session_id)
+                if boss_notification_waiting(session_id, &agent, &boss, &task_state)
+                    || agent.is_working(session_id)
                     || employee_update_streaming(session_id, entry.sender, &agent, &boss)
                 {
                     // A turn started while the queue drained — a human

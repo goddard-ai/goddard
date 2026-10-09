@@ -94,7 +94,11 @@ impl WakuBackend {
             self.resolve_agent_target(task_id, thread_id, provider)?
         };
         if sender_employee.is_some() {
-            // Employee messages never enter either prompt queue and never
+            if self.boss.is_boss(target) {
+                self.queue_agent_prompt(target, prompt, sender, &events)?;
+                return Ok(ResponsePayload::Ack);
+            }
+            // Employee messages to non-Boss supervisors never enter either prompt queue and never
             // wait for the sender's turn to settle. Queue/steer flags on the
             // legacy prompt command cannot change this contract.
             self.boss.require_active(target)?;
@@ -321,7 +325,8 @@ impl WakuBackend {
         }) {
             return Ok(());
         }
-        if self.agent.is_working(target)
+        if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
+            || self.agent.is_working(target)
             || employee_update_streaming(target, sender, &self.agent, &self.boss)
         {
             // The runtime event forwarder delivers queued prompts in
@@ -411,8 +416,9 @@ impl WakuBackend {
     ) -> anyhow::Result<()> {
         rehydrate_agent_queue(&self.agent, &self.task_state, &self.task_store, session_id);
         while let Some(entry) = self.agent.pop_queued(session_id) {
-            if (self.agent.is_working(session_id)
-                && !(employee_report_interrupts(&entry) && driver.supports_steer()))
+            if boss_notification_waiting(session_id, &self.agent, &self.boss, &self.task_state)
+                || (self.agent.is_working(session_id)
+                    && !(employee_report_interrupts(&entry) && driver.supports_steer()))
                 || employee_update_streaming(session_id, entry.sender, &self.agent, &self.boss)
             {
                 self.agent.requeue_front(session_id, entry);

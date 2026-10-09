@@ -1,0 +1,1 @@
+- Boss waits until your queued prompts finish before delivering employee notifications, including blocker reports.

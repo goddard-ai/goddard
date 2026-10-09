@@ -28,6 +28,7 @@ use crate::model::{AgentAskOutcome, DriverEvent};
 /// A prompt an agent submitted, with the sending task it must be attributed
 /// to. The same record tracks steer injections awaiting the provider's
 /// `steerAccepted` echo so the mirrored message keeps its provenance.
+#[derive(Clone)]
 pub struct AgentPrompt {
     /// The sender's own words — what the transcript and the mirrored queued
     /// chip show.
