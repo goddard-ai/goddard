@@ -109,6 +109,11 @@ if (
     "[goddard-dev] GODDARD_DAEMON_ADDRESS is set but GODDARD_DAEMON_TOKEN is unset; starting a local daemon instead.",
   );
 }
+// The packaging step. Substitute a script that fabricates GODDARD_BUNDLE_DIR
+// (or clones GODDARD_BUNDLE_SOURCE) to exercise the watcher without a signed
+// toolchain, the Cua SDK, or Sparkle.
+const bundleScript =
+  process.env.GODDARD_BUNDLE_SCRIPT ?? join(root, "scripts/bundle.sh");
 // Bind host for the spawned daemon. Default loopback; set to 0.0.0.0 (or a
 // Tailscale/LAN address) to make the dev daemon reachable from a phone.
 const daemonBindHost = process.env.GODDARD_DAEMON_BIND ?? "127.0.0.1";
@@ -904,7 +909,7 @@ async function build(target: BuildTarget): Promise<boolean> {
     ];
     const bundleArgs = [profile, ...(serveMode ? ["--debug-icon"] : [])];
     const result =
-      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${join(root, "scripts/bundle.sh")} ${bundleArgs}`.nothrow();
+      await $`env GODDARD_SKIP_CARGO_BUILD=1 ${laneEnv} ${bundleScript} ${bundleArgs}`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
         "[goddard-dev] Bundle failed; keeping the current app open.",
@@ -962,7 +967,7 @@ async function buildDaemon(publishRuntime = true): Promise<boolean> {
     retireLane(lane);
     // Reuse the unchanged app and helpers, then replace daemon + CLI and
     // re-sign the new bundle. Neither live lane is modified.
-    const result = await $`env GODDARD_SKIP_CARGO_BUILD=1 GODDARD_BUNDLE_SOURCE=${source} GODDARD_BUNDLE_DIR=${laneAppPath(lane)} ${join(root, "scripts/bundle.sh")} debug`.nothrow();
+    const result = await $`env GODDARD_SKIP_CARGO_BUILD=1 GODDARD_BUNDLE_SOURCE=${source} GODDARD_BUNDLE_DIR=${laneAppPath(lane)} ${bundleScript} debug`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
         "[goddard-dev] Could not package the rebuilt daemon; keeping the current runtime.",
@@ -1251,6 +1256,22 @@ async function liveSessionCount(): Promise<number | undefined> {
 async function restartDaemon(reason: string): Promise<void> {
   if (daemonRestarting || stopping) return;
   if (daemonBind === undefined) {
+    if (daemonAddress === undefined) {
+      // The daemon never came up — e.g. a serve run whose initial build
+      // failed — so 'd' retries the spawn instead of reporting an external
+      // daemon.
+      daemonRestarting = true;
+      try {
+        await ensureDaemon();
+        daemonRestartPending = false;
+      } catch (error) {
+        console.error("[goddard-dev] Daemon start failed:", error);
+        daemonRestartPending = true;
+      } finally {
+        daemonRestarting = false;
+      }
+      return;
+    }
     console.log(
       "[goddard-dev] The daemon is externally managed; restart it yourself.",
     );
@@ -1398,7 +1419,7 @@ function printBanner(): void {
   console.log(
     `\n  ${bold("goddard dev")} ${dim("— watching for changes")}\n\n` +
       `  ${green("➜")}  ${dim("app")}     ${appName}${isMacOS ? ".app" : ""}${laned ? dim(` · lane ${latestLane ?? "none yet"}`) : ""}\n` +
-      `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress} ${dim(`(${daemonDetail})`)}` +
+      `  ${green("➜")}  ${dim("daemon")}  ${daemonAddress ?? "not running yet"} ${dim(`(${daemonDetail})`)}` +
       (serve === undefined
         ? ""
         : `\n  ${green("➜")}  ${dim("feed")}    ${serve.appcastUrl} ${dim(`(serving ${serve.updatesDir})`)}`),
@@ -1773,9 +1794,28 @@ async function drainBuildQueue(): Promise<void> {
       queuedBuild = undefined;
       const buildAppRevision = appChangeRevision;
       const buildDaemonRevision = daemonChangeRevision;
-      if (!(await build(target)) || stopping) continue;
+      // A thrown packaging/deploy error is a failed build like any other:
+      // report it and keep watching so the next edit retries.
+      let succeeded = false;
+      try {
+        succeeded = await build(target);
+      } catch (error) {
+        console.error("[goddard-dev] Build failed:", error);
+      }
+      if (!succeeded || stopping) continue;
       const daemonRebuilt = daemonBuildDirty;
       daemonBuildDirty = false;
+      // A serve run stays up when startup produced no usable runtime; the
+      // first completed build is what makes a local daemon launchable.
+      if (serveMode && daemonAddress === undefined && !daemonRestarting) {
+        try {
+          await ensureDaemon();
+          daemonRestartPending = false;
+          daemonRestartWhenIdle = false;
+        } catch (error) {
+          console.error("[goddard-dev] Could not start the daemon:", error);
+        }
+      }
 
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
@@ -1961,13 +2001,22 @@ if (
 }
 const initialAppRevision = appChangeRevision;
 let daemonRebuilt = false;
+let initialBuildSucceeded = true;
 if (runInitialBuild) {
-  const initialBuildSucceeded = await build("app");
+  try {
+    initialBuildSucceeded = await build("app");
+  } catch (error) {
+    console.error("[goddard-dev] The initial build failed:", error);
+    initialBuildSucceeded = false;
+  }
   daemonRebuilt = daemonBuildDirty;
   daemonBuildDirty = false;
   building = false;
   if (stopping) process.exit(0);
-  if (!initialBuildSucceeded) {
+  // Serve runs keep going: the feed, tunnel, and any running runtime stay up
+  // and the next source edit retries the build. Other modes still fail fast —
+  // without a completed build there is nothing to run.
+  if (!initialBuildSucceeded && !serveMode) {
     await cleanup();
     process.exit(1);
   }
@@ -1978,13 +2027,27 @@ if (runInitialBuild) {
 try {
   if (daemonAddress === undefined) await ensureDaemon();
 } catch (error) {
-  console.error("[goddard-dev]", error);
-  await cleanup();
-  process.exit(1);
+  if (!serveMode) {
+    console.error("[goddard-dev]", error);
+    await cleanup();
+    process.exit(1);
+  }
+  // A serve watcher exists to publish builds, so a daemon that cannot start
+  // (no completed runtime yet, or a broken one) is not fatal. 'd' and every
+  // successful build retry it.
+  console.error("[goddard-dev] Could not start the daemon:", error);
+  daemonRestartPending = true;
 }
 
 if (stopping) process.exit(0);
-if (appChangeRevision === initialAppRevision) {
+if (!initialBuildSucceeded) {
+  // Serve mode only — other modes exited above. The running previous runtime
+  // and the feed are untouched; say so once instead of the rebuild hints.
+  console.error(
+    "[goddard-dev] The initial build failed; edit the source to retry — the watcher and update feed stay up.",
+  );
+  if (queuedBuild !== undefined) void drainBuildQueue();
+} else if (appChangeRevision === initialAppRevision) {
   // An app already running a completed lane gets the same treatment a rebuild
   // gets in drainBuildQueue: auto-restart only on the palette toggle, and the
   // 'b' instruction whenever the protocol moved under it.

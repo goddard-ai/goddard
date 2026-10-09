@@ -232,26 +232,33 @@ export async function startDevServe(options: {
     updatesDir,
     appcastUrl,
     async deploy(appBundle: string): Promise<boolean> {
-      const version = await cargoPackageVersion(root, "waku");
-      const shortVersion = version.split("-", 1)[0];
-      // Every deploy must out-version the last: the derived release number
-      // keeps dev builds ahead of released versions while staying behind the
-      // next real release, and the epoch suffix orders builds of one version.
-      lastBuildTimestamp = Math.max(Date.now(), lastBuildTimestamp + 1);
-      const buildNumber = `${derivedBuildNumber(version)}.${lastBuildTimestamp}`;
-      const plist = join(appBundle, "Contents", "Info.plist");
-      await $`plutil -replace CFBundleShortVersionString -string ${shortVersion} ${plist}`;
-      await $`plutil -replace CFBundleVersion -string ${buildNumber} ${plist}`;
-      await resignBundle(appBundle, root);
-
-      // Build each publication off to the side. The live directory contains
-      // the current archive plus one atomically replaced appcast, so readers
-      // never observe a partially written ZIP or feed.
-      const stagingDir = join(workDir, `.staging-${buildNumber}`);
-      await rm(stagingDir, { force: true, recursive: true });
-      await mkdir(stagingDir, { recursive: true });
-      const zipName = `Goddard-${version}-${buildNumber}.zip`;
+      // Everything in here is recoverable: a failed stamp, re-sign, archive,
+      // or feed write reports false so the watcher keeps the current update
+      // and retries on the next build instead of dying on the rejection.
+      let version = "";
+      let buildNumber = "";
+      let zipName = "";
+      let stagingDir: string | undefined;
       try {
+        version = await cargoPackageVersion(root, "waku");
+        const shortVersion = version.split("-", 1)[0];
+        // Every deploy must out-version the last: the derived release number
+        // keeps dev builds ahead of released versions while staying behind the
+        // next real release, and the epoch suffix orders builds of one version.
+        lastBuildTimestamp = Math.max(Date.now(), lastBuildTimestamp + 1);
+        buildNumber = `${derivedBuildNumber(version)}.${lastBuildTimestamp}`;
+        const plist = join(appBundle, "Contents", "Info.plist");
+        await $`plutil -replace CFBundleShortVersionString -string ${shortVersion} ${plist}`;
+        await $`plutil -replace CFBundleVersion -string ${buildNumber} ${plist}`;
+        await resignBundle(appBundle, root);
+
+        // Build each publication off to the side. The live directory contains
+        // the current archive plus one atomically replaced appcast, so readers
+        // never observe a partially written ZIP or feed.
+        stagingDir = join(workDir, `.staging-${buildNumber}`);
+        await rm(stagingDir, { force: true, recursive: true });
+        await mkdir(stagingDir, { recursive: true });
+        zipName = `Goddard-${version}-${buildNumber}.zip`;
         await $`ditto -c -k --keepParent ${appBundle} ${join(stagingDir, zipName)}`;
         await generateAppcast(stagingDir, `https://${hostname}/`);
         // The archive is immutable and must exist before the feed starts
@@ -263,14 +270,16 @@ export async function startDevServe(options: {
           join(updatesDir, "appcast.xml"),
         );
       } catch (error) {
-        await rm(join(updatesDir, zipName), { force: true });
+        if (zipName) await rm(join(updatesDir, zipName), { force: true });
         log(
           `Nightly channel publish failed (is the Sparkle key in the keychain?): ` +
             `${error instanceof Error ? error.message : error}`,
         );
         return false;
       } finally {
-        await rm(stagingDir, { force: true, recursive: true });
+        if (stagingDir !== undefined) {
+          await rm(stagingDir, { force: true, recursive: true });
+        }
       }
       // Cleanup failure must not roll back an already published feed or
       // remove the archive it advertises. Retry cleanup on the next deploy.
