@@ -200,9 +200,12 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSGeometry",
   "NSKeyValueObserving",
   "NSLocale",
+  "NSNotification",
+  "NSOperation",
   "NSProcessInfo",
   "NSString",
   "NSURL",
+  "block2",
 ] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = [
   "std",

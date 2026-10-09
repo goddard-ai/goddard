@@ -61,8 +61,10 @@ const VOICE_CONSENT_RESTARTS: u8 = 3;
 /// missing — the HAL device listener watches the device list and the
 /// default-input property, neither of which reliably fires when a live
 /// device gains input channels in place, the exact move a Bluetooth
-/// headset makes flipping into HFP.
-const VOICE_INPUT_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+/// headset makes flipping into HFP. Press-to-talk retries a refused
+/// engine start on the same cadence.
+pub(super) const VOICE_INPUT_RETRY: std::time::Duration =
+    std::time::Duration::from_millis(500);
 /// An input gap shorter than this never raises the "microphone
 /// unavailable" row — a Bluetooth profile switch crosses it routinely.
 const VOICE_INPUT_GRACE: std::time::Duration = std::time::Duration::from_millis(1_500);
@@ -462,6 +464,18 @@ fn voice_input_verdict(ready: bool, down_for: Option<std::time::Duration>) -> Vo
         Some(elapsed) if elapsed >= VOICE_INPUT_GRACE => VoiceInputVerdict::Unavailable,
         Some(_) => VoiceInputVerdict::InGrace,
     }
+}
+
+/// The retry poll's bookkeeping after one sample: an outage clock under
+/// the cap keeps it armed (`Some`); at the cap the clock retires with
+/// the poll — `None` — so the next device event or capture start re-runs
+/// a full grace-plus-poll window rather than inheriting a stale verdict
+/// that ends every future poll after one sample. A cleared clock stays
+/// cleared. Pure so the retirement rule is testable.
+fn voice_input_poll_clock(
+    down_for: Option<std::time::Duration>,
+) -> Option<std::time::Duration> {
+    down_for.filter(|elapsed| *elapsed < VOICE_INPUT_POLL_CAP)
 }
 
 impl Waku {
@@ -1125,8 +1139,9 @@ impl Waku {
 
     /// Keep re-polling the device set while the wanted input is missing —
     /// covers the device-list notifications CoreAudio never sends. One
-    /// task at a time; it stops when the engine is live again, when the
-    /// mic is no longer wanted, or when the outage outlives the cap.
+    /// task at a time; it stops when the engine is live again or when the
+    /// outage outlives the cap, which retires the outage clock with it so
+    /// the next trigger re-runs the full grace-plus-poll window.
     fn schedule_voice_input_retry(&mut self, cx: &mut Context<Self>) {
         if self.voice_input_retry_scheduled {
             return;
@@ -1141,8 +1156,20 @@ impl Waku {
                         let available = crate::platform::voice_input_devices_changed();
                         this.sync_voice_input(available, cx);
                         cx.notify();
-                        this.voice_input_down_since
-                            .is_some_and(|since| since.elapsed() < VOICE_INPUT_POLL_CAP)
+                        match voice_input_poll_clock(
+                            this.voice_input_down_since.map(|since| since.elapsed()),
+                        ) {
+                            Some(_) => true,
+                            // Back already (the verdict cleared the
+                            // clock) or past the cap — retire the clock
+                            // with the poll so a later recovery trigger
+                            // re-runs the full window. The "unavailable"
+                            // row holds until a real sample clears it.
+                            None => {
+                                this.voice_input_down_since = None;
+                                false
+                            }
+                        }
                     })
                     .unwrap_or(false);
                 if !keep_polling {
@@ -1489,5 +1516,18 @@ pub(super) mod tests {
         assert!(voice_input_ready(true, false, false));
         assert!(!voice_input_ready(true, true, false));
         assert!(!voice_input_ready(false, false, true));
+    }
+
+    /// A poll sample under the cap keeps the outage clock; at the cap the
+    /// clock retires with the poll so the next trigger re-runs a fresh
+    /// grace-plus-poll window instead of inheriting a stale verdict —
+    /// and a cleared clock stays cleared.
+    #[test]
+    fn voice_input_poll_clock_retires_at_the_cap() {
+        use std::time::Duration;
+        let young = VOICE_INPUT_POLL_CAP - Duration::from_millis(1);
+        assert_eq!(voice_input_poll_clock(Some(young)), Some(young));
+        assert_eq!(voice_input_poll_clock(Some(VOICE_INPUT_POLL_CAP)), None);
+        assert_eq!(voice_input_poll_clock(None), None);
     }
 }

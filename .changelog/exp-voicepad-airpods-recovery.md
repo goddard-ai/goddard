@@ -1,0 +1,1 @@
+- **VoicePad:** A microphone picked in Settings stays recognized through a Bluetooth headset's whole profile switch, so "microphone unavailable" stops sticking after AirPods connect, and hold-to-talk retries a refused start instead of failing at once.

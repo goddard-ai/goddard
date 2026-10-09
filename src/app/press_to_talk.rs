@@ -47,6 +47,11 @@ const FINAL_DRAIN: Duration = Duration::from_secs(6);
 /// breaks each into its own word.
 const MIN_WORDS: usize = 3;
 
+/// Engine-start retries inside the input grace — a refused start while a
+/// Bluetooth headset flips profiles is a momentary verdict, not a dead
+/// mic. At the input-poll cadence this bounds the wait to ~1.5 s.
+const PRESS_TO_TALK_START_RETRIES: u32 = 3;
+
 /// The VoicePad owner a hold records for — the key its paragraph lands
 /// under in `voice_scratchpads`. A chat session owns its pad today; a
 /// deliverable-owned VoicePad keys the same map by its own id later, so
@@ -966,12 +971,7 @@ impl Waku {
             });
         })));
         if !crate::platform::start_voice_listener() {
-            self.abort_press_to_talk_capture();
-            let directives = self.press_to_talk.worker_event(
-                generation,
-                PressToTalkEvent::Completed(Err(tr!("press_to_talk.mic_unavailable"))),
-            );
-            self.apply_press_to_talk_directives(directives, cx);
+            self.retry_press_to_talk_engine_start(generation, PRESS_TO_TALK_START_RETRIES, cx);
             return;
         }
         let events = self.press_to_talk_tx.clone();
@@ -1076,6 +1076,46 @@ impl Waku {
                 .detach();
             }
         }
+    }
+
+    /// A refused engine start during warmup: a Bluetooth headset mid
+    /// profile-switch reads as a missing input for a moment, so retry on
+    /// the input-poll cadence inside the grace window before calling the
+    /// mic unavailable. A release or cancel bumps the hold's generation
+    /// and the wake lands nowhere.
+    fn retry_press_to_talk_engine_start(
+        &mut self,
+        generation: u64,
+        retries: u32,
+        cx: &mut Context<Self>,
+    ) {
+        if retries == 0 {
+            self.press_to_talk_startup_failed(
+                generation,
+                tr!("press_to_talk.mic_unavailable"),
+                cx,
+            );
+            return;
+        }
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(super::speech::VOICE_INPUT_RETRY)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.press_to_talk.generation != generation
+                    || this.press_to_talk.phase != PressToTalkPhase::Starting
+                {
+                    return;
+                }
+                if crate::platform::start_voice_listener() {
+                    this.start_press_to_talk_capture(cx);
+                } else {
+                    this.retry_press_to_talk_engine_start(generation, retries - 1, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// A startup leg failed after the tap attached — report it through

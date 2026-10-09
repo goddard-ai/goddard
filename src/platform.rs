@@ -146,7 +146,9 @@ mod voice_gate {
     use objc2_audio_toolbox::{
         AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
     };
-    use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
+    use objc2_avf_audio::{
+        AVAudioEngine, AVAudioEngineConfigurationChangeNotification, AVAudioPCMBuffer, AVAudioTime,
+    };
     use objc2_core_audio::{
         AudioObjectAddPropertyListenerBlock, AudioObjectGetPropertyData,
         AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
@@ -155,7 +157,7 @@ mod voice_gate {
         kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyScopeInput, kAudioObjectSystemObject,
     };
-    use objc2_foundation::{NSArray, NSError, NSString};
+    use objc2_foundation::{NSArray, NSError, NSNotification, NSNotificationCenter, NSString};
     use objc2_speech::{
         SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
         SFSpeechRecognitionTaskHint, SFSpeechRecognizer,
@@ -228,6 +230,10 @@ mod voice_gate {
     struct VoiceListener {
         engine: Retained<AVAudioEngine>,
         consent: Option<ConsentSession>,
+        /// Whether the buffer tap is attached — an engine started over a
+        /// device with no live input channels runs bare, so the tap
+        /// rebuilds once the device finishes its profile switch.
+        tap_installed: bool,
     }
 
     thread_local! {
@@ -364,9 +370,34 @@ mod voice_gate {
         Some(string.to_string())
     }
 
-    /// Every audio device the HAL reports, as `(id, uid, name)` — filtered
-    /// to devices with at least one live input channel.
-    pub fn audio_input_devices() -> Vec<(AudioObjectID, String, String)> {
+    /// A device's live input-channel count — the stream-configuration
+    /// buffer list: a u32 buffer count followed by 16-byte AudioBuffer
+    /// entries carrying each buffer's channels. Any read failure counts
+    /// as zero, matching "can't capture right now".
+    fn input_channels(device: AudioObjectID) -> u32 {
+        let Some(config) = audio_property_data(
+            device,
+            kAudioDevicePropertyStreamConfiguration,
+            kAudioObjectPropertyScopeInput,
+        ) else {
+            return 0;
+        };
+        let buffers = u32::from_ne_bytes(config[0..4].try_into().unwrap_or([0; 4])) as usize;
+        (0..buffers)
+            .map(|index| {
+                config
+                    .get(8 + index * 16..)
+                    .and_then(|rest| rest.first_chunk::<4>())
+                    .map_or(0, |channels| u32::from_ne_bytes(*channels))
+            })
+            .sum()
+    }
+
+    /// Every audio device the HAL reports, as `(id, uid, input_channels)`
+    /// — unfiltered: a Bluetooth headset stays on the device list with
+    /// zero input channels through its profile switch, and it is still
+    /// attached.
+    fn attached_audio_devices() -> Vec<(AudioObjectID, String, u32)> {
         let Some(ids) = audio_property_data(
             kAudioObjectSystemObject as AudioObjectID,
             kAudioHardwarePropertyDevices,
@@ -376,29 +407,22 @@ mod voice_gate {
         };
         ids.chunks_exact(4)
             .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()))
-            .filter(|device| {
-                // The stream-configuration buffer list: a u32 buffer count
-                // followed by 16-byte AudioBuffer entries — an input device
-                // has at least one buffer with channels.
-                let Some(config) = audio_property_data(
-                    *device,
-                    kAudioDevicePropertyStreamConfiguration,
-                    kAudioObjectPropertyScopeInput,
-                ) else {
-                    return false;
-                };
-                let buffers =
-                    u32::from_ne_bytes(config[0..4].try_into().unwrap_or([0; 4])) as usize;
-                (0..buffers).any(|index| {
-                    config
-                        .get(8 + index * 16..)
-                        .and_then(|rest| rest.first_chunk::<4>())
-                        .is_some_and(|channels| u32::from_ne_bytes(*channels) > 0)
-                })
-            })
             .map(|device| {
                 let uid = audio_property_string(device, kAudioDevicePropertyDeviceUID)
                     .unwrap_or_default();
+                (device, uid, input_channels(device))
+            })
+            .collect()
+    }
+
+    /// The input-capable devices, as `(id, uid, name)` — the picker's
+    /// list: a device reporting zero input channels can't capture this
+    /// instant, so it doesn't appear.
+    pub fn audio_input_devices() -> Vec<(AudioObjectID, String, String)> {
+        attached_audio_devices()
+            .into_iter()
+            .filter(|(.., channels)| *channels > 0)
+            .map(|(device, uid, _)| {
                 let name =
                     audio_property_string(device, kAudioObjectPropertyName).unwrap_or_default();
                 (device, uid, name)
@@ -407,20 +431,22 @@ mod voice_gate {
     }
 
     /// Which attached device the engine binds to: the pinned UID
-    /// resolved against the attached set — a pinned selection is never
-    /// replaced by the default; a missing one binds nothing — or the
-    /// current default when unpinned. Pure so the pinning rule is
-    /// testable without hardware.
+    /// resolved against the whole attached set — presence decides, not
+    /// channel count, since a Bluetooth headset reports zero input
+    /// channels through its profile switch — or the current default when
+    /// unpinned. A pinned selection is never replaced by the default; a
+    /// missing one binds nothing. Pure so the pinning rule is testable
+    /// without hardware.
     fn target_device(
         preferred_uid: Option<&str>,
-        inputs: &[(AudioObjectID, String, String)],
+        attached: &[(AudioObjectID, String, u32)],
         default_input: Option<AudioObjectID>,
     ) -> Option<AudioObjectID> {
         match preferred_uid {
-            Some(uid) => inputs
+            Some(uid) => attached
                 .iter()
                 .find(|(_, device_uid, _)| device_uid == uid)
-                .map(|(id, _, _)| *id),
+                .map(|(id, ..)| *id),
             None => default_input,
         }
     }
@@ -431,7 +457,7 @@ mod voice_gate {
     fn current_target_device() -> Option<AudioObjectID> {
         target_device(
             PREFERRED_INPUT_UID.lock().unwrap().as_deref(),
-            &audio_input_devices(),
+            &attached_audio_devices(),
             audio_property_u32(
                 kAudioObjectSystemObject as AudioObjectID,
                 kAudioHardwarePropertyDefaultInputDevice,
@@ -441,30 +467,33 @@ mod voice_gate {
         )
     }
 
-    /// Whether the wanted input can capture at all — the pinned device is
-    /// attached, or some input device exists for the default to pick.
+    /// Whether the wanted input is attached at all — the pinned device is
+    /// on the device list, or a default input exists for the unpinned
+    /// engine to follow. Channel counts stay out of the verdict: a
+    /// headset mid profile-switch reports zero, and whether capture can
+    /// begin is `configure_and_start`'s call.
     fn input_present() -> bool {
-        if PREFERRED_INPUT_UID.lock().unwrap().is_some() {
-            current_target_device().is_some()
-        } else {
-            !audio_input_devices().is_empty()
-        }
+        current_target_device().is_some()
     }
 
-    /// Arm the tap on a fresh engine: pin the chosen input device onto the
-    /// input node's audio unit (a pinned mic never follows the default), then
-    /// install the buffer tap and start. Returns false when the wanted
-    /// device can't be bound or the engine refuses to start.
-    fn configure_and_start(engine: &AVAudioEngine) -> bool {
+    /// Arm a fresh engine: pin the chosen input device onto the input
+    /// node's audio unit (a pinned mic never follows the default), then
+    /// install the buffer tap and start. `None` when the wanted device
+    /// can't be bound or the engine refuses to start; `Some(false)` when
+    /// it starts bare — a mid-switch device reports zero input channels
+    /// and a tap can't attach to an empty format, but opening the input
+    /// is itself what coaxes a Bluetooth headset into its call profile,
+    /// and `devices_changed` rebuilds with the tap once channels arrive.
+    fn configure_and_start(engine: &AVAudioEngine) -> Option<bool> {
         let input = unsafe { engine.inputNode() };
         let target = current_target_device();
         if PREFERRED_INPUT_UID.lock().unwrap().is_some() {
             let Some(device) = target else {
-                return false;
+                return None;
             };
             let unit = unsafe { input.audioUnit() };
             if unit.is_null() {
-                return false;
+                return None;
             }
             let status = unsafe {
                 AudioUnitSetProperty(
@@ -477,8 +506,19 @@ mod voice_gate {
                 )
             };
             if status != 0 {
-                return false;
+                return None;
             }
+        }
+        // A channel-less input has no format a tap can take — installing
+        // one raises — so the engine starts bare until the device reports
+        // channels again.
+        let tap_installed = unsafe { input.outputFormatForBus(0).channelCount() } > 0;
+        if !tap_installed {
+            if unsafe { engine.startAndReturnError() }.is_err() {
+                return None;
+            }
+            *BOUND_DEVICE.lock().unwrap() = target;
+            return Some(false);
         }
         let tap = RcBlock::new(
             |buffer: NonNull<AVAudioPCMBuffer>, _time: NonNull<AVAudioTime>| {
@@ -502,24 +542,27 @@ mod voice_gate {
         unsafe { input.installTapOnBus_bufferSize_format_block(0, 4_800, None, tap_pointer) };
         if unsafe { engine.startAndReturnError() }.is_err() {
             unsafe { input.removeTapOnBus(0) };
-            return false;
+            return None;
         }
         *BOUND_DEVICE.lock().unwrap() = target;
-        true
+        Some(true)
     }
 
     /// Tear down the engine only — consent state is the caller's call.
     fn teardown_engine(listener: &VoiceListener) {
         let input = unsafe { listener.engine.inputNode() };
         unsafe {
-            input.removeTapOnBus(0);
+            if listener.tap_installed {
+                input.removeTapOnBus(0);
+            }
             listener.engine.stop();
         }
     }
 
-    /// Register the CoreAudio device-list listener once — its block fires
-    /// on a HAL-owned thread and only forwards into the app's hook, which
-    /// lands the real work on the event pump.
+    /// Register the device-set listeners once — the CoreAudio blocks fire
+    /// on HAL-owned threads and the engine posts configuration changes on
+    /// an internal queue, so every one only forwards into the app's hook,
+    /// which lands the real work on the event pump.
     fn install_device_listener() {
         if DEVICE_LISTENER_INSTALLED.swap(true, Ordering::Relaxed) {
             return;
@@ -558,6 +601,29 @@ mod voice_gate {
         // The HAL copies the block into its own dispatch list, so the local
         // handle can drop — but keeping it makes the lifetime obvious.
         std::mem::forget(listener);
+        // The engine's own configuration-change notice covers what the two
+        // watched HAL properties can't: a bound device gaining or losing
+        // its input streams in place, or the engine stopping itself on the
+        // move. Re-evaluate the same way — the notification arrives on an
+        // engine-internal queue, so the block only forwards; the observer
+        // object owns the registration and lives for the process.
+        let center = NSNotificationCenter::defaultCenter();
+        let on_change = RcBlock::new(|_: NonNull<NSNotification>| {
+            if let Ok(hook) = DEVICE_CHANGE_HOOK.lock()
+                && let Some(hook) = hook.as_ref()
+            {
+                hook();
+            }
+        });
+        let observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(AVAudioEngineConfigurationChangeNotification),
+                None,
+                None,
+                &on_change,
+            )
+        };
+        std::mem::forget(observer);
     }
 
     /// Start the capture engine and its tap. Audio is only inspected for
@@ -570,21 +636,32 @@ mod voice_gate {
         install_device_listener();
         ENGINE_WANTED.store(true, Ordering::Relaxed);
         VOICE_LISTENER.with_borrow_mut(|slot| {
-            if slot.is_some() {
+            // A live engine with its tap on is started; a bare one parked
+            // over a mid-switch device — or a dead one — isn't, so fall
+            // through and rebuild.
+            if slot.as_ref().is_some_and(|listener| {
+                listener.tap_installed && unsafe { listener.engine.isRunning() }
+            }) {
                 return true;
             }
+            let consent = slot.take().and_then(|mut listener| {
+                let consent = listener.consent.take();
+                teardown_engine(&listener);
+                consent
+            });
             if !input_present() {
                 INPUT_AVAILABLE.store(false, Ordering::Relaxed);
                 return false;
             }
             let engine = unsafe { AVAudioEngine::new() };
-            if !configure_and_start(&engine) {
+            let Some(tap_installed) = configure_and_start(&engine) else {
                 return false;
-            }
+            };
             INPUT_AVAILABLE.store(true, Ordering::Relaxed);
             *slot = Some(VoiceListener {
                 engine,
-                consent: None,
+                consent,
+                tap_installed,
             });
             true
         })
@@ -611,14 +688,16 @@ mod voice_gate {
         INPUT_AVAILABLE.load(Ordering::Relaxed)
     }
 
-    /// Whether the engine object is actually running — a present input
-    /// can still sit over a dead engine when a start raced a device
-    /// transition. `VOICE_LISTENER` is thread-local: call on the thread
-    /// that owns it.
+    /// Whether the engine is live and delivering — a present input can
+    /// still sit over a dead engine when a start raced a device
+    /// transition, or over a bare one waiting out a channel-less
+    /// profile switch. `VOICE_LISTENER` is thread-local: call on the
+    /// thread that owns it.
     pub fn engine_running() -> bool {
         VOICE_LISTENER.with_borrow(|slot| {
-            slot.as_ref()
-                .is_some_and(|listener| unsafe { listener.engine.isRunning() })
+            slot.as_ref().is_some_and(|listener| {
+                listener.tap_installed && unsafe { listener.engine.isRunning() }
+            })
         })
     }
 
@@ -635,7 +714,10 @@ mod voice_gate {
             if let Some(mut listener) = slot.take() {
                 let bound = *BOUND_DEVICE.lock().unwrap();
                 let engine_dead = !unsafe { listener.engine.isRunning() };
-                if available && !engine_dead && bound == target {
+                // A bare engine — started over a device with no live
+                // input channels — never counts as bound and live: it
+                // rebuilds until the tap can attach.
+                if listener.tap_installed && available && !engine_dead && bound == target {
                     // Nothing the engine cares about moved — put it back
                     // rather than interrupting live capture.
                     *slot = Some(listener);
@@ -653,8 +735,12 @@ mod voice_gate {
                 return;
             }
             let engine = unsafe { AVAudioEngine::new() };
-            if configure_and_start(&engine) {
-                *slot = Some(VoiceListener { engine, consent });
+            if let Some(tap_installed) = configure_and_start(&engine) {
+                *slot = Some(VoiceListener {
+                    engine,
+                    consent,
+                    tap_installed,
+                });
             }
         });
         available
@@ -850,20 +936,34 @@ mod voice_gate {
     mod tests {
         use super::*;
 
-        fn device(id: AudioObjectID, uid: &str) -> (AudioObjectID, String, String) {
-            (id, uid.to_owned(), format!("device {id}"))
+        fn device(id: AudioObjectID, uid: &str, channels: u32) -> (AudioObjectID, String, u32) {
+            (id, uid.to_owned(), channels)
         }
 
         /// A pinned UID binds its own device or nothing — availability or
         /// default-route moves must never substitute the system default.
         #[test]
         fn pinned_device_is_never_replaced_by_the_default() {
-            let inputs = vec![device(11, "airpods-uid"), device(22, "builtin-uid")];
+            let inputs = vec![device(11, "airpods-uid", 2), device(22, "builtin-uid", 2)];
             assert_eq!(target_device(Some("airpods-uid"), &inputs, Some(22)), Some(11));
             assert_eq!(target_device(Some("gone-uid"), &inputs, Some(22)), None);
             assert_eq!(target_device(Some("gone-uid"), &[], Some(22)), None);
             assert_eq!(target_device(None, &inputs, Some(22)), Some(22));
             assert_eq!(target_device(None, &inputs, None), None);
+        }
+
+        /// A pinned device reporting zero input channels is still
+        /// attached — a Bluetooth headset reads that way through its
+        /// whole profile switch, and channel gain is what opening the
+        /// input coaxes — so it resolves as the bind target rather than
+        /// reading as gone.
+        #[test]
+        fn pinned_device_with_no_input_channels_still_targets() {
+            let inputs = vec![device(11, "airpods-uid", 0), device(22, "builtin-uid", 2)];
+            assert_eq!(target_device(Some("airpods-uid"), &inputs, Some(22)), Some(11));
+            // Unpinned follows the default no matter what the attached
+            // set's channel counts say.
+            assert_eq!(target_device(None, &inputs, Some(11)), Some(11));
         }
     }
 }
