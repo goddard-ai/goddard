@@ -82,14 +82,57 @@ pub(super) struct ComposerSessionRef {
     pub planning: bool,
 }
 
-/// Session rows cap under `@` — they lead the list so a title match is
-/// never buried under the file index, but a broad query still leaves files
-/// reachable.
+/// Session rows cap under `@` so a broad query still leaves files reachable.
 const SESSION_MENTION_CAP: usize = 8;
 
 /// Reference rows share the same cap for the same reason — the `@` list is
 /// a mention list first, never a second file picker.
 const REF_MENTION_CAP: usize = 8;
+
+pub(super) fn rank_reference_mentions(
+    projects: &[composer::ComposerRef],
+    references: &[composer::ComposerRef],
+    query: &str,
+    matcher: &mut Matcher,
+) -> (
+    Vec<Scored<composer::ComposerRef>>,
+    Vec<Scored<composer::ComposerRef>>,
+) {
+    let project_names = projects
+        .iter()
+        .map(|item| item.name.as_str())
+        .collect::<Vec<_>>();
+    let ranked =
+        composer_complete::filter_scored(&project_names, query, matcher, REF_MENTION_CAP)
+            .into_iter()
+            .map(|(index, positions)| Scored {
+                item: projects[index].clone(),
+                positions,
+            })
+            .collect::<Vec<_>>();
+    let project_count = ranked.len();
+    let remaining = REF_MENTION_CAP.saturating_sub(project_count);
+    let mut other_ranked = Vec::new();
+    if remaining > 0 {
+        let names = references
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>();
+        other_ranked.extend(
+            composer_complete::filter_scored(&names, query, matcher, remaining)
+                .into_iter()
+                .map(|(index, positions)| Scored {
+                    item: references[index].clone(),
+                    positions,
+                }),
+        );
+    }
+    (ranked, other_ranked)
+}
+
+pub(super) fn is_boss_reference_candidate(kind: AtomRefKind) -> bool {
+    kind != AtomRefKind::MemoryFile
+}
 
 /// The `mentionable_sessions` pool minus the staged/target exclusions:
 /// started, unarchived, not a side chat, and in the composer's own project
@@ -896,26 +939,6 @@ impl Waku {
                 target: SharedString::from(bucket.id.clone()),
                 detail: SharedString::from(bucket.purpose.clone()),
             });
-        let memory_files = self
-            .boss_ui
-            .memory_files
-            .get(&key)
-            .into_iter()
-            .flat_map(|files| files.iter())
-            .filter(|file| !file.directory)
-            .map(|file| {
-                let (parent, name) = file
-                    .path
-                    .rsplit_once('/')
-                    .map(|(parent, name)| (parent, name.to_owned()))
-                    .unwrap_or(("", file.path.clone()));
-                composer::ComposerRef {
-                    kind: AtomRefKind::MemoryFile,
-                    name: SharedString::from(name),
-                    target: SharedString::from(file.path.clone()),
-                    detail: SharedString::from(parent.to_owned()),
-                }
-            });
         let home = self.home_directory.as_deref();
         let automations = self
             .automations
@@ -934,10 +957,10 @@ impl Waku {
         personas
             .chain(deliverables)
             .chain(buckets)
-            .chain(memory_files)
             .chain(automations)
             .filter(|reference| {
-                self.surface_ref_atom_allowed(surface, reference.kind, &reference.target)
+                is_boss_reference_candidate(reference.kind)
+                    && self.surface_ref_atom_allowed(surface, reference.kind, &reference.target)
             })
             .collect()
     }
@@ -1084,59 +1107,47 @@ impl Waku {
                     .collect::<Vec<_>>()
             }
             TriggerKind::File => {
-                // Session mentions lead: a title match names a task the user
-                // is thinking about. References — projects, and a boss
-                // surface's personas, deliverables, and memory buckets —
-                // follow; a broad query still leaves files reachable below
-                // the cap.
+                // Projects lead every other candidate kind. Sessions and
+                // other boss references follow, while files remain reachable
+                // below their separate cap.
                 let sessions = self.mentionable_sessions_for(surface);
                 let titles = sessions
                     .iter()
                     .map(|session| session.title.as_str())
                     .collect::<Vec<_>>();
-                let references = self
-                    .mentionable_projects(surface)
-                    .into_iter()
-                    .chain(self.mentionable_boss_refs(surface))
-                    .collect::<Vec<_>>();
-                let names = references
-                    .iter()
-                    .map(|reference| reference.name.as_str())
-                    .collect::<Vec<_>>();
-                composer_complete::filter_scored(
-                    &titles,
+                let projects = self.mentionable_projects(surface);
+                let references = self.mentionable_boss_refs(surface);
+                let (project_rows, reference_rows) = rank_reference_mentions(
+                    &projects,
+                    &references,
                     &trigger.query,
                     &mut matcher,
-                    SESSION_MENTION_CAP,
-                )
-                .into_iter()
-                .map(|(index, positions)| {
-                    AutocompleteRow::Session(Scored {
-                        item: sessions[index].clone(),
-                        positions,
-                    })
-                })
-                .chain(
-                    composer_complete::filter_scored(
-                        &names,
-                        &trigger.query,
-                        &mut matcher,
-                        REF_MENTION_CAP,
-                    )
+                );
+                project_rows
                     .into_iter()
-                    .map(|(index, positions)| {
-                        AutocompleteRow::Ref(Scored {
-                            item: references[index].clone(),
-                            positions,
-                        })
-                    }),
-                )
-                .chain(
-                    composer_complete::filter_files(&files, &trigger.query, &mut matcher)
+                    .map(AutocompleteRow::Ref)
+                    .chain(
+                        composer_complete::filter_scored(
+                            &titles,
+                            &trigger.query,
+                            &mut matcher,
+                            SESSION_MENTION_CAP,
+                        )
                         .into_iter()
-                        .map(AutocompleteRow::File),
-                )
-                .collect()
+                        .map(|(index, positions)| {
+                            AutocompleteRow::Session(Scored {
+                                item: sessions[index].clone(),
+                                positions,
+                            })
+                        }),
+                    )
+                    .chain(reference_rows.into_iter().map(AutocompleteRow::Ref))
+                    .chain(
+                        composer_complete::filter_files(&files, &trigger.query, &mut matcher)
+                            .into_iter()
+                            .map(AutocompleteRow::File),
+                    )
+                    .collect()
             }
             // The remote search already narrowed `items` to the query; the
             // local pass only re-ranks so digits hit the number and text hits

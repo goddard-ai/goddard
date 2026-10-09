@@ -1,4 +1,6 @@
-use super::autocomplete::session_mention_candidate;
+use super::autocomplete::{
+    is_boss_reference_candidate, rank_reference_mentions, session_mention_candidate,
+};
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
     ComposerAtomKind, ComposerInlineAtom, ComposerRef, ComposerSubmitAction, ContinueState,
@@ -51,11 +53,11 @@ use super::{
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
-    ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
-    DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind, QueuedMessage,
-    ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace, TranscriptBlock,
-    TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption, UserInputQuestion,
-    unix_time,
+    ActivityItem, ActivityKind, AgentSession, AtomRefKind, Checkpoint, CheckpointFile,
+    CheckpointStatus, DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind,
+    QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace,
+    TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption,
+    UserInputQuestion, unix_time,
 };
 
 #[test]
@@ -984,6 +986,33 @@ fn session_mentions_offer_only_the_composers_project() {
     assert!(!session_mention_candidate(&unstarted, Some(project)));
     // A composer with no draft slot has no project to scope to.
     assert!(session_mention_candidate(&foreign, None));
+}
+
+#[test]
+fn project_mentions_rank_before_other_references_and_memory_files_are_excluded() {
+    let project = ComposerRef {
+        kind: AtomRefKind::Project,
+        name: "matching project".into(),
+        target: "/projects/matching".into(),
+        detail: "".into(),
+    };
+    let persona = ComposerRef {
+        kind: AtomRefKind::Persona,
+        name: "matching persona".into(),
+        target: Uuid::new_v4().to_string().into(),
+        detail: "".into(),
+    };
+    let (projects, references) = rank_reference_mentions(
+        &[project],
+        &[persona],
+        "matching",
+        &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
+    );
+
+    assert_eq!(projects[0].item.kind, AtomRefKind::Project);
+    assert_eq!(references[0].item.kind, AtomRefKind::Persona);
+    assert!(is_boss_reference_candidate(AtomRefKind::MemoryBucket));
+    assert!(!is_boss_reference_candidate(AtomRefKind::MemoryFile));
 }
 
 #[test]

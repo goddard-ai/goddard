@@ -1,0 +1,1 @@
+- Boss chat `@` mentions now put matching projects first and omit memory files.
