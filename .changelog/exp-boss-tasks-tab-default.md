@@ -1,0 +1,1 @@
+- Keep the Boss Tasks tab open in chat by default; it stays in the tab strip when you close other tabs.

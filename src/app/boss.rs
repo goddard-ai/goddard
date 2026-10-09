@@ -244,10 +244,6 @@ pub(super) struct BossUi {
     /// item records keeps a focused item rendering while it sits outside
     /// the painted range. Handles are pruned as items leave the panel.
     pub(super) goals_focus_handles: HashMap<(DaemonKey, String), FocusHandle>,
-    /// The task-content signature the user last dismissed for this daemon —
-    /// a manual hide or tab close suppresses the auto-show until the
-    /// Tasks surface's content actually changes.
-    pub(super) goals_panel_dismissed: HashMap<DaemonKey, u64>,
     pub projects: HashMap<Uuid, Project>,
     pub hosts: Vec<DaemonKey>,
     pub managed: HashSet<Uuid>,
@@ -416,7 +412,6 @@ impl Default for BossUi {
             goals_history_expanded: HashSet::new(),
             goals_row_expanded: HashSet::new(),
             goals_focus_handles: HashMap::new(),
-            goals_panel_dismissed: HashMap::new(),
             projects: HashMap::new(),
             hosts: Vec::new(),
             managed: HashSet::new(),

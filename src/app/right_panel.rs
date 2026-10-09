@@ -1292,18 +1292,27 @@ impl RightPanelSurface {
     }
 }
 
-/// The Tasks tab's content fingerprint: which outcomes it would
-/// list. Stable across status churn inside a row; changes when work
-/// arrives or leaves so a dismissed auto-show re-arms on real change.
-fn boss_tasks_content_signature(rows: &[crate::app::boss::BossOutcomeRow]) -> u64 {
-    if rows.is_empty() {
-        return 0;
+/// Add the runtime-only Tasks tab to a Boss chat's strip. When it is the
+/// first tab, select it; otherwise preserve the active user tab.
+fn ensure_boss_tasks_tab(
+    surfaces: &mut Vec<RightPanelSurface>,
+    active_surface: &mut Option<usize>,
+) -> Option<bool> {
+    if surfaces.contains(&RightPanelSurface::Goals) {
+        return None;
     }
-    let mut ids: Vec<Uuid> = rows.iter().map(|row| row.outcome.id).collect();
-    ids.sort();
-    ids.iter().fold(rows.len() as u64, |signature, id| {
-        signature.wrapping_mul(31).wrapping_add(id.as_u128() as u64)
-    })
+    let first_visit = surfaces.is_empty();
+    surfaces.insert(0, RightPanelSurface::Goals);
+    *active_surface = if first_visit {
+        Some(0)
+    } else {
+        active_surface.map(|active| active + 1).or(Some(1))
+    };
+    Some(first_visit)
+}
+
+fn right_panel_surface_is_closable(surface: &RightPanelSurface) -> bool {
+    !matches!(surface, RightPanelSurface::Plan { .. } | RightPanelSurface::Goals)
 }
 
 fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Option<&str>) -> String {
@@ -2885,6 +2894,48 @@ mod tests {
     }
 
     #[test]
+    fn boss_tasks_tab_is_added_by_default_and_survives_strip_restore() {
+        let mut surfaces = Vec::new();
+        let mut active_surface = None;
+
+        assert_eq!(
+            ensure_boss_tasks_tab(&mut surfaces, &mut active_surface),
+            Some(true)
+        );
+        assert_eq!(surfaces, vec![RightPanelSurface::Goals]);
+        assert_eq!(active_surface, Some(0));
+
+        // Syncing a restored strip keeps Tasks, while adding it to a strip
+        // with user tabs preserves the active user tab.
+        assert_eq!(
+            ensure_boss_tasks_tab(&mut surfaces, &mut active_surface),
+            None
+        );
+        assert_eq!(surfaces, vec![RightPanelSurface::Goals]);
+        let mut restored = vec![RightPanelSurface::Files];
+        let mut restored_active = Some(0);
+        assert_eq!(
+            ensure_boss_tasks_tab(&mut restored, &mut restored_active),
+            Some(false)
+        );
+        assert_eq!(
+            restored,
+            vec![RightPanelSurface::Goals, RightPanelSurface::Files]
+        );
+        assert_eq!(restored_active, Some(1));
+    }
+
+    #[test]
+    fn boss_tasks_tab_cannot_be_closed_but_other_tabs_can() {
+        assert!(!right_panel_surface_is_closable(&RightPanelSurface::Goals));
+        assert!(!right_panel_surface_is_closable(&RightPanelSurface::Plan {
+            session_id: Uuid::nil(),
+            plan_file: "plans/plan.md".into(),
+        }));
+        assert!(right_panel_surface_is_closable(&RightPanelSurface::Files));
+    }
+
+    #[test]
     fn transcript_file_links_route_by_the_active_workspace() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
         let project_file = workspace.join("src/app/right_panel.rs");
@@ -3735,64 +3786,6 @@ mod tests {
         );
     }
 
-    /// The auto-show's content fingerprint: no rows means nothing to
-    /// surface, identical row sets fingerprint the same regardless of
-    /// order or status churn, and a row arriving or leaving re-arms a
-    /// dismissed panel exactly when the Tasks content actually changed.
-    #[test]
-    fn boss_tasks_signature_tracks_row_identity_not_status() {
-        use waku_protocol::boss::{EmployeeLifecycle, OutcomeState};
-
-        let row = |id: u128, lifecycle, blocker: Option<&str>| {
-            let mut prepared = outcome_row(
-                OutcomeState::Open,
-                vec![boss_employee(lifecycle, blocker)],
-            );
-            prepared.outcome.id = Uuid::from_u128(id);
-            prepared
-        };
-        let first = 1;
-        let second = 2;
-
-        // Empty content never signs — the tab stays a manual surface.
-        assert_eq!(boss_tasks_content_signature(&[]), 0);
-
-        // The same outcomes sign identically in any order and across
-        // lifecycle churn — a dismissal outlives status updates.
-        let quiet = row(first, EmployeeLifecycle::Working, None);
-        let settled = row(first, EmployeeLifecycle::Expired, Some("a blocker"));
-        assert_eq!(
-            boss_tasks_content_signature(&[quiet.clone()]),
-            boss_tasks_content_signature(&[settled]),
-        );
-        assert_eq!(
-            boss_tasks_content_signature(&[
-                quiet.clone(),
-                row(second, EmployeeLifecycle::Queued, None),
-            ]),
-            boss_tasks_content_signature(&[
-                row(second, EmployeeLifecycle::Expired, None),
-                quiet.clone(),
-            ]),
-        );
-
-        // Work arriving or leaving changes the signature — a dismissed
-        // auto-show re-arms only here.
-        assert_ne!(
-            boss_tasks_content_signature(&[quiet.clone()]),
-            boss_tasks_content_signature(&[
-                quiet.clone(),
-                row(second, EmployeeLifecycle::Queued, None),
-            ]),
-        );
-        assert_ne!(
-            boss_tasks_content_signature(&[
-                quiet.clone(),
-                row(second, EmployeeLifecycle::Queued, None),
-            ]),
-            boss_tasks_content_signature(&[quiet]),
-        );
-    }
 
     /// The section rules: terminal state owns Finished; a live member owns
     /// In progress over queued or waiting work; and the member-less cases
@@ -4687,60 +4680,26 @@ impl Waku {
         self.sync_boss_tasks_panel(cx);
     }
 
-    /// Fingerprint of the daemon's Tasks content — which assignment rows
-    /// the tab would show. A change re-arms the auto-show after a manual
-    /// dismissal; a mere status update inside a row does not.
-    fn boss_tasks_signature(&self, key: waku_client::DaemonKey) -> u64 {
-        let Some(rows) = self.boss_ui.outcome_rows.get(&key) else {
-            return 0;
-        };
-        boss_tasks_content_signature(rows)
-    }
-
-    /// Record the user's choice to keep the panel hidden or the tab
-    /// closed for the task content currently on offer — the auto-show
-    /// respects it until new content changes the signature.
-    pub(super) fn dismiss_boss_tasks_panel(&mut self) {
-        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
-            return;
-        };
-        let signature = self.boss_tasks_signature(key);
-        if signature != 0 {
-            self.boss_ui.goals_panel_dismissed.insert(key, signature);
-        }
-    }
-
-    /// Show the boss chat's Tasks tab when the panel is hidden and the
-    /// daemon has real task content to surface. A dismissed signature
-    /// stays dismissed, an already-mounted tab is left alone, and a
-    /// visible strip holding other tabs is the user's arrangement — the
-    /// tab never inserts itself over it. A panel the user never resized
-    /// opens at the narrowest usable width; a resized one keeps its
-    /// width. Boss pages do not claim it.
+    /// Ensure the Boss chat's Tasks tab exists. It is strip furniture that
+    /// is reconstructed on restore and remains present while user tabs come
+    /// and go. Boss pages do not claim the chat's strip.
     pub(super) fn sync_boss_tasks_panel(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
+        let Some(_key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
             return;
         };
-        if self
-            .right_panel_surfaces
-            .contains(&RightPanelSurface::Goals)
-        {
+        let Some(first_tab) = ensure_boss_tasks_tab(
+            &mut self.right_panel_surfaces,
+            &mut self.right_panel_active_surface,
+        ) else {
             return;
+        };
+        if first_tab {
+            if self.right_panel_width == DEFAULT_RIGHT_PANEL_WIDTH {
+                self.right_panel_width = RIGHT_PANEL_MIN_WIDTH;
+            }
+            self.set_right_panel_visible(true, cx);
         }
-        let signature = self.boss_tasks_signature(key);
-        if signature == 0 || self.boss_ui.goals_panel_dismissed.get(&key) == Some(&signature) {
-            return;
-        }
-        if self.right_panel_visible && !self.right_panel_surfaces.is_empty() {
-            return;
-        }
-        if self.git_panel_visible {
-            return;
-        }
-        if self.right_panel_width == DEFAULT_RIGHT_PANEL_WIDTH {
-            self.right_panel_width = RIGHT_PANEL_MIN_WIDTH;
-        }
-        self.add_right_panel_surface(RightPanelSurface::Goals, true, cx);
+        cx.notify();
     }
 
     /// Whether the live strip belongs to a boss-managed session — an
@@ -5616,10 +5575,7 @@ impl Waku {
         }
         // A planning session's plan tab is part of the session — it leaves
         // only when the session does, never through a close gesture.
-        if matches!(
-            self.right_panel_surfaces[index],
-            RightPanelSurface::Plan { .. }
-        ) {
+        if !right_panel_surface_is_closable(&self.right_panel_surfaces[index]) {
             return;
         }
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
@@ -5646,9 +5602,6 @@ impl Waku {
             RightPanelSurface::SideChat(id) => Some(id),
             _ => None,
         };
-        if self.right_panel_surfaces[index] == RightPanelSurface::Goals {
-            self.dismiss_boss_tasks_panel();
-        }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
             None
@@ -7492,7 +7445,7 @@ impl Waku {
                 && self.right_panel_files_selected_path.is_some();
             // A plan tab is the session's own document — it stays mounted
             // for the session's life, so the strip draws no close control.
-            let closable = !matches!(&surface, RightPanelSurface::Plan { .. });
+            let closable = right_panel_surface_is_closable(&surface);
             let activate_weak = cx.entity().downgrade();
             let close_weak = cx.entity().downgrade();
             tabs = tabs.child(
