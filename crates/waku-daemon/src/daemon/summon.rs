@@ -533,6 +533,101 @@ impl WakuBackend {
             state.sessions[index].has_started()
         };
         if started {
+            // A requeue (a setModel reticket, a prompt-parked revival) can
+            // carry a selection the session record predates — the ticket is
+            // the committed target, so provider/model/effort sync here and
+            // the relaunched runtime actually runs the admitted pair.
+            {
+                let mut state = self.task_state.lock();
+                let session = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                    .ok_or_else(|| anyhow!("employee session is missing"))?;
+                self.task_store.hydrate(session)?;
+                if session.provider != ticket.provider {
+                    // The live cursor belongs to the provider being left —
+                    // a foreign one fails the target's launch — so it
+                    // suspends with the transcript boundary, and the
+                    // target's own suspended conversation resumes when the
+                    // session has one.
+                    let from = session.provider;
+                    if let Some(cursor) = session.provider_cursor.take() {
+                        let boundary = session.transcript_boundary();
+                        match session
+                            .suspended_provider_sessions
+                            .iter_mut()
+                            .find(|entry| entry.provider == from)
+                        {
+                            Some(entry) => {
+                                entry.cursor = cursor;
+                                entry.boundary = boundary;
+                            }
+                            None => session.suspended_provider_sessions.push(
+                                crate::model::SuspendedProviderSession {
+                                    provider: from,
+                                    cursor,
+                                    boundary,
+                                },
+                            ),
+                        }
+                    }
+                    session.provider_cursor = session
+                        .suspended_provider_sessions
+                        .iter()
+                        .position(|entry| entry.provider == ticket.provider)
+                        .map(|index| session.suspended_provider_sessions.remove(index).cursor);
+                    // These belong to the previous provider's process.
+                    session.provider_session_id = None;
+                    session.agent_preset = None;
+                    session.available_commands.clear();
+                    session.context_usage = None;
+                    session.thread_goal = None;
+                    session.push_notice_message(
+                        crate::model::MessageRole::System,
+                        tr!(
+                            "transcript.provider_switched",
+                            from = from.display_name(),
+                            to = ticket.provider.display_name()
+                        ),
+                        crate::model::TranscriptNotice::ProviderSwitched {
+                            from,
+                            to: ticket.provider,
+                            restarted: false,
+                        },
+                    );
+                    // The fresh provider thread knows nothing it has not
+                    // been told — the transcript read and the untouched
+                    // workspace are its recovery surface.
+                    session.pending_provider_context = Some(format!(
+                        "This session moved from {} to {} — the {} side holds none of the earlier \
+                         conversation. This task's transcript so far is readable with \
+                         `goddard-agent read`; the workspace still holds whatever work was committed \
+                         or left on disk.",
+                        from.display_name(),
+                        ticket.provider.display_name(),
+                        ticket.provider.display_name()
+                    ));
+                } else if session.model.as_deref() != Some(ticket.model.as_str()) {
+                    session.push_notice_message(
+                        crate::model::MessageRole::System,
+                        tr!(
+                            "transcript.model_switched",
+                            from = session.model.as_deref().unwrap_or_default(),
+                            to = ticket.model.as_str()
+                        ),
+                        crate::model::TranscriptNotice::Status {
+                            kind: crate::model::TranscriptNoticeStatus::ModelSwitched,
+                        },
+                    );
+                }
+                session.provider = ticket.provider;
+                session.model = Some(ticket.model.clone());
+                session.reasoning_effort = ticket.reasoning_effort.clone();
+                session.updated_at = crate::model::unix_time();
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+            }
             // Like a fresh assignment, all prompts waiting for admission
             // belong to one wake, rather than one provider turn per item.
             let prompt = std::iter::once(ticket.prompt.clone())
@@ -1456,20 +1551,12 @@ impl WakuBackend {
         }
         // A different pair is a different capacity claim — the ticket
         // re-enters admission rather than jumping pools mid-flight — and
-        // a mid-turn driver refusal lands here too. Once the record reads
-        // queued, the superseded runtime's events arrive stale: they
-        // rewrite nothing and settle nothing.
-        self.requeue_employee(session_id, |ticket, started| {
-            ticket.provider = provider;
-            ticket.model = model_id.clone();
-            ticket.reasoning_effort = effort.clone();
-            // The turn this reconfigure cut answers with a continuation
-            // note behind whatever parked — a never-started shell has no
-            // turn to pick back up.
-            if started && interrupted {
-                ticket.pending_prompts.push(continuation.clone());
-            }
-        })?;
+        // a mid-turn driver refusal lands here too. The old generation's
+        // turn and runtime close BEFORE the ticket queues: requeueing
+        // wakes the scheduler, and a dispatch must never drain the
+        // resumption into the runtime being torn down. Once the record
+        // reads queued, the superseded runtime's events arrive stale:
+        // they rewrite nothing and settle nothing.
         {
             // The surviving session record's launch options belong to the
             // old pair — dispatch rewrites provider/model/effort from the
@@ -1500,6 +1587,17 @@ impl WakuBackend {
         }
         drop_detached(removed);
         self.agent.revoke_session(session_id);
+        self.requeue_employee(session_id, |ticket, started| {
+            ticket.provider = provider;
+            ticket.model = model_id.clone();
+            ticket.reasoning_effort = effort.clone();
+            // The turn this reconfigure cut answers with a continuation
+            // note behind whatever parked — a never-started shell has no
+            // turn to pick back up.
+            if started && interrupted {
+                ticket.pending_prompts.push(continuation.clone());
+            }
+        })?;
         Ok(waku_protocol::boss::BossResult::Saved)
     }
 

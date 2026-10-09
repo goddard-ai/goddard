@@ -7618,6 +7618,355 @@ fn setmodel_validates_the_selection_before_reconfiguring() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The requeue half of `setModel` on a working employee relaunches on the
+/// NEW pair: dispatch syncs the ticket's provider/model/effort into the
+/// session before the runtime starts, suspends the old provider's resume
+/// cursor instead of handing the target a foreign one (which fails the
+/// launch), and leaves a transcript-read note for the fresh thread.
+#[test]
+fn setmodel_requeue_relaunches_on_the_new_provider() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    use waku_protocol::model::{TranscriptNotice, TurnInterruption};
+    use waku_protocol::resources::{AdmissionClaim, ResourceSet};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-relaunch-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "rekey",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    // Walk the ticket to working by hand — no provider binary exists in
+    // tests — with a live runtime, a turn in flight, and a resumable
+    // Codex thread on the session.
+    let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+    let attempt = backend
+        .resource_broker()
+        .unwrap()
+        .try_admission(
+            session_id,
+            reservation,
+            ResourceSet::default(),
+            "summon dispatch".into(),
+            AdmissionClaim {
+                daemon: backend.boss.document().identity.id,
+                provider: ProviderKind::Codex.id().into(),
+                model: "gpt-5.5".into(),
+                live_limit: 1,
+                hard_cap: 2,
+                allow_burst: true,
+            },
+        )
+        .unwrap();
+    assert!(attempt.granted);
+    assert!(
+        backend
+            .boss
+            .mark_dispatching(session_id, 1, Some(reservation))
+            .unwrap()
+    );
+    assert!(backend.boss.mark_working(session_id, 1).unwrap());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("Work on rekey");
+        session.provider_cursor = Some(ProviderResumeCursor::Codex {
+            thread_id: "thread-1".into(),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+
+    // Reconfigure to Claude with its pool held closed — the reticket stays
+    // observably queued until the test opens capacity.
+    set_model_policy(&backend, ProviderKind::Claude, "claude-opus-4-5", 0, 1);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider: ProviderKind::Claude,
+                    model: "claude-opus-4-5".into(),
+                    reasoning_effort: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    let turn = session.turns.last().unwrap();
+    assert_eq!(turn.interruption, Some(TurnInterruption::Daemon));
+    drop(state);
+
+    // Capacity frees; the re-admitted dispatch relaunches. The capture
+    // runtime stands in for the freshly spawned driver.
+    set_model_policy(&backend, ProviderKind::Claude, "claude-opus-4-5", 1, 1);
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Claude,
+            cwd: root.to_path_buf(),
+        },
+    );
+    backend
+        .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
+        .unwrap();
+
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    assert_eq!(session.provider, ProviderKind::Claude);
+    assert_eq!(session.model.as_deref(), Some("claude-opus-4-5"));
+    // The Codex thread suspended rather than feeding a foreign cursor to
+    // the Claude launch.
+    assert!(session.provider_cursor.is_none());
+    assert!(
+        session
+            .suspended_provider_sessions
+            .iter()
+            .any(|entry| entry.provider == ProviderKind::Codex)
+    );
+    assert!(session.messages.iter().any(|message| {
+        matches!(
+            message.notice,
+            Some(TranscriptNotice::ProviderSwitched {
+                from: ProviderKind::Codex,
+                to: ProviderKind::Claude,
+                ..
+            })
+        )
+    }));
+    drop(state);
+    let prompts = capture.prompts.lock();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("Work on rekey"), "{}", prompts[0]);
+    assert!(prompts[0].contains("Verify the state"), "{}", prompts[0]);
+    assert!(
+        prompts[0].contains("goddard-agent read"),
+        "the handoff points the fresh thread at the transcript: {}",
+        prompts[0]
+    );
+    drop(prompts);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A same-provider `setModel` also re-enters admission — but only the
+/// model changed, so the provider's own resume cursor survives and the
+/// relaunch continues the same thread on the new model.
+#[test]
+fn setmodel_requeue_keeps_the_same_providers_cursor() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
+    use waku_protocol::model::TranscriptNotice;
+    use waku_protocol::resources::{AdmissionClaim, ResourceSet};
+    let root = std::env::temp_dir().join(format!("summon-setmodel-samepair-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let other_model = crate::model_catalog::cached_models(ProviderKind::Codex)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(ProviderKind::Codex))
+        .into_iter()
+        .find(|model| model.id != "gpt-5.5")
+        .expect("the codex catalog has a second model")
+        .id;
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "retune",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    let reservation = Uuid::from_u128(session_id.as_u128() ^ 1);
+    let attempt = backend
+        .resource_broker()
+        .unwrap()
+        .try_admission(
+            session_id,
+            reservation,
+            ResourceSet::default(),
+            "summon dispatch".into(),
+            AdmissionClaim {
+                daemon: backend.boss.document().identity.id,
+                provider: ProviderKind::Codex.id().into(),
+                model: "gpt-5.5".into(),
+                live_limit: 1,
+                hard_cap: 2,
+                allow_burst: true,
+            },
+        )
+        .unwrap();
+    assert!(attempt.granted);
+    assert!(
+        backend
+            .boss
+            .mark_dispatching(session_id, 1, Some(reservation))
+            .unwrap()
+    );
+    assert!(backend.boss.mark_working(session_id, 1).unwrap());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("Work on retune");
+        session.provider_cursor = Some(ProviderResumeCursor::Codex {
+            thread_id: "thread-1".into(),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    // A model change is a different capacity claim even within one
+    // provider — it routes through admission, never the in-session retune.
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+
+    set_model_policy(&backend, ProviderKind::Codex, &other_model, 0, 1);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetModel {
+                    provider: ProviderKind::Codex,
+                    model: other_model.clone(),
+                    reasoning_effort: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+
+    set_model_policy(&backend, ProviderKind::Codex, &other_model, 1, 1);
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.to_path_buf(),
+        },
+    );
+    backend
+        .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
+        .unwrap();
+
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    assert_eq!(session.provider, ProviderKind::Codex);
+    assert_eq!(session.model.as_deref(), Some(other_model.as_str()));
+    // Same provider — the Codex thread resumes on the new model.
+    assert!(
+        matches!(
+            session.provider_cursor,
+            Some(ProviderResumeCursor::Codex { .. })
+        ),
+        "the same-provider cursor must survive: {:?}",
+        session.provider_cursor
+    );
+    assert!(session.suspended_provider_sessions.is_empty());
+    assert!(session.messages.iter().any(|message| {
+        matches!(
+            message.notice,
+            Some(TranscriptNotice::Status {
+                kind: crate::model::TranscriptNoticeStatus::ModelSwitched,
+            })
+        )
+    }));
+    drop(state);
+    assert!(capture.prompts.lock()[0].contains("Verify the state"));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// An employee's `prompt` to its supervisor is the report channel — it
 /// delivers with sender attribution. A prompt to any other task fails
 /// with the actionable channel names instead of a bare roster refusal.
