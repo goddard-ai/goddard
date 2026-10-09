@@ -18,6 +18,40 @@ fn global_avatar_style_operation(avatar_style: AvatarStyle) -> BossOperation {
     }
 }
 
+fn sidebar_deliverable_action_slot(group_name: SharedString) -> Div {
+    div()
+        .flex_none()
+        .w_0()
+        .h(px(18.0))
+        .overflow_hidden()
+        .rounded(px(4.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_default()
+        .opacity(0.0)
+        .group_hover(group_name, |style| style.w(px(20.0)).opacity(1.0))
+}
+
+fn sidebar_deliverable_unread_status_slot(
+    group_name: SharedString,
+    id: SharedString,
+    indicator: impl IntoElement,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .w(px(12.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .group_hover(group_name, |style| style.invisible())
+        .child(indicator)
+}
+
 /// The logical size a session-mention chip's avatar occupies in the
 /// transcript — `ATOM_AVATAR_SCALE` of a body-text chip's height.
 const MENTION_AVATAR_SIZE: f32 = 18.0;
@@ -3710,6 +3744,7 @@ impl Waku {
                             .gap(px(6.0))
                             .overflow_hidden()
                             .line_height(sp(18.0))
+                            .relative()
                             .child(
                                 div()
                                     .flex_1()
@@ -3722,21 +3757,16 @@ impl Waku {
                             .children(finder_button)
                             .child(pin_button)
                             .child(archive_button)
-                            // The unread dot holds the row's right edge so
-                            // the hover controls reveal to its left without
-                            // moving it — the same glyph a task row's
-                            // unseen-completion indicator draws.
+                            // On hover the unread dot gives its right-edge
+                            // slot to the quick actions, matching task rows.
                             .when(unread, |line| {
-                                line.child(
-                                    div()
-                                        .flex_none()
-                                        .size(px(12.0))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .group_hover(group_name.clone(), |style| style.invisible())
-                                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-                                )
+                                line.child(sidebar_deliverable_unread_status_slot(
+                                    group_name.clone(),
+                                    SharedString::from(format!(
+                                        "deliverable-unread-{key:?}-{deliverable_id}"
+                                    )),
+                                    div().size(px(7.0)).rounded_full().bg(theme.info),
+                                ))
                             }),
                     )
                     .child(
@@ -3875,21 +3905,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        div()
+        sidebar_deliverable_action_slot(group_name.clone())
             .id(SharedString::from(id))
             .track_focus(focus)
             .tab_index(0)
-            .flex_none()
-            .w_0()
-            .h(px(18.0))
-            .overflow_hidden()
-            .rounded(px(4.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .opacity(0.0)
-            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
             .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
@@ -8408,6 +8427,71 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct DeliverableHoverLayoutHarness;
+
+    impl Render for DeliverableHoverLayoutHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let group = SharedString::from("deliverable-hover-layout");
+            div().size_full().child(
+                div()
+                    .id("deliverable-layout-row")
+                    .debug_selector(|| "deliverable-layout-row".into())
+                    .group(group.clone())
+                    .relative()
+                    .w(px(240.0))
+                    .h(px(32.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(div().flex_1().min_w_0())
+                    .child(
+                        sidebar_deliverable_action_slot(group.clone())
+                            .id("deliverable-layout-pin")
+                            .debug_selector(|| "deliverable-layout-pin".into()),
+                    )
+                    .child(
+                        sidebar_deliverable_action_slot(group.clone())
+                            .id("deliverable-layout-archive")
+                            .debug_selector(|| "deliverable-layout-archive".into()),
+                    )
+                    .child(sidebar_deliverable_unread_status_slot(
+                        group,
+                        SharedString::from("deliverable-layout-status"),
+                        div().size(px(7.0)).rounded_full(),
+                    )
+                    .debug_selector(|| "deliverable-layout-status".into())),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn deliverable_hover_actions_take_the_unread_status_slot(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, _| DeliverableHoverLayoutHarness);
+        cx.run_until_parked();
+
+        let row = cx.debug_bounds("deliverable-layout-row").unwrap();
+        let status = cx.debug_bounds("deliverable-layout-status").unwrap();
+        let pin = cx.debug_bounds("deliverable-layout-pin").unwrap();
+        let archive = cx.debug_bounds("deliverable-layout-archive").unwrap();
+        assert_eq!(status.right(), row.right());
+        assert_eq!(status.size.width, px(12.0));
+        assert_eq!(pin.size.width, px(0.0));
+        assert_eq!(archive.size.width, px(0.0));
+
+        cx.simulate_mouse_move(row.center(), None, Modifiers::none());
+        cx.run_until_parked();
+
+        let status = cx.debug_bounds("deliverable-layout-status").unwrap();
+        let pin = cx.debug_bounds("deliverable-layout-pin").unwrap();
+        let archive = cx.debug_bounds("deliverable-layout-archive").unwrap();
+        assert_eq!(status.right(), row.right());
+        assert_eq!(status.size.width, px(12.0));
+        assert_eq!(pin.size.width, px(20.0));
+        assert_eq!(archive.size.width, px(20.0));
+        assert_eq!(archive.right(), row.right());
+        assert!(archive.origin.x < status.origin.x);
+    }
 
     #[test]
     fn memory_tree_flattens_expanded_folders_and_hides_collapsed_children() {
