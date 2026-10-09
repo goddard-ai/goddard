@@ -4304,6 +4304,160 @@ fn a_recovered_finish_keeps_its_recorded_cause() {
 }
 
 #[test]
+fn workspace_transition_suppresses_turn_settlement_without_expiring() {
+    use waku_protocol::boss::EmployeeSettle;
+    let root = std::env::temp_dir().join(format!("boss-workspace-settle-{}", Uuid::new_v4()));
+    let (backend, _, employee_id, _, child) = employee_finish_fixture(&root);
+    backend
+        .boss
+        .set_workspace_transition(employee_id, true)
+        .unwrap();
+    backend
+        .queue_agent_prompt(
+            employee_id,
+            "follow-up during move".into(),
+            None,
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(backend.agent.has_queued(employee_id));
+    assert!(
+        child.prompts.lock().is_empty(),
+        "follow-ups must not reach the old workspace"
+    );
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert!(employee.workspace_transition);
+    assert!(!employee.expired);
+    assert!(employee.expiry.is_none());
+    assert!(backend.sessions.lock().contains_key(&employee_id));
+    assert_eq!(*child.shutdowns.lock(), 0);
+    backend
+        .boss
+        .set_workspace_transition(employee_id, false)
+        .unwrap();
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert_eq!(*child.shutdowns.lock(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_transition_recovers_as_restart_interruption() {
+    use waku_protocol::boss::ExpiryCause;
+    let root = std::env::temp_dir().join(format!("boss-workspace-recover-{}", Uuid::new_v4()));
+    let (mut backend, _, employee_id, _, child) = employee_finish_fixture(&root);
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        session.begin_turn("Move interrupted during active work");
+        session.status = SessionStatus::Working;
+        state.mark_session_dirty(employee_id);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .agent
+        .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    backend
+        .boss
+        .set_workspace_transition(employee_id, true)
+        .unwrap();
+    let token = backend.agent.mint(employee_id);
+    // Reopen the persisted Boss document, as daemon startup does. The
+    // interrupted employee must be recoverable rather than skipped as expired.
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    assert!(
+        backend
+            .boss
+            .employee(employee_id)
+            .unwrap()
+            .workspace_transition
+    );
+    assert!(backend.boss.require_active(employee_id).is_err());
+    let (recover, pending) = crossbeam_channel::bounded(1);
+    backend.boss.set_recover_employee(Arc::new(move |id| {
+        recover.send(id).unwrap();
+        Ok(())
+    }));
+    backend.boss.recover_interrupted();
+    assert_eq!(
+        pending
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap(),
+        employee_id
+    );
+    backend.recover_boss_employee(employee_id).unwrap();
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert!(employee.expired);
+    assert!(!employee.workspace_transition);
+    assert_eq!(employee.expiry.unwrap().cause, ExpiryCause::Restarted);
+    assert!(!backend.sessions.lock().contains_key(&employee_id));
+    assert_eq!(*child.shutdowns.lock(), 1);
+    assert!(backend.agent.resolve(&token).is_none());
+    assert!(!backend.agent.has_open_turn(employee_id));
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id)
+            .unwrap()
+            .turns
+            .last()
+            .unwrap()
+            .status,
+        TurnStatus::Interrupted
+    );
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id)
+            .unwrap()
+            .status,
+        SessionStatus::Idle
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn workspace_transition_cannot_revive_a_stopped_employee() {
+    use waku_protocol::boss::EmployeeSettle;
+    let root = std::env::temp_dir().join(format!("boss-workspace-stop-{}", Uuid::new_v4()));
+    let (backend, _, employee_id, _, child) = employee_finish_fixture(&root);
+    backend
+        .boss
+        .set_workspace_transition(employee_id, true)
+        .unwrap();
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::Stopped)
+        .unwrap();
+    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(
+        backend
+            .boss
+            .set_workspace_transition(employee_id, false)
+            .is_err()
+    );
+    assert_eq!(*child.shutdowns.lock(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn a_flagged_employee_finish_delivers_the_index() {
     let root = std::env::temp_dir().join(format!("boss-flagged-{}", Uuid::new_v4()));
     let (backend, _supervisor, employee_id, parent_capture, _child) =
@@ -8753,6 +8907,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     ]);
 
     let (backend, supervisor) = surface_test_backend(&root);
+    let backend = Arc::new(backend);
     backend.boss.set_session_id(supervisor).unwrap();
     let persona = backend.boss.document().personas[1].id;
     let employee = backend
@@ -8772,6 +8927,8 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     let mut child = AgentSession::new(git_project.id, ProviderKind::Codex);
     child.id = employee_id;
     child.boss_managed = true;
+    child.begin_turn("Continue the assigned job");
+    child.status = SessionStatus::Working;
     {
         let mut state = backend.task_state.lock();
         state.projects.push(git_project);
@@ -8797,6 +8954,28 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
             cwd: project.clone(),
         },
     );
+    let transitions = Arc::new(Mutex::new(Vec::new()));
+    let snapshots = transitions.clone();
+    let weak_backend = Arc::downgrade(&backend);
+    backend.boss.set_task_notifier(Arc::new(move || {
+        let backend = weak_backend.upgrade().unwrap();
+        let employee = backend.boss.employee(employee_id).unwrap();
+        let status = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == employee_id)
+            .unwrap()
+            .status;
+        let has_runtime = backend.sessions.lock().contains_key(&employee_id);
+        snapshots.lock().push((
+            employee.workspace_transition,
+            employee.expired,
+            status,
+            has_runtime,
+        ));
+    }));
     let switch = |workspace: AgentWorkspace, base_branch: Option<&str>| {
         backend.handle_boss_operation(
             Some(supervisor),
@@ -8861,6 +9040,22 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     assert_eq!(*first_capture.shutdowns.lock(), 1);
     assert!(!backend.boss.employee(employee_id).unwrap().expired);
     assert!(backend.agent.has_queued(employee_id));
+    assert!(
+        !backend
+            .boss
+            .employee(employee_id)
+            .unwrap()
+            .workspace_transition
+    );
+    let published = transitions.lock();
+    assert!(published.iter().any(
+        |&(transitioning, expired, status, has_runtime)| transitioning
+            && !expired
+            && status == SessionStatus::Working
+            && has_runtime
+    ));
+    assert!(published.iter().all(|&(_, expired, _, _)| !expired));
+    drop(published);
 
     // Once a runtime exists the parked resume delivers with the move
     // notice folded into it.

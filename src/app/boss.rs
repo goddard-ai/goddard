@@ -224,6 +224,7 @@ pub(super) struct BossUi {
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
+    workspace_transitions: HashSet<Uuid>,
     /// Queued employees' wait reason, keyed by session id — the sidebar row
     /// and summon card read membership here to wear a pending state instead
     /// of the finished/idle look an unstarted shell session would give them.
@@ -371,6 +372,7 @@ impl Default for BossUi {
             active: HashMap::new(),
             working: HashSet::new(),
             expired: HashSet::new(),
+            workspace_transitions: HashSet::new(),
             queued: HashMap::new(),
             dispatching: HashSet::new(),
             queued_model_targets: HashMap::new(),
@@ -884,6 +886,7 @@ impl Waku {
             self.boss_ui.employee_icons.clear();
             self.boss_ui.working.clear();
             self.boss_ui.expired.clear();
+            self.boss_ui.workspace_transitions.clear();
             self.boss_ui.queued.clear();
             self.boss_ui.dispatching.clear();
             self.boss_ui.queued_model_targets.clear();
@@ -920,6 +923,11 @@ impl Waku {
                         .employee_icons
                         .insert(employee.session_id, employee_icon(employee, state));
                     self.boss_ui.managed.insert(employee.session_id);
+                    if employee.workspace_transition {
+                        self.boss_ui
+                            .workspace_transitions
+                            .insert(employee.session_id);
+                    }
                     if employee.expired {
                         self.boss_ui.expired.insert(employee.session_id);
                     } else {
@@ -3255,7 +3263,14 @@ impl Waku {
                 },
             )
         } else {
-            (self.boss_ui.job_titles.get(&id).cloned(), None)
+            (
+                if self.boss_ui.workspace_transitions.contains(&id) {
+                    Some(tr!("boss.status_switching_workspace"))
+                } else {
+                    self.boss_ui.job_titles.get(&id).cloned()
+                },
+                None,
+            )
         };
         div()
             .id(format!("boss-employee-{id}"))
@@ -4934,6 +4949,9 @@ impl Waku {
         theme: &Theme,
     ) -> (String, Hsla) {
         use waku_protocol::boss::EmployeeLifecycle;
+        if employee.workspace_transition && !employee.expired {
+            return (tr!("boss.status_switching_workspace"), theme.text_secondary);
+        }
         match employee.lifecycle() {
             EmployeeLifecycle::Queued => {
                 let detail = self
@@ -7706,6 +7724,7 @@ mod tests {
             permissions: PersonaPermissions::default(),
             pinned_files: Vec::new(),
             expired: false,
+            workspace_transition: false,
             expired_at: None,
             blocker: None,
             cancelled: false,
@@ -7912,6 +7931,7 @@ mod tests {
             permissions: PersonaPermissions::default(),
             pinned_files: Vec::new(),
             expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
+            workspace_transition: false,
             expired_at: None,
             blocker: None,
             cancelled: false,

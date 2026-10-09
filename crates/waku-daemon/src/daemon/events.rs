@@ -526,6 +526,9 @@ pub(super) fn forward_driver_events(
                 Some(waku_protocol::boss::EmployeeSettle::TurnFinished)
             )
             && boss.is_employee(session_id)
+            && !boss
+                .employee(session_id)
+                .is_some_and(|employee| employee.workspace_transition)
         {
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {

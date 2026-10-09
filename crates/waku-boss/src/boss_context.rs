@@ -705,6 +705,7 @@ mod tests {
             permissions: PersonaPermissions::default(),
             pinned_files: Vec::new(),
             expired,
+            workspace_transition: false,
             expired_at: expired.then(unix_time),
             blocker: None,
             cancelled: false,

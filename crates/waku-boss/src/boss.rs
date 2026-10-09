@@ -592,15 +592,35 @@ impl BossService {
         })
     }
 
-    pub fn set_employee_expired(&self, session_id: Uuid, expired: bool) -> anyhow::Result<()> {
+    pub fn set_workspace_transition(
+        &self,
+        session_id: Uuid,
+        transitioning: bool,
+    ) -> anyhow::Result<()> {
         self.update(|state| {
-            if let Some(employee) = state
+            let employee = state
                 .employees
                 .iter_mut()
                 .find(|employee| employee.session_id == session_id)
+                .ok_or_else(|| anyhow!("employee session is missing"))?;
+            // Ticket-less queued records are legacy working employees,
+            // as on the settle path; they hold no scheduler queue position.
+            if transitioning
+                && employee.lifecycle() == EmployeeLifecycle::Queued
+                && employee.ticket.is_none()
             {
-                employee.expired = expired;
+                employee.set_lifecycle(EmployeeLifecycle::Working, waku_protocol::model::unix_time());
             }
+            if !transitioning && employee.lifecycle() != EmployeeLifecycle::Working {
+                bail!("employee stopped while its workspace was changing");
+            }
+            if transitioning
+                && (employee.lifecycle() != EmployeeLifecycle::Working
+                    || employee.workspace_transition)
+            {
+                bail!("employee is not ready for a workspace move");
+            }
+            employee.workspace_transition = transitioning;
             Ok(())
         })
     }
@@ -1825,6 +1845,12 @@ impl BossService {
     }
 
     pub fn require_active(&self, session: Uuid) -> anyhow::Result<()> {
+        if self
+            .employee(session)
+            .is_some_and(|entry| entry.workspace_transition)
+        {
+            bail!("employee is switching workspace; try again after the move");
+        }
         if self.interrupted.lock().contains(&session) {
             bail!("employee was interrupted by daemon restart; summon a new employee");
         }
@@ -1978,6 +2004,7 @@ impl BossService {
             permissions,
             pinned_files,
             expired: false,
+            workspace_transition: false,
             expired_at: None,
             blocker: None,
             cancelled: false,
@@ -2342,6 +2369,7 @@ impl BossService {
         // ticketless `queued` records still own a runtime, so theirs land.
         if !self.employee(session).is_some_and(|entry| {
             !entry.expired
+                && !entry.workspace_transition
                 && !(entry.lifecycle() == EmployeeLifecycle::Queued && entry.ticket.is_some())
         }) {
             return;
@@ -2604,6 +2632,8 @@ impl BossService {
         self.update(|state| {
             if let Some(entry) = state.employees.iter_mut().find(|entry| {
                 entry.session_id == session
+                    && (!entry.workspace_transition
+                        || matches!(cause, ExpiryCause::Restarted | ExpiryCause::Stopped))
                     && matches!(
                         entry.lifecycle(),
                         EmployeeLifecycle::Queued
@@ -5966,6 +5996,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     pinned_files: Vec::new(),
                     expired: false,
+                    workspace_transition: false,
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
@@ -6038,6 +6069,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     pinned_files: Vec::new(),
                     expired: false,
+                    workspace_transition: false,
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
@@ -6367,6 +6399,7 @@ mod tests {
                     },
                     pinned_files: vec!["docs/release.md".into(), "memory/work/old.md".into()],
                     expired: false,
+                    workspace_transition: false,
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
@@ -6507,6 +6540,7 @@ mod tests {
                         permissions: PersonaPermissions::default(),
                         pinned_files: Vec::new(),
                         expired: false,
+                        workspace_transition: false,
                         expired_at: None,
                         blocker: None,
                         cancelled: false,
@@ -6987,6 +7021,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     pinned_files: Vec::new(),
                     expired: false,
+                    workspace_transition: false,
                     expired_at: None,
                     blocker: None,
                     cancelled: false,
@@ -7586,6 +7621,7 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     pinned_files: Vec::new(),
                     expired: false,
+                    workspace_transition: false,
                     expired_at: None,
                     blocker: None,
                     cancelled: false,

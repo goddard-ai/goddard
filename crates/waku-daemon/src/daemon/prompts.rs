@@ -303,6 +303,15 @@ impl WakuBackend {
         // A queued or dispatching ticket owns no settled runtime — park
         // the prompt in the mirrored queue; dispatch drains it when the
         // launch lands.
+        // A workspace move likewise must not launch or deliver into the
+        // old directory; its continuation drains these prompts after the move.
+        if self
+            .boss
+            .employee(target)
+            .is_some_and(|employee| employee.workspace_transition)
+        {
+            return Ok(());
+        }
         if self.boss.employee_lifecycle(target).is_some_and(|state| {
             matches!(
                 state,

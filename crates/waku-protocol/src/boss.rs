@@ -703,6 +703,11 @@ pub struct BossEmployee {
     #[serde(default, alias = "knowledgeFiles")]
     pub pinned_files: Vec<String>,
     pub expired: bool,
+    /// A workspace move is retiring its old runtime. The admission stays
+    /// live; normal turn settlement is suppressed until the move completes.
+    /// A daemon restart resolves an abandoned move as an interruption.
+    #[serde(default)]
+    pub workspace_transition: bool,
     /// Unix timestamp when the employee finished. Retired after one hour
     /// unless the boss assigns the employee another prompt first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -811,6 +816,9 @@ impl BossEmployee {
     pub fn set_lifecycle(&mut self, lifecycle: EmployeeLifecycle, now: u64) {
         self.state = lifecycle;
         self.expired = lifecycle == EmployeeLifecycle::Expired;
+        if lifecycle != EmployeeLifecycle::Working {
+            self.workspace_transition = false;
+        }
         if self.expired && self.expired_at.is_none() {
             self.expired_at = Some(now);
         }

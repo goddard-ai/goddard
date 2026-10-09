@@ -1510,12 +1510,16 @@ impl WakuBackend {
             )?),
             AgentWorkspace::Adopt => unreachable!("adopt is rejected above"),
         };
-        // A cancelled turn settles like a finished one — for a live
-        // employee that means expiry, a supervisor report, and a cleared
-        // prompt queue. Marking the record expired first suppresses the
-        // settle; the resurrect below restores it once the old turn's
-        // events are known to have passed.
-        self.boss.set_employee_expired(session_id, true)?;
+        // Persist the settle guard before cancellation can emit its close
+        // event. The employee keeps its admission and live sidebar row;
+        // startup recovery interrupts an abandoned move instead of leaving
+        // a falsely expired record behind.
+        if let Err(error) = self.boss.set_workspace_transition(session_id, true) {
+            if let Some(worktree) = &created {
+                let _ = crate::worktree::remove(&worktree.path, true);
+            }
+            return Err(error);
+        }
         let switch = (|| -> anyhow::Result<()> {
             if self.agent.has_open_turn(session_id)
                 && let Some(entry) = self.sessions.lock().get(&session_id)
@@ -1528,9 +1532,9 @@ impl WakuBackend {
             }
             drop_detached(removed);
             self.agent.revoke_session(session_id);
-            // Resurrecting before the cancelled turn's close event lands
+            // Clearing the guard before the cancelled turn's close event lands
             // would let its settle finish the employee for real — the
-            // forwarder reads expiry at event time, so the open-turn flag
+            // forwarder reads the guard at event time, so the open-turn flag
             // clearing is what proves that evaluation already happened.
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while self.agent.has_open_turn(session_id) {
@@ -1579,16 +1583,17 @@ impl WakuBackend {
             Ok(())
         })();
         if let Err(error) = switch {
-            let _ = self.boss.resurrect(session_id);
+            let restored = self.boss.set_workspace_transition(session_id, false);
             // The fork only ever held a fresh checkout — nothing the
             // employee wrote — so abandoning it on a failed switch loses
             // nothing.
             if let Some(worktree) = &created {
                 let _ = crate::worktree::remove(&worktree.path, true);
             }
+            restored?;
             return Err(error);
         }
-        self.boss.resurrect(session_id)?;
+        self.boss.set_workspace_transition(session_id, false)?;
         self.queue_agent_prompt_hidden(
             session_id,
             "Continue the job you were assigned.".to_owned(),

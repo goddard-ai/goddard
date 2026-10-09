@@ -33,6 +33,12 @@ permissions: PersonaPermissions,
  */
 pinnedFiles: Array<string>, expired: boolean,
 /**
+ * A workspace move is retiring its old runtime. The admission stays
+ * live; normal turn settlement is suppressed until the move completes.
+ * A daemon restart resolves an abandoned move as an interruption.
+ */
+workspaceTransition: boolean,
+/**
  * Unix timestamp when the employee finished. Retired after one hour
  * unless the boss assigns the employee another prompt first.
  */
