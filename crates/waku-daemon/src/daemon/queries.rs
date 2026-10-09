@@ -168,6 +168,404 @@ impl WakuBackend {
         Ok(ResponsePayload::AgentSessionSearch { hits })
     }
 
+    /// The scoped credential's history search — the read-only discovery
+    /// surface behind `goddard-agent history search`. Archived records are
+    /// in scope for every caller. The corpus is whatever the caller may
+    /// already open: every retained session for the boss; an employee's own
+    /// record plus the employees it supervises; an ordinary task's project
+    /// minus boss-managed sessions it cannot read. Hits carry the passage
+    /// that earned them and the coverage block reports scope, caps, and
+    /// exclusions instead of implying coverage the caller does not have.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn agent_history_search(
+        &self,
+        agent: Option<Uuid>,
+        session_id: Uuid,
+        query: &str,
+        project: Option<&str>,
+        person: Option<&str>,
+        after: Option<&str>,
+        before: Option<&str>,
+        kind: Option<waku_protocol::model::HistorySourceKind>,
+        limit: Option<usize>,
+        offset: usize,
+    ) -> anyhow::Result<ResponsePayload> {
+        use waku_protocol::model::HistorySourceKind;
+        self.require_agent_tools()?;
+        let caller = agent.or_else(|| {
+            (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
+        });
+        let Some(caller) = caller else {
+            bail!("history search needs a calling task to scope to");
+        };
+        let limit = limit.unwrap_or(AGENT_SEARCH_DEFAULT_LIMIT);
+        if limit == 0 || limit > HISTORY_SEARCH_MAX_LIMIT {
+            bail!("`limit` must be between 1 and {HISTORY_SEARCH_MAX_LIMIT}");
+        }
+        let after = parse_history_bound(after, false)?;
+        let before = parse_history_bound(before, true)?;
+        if let (Some(after), Some(before)) = (after, before)
+            && before <= after
+        {
+            bail!("`before` must be later than `after`");
+        }
+        let (terms, terms_dropped) = history_search_terms(query);
+        if terms.is_empty()
+            && project.is_none()
+            && person.is_none()
+            && kind.is_none()
+            && after.is_none()
+            && before.is_none()
+        {
+            bail!("history search needs query text or at least one filter");
+        }
+
+        let document = self.boss.document();
+        let boss_project = document.identity.id;
+        let employees: HashMap<Uuid, waku_protocol::boss::BossEmployee> = document
+            .employees
+            .iter()
+            .chain(document.retired_employees.iter())
+            .map(|employee| (employee.session_id, employee.clone()))
+            .collect();
+        let planning_sessions: HashSet<Uuid> = document
+            .planning
+            .iter()
+            .map(|plan| plan.session_id)
+            .collect();
+        let boss_session_id = document.session_id;
+        let is_boss = self.boss.is_boss_principal(caller);
+        let is_employee = !is_boss && self.boss.is_employee(caller);
+
+        // One classifier for the corpus scan and the result projection:
+        // planning metadata first, then the employee roster (active and
+        // retired), then the live or rotated Boss chat, then managed
+        // records that were employee tasks, and plain tasks last.
+        let classify = |session: &AgentSession| -> HistorySourceKind {
+            if session.planning.is_some() || planning_sessions.contains(&session.id) {
+                HistorySourceKind::Plan
+            } else if employees.contains_key(&session.id) {
+                HistorySourceKind::Employee
+            } else if Some(session.id) == boss_session_id
+                || (session.boss_managed && session.project_id == boss_project)
+            {
+                HistorySourceKind::Boss
+            } else if session.boss_managed {
+                HistorySourceKind::Employee
+            } else {
+                HistorySourceKind::Task
+            }
+        };
+
+        let (allowed_ids, excluded_by_access, kinds_scanned, caller_project_name, person_matches) = {
+            let state = self.task_state.lock();
+            let caller_session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == caller)
+                .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
+            let caller_project = caller_session.project_id;
+            let caller_parent = caller_session.side_chat_of;
+            let caller_project_name = state
+                .projects
+                .iter()
+                .find(|entry| entry.id == caller_project)
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default();
+
+            // The sessions this credential may already open. `None` means
+            // the boss's whole store — no allowlist needed.
+            let accessible: Option<HashSet<Uuid>> = if is_boss {
+                None
+            } else if is_employee {
+                // Self plus every active-roster employee whose supervisor
+                // chain reaches the caller — the set `authorize_transcript`
+                // already lets it read — plus a side chat's parent.
+                let mut set = HashSet::from([caller]);
+                set.extend(caller_parent);
+                loop {
+                    let grown = set.len();
+                    for employee in &document.employees {
+                        if set.contains(&employee.supervisor_id) {
+                            set.insert(employee.session_id);
+                        }
+                    }
+                    if set.len() == grown {
+                        break;
+                    }
+                }
+                Some(set)
+            } else {
+                Some(
+                    state
+                        .sessions
+                        .iter()
+                        .filter(|session| {
+                            session.project_id == caller_project && !session.boss_managed
+                        })
+                        .map(|session| session.id)
+                        .collect(),
+                )
+            };
+
+            // `--project`: the boss names any registered project; employees
+            // narrow their supervised corpus by any registered project; an
+            // ordinary task must name its own — the `search` rule.
+            let project_id =
+                match project {
+                    Some(name) => {
+                        let resolved = resolve_named_search_project(&state.projects, name);
+                        if is_boss || is_employee {
+                            Some(resolved.ok_or_else(|| {
+                                anyhow!("project `{name}` is unknown to the daemon")
+                            })?)
+                        } else {
+                            if resolved != Some(caller_project) {
+                                bail!("project `{name}` is not this task's project");
+                            }
+                            Some(caller_project)
+                        }
+                    }
+                    // An ordinary task is pinned to its own project; the boss
+                    // and employees filter only when they ask to.
+                    None if !is_boss && !is_employee => Some(caller_project),
+                    None => None,
+                };
+
+            // `--person` resolves to the sessions owned by employees or Boss
+            // identities whose name matches — exact case-insensitive first,
+            // then substring — so "walter" need not be typed in full.
+            let mut person_count = 0usize;
+            let person_ids = person
+                .map(|name| {
+                    let needle = name.trim().to_lowercase();
+                    if needle.is_empty() {
+                        return anyhow::Result::<HashSet<Uuid>>::Err(anyhow!(
+                            "--person must not be empty"
+                        ));
+                    }
+                    let mut ids = HashSet::new();
+                    let named: Vec<&waku_protocol::boss::BossEmployee> = employees
+                        .values()
+                        .filter(|employee| employee.identity.name.eq_ignore_ascii_case(&needle))
+                        .collect();
+                    let named = if named.is_empty() {
+                        employees
+                            .values()
+                            .filter(|employee| {
+                                employee.identity.name.to_lowercase().contains(&needle)
+                            })
+                            .collect()
+                    } else {
+                        named
+                    };
+                    ids.extend(named.iter().map(|employee| employee.session_id));
+                    person_count = named.len();
+                    if needle == "boss" || document.identity.name.to_lowercase().contains(&needle) {
+                        person_count += 1;
+                        ids.extend(
+                            state
+                                .sessions
+                                .iter()
+                                .filter(|session| {
+                                    let kind = classify(session);
+                                    kind == HistorySourceKind::Boss
+                                        || kind == HistorySourceKind::Plan
+                                })
+                                .map(|session| session.id),
+                        );
+                    }
+                    if ids.is_empty() {
+                        return Err(anyhow!(
+                            "person `{name}` matches no employee or Boss identity"
+                        ));
+                    }
+                    Ok(ids)
+                })
+                .transpose()?;
+
+            let mut allowed = Vec::new();
+            let mut excluded = 0u64;
+            let mut kinds = HashSet::new();
+            for session in &state.sessions {
+                let session_kind = classify(session);
+                if kind.is_some_and(|kind| kind != session_kind)
+                    || project_id.is_some_and(|id| session.project_id != id)
+                    || person_ids
+                        .as_ref()
+                        .is_some_and(|ids| !ids.contains(&session.id))
+                {
+                    continue;
+                }
+                match &accessible {
+                    None => {}
+                    Some(set) if set.contains(&session.id) => {}
+                    Some(_) => {
+                        excluded += 1;
+                        continue;
+                    }
+                }
+                kinds.insert(session_kind);
+                allowed.push(session.id);
+            }
+            let mut kinds: Vec<HistorySourceKind> = kinds.into_iter().collect();
+            kinds.sort_by_key(|kind| *kind as u8);
+            (
+                allowed,
+                excluded,
+                kinds,
+                caller_project_name,
+                person.is_some().then_some(person_count),
+            )
+        };
+
+        // The allowlist is the corpus — passing it always, even unfiltered,
+        // keeps `sources_scanned` honest: the scan sees exactly the records
+        // this credential may open under the requested filters.
+        let scanned = allowed_ids.len() as u64;
+        let (matches, sources_matched) = self.task_store.history_message_search(
+            terms.clone(),
+            after,
+            before,
+            limit,
+            offset,
+            Some(allowed_ids),
+        )()?;
+
+        let (hits, dropped) = {
+            let state = self.task_state.lock();
+            let mut dropped = 0u64;
+            let mut hits = Vec::with_capacity(matches.len());
+            for matched in matches {
+                let Some(session) = state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == matched.session_id)
+                else {
+                    // Gone between the scan and the read — count it rather
+                    // than letting the hit vanish silently.
+                    dropped += 1;
+                    continue;
+                };
+                let employee = employees.get(&session.id);
+                let kind = classify(session);
+                let recorded_by = matched.sent_by_task.and_then(|sender| {
+                    employees
+                        .get(&sender)
+                        .map(|employee| employee.identity.name.clone())
+                        .or_else(|| {
+                            (document.session_id == Some(sender))
+                                .then(|| document.identity.name.clone())
+                        })
+                        .or_else(|| {
+                            state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == sender)
+                                .map(|session| session.display_title().to_owned())
+                        })
+                });
+                hits.push(waku_protocol::model::AgentHistorySearchHit {
+                    task_id: session.id,
+                    kind,
+                    title: session.display_title().to_owned(),
+                    project: state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| project.name.clone())
+                        .unwrap_or_default(),
+                    person: match kind {
+                        HistorySourceKind::Employee => {
+                            employee.map(|employee| employee.identity.name.clone())
+                        }
+                        HistorySourceKind::Boss | HistorySourceKind::Plan => {
+                            Some(document.identity.name.clone())
+                        }
+                        HistorySourceKind::Task => None,
+                    },
+                    job_title: employee.and_then(|employee| {
+                        (!employee.job_title.is_empty()).then(|| employee.job_title.clone())
+                    }),
+                    employee_expired: employee.map(|employee| employee.expired),
+                    status: session.status,
+                    archived: session.archived_at.is_some(),
+                    created_at: session.created_at,
+                    updated_at: session.updated_at,
+                    message_id: matched.message_id,
+                    role: matched.source,
+                    recorded_by,
+                    excerpt: matched.excerpt,
+                    excerpt_matched: matched.excerpt_matched,
+                    excerpt_at: matched.created_at,
+                    matched_terms: matched.matched_terms,
+                    title_matched: matched.title_matched,
+                    matched_messages: matched.matched_messages,
+                });
+            }
+            (hits, dropped)
+        };
+
+        let returned = hits.len() as u64;
+        let truncated = offset as u64 + returned < sources_matched;
+        let mut notes = Vec::new();
+        notes.push(
+            "archived records are purged about 30 days after archiving; purged or never-retained records cannot appear"
+                .to_owned(),
+        );
+        if terms_dropped {
+            notes.push(format!(
+                "the query kept its first {HISTORY_SEARCH_MAX_TERMS} terms; later terms were dropped"
+            ));
+        }
+        if excluded_by_access > 0 {
+            notes.push(format!(
+                "{excluded_by_access} records inside the requested scope are outside this credential's access and were not searched"
+            ));
+        }
+        if let (Some(name), Some(count)) = (person, person_matches)
+            && count > 1
+        {
+            notes.push(format!(
+                "person `{name}` matched {count} identities — their records are combined"
+            ));
+        }
+        if dropped > 0 {
+            notes.push(format!(
+                "{dropped} matched records left the live list while the search ran"
+            ));
+        }
+        let scope = if is_boss {
+            "every project on this daemon — task, employee, Boss-chat and planning records, including archived records"
+                .to_owned()
+        } else if is_employee {
+            "your own record plus the employees you supervise, including archived records"
+                .to_owned()
+        } else {
+            format!(
+                "project '{caller_project_name}' — its task transcripts, including archived records"
+            )
+        };
+        Ok(ResponsePayload::AgentHistorySearch {
+            result: waku_protocol::model::AgentHistorySearchResult {
+                query: query.to_owned(),
+                hits,
+                coverage: waku_protocol::model::AgentHistorySearchCoverage {
+                    scope,
+                    includes_archived: true,
+                    kinds: kinds_scanned,
+                    sources_scanned: scanned,
+                    sources_matched,
+                    returned,
+                    truncated,
+                    next_offset: truncated.then(|| offset as u64 + returned),
+                    excluded_by_access,
+                    notes,
+                },
+            },
+        })
+    }
+
     /// The scoped agent's query-aware workspace lookup. Jev judges each
     /// bounded candidate independently; code owns ranking, formatting, and
     /// the deterministic fallback.
@@ -823,4 +1221,41 @@ impl WakuBackend {
             _ => bail!("exactly one of task_id and thread_id is required"),
         }
     }
+}
+
+/// The most sources one `history search` page returns. Larger asks are an
+/// error — continuation goes through `offset`.
+const HISTORY_SEARCH_MAX_LIMIT: usize = 100;
+
+/// Parse a `history search` date bound — `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM[:SS]`,
+/// or unix seconds, all UTC. A bare `before` date resolves to the *next*
+/// midnight so `--before 2026-10-05` still covers that day; instants and
+/// `after` bounds stay exact.
+fn parse_history_bound(value: Option<&str>, end_of_day: bool) -> anyhow::Result<Option<u64>> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        bail!("date bounds must not be empty");
+    }
+    if let Ok(seconds) = raw.parse::<u64>() {
+        return Ok(Some(seconds));
+    }
+    let parsed = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M"))
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").map(|date| {
+                let day = if end_of_day {
+                    date.succ_opt().unwrap_or(date)
+                } else {
+                    date
+                };
+                day.and_hms_opt(0, 0, 0).expect("midnight exists")
+            })
+        })
+        .map_err(|_| {
+            anyhow!("date `{raw}` must be YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS], or unix seconds (UTC)")
+        })?;
+    Ok(Some(parsed.and_utc().timestamp().max(0) as u64))
 }

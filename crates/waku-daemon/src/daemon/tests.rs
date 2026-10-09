@@ -8636,7 +8636,10 @@ fn setmodel_resolves_the_selections_effective_effort() {
         .expect("the ladder names a rung");
     let packed = format!("{}-{rung}", codex_ladder.id);
     let ticket = control(ProviderKind::Codex, &packed, None);
-    assert_eq!(ticket.model, codex_ladder.id, "the packed id stores its base");
+    assert_eq!(
+        ticket.model, codex_ladder.id,
+        "the packed id stores its base"
+    );
     assert_eq!(
         ticket.reasoning_effort.as_deref(),
         Some(rung.as_str()),
@@ -13025,4 +13028,638 @@ fn a_cancelled_outcome_stops_its_live_assignments() {
         OutcomeState::Cancelled
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// `history search` is the boss's retained-record sweep: a natural-language
+/// question ranks a paraphrased passage, and employee, retired-employee,
+/// earlier Boss chat, planning, and archived task records each return under
+/// their own kind with navigable ids, excerpts, and honest coverage.
+#[test]
+fn boss_history_search_surfaces_paraphrased_archived_and_retired_sources() {
+    use waku_protocol::model::{AgentHistorySearchResult, HistorySourceKind, SessionPlanning};
+    let root = std::env::temp_dir().join(format!("waku-hist-boss-{}", Uuid::new_v4()));
+    let (backend, boss_id) = surface_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend.boss.set_session_id(boss_id).unwrap();
+    let document = backend.boss.document();
+    let boss_project = document.identity.id;
+    let boss_name = document.identity.name.clone();
+    let project_id = backend.task_state.lock().sessions[0].project_id;
+    let persona = document.personas[0].id;
+    let now = crate::model::unix_time();
+
+    // The Zed-sync paraphrase the plan pinned: the employee reported on
+    // "the upstream sync", never typing the literal phrase "zed upgrade".
+    let employee = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Editor sync".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let employee_id = employee.session_id;
+    let employee_name = employee.identity.name.clone();
+    backend.boss.add_employee(employee).unwrap();
+
+    // A retired employee — expired off the roster, transcript retained.
+    let retired = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Upgrade notes".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let retired_id = retired.session_id;
+    backend.boss.add_employee(retired).unwrap();
+    backend.boss.set_employee_expired_at(retired_id, 1).unwrap();
+    assert_eq!(backend.boss.retire_expired(3_601).unwrap().len(), 1);
+
+    let (old_boss_id, planning_id, archived_id, foreign_id) = {
+        let mut state = backend.task_state.lock();
+        let mut child = AgentSession::new(project_id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        child.begin_turn("Sync the editor to the newest upstream");
+        child.push_message(
+            MessageRole::Assistant,
+            "Upstream highlights for Goddard: the new zed build ships a faster sync pipeline",
+        );
+        child.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(child);
+
+        let mut retired_child = AgentSession::new(project_id, ProviderKind::Codex);
+        retired_child.id = retired_id;
+        retired_child.boss_managed = true;
+        retired_child.archived_at = Some(now - 3_600);
+        retired_child.begin_turn("Review the zed highlights");
+        retired_child.push_message(
+            MessageRole::Assistant,
+            "zed highlights verified against the upstream release",
+        );
+        retired_child.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(retired_child);
+
+        // An earlier Boss chat — a rotation predecessor, archived.
+        let mut old_boss = AgentSession::new(boss_project, ProviderKind::Codex);
+        old_boss.boss_managed = true;
+        old_boss.archived_at = Some(now - 7_200);
+        old_boss.begin_turn("what did the zed sync give us — earlier chat");
+        old_boss.push_message(MessageRole::Assistant, "highlights digest noted");
+        old_boss.finish_active_turn(crate::model::TurnStatus::Completed);
+        let old_boss_id = old_boss.id;
+        state.push_session(old_boss);
+
+        // A planning session in the Boss project.
+        let mut planning = AgentSession::new(boss_project, ProviderKind::Codex);
+        planning.boss_managed = true;
+        planning.planning = Some(SessionPlanning {
+            plan_file: "plans/history.md".into(),
+            idea: "History".into(),
+            label: waku_protocol::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        planning.begin_turn("plan the zed upgrade highlights page");
+        planning.finish_active_turn(crate::model::TurnStatus::Completed);
+        let planning_id = planning.id;
+        state.push_session(planning);
+
+        // An archived ordinary task in the project.
+        let mut archived = AgentSession::new(project_id, ProviderKind::Codex);
+        archived.archived_at = Some(now - 100);
+        archived.begin_turn("zed upgrade highlights thread");
+        archived.finish_active_turn(crate::model::TurnStatus::Completed);
+        let archived_id = archived.id;
+        state.push_session(archived);
+
+        // A foreign project's task — in scope for the boss only.
+        let other_project = Project::from_path(root.join("other"));
+        let mut foreign = AgentSession::new(other_project.id, ProviderKind::Codex);
+        foreign.begin_turn("zed highlights in the other project");
+        foreign.finish_active_turn(crate::model::TurnStatus::Completed);
+        let foreign_id = foreign.id;
+        state.projects.push(other_project);
+        state.push_session(foreign);
+        backend.task_store.save(&mut state).unwrap();
+        (old_boss_id, planning_id, archived_id, foreign_id)
+    };
+
+    let search = |query: &str,
+                  project: Option<&str>,
+                  person: Option<&str>,
+                  after: Option<&str>,
+                  before: Option<&str>,
+                  kind: Option<HistorySourceKind>,
+                  limit: Option<usize>,
+                  offset: usize|
+     -> AgentHistorySearchResult {
+        match backend
+            .agent_history_search(
+                Some(boss_id),
+                Uuid::nil(),
+                query,
+                project,
+                person,
+                after,
+                before,
+                kind,
+                limit,
+                offset,
+            )
+            .unwrap()
+        {
+            ResponsePayload::AgentHistorySearch { result } => result,
+            other => panic!("unexpected payload {other:?}"),
+        }
+    };
+    fn hit<'a>(
+        result: &'a AgentHistorySearchResult,
+        task: Uuid,
+    ) -> &'a waku_protocol::model::AgentHistorySearchHit {
+        result
+            .hits
+            .iter()
+            .find(|hit| hit.task_id == task)
+            .unwrap_or_else(|| panic!("expected a hit for {task}"))
+    }
+
+    // The original question — its terms overlap every evidence record even
+    // though the answer is phrased as "upstream".
+    let result = search(
+        "what highlights did the goddard zed upgrade give us",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        0,
+    );
+    assert!(result.coverage.scope.contains("every project"));
+    assert!(result.coverage.includes_archived);
+    assert_eq!(result.coverage.sources_scanned, 7);
+    assert_eq!(result.coverage.sources_matched, 6);
+    assert!(!result.coverage.truncated);
+    assert_eq!(result.coverage.next_offset, None);
+    assert_eq!(result.coverage.excluded_by_access, 0);
+    assert!(
+        result
+            .coverage
+            .notes
+            .iter()
+            .any(|note| note.contains("purged"))
+    );
+
+    // Every hit is a navigable source: task id, message id, kind, dates.
+    let employee_hit = hit(&result, employee_id);
+    assert_eq!(employee_hit.kind, HistorySourceKind::Employee);
+    assert_eq!(employee_hit.person.as_deref(), Some(employee_name.as_str()));
+    assert_eq!(employee_hit.job_title.as_deref(), Some("Editor sync"));
+    assert_eq!(employee_hit.employee_expired, Some(false));
+    assert!(!employee_hit.archived);
+    assert!(employee_hit.excerpt.contains("Upstream highlights"));
+    assert!(employee_hit.excerpt_matched);
+    assert!(!employee_hit.message_id.is_nil());
+
+    let retired_hit = hit(&result, retired_id);
+    assert_eq!(retired_hit.kind, HistorySourceKind::Employee);
+    assert_eq!(retired_hit.employee_expired, Some(true));
+    assert!(retired_hit.archived);
+
+    let boss_hit = hit(&result, old_boss_id);
+    assert_eq!(boss_hit.kind, HistorySourceKind::Boss);
+    assert_eq!(boss_hit.person.as_deref(), Some(boss_name.as_str()));
+    assert!(boss_hit.archived);
+
+    assert_eq!(hit(&result, planning_id).kind, HistorySourceKind::Plan);
+    let archived_hit = hit(&result, archived_id);
+    assert_eq!(archived_hit.kind, HistorySourceKind::Task);
+    assert!(archived_hit.archived);
+    assert_eq!(hit(&result, foreign_id).kind, HistorySourceKind::Task);
+
+    // Kind and person filters narrow the corpus itself — the coverage
+    // numbers follow the narrowed scan.
+    let employees_only = search(
+        "zed",
+        None,
+        None,
+        None,
+        None,
+        Some(HistorySourceKind::Employee),
+        None,
+        0,
+    );
+    assert_eq!(employees_only.coverage.sources_scanned, 2);
+    assert_eq!(employees_only.hits.len(), 2);
+    assert!(
+        employees_only
+            .hits
+            .iter()
+            .all(|hit| hit.kind == HistorySourceKind::Employee)
+    );
+
+    let named = search("zed", None, Some(&employee_name), None, None, None, None, 0);
+    assert_eq!(named.hits.len(), 1);
+    assert_eq!(named.hits[0].task_id, employee_id);
+    // "boss" resolves to the Boss identity — its chat history and planning
+    // sessions, and the coverage note reports the combination.
+    let boss_records = search("zed", None, Some("boss"), None, None, None, None, 0);
+    assert!(
+        boss_records
+            .hits
+            .iter()
+            .all(|hit| matches!(hit.kind, HistorySourceKind::Boss | HistorySourceKind::Plan))
+    );
+    assert_eq!(boss_records.coverage.sources_scanned, 3);
+    assert!(
+        backend
+            .agent_history_search(
+                Some(boss_id),
+                Uuid::nil(),
+                "zed",
+                None,
+                Some("no such person"),
+                None,
+                None,
+                None,
+                None,
+                0,
+            )
+            .is_err()
+    );
+
+    // A project filter narrows by name; date bounds empty the scan without
+    // pretending nothing exists — scanned stays honest.
+    let project_name = backend
+        .task_state
+        .lock()
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .unwrap()
+        .name
+        .clone();
+    let filtered = search("zed", Some(&project_name), None, None, None, None, None, 0);
+    assert!(filtered.hits.iter().all(|hit| hit.project == project_name));
+    let empty = search("zed", None, None, Some("2999-01-01"), None, None, None, 0);
+    assert!(empty.hits.is_empty());
+    assert_eq!(empty.coverage.sources_matched, 0);
+    assert_eq!(empty.coverage.sources_scanned, 7);
+    assert!(
+        backend
+            .agent_history_search(
+                Some(boss_id),
+                Uuid::nil(),
+                "zed",
+                None,
+                None,
+                Some("2999-01-01"),
+                Some("2020-01-01"),
+                None,
+                None,
+                0,
+            )
+            .is_err(),
+        "a before bound before the after bound is an error"
+    );
+
+    // Paging continues rather than truncating silently.
+    let page = search("zed", None, None, None, None, None, Some(2), 0);
+    assert_eq!(page.hits.len(), 2);
+    assert!(page.coverage.truncated);
+    assert_eq!(page.coverage.next_offset, Some(2));
+    let rest = search("zed", None, None, None, None, None, Some(2), 2);
+    assert_eq!(
+        page.hits
+            .iter()
+            .chain(rest.hits.iter())
+            .map(|hit| hit.task_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        page.hits.len() + rest.hits.len()
+    );
+
+    // Nothing was revived: archives stay archived, the retired employee
+    // stays off the roster, and no session moved.
+    {
+        let state = backend.task_state.lock();
+        for id in [retired_id, old_boss_id, archived_id] {
+            assert!(
+                state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+                    .is_some_and(|session| session.archived_at.is_some()),
+                "history search must not unarchive {id}"
+            );
+        }
+    }
+    assert!(backend.boss.employee(retired_id).is_none());
+    assert!(
+        backend
+            .boss
+            .document()
+            .retired_employees
+            .iter()
+            .any(|employee| employee.session_id == retired_id)
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+/// An ordinary task's history search is its own project's transcripts:
+/// foreign projects are refused by name, boss-managed records in the same
+/// project are disclosed as access-excluded rather than silently dropped,
+/// and nothing is revived.
+#[test]
+fn task_history_search_stays_in_scope_and_discloses_exclusions() {
+    use waku_protocol::model::{AgentHistorySearchResult, HistorySourceKind};
+    let root = std::env::temp_dir().join(format!("waku-hist-task-{}", Uuid::new_v4()));
+    let (backend, boss_id) = surface_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend.boss.set_session_id(boss_id).unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let employee = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Editor sync".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let employee_id = employee.session_id;
+    let employee_name = employee.identity.name.clone();
+    backend.boss.add_employee(employee).unwrap();
+
+    let (worker_id, sibling_id, archived_id) = {
+        let mut state = backend.task_state.lock();
+        let project_id = state.sessions[0].project_id;
+        // The seeded session is the live Boss chat — managed, like a real
+        // one, so a project task cannot treat it as a plain transcript.
+        state.sessions[0].boss_managed = true;
+        let mut worker = AgentSession::new(project_id, ProviderKind::Codex);
+        worker.begin_turn("routine maintenance");
+        worker.finish_active_turn(crate::model::TurnStatus::Completed);
+        let worker_id = worker.id;
+        state.push_session(worker);
+        let mut sibling = AgentSession::new(project_id, ProviderKind::Codex);
+        sibling.begin_turn("the zed sync notes");
+        sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+        let sibling_id = sibling.id;
+        state.push_session(sibling);
+        let mut archived = AgentSession::new(project_id, ProviderKind::Codex);
+        archived.archived_at = Some(crate::model::unix_time() - 100);
+        archived.begin_turn("archived zed highlights");
+        archived.finish_active_turn(crate::model::TurnStatus::Completed);
+        let archived_id = archived.id;
+        state.push_session(archived);
+        // The employee's record sits in the same project but stays
+        // boss-managed — the task may not open it.
+        let mut child = AgentSession::new(project_id, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        child.begin_turn("zed employee report");
+        child.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(child);
+        backend.task_store.save(&mut state).unwrap();
+        (worker_id, sibling_id, archived_id)
+    };
+
+    let search = |query: &str,
+                  project: Option<&str>,
+                  person: Option<&str>,
+                  kind: Option<HistorySourceKind>|
+     -> AgentHistorySearchResult {
+        match backend
+            .agent_history_search(
+                Some(worker_id),
+                Uuid::nil(),
+                query,
+                project,
+                person,
+                None,
+                None,
+                kind,
+                None,
+                0,
+            )
+            .unwrap()
+        {
+            ResponsePayload::AgentHistorySearch { result } => result,
+            other => panic!("unexpected payload {other:?}"),
+        }
+    };
+
+    // In-scope: the project's own tasks, archived ones included. The
+    // employee record and the Boss chat are counted as access-excluded,
+    // never returned.
+    let result = search("zed", None, None, None);
+    let mut found = result
+        .hits
+        .iter()
+        .map(|hit| hit.task_id)
+        .collect::<Vec<_>>();
+    found.sort();
+    let mut expected = vec![sibling_id, archived_id];
+    expected.sort();
+    assert_eq!(found, expected);
+    assert!(
+        result
+            .hits
+            .iter()
+            .all(|hit| hit.kind == HistorySourceKind::Task)
+    );
+    assert_eq!(result.coverage.excluded_by_access, 2);
+    assert!(
+        result
+            .coverage
+            .notes
+            .iter()
+            .any(|note| note.contains("outside this credential"))
+    );
+    assert!(
+        result.coverage.scope.contains("project"),
+        "the scope statement names what was searched"
+    );
+
+    // Naming a foreign project is an error, and naming the employee keeps
+    // its record out — disclosed, not silently empty.
+    assert!(
+        backend
+            .agent_history_search(
+                Some(worker_id),
+                Uuid::nil(),
+                "zed",
+                Some("other"),
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+            )
+            .is_err()
+    );
+    let named = search("zed", None, Some(&employee_name), None);
+    assert!(named.hits.is_empty());
+    assert_eq!(named.coverage.excluded_by_access, 1);
+    assert_eq!(named.coverage.sources_scanned, 0);
+    // Boss-managed records are not a task's corpus even by kind.
+    let employees = search("zed", None, None, Some(HistorySourceKind::Employee));
+    assert!(employees.hits.is_empty());
+    assert_eq!(employees.coverage.excluded_by_access, 1);
+
+    // The search left the archive and the employee record untouched.
+    let state = backend.task_state.lock();
+    assert!(
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == archived_id)
+            .is_some_and(|session| session.archived_at.is_some())
+    );
+    drop(state);
+    std::fs::remove_dir_all(root).ok();
+}
+
+/// An employee's history search is its own record plus the employees it
+/// supervises — never its supervisor's chat, a sibling employee, or the
+/// project's plain tasks.
+#[test]
+fn employee_history_search_reaches_itself_and_supervised_only() {
+    use waku_protocol::model::AgentHistorySearchResult;
+    let root = std::env::temp_dir().join(format!("waku-hist-emp-{}", Uuid::new_v4()));
+    let (backend, boss_id) = surface_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend.boss.set_session_id(boss_id).unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let mut lead = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Lead".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    lead.permissions.summon_employees = true;
+    let lead_id = lead.session_id;
+    backend.boss.add_employee(lead).unwrap();
+    let subordinate = backend
+        .boss
+        .prepare_employee(
+            lead_id,
+            Some(persona),
+            "Assistant".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let subordinate_id = subordinate.session_id;
+    backend.boss.add_employee(subordinate).unwrap();
+    let sibling = backend
+        .boss
+        .prepare_employee(
+            boss_id,
+            Some(persona),
+            "Other team".into(),
+            None,
+            waku_protocol::boss::EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let sibling_id = sibling.session_id;
+    backend.boss.add_employee(sibling).unwrap();
+
+    {
+        let mut state = backend.task_state.lock();
+        let project_id = state.sessions[0].project_id;
+        for (id, prompt) in [
+            (lead_id, "lead ran the zed audit"),
+            (subordinate_id, "subordinate zed findings"),
+            (sibling_id, "sibling zed notes"),
+        ] {
+            let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+            session.id = id;
+            session.boss_managed = true;
+            session.begin_turn(prompt);
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            state.push_session(session);
+        }
+        let mut task = AgentSession::new(project_id, ProviderKind::Codex);
+        task.begin_turn("plain task zed chatter");
+        task.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(task);
+        backend.task_store.save(&mut state).unwrap();
+    }
+
+    let search = |person: Option<&str>| -> AgentHistorySearchResult {
+        match backend
+            .agent_history_search(
+                Some(lead_id),
+                Uuid::nil(),
+                "zed",
+                None,
+                person,
+                None,
+                None,
+                None,
+                None,
+                0,
+            )
+            .unwrap()
+        {
+            ResponsePayload::AgentHistorySearch { result } => result,
+            other => panic!("unexpected payload {other:?}"),
+        }
+    };
+
+    let result = search(None);
+    let mut found = result
+        .hits
+        .iter()
+        .map(|hit| hit.task_id)
+        .collect::<Vec<_>>();
+    found.sort();
+    let mut expected = vec![lead_id, subordinate_id];
+    expected.sort();
+    assert_eq!(found, expected);
+    assert!(result.coverage.scope.contains("supervise"));
+    // The boss chat, sibling employee, and plain task all passed the
+    // filters but sit outside the grant — disclosed, not hidden.
+    assert_eq!(result.coverage.excluded_by_access, 3);
+
+    // A `--person` filter still cannot pull a sibling into reach.
+    let sibling_name = backend
+        .boss
+        .document()
+        .employees
+        .iter()
+        .find(|employee| employee.session_id == sibling_id)
+        .unwrap()
+        .identity
+        .name
+        .clone();
+    let named = search(Some(&sibling_name));
+    assert!(named.hits.is_empty());
+    assert_eq!(named.coverage.excluded_by_access, 1);
+    std::fs::remove_dir_all(root).ok();
 }

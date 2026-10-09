@@ -33,8 +33,8 @@ use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 #[cfg(test)]
 use waku_protocol::event_from_wire;
 use waku_protocol::persistence::{
-    SessionMessageMatch, SessionMessageSearchScope, parse_session_message_search,
-    resolve_named_search_project,
+    HISTORY_SEARCH_MAX_TERMS, SessionMessageMatch, SessionMessageSearchScope, history_search_terms,
+    parse_session_message_search, resolve_named_search_project,
 };
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use waku_protocol::routing::{RouteCandidate, RouteTarget};

@@ -1722,6 +1722,27 @@ impl Backend for WakuBackend {
             Command::AgentSearchSessions { query, last_turns } => {
                 self.agent_search_sessions(agent, session_id, &query, last_turns)
             }
+            Command::AgentHistorySearch {
+                query,
+                project,
+                person,
+                after,
+                before,
+                kind,
+                limit,
+                offset,
+            } => self.agent_history_search(
+                agent,
+                session_id,
+                &query,
+                project.as_deref(),
+                person.as_deref(),
+                after.as_deref(),
+                before.as_deref(),
+                kind,
+                limit,
+                offset,
+            ),
             Command::AgentProjectMap {
                 query,
                 path,

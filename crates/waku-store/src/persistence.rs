@@ -38,7 +38,8 @@ use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
-    ComposerDraftTarget, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
+    ComposerDraftTarget, ComposerDrafts, HistoryMessageMatch, SessionMessageMatch,
+    SessionMessageSearchScope,
 };
 
 const STATE_VERSION: u32 = 5;
@@ -968,11 +969,6 @@ const SESSION_SEARCH_CONTEXT_BEFORE_CHARS: usize = 72;
 
 fn build_session_search_snippet(text: &str, query: &str) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let char_count = normalized.chars().count();
-    if char_count <= SESSION_SEARCH_SNIPPET_CHARS {
-        return normalized;
-    }
-
     // ASCII folding preserves UTF-8 byte offsets while covering the provider
     // and source-code text people search most often. Non-ASCII queries still
     // match exactly, including Simplified Chinese.
@@ -980,6 +976,26 @@ fn build_session_search_snippet(text: &str, query: &str) -> String {
         .to_ascii_lowercase()
         .find(&query.to_ascii_lowercase())
         .unwrap_or(0);
+    session_search_snippet(normalized, match_byte)
+}
+
+/// `history search` excerpts center on the earliest-occurring matched term.
+fn build_history_snippet(text: &str, terms: &[String]) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lowered = normalized.to_lowercase();
+    let match_byte = terms
+        .iter()
+        .filter_map(|term| lowered.find(term.as_str()))
+        .min()
+        .unwrap_or(0);
+    session_search_snippet(normalized, match_byte)
+}
+
+fn session_search_snippet(normalized: String, match_byte: usize) -> String {
+    let char_count = normalized.chars().count();
+    if char_count <= SESSION_SEARCH_SNIPPET_CHARS {
+        return normalized;
+    }
     let match_char = normalized[..match_byte].chars().count();
     let body_chars = SESSION_SEARCH_SNIPPET_CHARS.saturating_sub(4);
     let ideal_start = match_char.saturating_sub(SESSION_SEARCH_CONTEXT_BEFORE_CHARS);
@@ -1148,6 +1164,232 @@ fn search_session_messages(
         });
     }
     Ok(matches)
+}
+
+/// The `history search` scan behind
+/// [`StateStore::history_message_search`]. Every kept message term is a
+/// case-insensitive substring over the message text and the session's
+/// `title`/`auto_title`, OR'd together; each source contributes its
+/// highest-scoring message — most distinct content terms, user prompts
+/// first, then newest — and the outer ranking puts the broadest term
+/// coverage ahead of recency. The second return value is the matching-source
+/// total before `offset`/`limit`, so callers can report honest coverage and
+/// page the rest.
+fn search_history_messages(
+    path: &Path,
+    terms: &[String],
+    after: Option<u64>,
+    before: Option<u64>,
+    limit: usize,
+    offset: usize,
+    session_ids: Option<Vec<Uuid>>,
+) -> io::Result<(Vec<HistoryMessageMatch>, u64)> {
+    if limit == 0 || session_ids.as_ref().is_some_and(Vec::is_empty) {
+        return Ok((Vec::new(), 0));
+    }
+    // The writer uses WAL, so an independent read-only connection can scan
+    // history without taking the StateStore mutex or delaying a streaming save.
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(to_io_error)?;
+
+    // Positional binds: terms take ?1..=terms.len() and are reused by the
+    // content and title expressions; dates and paging follow in order.
+    let mut values: Vec<rusqlite::types::Value> = terms
+        .iter()
+        .map(|term| rusqlite::types::Value::from(term.clone()))
+        .collect();
+    let after_param = after.map(|bound| {
+        values.push((bound as i64).into());
+        values.len()
+    });
+    let before_param = before.map(|bound| {
+        values.push((bound as i64).into());
+        values.len()
+    });
+    values.push(i64::try_from(limit).unwrap_or(i64::MAX).into());
+    let limit_param = values.len();
+    values.push(i64::try_from(offset).unwrap_or(i64::MAX).into());
+    let offset_param = values.len();
+
+    let content_score = if terms.is_empty() {
+        "0".to_owned()
+    } else {
+        (1..=terms.len())
+            .map(|index| format!("(instr(lower(messages.content), lower(?{index})) > 0)"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let title_score = if terms.is_empty() {
+        "0".to_owned()
+    } else {
+        (1..=terms.len())
+            .map(|index| {
+                format!(
+                    "((instr(lower(sessions.title), lower(?{index})) > 0) OR \
+                     (instr(lower(COALESCE(sessions.auto_title, '')), lower(?{index})) > 0))"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let match_clause = if terms.is_empty() {
+        // A termless query lists every in-scope source; the newest user
+        // message still stands in as the excerpt.
+        "1".to_owned()
+    } else {
+        "(content_score > 0 OR title_score > 0)".to_owned()
+    };
+    // Allowlist values are validated Uuids — their Display form is hex and
+    // dashes only, so inlining them cannot inject SQL.
+    let session_clause = session_ids
+        .map(|ids| {
+            ids.iter()
+                .map(|id| format!("'{id}'"))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .map(|ids| format!("messages.session_id IN ({ids})"))
+        .unwrap_or_else(|| "1".to_owned());
+    let date_clause = format!(
+        "{}{}",
+        after_param
+            .map(|param| format!(" AND messages.created_at >= ?{param}"))
+            .unwrap_or_default(),
+        before_param
+            .map(|param| format!(" AND messages.created_at < ?{param}"))
+            .unwrap_or_default(),
+    );
+
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT session_id, message_id, role, content, created_at, sent_by_task, \
+                    title, auto_title, content_score, title_score, matched_messages, \
+                    COUNT(*) OVER () AS total_sources \
+             FROM ( \
+                 SELECT scored.*, \
+                        ROW_NUMBER() OVER ( \
+                            PARTITION BY scored.session_id \
+                            ORDER BY scored.content_score DESC, \
+                                     CASE scored.role WHEN 'user' THEN 0 ELSE 1 END, \
+                                     scored.created_at DESC, \
+                                     scored.position DESC \
+                        ) AS pick, \
+                        SUM(CASE WHEN scored.content_score > 0 THEN 1 ELSE 0 END) \
+                            OVER (PARTITION BY scored.session_id) AS matched_messages \
+                 FROM ( \
+                     SELECT messages.session_id AS session_id, \
+                            messages.id AS message_id, \
+                            messages.role AS role, \
+                            messages.content AS content, \
+                            messages.created_at AS created_at, \
+                            messages.position AS position, \
+                            messages.sent_by_task AS sent_by_task, \
+                            sessions.title AS title, \
+                            sessions.auto_title AS auto_title, \
+                            sessions.updated_at AS session_updated_at, \
+                            {content_score} AS content_score, \
+                            {title_score} AS title_score \
+                     FROM messages \
+                     INNER JOIN sessions ON sessions.id = messages.session_id \
+                     WHERE messages.streaming = 0 \
+                       AND messages.role IN ('user', 'assistant') \
+                       AND messages.hidden = 0 \
+                       AND messages.notice IS NULL \
+                       AND {session_clause} \
+                       {date_clause} \
+                 ) AS scored \
+                 WHERE {match_clause} \
+             ) AS ranked \
+             WHERE pick = 1 \
+             ORDER BY (content_score + title_score) DESC, content_score DESC, \
+                      session_updated_at DESC, session_id \
+             LIMIT ?{limit_param} OFFSET ?{offset_param}",
+        ))
+        .map_err(to_io_error)?;
+
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(11)?,
+            ))
+        })
+        .map_err(to_io_error)?;
+
+    let mut matches = Vec::new();
+    let mut total = 0u64;
+    for row in rows {
+        let (
+            session_id,
+            message_id,
+            role,
+            content,
+            created_at,
+            sent_by_task,
+            title,
+            auto_title,
+            content_score,
+            title_score,
+            matched_messages,
+            total_sources,
+        ) = row.map_err(to_io_error)?;
+        let (Ok(session_id), Ok(message_id)) =
+            (Uuid::parse_str(&session_id), Uuid::parse_str(&message_id))
+        else {
+            continue;
+        };
+        total = total_sources.max(0) as u64;
+        let Some(source) = (match role.as_str() {
+            "user" => Some(MessageRole::User),
+            "assistant" => Some(MessageRole::Assistant),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let excerpt_matched = content_score > 0;
+        let matched_terms = if excerpt_matched {
+            let lowered = content.to_lowercase();
+            terms
+                .iter()
+                .filter(|term| lowered.contains(term.as_str()))
+                .cloned()
+                .collect()
+        } else {
+            let lowered = format!("{} {}", title, auto_title.unwrap_or_default()).to_lowercase();
+            terms
+                .iter()
+                .filter(|term| lowered.contains(term.as_str()))
+                .cloned()
+                .collect()
+        };
+        matches.push(HistoryMessageMatch {
+            session_id,
+            message_id,
+            source,
+            created_at: created_at.max(0) as u64,
+            sent_by_task: sent_by_task.and_then(|id| Uuid::parse_str(&id).ok()),
+            excerpt: build_history_snippet(&content, terms),
+            excerpt_matched,
+            matched_terms,
+            matched_messages: matched_messages.max(0) as u64,
+            title_matched: title_score > 0,
+            score: content_score.max(0) as u32 + title_score.max(0) as u32,
+        });
+    }
+    Ok((matches, total))
 }
 
 include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
@@ -1322,6 +1564,28 @@ impl StateStore {
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let path = self.path.clone();
         move || search_session_messages(&path, &query, limit, scope, session_ids, last_turns)
+    }
+
+    /// Builds the `history search` scan — same off-thread contract as
+    /// [`Self::session_message_search`], but the caller supplies match
+    /// `terms` (each a case-insensitive substring over message text and the
+    /// session's titles, OR'd and ranked by distinct-term coverage),
+    /// `after`/`before` bound the matched messages' `created_at`, and
+    /// `offset`/`limit` page the per-source results. `session_ids` is the
+    /// caller-resolved corpus — `None` scans every retained session, active
+    /// and archived alike; an empty list scans nothing. The returned count
+    /// is the number of matching sources before paging.
+    pub fn history_message_search(
+        &self,
+        terms: Vec<String>,
+        after: Option<u64>,
+        before: Option<u64>,
+        limit: usize,
+        offset: usize,
+        session_ids: Option<Vec<Uuid>>,
+    ) -> impl FnOnce() -> io::Result<(Vec<HistoryMessageMatch>, u64)> + Send + 'static {
+        let path = self.path.clone();
+        move || search_history_messages(&path, &terms, after, before, limit, offset, session_ids)
     }
 
     pub fn blobs(&self) -> Arc<BlobStore> {
@@ -5187,6 +5451,155 @@ mod tests {
         assert!(snippet.ends_with('…'));
         assert!(snippet.contains("100%_needle"));
         assert!(snippet.chars().count() <= SESSION_SEARCH_SNIPPET_CHARS);
+    }
+
+    /// History search is per-source: each retained record contributes one
+    /// ranked excerpt, dates bound the matched messages, and the total
+    /// survives paging so the caller can continue.
+    #[test]
+    fn history_search_ranks_terms_by_source_and_pages() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        // Fresh state already owns one session; make it the paraphrased
+        // answer — "upstream" carries the idea without the literal terms.
+        let paraphrased_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Pull the upstream editor release");
+        state.sessions[0].push_message(
+            MessageRole::Assistant,
+            "Upstream highlights for Goddard: the new zed build ships a faster sync",
+        );
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+
+        // A title-only source: the terms live on the record, never in a
+        // message — the excerpt stands in from the newest user prompt.
+        let mut titled = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        titled.title = "zed highlights review".into();
+        titled.begin_turn("unrelated chatter");
+        titled.finish_active_turn(crate::model::TurnStatus::Completed);
+        let titled_id = titled.id;
+        state.push_session(titled);
+
+        // A weak source matches one term only.
+        let mut weak = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        weak.begin_turn("the weekly zed roundup");
+        weak.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(weak);
+
+        // A foreign record the allowlist excludes.
+        let mut foreign = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        foreign.begin_turn("the zed tree in another forest");
+        foreign.finish_active_turn(crate::model::TurnStatus::Completed);
+        let foreign_id = foreign.id;
+        state.push_session(foreign);
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let search = |terms: &[&str],
+                      after: Option<u64>,
+                      before: Option<u64>,
+                      limit: usize,
+                      offset: usize,
+                      ids: Option<Vec<Uuid>>| {
+            reopened.history_message_search(
+                terms.iter().map(|term| term.to_string()).collect(),
+                after,
+                before,
+                limit,
+                offset,
+                ids,
+            )()
+            .unwrap()
+        };
+
+        // The paraphrased passage ranks first on distinct-term overlap,
+        // and the excerpt carries the evidence — no whole transcript.
+        let (matches, total) = search(&["zed", "highlights", "sync"], None, None, 10, 0, None);
+        assert_eq!(total, 4);
+        assert_eq!(matches[0].session_id, paraphrased_id);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|matched| matched.session_id)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+        let paraphrased = &matches[0];
+        assert!(paraphrased.excerpt.contains("Upstream highlights"));
+        assert!(paraphrased.excerpt_matched);
+        assert_eq!(paraphrased.source, MessageRole::Assistant);
+        assert!(
+            paraphrased
+                .matched_terms
+                .iter()
+                .any(|term| term == "zed" || term == "highlights")
+        );
+        assert_eq!(paraphrased.matched_messages, 1);
+
+        // The title-only source excerpts its newest user message, marked
+        // so the reader knows the passage itself never matched.
+        let (matches, _) = search(&["highlights", "review"], None, None, 10, 0, None);
+        let titled = matches
+            .iter()
+            .find(|matched| matched.session_id == titled_id)
+            .unwrap();
+        assert!(titled.title_matched);
+        assert!(!titled.excerpt_matched);
+        assert_eq!(titled.matched_messages, 0);
+        assert_eq!(titled.source, MessageRole::User);
+        assert!(titled.excerpt.contains("unrelated chatter"));
+
+        // The allowlist is the corpus — foreign stays out even matching.
+        let (matches, total) = search(
+            &["zed", "highlights"],
+            None,
+            None,
+            10,
+            0,
+            Some(vec![paraphrased_id, titled_id]),
+        );
+        assert_eq!(total, 2);
+        assert!(
+            matches
+                .iter()
+                .all(|matched| matched.session_id != foreign_id)
+        );
+
+        // Paging walks distinct sources; the total does not shrink.
+        let (first, total) = search(&[], None, None, 2, 0, None);
+        let (second, _) = search(&[], None, None, 2, 2, None);
+        assert_eq!(total, 4);
+        assert_eq!(first.len(), 2);
+        assert_eq!(second.len(), 2);
+        assert_eq!(
+            first
+                .iter()
+                .chain(second.iter())
+                .map(|matched| matched.session_id)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+
+        // Date bounds cut the matched messages — the seeded rows are all
+        // "now", so an older window empties the result.
+        let now = waku_protocol::model::unix_time();
+        assert!(
+            search(&["zed"], None, Some(now - 60), 10, 0, None)
+                .0
+                .is_empty()
+        );
+        assert_eq!(search(&["zed"], Some(now - 60), None, 10, 0, None).1, 4);
+
+        // A termless query lists every allowed source — the filter-only
+        // search path — still one row per record.
+        let (all, total) = search(&[], None, None, 10, 0, None);
+        assert_eq!(total, 4);
+        assert_eq!(all.len(), 4);
+        assert!(all.iter().all(|matched| !matched.excerpt_matched));
+
+        fs::remove_dir_all(directory).ok();
     }
 
     #[test]

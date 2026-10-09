@@ -136,6 +136,7 @@ pub(super) fn handle_driver_command(
         | Command::AgentMergeSubmit
         | Command::AgentReadSession { .. }
         | Command::AgentSearchSessions { .. }
+        | Command::AgentHistorySearch { .. }
         | Command::AgentProjectMap { .. }
         | Command::AgentAsk { .. }
         | Command::AgentResources { .. }

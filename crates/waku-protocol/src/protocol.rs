@@ -12,11 +12,11 @@ use crate::computer_use::ComputerPermissions;
 use crate::custom_commands::CustomCommand;
 use crate::eval::{EvalQuestion, EvalSettings, EvalUsageStats, Evaluation};
 use crate::model::{
-    AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
-    AgentSessionTranscript, GoalOperation, MessageAttachment, Project, ProjectMapIntent,
-    ProviderKind, ProviderProbe, ProviderResumeCursor, ProviderSessionCatalogStatus,
-    ProviderSessionHistory, ProviderSessionSummary, SessionStatus, UserInputAnswer,
-    UserInputQuestion,
+    AgentAskOutcome, AgentHistorySearchResult, AgentModelOption, AgentProjectMapResult,
+    AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, HistorySourceKind,
+    MessageAttachment, Project, ProjectMapIntent, ProviderKind, ProviderProbe,
+    ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
+    ProviderSessionSummary, SessionStatus, UserInputAnswer, UserInputQuestion,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -796,6 +796,41 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_turns: Option<usize>,
     },
+    /// Scoped agent credential only: search retained work history — the
+    /// read-only discovery surface behind `goddard-agent history search`.
+    /// The corpus is the caller's accessible records: the boss reaches every
+    /// task, employee session (expired and retired included), planning
+    /// session, and earlier Boss chat; an employee reaches its own record
+    /// and the employees it supervises; any other task reaches its own
+    /// project's ordinary sessions. Archived records are in scope by
+    /// default. `query` is natural-language free text — split into terms,
+    /// each a case-insensitive substring over message text and record
+    /// titles, ranked by how many distinct terms a source matches. The
+    /// explicit filters intersect: `project` names a project like
+    /// [`Self::AgentSearchSessions`]' `project:` token, `person` an
+    /// employee or Boss name, `kind` a [`HistorySourceKind`], and
+    /// `after`/`before` bound the matched messages' recorded dates
+    /// (`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM[:SS]`, or unix seconds — UTC).
+    /// `limit`/`offset` page the per-source results; the coverage block
+    /// reports what was searched, what was capped, and what the caller may
+    /// not open.
+    AgentHistorySearch {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        person: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<HistorySourceKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default)]
+        offset: usize,
+    },
     /// Scoped agent credential only: ask Jev to select source-backed context
     /// from the caller's indexed workspace. Output is bounded and carries
     /// path/line locations; the map setting gates this command.
@@ -1573,6 +1608,11 @@ pub enum ResponsePayload {
     /// command palette ranks session matches.
     AgentSessionSearch {
         hits: Vec<AgentSessionSearchHit>,
+    },
+    /// The hits and coverage an `agentHistorySearch` resolved — sources
+    /// the caller may open, each carrying the excerpt that earned it.
+    AgentHistorySearch {
+        result: AgentHistorySearchResult,
     },
     /// The source-backed result an agent requested from its own workspace.
     AgentProjectMap {

@@ -4116,6 +4116,132 @@ pub struct AgentSessionSearchHit {
     pub snippet: String,
 }
 
+/// Which retained record a `history` hit came from. `Task` covers ordinary
+/// sessions and side chats; `Employee` covers boss-managed employee sessions
+/// whether the roster record is active, expired, or retired; `Boss` covers
+/// the current and every rotated Boss chat; `Plan` covers boss-attached
+/// planning sessions.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum HistorySourceKind {
+    Task,
+    Employee,
+    Boss,
+    Plan,
+}
+
+/// One source [`crate::Command::AgentHistorySearch`] matched: a navigable
+/// identity (the session id `read`/`boss transcript` open, plus the matched
+/// message when there is one) with the excerpt that earned it and the dates
+/// that locate the record in time.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentHistorySearchHit {
+    /// The retained record's session id — `goddard-agent read <id>` or
+    /// `boss transcript <id>` opens it for a caller with access.
+    pub task_id: Uuid,
+    pub kind: HistorySourceKind,
+    /// The record's display title — an employee's name, a task's title, or
+    /// the Boss chat's identity name.
+    pub title: String,
+    /// The project the work belongs to — "Boss" for Boss chats and
+    /// planning sessions.
+    pub project: String,
+    /// Who the record belongs to: the employee's human-readable name, or
+    /// the Boss identity's name on Boss and planning sessions. `None` on
+    /// ordinary tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+    /// An employee's job title — the assignment's subject. `None` on other
+    /// kinds and on records written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_title: Option<String>,
+    /// An employee's recorded lifecycle — `expired`/`retired` flag settled
+    /// work. `None` on non-employee sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_expired: Option<bool>,
+    pub status: SessionStatus,
+    /// The record is archived — still searchable, never revived by a hit.
+    pub archived: bool,
+    /// When the record's session was created.
+    pub created_at: u64,
+    /// The record's last recorded activity — a useful ordering and a
+    /// distinguishable date for rotated Boss chats that share one name.
+    pub updated_at: u64,
+    /// The excerpted message's id — pairs with `task_id` in a
+    /// `goddard://task/<id>?message=<message_id>` link to land on it.
+    pub message_id: Uuid,
+    /// Which side of the conversation `excerpt` came from.
+    pub role: MessageRole,
+    /// Who submitted the excerpted message — an employee name when a report
+    /// or steer carried it. `None` for human and unattributed messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_by: Option<String>,
+    /// The excerpted passage — a real matching message when one exists,
+    /// otherwise the source's newest user message as orientation. Check
+    /// `excerpt_matched` before presenting it as evidence.
+    pub excerpt: String,
+    /// `excerpt` carries a query term — false on title-only hits and
+    /// termless listing queries.
+    pub excerpt_matched: bool,
+    /// When the excerpted message was recorded — the evidence's own date,
+    /// not when it was retrieved.
+    pub excerpt_at: u64,
+    /// Query terms the excerpted passage contains — or, for title-only
+    /// hits, the terms the title matched.
+    pub matched_terms: Vec<String>,
+    /// The record's `title`/`auto_title` carried at least one term.
+    pub title_matched: bool,
+    /// Total in-scope messages carrying a term in this source — `0` means
+    /// the title matched alone. `read` on the source finds the rest.
+    pub matched_messages: u64,
+}
+
+/// What an `AgentHistorySearch` covered and where it stopped — the honest
+/// scope statement the caller quotes instead of claiming a negative over
+/// records it never searched.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentHistorySearchCoverage {
+    /// The corpus as a sentence, e.g. "every project on this daemon,
+    /// including archived records".
+    pub scope: String,
+    /// Archived records were in scope — the command always includes them.
+    pub includes_archived: bool,
+    /// The source kinds scanned after any `kind` filter.
+    pub kinds: Vec<HistorySourceKind>,
+    /// Records whose transcripts were scanned — post-access, post-filters.
+    pub sources_scanned: u64,
+    /// Sources with at least one qualifying match, before limit/offset.
+    pub sources_matched: u64,
+    /// Hits in this response.
+    pub returned: u64,
+    /// `sources_matched` exceeds what this response returned.
+    pub truncated: bool,
+    /// Pass as `offset` for the next page; absent when nothing remains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<u64>,
+    /// In-scope records the caller's grants do not let it open — excluded
+    /// from `sources_scanned` and never searched.
+    #[serde(default)]
+    pub excluded_by_access: u64,
+    /// Caveats worth repeating: retention bounds, ambiguous person matches,
+    /// dropped query terms.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// The response [`crate::Command::AgentHistorySearch`] resolves.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentHistorySearchResult {
+    /// The query text as searched — filters are separate fields, so this
+    /// echo is what the caller quoted.
+    pub query: String,
+    pub hits: Vec<AgentHistorySearchHit>,
+    pub coverage: AgentHistorySearchCoverage,
+}
+
 /// One provider/model combination [`crate::Command::AgentListModels`]
 /// returns to a scoped agent caller — a known-good `agentCreateSession`
 /// selection copied from a task the user actually ran, not a catalog entry

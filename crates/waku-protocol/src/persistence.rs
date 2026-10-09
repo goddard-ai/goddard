@@ -306,6 +306,66 @@ pub struct SessionMessageMatch {
     pub snippet: String,
 }
 
+/// One per-source row the `history search` store scan returns — the best
+/// matching message (or the newest user message when the title alone
+/// matched, or when the query carried no terms), plus the counts a caller
+/// needs to rank and disclose coverage. Internal to the daemon — the wire
+/// projection is [`crate::model::AgentHistorySearchHit`].
+#[derive(Clone, Debug)]
+pub struct HistoryMessageMatch {
+    pub session_id: Uuid,
+    /// The excerpted message's id — deep-link target.
+    pub message_id: Uuid,
+    pub source: MessageRole,
+    /// The excerpted message's recorded time.
+    pub created_at: u64,
+    /// The task whose scoped agent submitted the excerpted message —
+    /// employee reports carry their sender; `None` for human messages.
+    pub sent_by_task: Option<Uuid>,
+    /// The excerpted text — a real matching passage when one exists, the
+    /// source's newest user message otherwise.
+    pub excerpt: String,
+    /// The excerpt actually carries a query term — false for title-only
+    /// hits and termless listing queries.
+    pub excerpt_matched: bool,
+    /// Terms the excerpted passage contains; title-matched terms on a
+    /// title-only hit.
+    pub matched_terms: Vec<String>,
+    /// In-scope messages carrying at least one term — `0` on title-only
+    /// hits and termless queries.
+    pub matched_messages: u64,
+    /// The record's `title`/`auto_title` carried at least one term.
+    pub title_matched: bool,
+    /// Distinct terms the excerpted message matched — the rank signal.
+    pub score: u32,
+}
+
+/// The most query terms `history search` keeps — past this the extras are
+/// dropped and the coverage notes say so. 24 terms comfortably cover a
+/// natural-language question.
+pub const HISTORY_SEARCH_MAX_TERMS: usize = 24;
+
+/// Split a history query into deduped, lowercased match terms. Quoting
+/// (`"a phrase"`) keeps a phrase one term, like the session-search grammar.
+/// Returns the terms and whether the [`HISTORY_SEARCH_MAX_TERMS`] cap
+/// dropped any.
+pub fn history_search_terms(query: &str) -> (Vec<String>, bool) {
+    let mut terms: Vec<String> = Vec::new();
+    let mut dropped = false;
+    for raw in session_search_tokens(query) {
+        let term = unquote(raw).trim().to_ascii_lowercase();
+        if term.is_empty() || terms.iter().any(|seen| seen == &term) {
+            continue;
+        }
+        if terms.len() == HISTORY_SEARCH_MAX_TERMS {
+            dropped = true;
+            continue;
+        }
+        terms.push(term);
+    }
+    (terms, dropped)
+}
+
 /// Which slice of the message store a transcript search scans. The surfaces
 /// stay complementary: the command palette searches active tasks, the
 /// Archived settings page searches the archive.
@@ -567,6 +627,27 @@ mod tests {
         assert!(parse_session_message_search("status:idle").is_blank() == false);
         assert!(parse_session_message_search("  ").is_blank());
         assert!(parse_session_message_search("").is_blank());
+    }
+
+    #[test]
+    fn history_terms_dedupe_lowercase_and_hold_quoted_phrases() {
+        let (terms, dropped) = history_search_terms("  Zed \"sync highlights\" zed upgrade  ");
+        assert_eq!(terms, ["zed", "sync highlights", "upgrade"]);
+        assert!(!dropped);
+        let (terms, dropped) = history_search_terms("   ");
+        assert!(terms.is_empty());
+        assert!(!dropped);
+    }
+
+    #[test]
+    fn history_terms_cap_at_the_maximum() {
+        let query = (0..HISTORY_SEARCH_MAX_TERMS + 4)
+            .map(|index| format!("term{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (terms, dropped) = history_search_terms(&query);
+        assert_eq!(terms.len(), HISTORY_SEARCH_MAX_TERMS);
+        assert!(dropped);
     }
 
     #[test]

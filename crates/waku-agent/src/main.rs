@@ -33,7 +33,9 @@ use uuid::Uuid;
 use waku_client::DaemonClient;
 use waku_protocol::computer_use::ComputerUseRunRequest;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
-use waku_protocol::model::{ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion};
+use waku_protocol::model::{
+    HistorySourceKind, ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion,
+};
 use waku_protocol::{
     AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
     DAEMON_ADDRESS_ENV, ResponsePayload,
@@ -49,6 +51,8 @@ USAGE
     goddard-agent archive '<json>'           Propose archiving tasks after the user approves the request
     goddard-agent read '<json>'              Read a task's transcript
     goddard-agent search --text QUERY         Search task transcripts — this project's, or every project's for the boss
+    goddard-agent history search --text QUERY [--project P] [--person N] [--after D] [--before D] [--kind task|employee|boss|plan] [--limit N] [--offset N]
+        Search retained history — tasks, employees, Boss chats — archives included
     goddard-agent map --text QUESTION         Find relevant code in this workspace
     goddard-agent merge submit               Rebase, verify, and land this employee worktree
     goddard-agent memory overview|scan|zoom|record|summary|buckets
@@ -105,6 +109,18 @@ USAGE CONTRACT
     to find tasks worth `read`ing. Use `create` and `prompt` only when the
     human you are working for has explicitly asked — never for exploration,
     convenience, or self-orchestration.
+    `history search` finds retained work — task transcripts, employee
+    sessions (expired and retired included), and earlier Boss chats — by
+    natural-language terms plus project/person/date/kind filters. Archived
+    records are always in scope. The corpus is what your credential may
+    already open: the boss reaches everything the daemon retains, an
+    employee reaches its own record and the employees it supervises, and any
+    other task reaches its own project's ordinary tasks. Every hit is a
+    source you can open (`read <taskId>`, `boss transcript <taskId>`), and
+    the coverage block reports exactly what was searched, what the limit
+    capped, and what access excluded — an empty result means no matching
+    record inside that scope, never that the work did not happen. Search is
+    read-only: it never revives, resumes, or unarchives anything.
     Employees use `steer-supervisor --text TEXT` to message their own
     supervisor without a task id: steer its live turn or start a new turn
     immediately; never queue. Use `boss report-blocker` when you cannot
@@ -284,6 +300,21 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"literal UTF-8 query"},"--last-turns":{"type":"positive integer","optional":true}}),
             json!({"json":{"results":"matching task/message records","session_link_hint":"how to format Goddard task links"}}),
             "goddard-agent search --text 'status:idle retry logic'".to_owned(),
+        ),
+        "history search" => (
+            json!({
+                "--text|--file":{"optional":true,"exactlyOne":true,"type":"UTF-8 query — natural language; whitespace splits it into terms, each a case-insensitive substring over message text and record titles. A source matching more distinct terms ranks first. Quoting keeps a phrase one term."},
+                "--project":{"optional":true,"type":"project name or id","notes":"boss: any registered project; employees: narrows the supervised corpus; other tasks: must be this task's project"},
+                "--person":{"optional":true,"type":"employee or Boss name","notes":"case-insensitive exact match, then substring"},
+                "--after":{"optional":true,"type":"YYYY-MM-DD | YYYY-MM-DDTHH:MM[:SS] | unix seconds (UTC)","notes":"matched messages recorded at or after"},
+                "--before":{"optional":true,"type":"same forms as --after","notes":"a bare date covers through that day"},
+                "--kind":{"optional":true,"enum":["task","employee","boss","plan"]},
+                "--limit":{"optional":true,"type":"integer 1..=100","default":20},
+                "--offset":{"optional":true,"type":"non-negative integer","default":0,"notes":"continuation — pass a previous response's coverage.nextOffset"},
+                "notes":"at least one of --text or a filter is required. Archived records are always included. Results are read-only sources you may open — read <taskId> or boss transcript <taskId>; the coverage block says exactly what was searched and what was capped or inaccessible, so an empty result never means the work did not happen outside the searched scope."
+            }),
+            json!({"json":{"query":"as searched","coverage":{"scope":"what was searched","includesArchived":true,"kinds":"source kinds scanned","sourcesScanned":"records scanned","sourcesMatched":"matching sources before paging","returned":"hits here","truncated":"bool","nextOffset":"continuation for --offset","excludedByAccess":"in-scope records this credential cannot open","notes":"caveats — retention bounds, ambiguous matches, dropped terms"},"results":"per-source hits: kind, person, project, dates, excerpt, matched terms","session_link_hint":"how to format Goddard task links"}}),
+            "goddard-agent history search --text 'zed sync highlights' --kind employee --after 2026-10-01".to_owned(),
         ),
         "steer-supervisor" => (
             json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"role":"employee only","description":"Resolve your supervisor automatically. Steer its live turn or start a new turn immediately; never queue. No task id or delivery option."}),
@@ -870,6 +901,7 @@ fn schema() -> serde_json::Value {
         "steer-supervisor",
         "read",
         "search",
+        "history search",
         "map",
         "rename",
         "archive",
@@ -1025,6 +1057,29 @@ struct SearchPayload {
     last_turns: Option<usize>,
 }
 
+/// `history search '<json>'` — field names mirror the flag spellings.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistorySearchPayload {
+    /// Empty only when a filter does the narrowing.
+    #[serde(default)]
+    query: String,
+    #[serde(default)]
+    project: Option<String>,
+    #[serde(default)]
+    person: Option<String>,
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default)]
+    before: Option<String>,
+    #[serde(default)]
+    kind: Option<HistorySourceKind>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    offset: usize,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectMapPayload {
@@ -1163,6 +1218,13 @@ fn run() -> anyhow::Result<()> {
         "--request-id",
         "--delivery",
         "--turn",
+        "--person",
+        "--after",
+        "--before",
+        "--kind",
+        "--limit",
+        "--offset",
+        "--last-turns",
         "--output",
         "--timeout-ms",
         "--cwd",
@@ -1270,6 +1332,21 @@ fn run() -> anyhow::Result<()> {
                 .is_some_and(|arg| arg.starts_with("--")) =>
         {
             task_search(arguments.collect())
+        }
+        "history" => {
+            let action = arguments.next().unwrap_or_default();
+            if action != "search" {
+                bail!(
+                    "usage: goddard-agent history search --text QUERY \
+                     [--project NAME] [--person NAME] [--after DATE] [--before DATE] \
+                     [--kind task|employee|boss|plan] [--limit N] [--offset N]"
+                );
+            }
+            let args: Vec<String> = arguments.collect();
+            match args.first().map(String::as_str) {
+                Some(payload) if !payload.starts_with('-') => history_search_json(payload),
+                _ => history_search(args),
+            }
         }
         "models" => {
             if arguments.next().is_some() {
@@ -1411,25 +1488,43 @@ fn raw_input(values: &std::collections::BTreeMap<String, String>) -> anyhow::Res
     if text.is_some() == file.is_some() {
         bail!("provide exactly one of --text or --file PATH|-");
     }
-    let body = if let Some(text) = text {
-        text.clone()
-    } else {
-        let path = file.unwrap();
-        if path == "-" {
-            let mut body = String::new();
-            std::io::Read::read_to_string(
-                &mut std::io::Read::take(std::io::stdin().lock(), 4 * 1024 * 1024 + 1),
-                &mut body,
-            )?;
-            if body.len() > 4 * 1024 * 1024 {
-                bail!("input exceeds 4 MB");
-            }
-            body
-        } else {
-            std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?
+    match (text, file) {
+        (Some(text), None) => Ok(text.clone()),
+        (None, Some(path)) => read_content_file(path),
+        _ => unreachable!(),
+    }
+}
+
+/// `history search` accepts at most one of `--text`/`--file` and runs
+/// filter-only when neither is present.
+fn optional_input(values: &std::collections::BTreeMap<String, String>) -> anyhow::Result<String> {
+    let text = values.get("text");
+    let file = values.get("file");
+    if text.is_some() && file.is_some() {
+        bail!("provide at most one of --text or --file PATH|-");
+    }
+    match (text, file) {
+        (Some(text), None) => Ok(text.clone()),
+        (None, Some(path)) => read_content_file(path),
+        (None, None) => Ok(String::new()),
+        _ => unreachable!(),
+    }
+}
+
+fn read_content_file(path: &str) -> anyhow::Result<String> {
+    if path == "-" {
+        let mut body = String::new();
+        std::io::Read::read_to_string(
+            &mut std::io::Read::take(std::io::stdin().lock(), 4 * 1024 * 1024 + 1),
+            &mut body,
+        )?;
+        if body.len() > 4 * 1024 * 1024 {
+            bail!("input exceeds 4 MB");
         }
-    };
-    Ok(body)
+        Ok(body)
+    } else {
+        std::fs::read_to_string(path).with_context(|| format!("reading {path}"))
+    }
 }
 
 fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
@@ -2493,6 +2588,106 @@ fn task_map(args: Vec<String>) -> anyhow::Result<()> {
     match connect()?.request(request_session_id(), Uuid::nil(), command)? {
         ResponsePayload::AgentProjectMap { result } => {
             println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        other => bail!("unexpected response: {other:?}"),
+    }
+}
+
+fn history_search(args: Vec<String>) -> anyhow::Result<()> {
+    let (_, opts) = flags(
+        args,
+        &[
+            "text", "file", "project", "person", "after", "before", "kind", "limit", "offset",
+        ],
+        false,
+    )?;
+    let query = optional_input(&opts)?;
+    history_send(history_command_parts(&query, &opts)?)
+}
+
+/// `history search '<json>'` — the payload form, same command the flags build.
+fn history_search_json(payload: &str) -> anyhow::Result<()> {
+    let payload: HistorySearchPayload = serde_json::from_str(payload).context(
+        "`history search` takes a JSON object; run `goddard-agent schema` for its shape",
+    )?;
+    if payload.query.trim().is_empty()
+        && payload.project.is_none()
+        && payload.person.is_none()
+        && payload.after.is_none()
+        && payload.before.is_none()
+        && payload.kind.is_none()
+    {
+        bail!("history search needs `query` text or at least one filter");
+    }
+    history_send(Command::AgentHistorySearch {
+        query: payload.query,
+        project: payload.project,
+        person: payload.person,
+        after: payload.after,
+        before: payload.before,
+        kind: payload.kind,
+        limit: payload.limit,
+        offset: payload.offset,
+    })
+}
+
+fn history_command_parts(
+    query: &str,
+    opts: &std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<Command> {
+    let has_filter = ["project", "person", "after", "before", "kind"]
+        .iter()
+        .any(|flag| opts.contains_key(*flag));
+    if query.trim().is_empty() && !has_filter {
+        bail!(
+            "history search needs --text or at least one filter (--project, --person, --after, --before, --kind)"
+        );
+    }
+    let kind = opts
+        .get("kind")
+        .map(|value| {
+            serde_json::from_value::<HistorySourceKind>(json!(value))
+                .context("--kind must be task, employee, boss, or plan")
+        })
+        .transpose()?;
+    let limit = opts
+        .get("limit")
+        .map(|value| value.parse().context("--limit must be a positive integer"))
+        .transpose()?;
+    let offset = opts
+        .get("offset")
+        .map(|value| {
+            value
+                .parse()
+                .context("--offset must be a non-negative integer")
+        })
+        .transpose()?
+        .unwrap_or(0);
+    Ok(Command::AgentHistorySearch {
+        query: query.to_owned(),
+        project: opts.get("project").cloned(),
+        person: opts.get("person").cloned(),
+        after: opts.get("after").cloned(),
+        before: opts.get("before").cloned(),
+        kind,
+        limit,
+        offset,
+    })
+}
+
+fn history_send(command: Command) -> anyhow::Result<()> {
+    match connect()?.request(request_session_id(), Uuid::nil(), command)? {
+        ResponsePayload::AgentHistorySearch { result } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "query": result.query,
+                    "coverage": result.coverage,
+                    "results": result.hits,
+                    "session_link_hint": session_link_hint(),
+                }))?
+            );
             Ok(())
         }
         other => bail!("unexpected response: {other:?}"),

@@ -2370,6 +2370,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentMergeSubmit
             | Command::AgentReadSession { .. }
             | Command::AgentSearchSessions { .. }
+            | Command::AgentHistorySearch { .. }
             | Command::AgentProjectMap { .. }
             | Command::AgentAsk { .. }
             | Command::AgentResources { .. }
@@ -2786,6 +2787,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::RunAutomationNow { .. } => "runAutomationNow",
         Command::AgentReadSession { .. } => "agentReadSession",
         Command::AgentSearchSessions { .. } => "agentSearchSessions",
+        Command::AgentHistorySearch { .. } => "agentHistorySearch",
         Command::AgentProjectMap { .. } => "agentProjectMap",
         Command::AgentAsk { .. } => "agentAsk",
         Command::AgentResources { .. } => "agentResources",

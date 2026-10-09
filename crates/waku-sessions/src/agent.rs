@@ -865,7 +865,10 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              - `prompt` — when the user asks you to send a message to \
              another task\n\
              - `read` — to read a task's transcript\n\
-             - `search` — to search {} task transcripts",
+             - `search` — to search {} task transcripts\n\
+             - `history search` — to find retained work (tasks, employees, \
+             earlier Boss chats) by topic, person, date, or source kind; \
+             archived records included",
             if scope.boss {
                 "every project's"
             } else {
