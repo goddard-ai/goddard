@@ -529,6 +529,30 @@ impl BossUi {
         self.avatars.entry(seed).or_default().insert(bucket, image);
         evicted
     }
+
+    /// An unread deliverable opens at the top of its page — the offset a
+    /// previous open left belongs to the version that was read, and a
+    /// re-publish since then moves the content that position pointed at.
+    /// A deliverable still read keeps its place across remounts.
+    fn forget_unread_deliverable_scroll(&mut self, key: DaemonKey, deliverable_id: Uuid) {
+        let unread = self
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == deliverable_id)
+            })
+            .is_some_and(|deliverable| {
+                deliverable
+                    .viewed_at
+                    .is_none_or(|viewed| viewed < deliverable.updated_at)
+            });
+        if unread {
+            self.deliverable_page_scroll.remove(&(key, deliverable_id));
+        }
+    }
 }
 
 /// One memory bucket the `@` mention pool can name — the fields a
@@ -3922,6 +3946,8 @@ impl Waku {
         deliverable_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        self.boss_ui
+            .forget_unread_deliverable_scroll(key, deliverable_id);
         self.mark_deliverable_viewed(key, deliverable_id, cx);
         self.chat_with_boss(key, cx);
         self.boss_ui.command_deliverable = Some((key, deliverable_id));
@@ -4004,6 +4030,8 @@ impl Waku {
         else {
             return;
         };
+        self.boss_ui
+            .forget_unread_deliverable_scroll(key, deliverable_id);
         self.mark_deliverable_viewed(key, deliverable_id, cx);
         // Re-arming over a mounted page would orphan its draft slot — the
         // new arm stales `live_deliverable_page` while the composer still
@@ -8422,6 +8450,50 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use waku_client::boss::{BossDeliverable, BossResourcePolicy};
+
+    fn deliverable_state(updated_at: u64, viewed_at: Option<u64>) -> BossState {
+        BossState {
+            identity: BossIdentity {
+                id: Uuid::new_v4(),
+                name: "Boss".into(),
+                avatar_seed: String::new(),
+                avatar_style: Default::default(),
+            },
+            persona_id: Uuid::new_v4(),
+            employee_persona_id: None,
+            persona_defaults: Default::default(),
+            persona_default_notice: None,
+            session_id: None,
+            personas: Vec::new(),
+            employees: Vec::new(),
+            retired_employees: Vec::new(),
+            deliverables: vec![BossDeliverable {
+                id: Uuid::nil(),
+                name: "report.md".into(),
+                path: "/tmp/report.md".into(),
+                source_path: None,
+                directory: false,
+                created_at: updated_at,
+                updated_at,
+                pinned_at: None,
+                dormant_at: None,
+                archived_at: None,
+                viewed_at,
+            }],
+            goals_viewed_at: None,
+            planning: Vec::new(),
+            outcomes: Vec::new(),
+            resource_policy: BossResourcePolicy::default(),
+            next_sequence: 0,
+            next_event_id: 0,
+            name_cursor: 0,
+            outbox: Vec::new(),
+            waves: Vec::new(),
+            wave_outbox: Vec::new(),
+            revision: 0,
+        }
+    }
 
     struct DeliverableHoverLayoutHarness;
 
@@ -8486,6 +8558,36 @@ mod tests {
         assert_eq!(archive.size.width, px(20.0));
         assert_eq!(archive.right(), row.right());
         assert!(archive.origin.x < status.origin.x);
+    }
+
+    #[test]
+    fn unread_deliverable_forgets_its_page_scroll_position() {
+        let key = DaemonKey::Local;
+        let page = (key, Uuid::nil());
+        let mut ui = BossUi::default();
+        let scrolled = ListState::new(8, ListAlignment::Top, px(1024.0));
+        scrolled.scroll_to(gpui::ListOffset {
+            item_ix: 5,
+            offset_in_item: px(12.0),
+        });
+        ui.deliverable_page_scroll.insert(page, scrolled.clone());
+
+        // Re-published after the last view: opening starts at the top.
+        ui.states.insert(key, deliverable_state(200, Some(100)));
+        ui.forget_unread_deliverable_scroll(key, Uuid::nil());
+        assert!(!ui.deliverable_page_scroll.contains_key(&page));
+
+        // Never opened at all reads the same way.
+        ui.deliverable_page_scroll.insert(page, scrolled.clone());
+        ui.states.insert(key, deliverable_state(200, None));
+        ui.forget_unread_deliverable_scroll(key, Uuid::nil());
+        assert!(!ui.deliverable_page_scroll.contains_key(&page));
+
+        // Still read since the last publish: the position survives a reopen.
+        ui.deliverable_page_scroll.insert(page, scrolled.clone());
+        ui.states.insert(key, deliverable_state(100, Some(200)));
+        ui.forget_unread_deliverable_scroll(key, Uuid::nil());
+        assert!(ui.deliverable_page_scroll.contains_key(&page));
     }
 
     #[test]

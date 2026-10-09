@@ -1,1 +1,1 @@
-- Reopen a Boss deliverable to return to its previous reading position; each deliverable keeps its own position.
+- Reopen a Boss deliverable to return to its previous reading position; each deliverable keeps its own position. A deliverable marked unread — new, or re-published since you last opened it — opens at the top.
