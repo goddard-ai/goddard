@@ -1230,7 +1230,21 @@ impl WakuBackend {
         marker.arguments = Some(serde_json::to_string(&summon_card)?);
         let event = DriverEvent::RichActivity(marker);
         record_boss_event(&self.task_state, &self.task_store, supervisor, &event)?;
-        let _ = events.send(event_to_wire(event)?);
+        // `Command::Boss` requests carry no runtime id — the agent CLI
+        // sends nil — so the card must ride the supervisor's registered
+        // runtime or the hub's runtime check drops it. A supervisor with
+        // no live runtime (an idle boss) gets the persisted marker only:
+        // there is no stream to light up.
+        if let Some(runtime_id) = self
+            .sessions
+            .lock()
+            .get(&supervisor)
+            .map(|entry| entry.runtime_id)
+        {
+            let _ = events
+                .for_session(supervisor, runtime_id)
+                .send(event_to_wire(event)?);
+        }
         self.wake_summon_queue();
         Ok((session_id, true))
     }

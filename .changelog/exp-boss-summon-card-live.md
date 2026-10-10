@@ -1,0 +1,1 @@
+- Employee summon cards now appear in the Boss chat the moment the Boss summons them, instead of only after the transcript reloads.

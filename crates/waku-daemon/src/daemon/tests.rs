@@ -6149,6 +6149,100 @@ fn boss_summon_marker_freezes_the_card_identity() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// The live summon card must reach the supervisor's stream: `boss summon`
+/// requests carry a nil runtime id, and the hub drops events addressed to
+/// anything but the session's registered runtime. Capacity stays full so
+/// the ticket queues without launching a provider, and the tapped hub
+/// plays the attached client.
+#[test]
+fn boss_summon_card_event_reaches_the_registered_runtime() {
+    use waku_protocol::boss::{BossResult, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("boss-summon-live-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let runtime_id = backend.sessions.lock().get(&boss).unwrap().runtime_id;
+
+    // The request sink the agent CLI shapes — the supervisor's session id
+    // with a nil runtime — over a hub that knows the real one.
+    let sink = EventSink::detached().begin_session_runtime(boss, runtime_id);
+    let tapped = sink.tapped_events();
+    let sink = sink.for_session(boss, Uuid::nil());
+
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "Live card",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &sink,
+        )
+        .expect("at capacity the summon must still be accepted");
+    let BossResult::Summoned {
+        session_id: employee_id,
+        state,
+        ..
+    } = result
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+
+    let events: Vec<_> = tapped
+        .try_iter()
+        .filter_map(|message| match message {
+            crate::ServerMessage::Event(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 1, "the summon emits exactly one live event");
+    let event = &events[0];
+    assert_eq!(event.session_id, boss);
+    assert_eq!(event.runtime_id, runtime_id);
+    assert_eq!(event.event.kind, "richActivity");
+    let item: crate::model::ActivityItem =
+        serde_json::from_value(event.event.payload.clone()).unwrap();
+    assert_eq!(
+        item.tool_name.as_deref(),
+        Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
+    );
+    let live_card = waku_protocol::model::BossSummonCard::parse(
+        item.arguments.as_deref().expect("the event carries the card"),
+    )
+    .expect("the event arguments parse as a summon card");
+    assert_eq!(live_card.session_id, employee_id);
+
+    // The live card is the same one the transcript persisted — the marker
+    // remains the card's durable copy independent of runtime availability.
+    let persisted = {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == boss)
+            .expect("the supervisor session persisted");
+        backend.task_store.hydrate(session).unwrap();
+        session
+            .transcript_blocks
+            .iter()
+            .flat_map(|block| block.activities.iter())
+            .find(|activity| {
+                activity.tool_name.as_deref()
+                    == Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
+            })
+            .and_then(|activity| activity.arguments.clone())
+            .expect("the summon marker landed in the transcript")
+    };
+    assert_eq!(item.arguments.as_deref(), Some(persisted.as_str()));
+
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Test scaffolding for the worktree-adoption tests: a Git project,
 /// a backend whose provider binary is missing so every launch fails
 /// after the session persists, and a summon builder.
