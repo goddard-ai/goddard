@@ -1769,6 +1769,23 @@ fn boss_outcome_queued(member: &boss::BossOutcomeMember) -> bool {
         && member.employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
 }
 
+/// A member's visible blocker or admission wait, kept separate from the
+/// project/assignee detail so it cannot be lost to that line's truncation.
+fn boss_outcome_row_reason(
+    member: Option<&boss::BossOutcomeMember>,
+    queued: &HashMap<Uuid, String>,
+) -> Option<String> {
+    let member = member?;
+    member
+        .employee
+        .blocker
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .map(str::to_owned)
+        .or_else(|| queued.get(&member.employee.session_id).cloned())
+}
+
 /// A defer-until's local timestamp — "Oct 9, 14:32" — for the recorded
 /// wait's readable reason.
 fn boss_wait_time_label(at: u64) -> String {
@@ -2010,6 +2027,8 @@ struct BossOutcomePanelRow {
     /// The state detail a member-less row shows instead — the recorded
     /// wait, an owed decision, or the unresolved cause.
     detail: Option<String>,
+    /// A blocked or queued member's reason, rendered on its own third line.
+    reason: Option<String>,
     worktree: bool,
     updated_label: Option<String>,
     attention: bool,
@@ -2398,6 +2417,18 @@ fn boss_goal_panel_row_element(
                     )
                 }),
         )
+        .when_some(row.reason.clone(), |element, reason| {
+            element.child(
+                div()
+                    .min_w_0()
+                    .pl(px(18.0))
+                    .truncate()
+                    .text_size(sp(11.0))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_secondary)
+                    .child(reason),
+            )
+        })
 }
 
 /// One line inside an expanded outcome — an indented status marker, the
@@ -2548,6 +2579,7 @@ mod tests {
                                     avatar: None,
                                     project_label: Some("Goddard".into()),
                                     detail: None,
+                                    reason: None,
                                     worktree: true,
                                     updated_label: Some("23h".into()),
                                     attention: true,
@@ -2707,6 +2739,7 @@ mod tests {
                             avatar: None,
                             project_label: None,
                             detail: None,
+                            reason: None,
                             worktree: false,
                             updated_label: None,
                             attention: false,
@@ -3668,6 +3701,38 @@ mod tests {
                 .collect(),
             attention: false,
         }
+    }
+
+    #[test]
+    fn outcome_rows_keep_blocked_and_queued_reasons_separate() {
+        use waku_protocol::boss::EmployeeLifecycle;
+
+        let blocked = boss::BossOutcomeMember {
+            employee: boss_employee(EmployeeLifecycle::Working, Some("Needs a signing key")),
+            queue_rank: None,
+        };
+        let queued_employee = boss_employee(EmployeeLifecycle::Queued, None);
+        let queued_id = queued_employee.session_id;
+        let queued = boss::BossOutcomeMember {
+            employee: queued_employee,
+            queue_rank: Some(1),
+        };
+        let waits = HashMap::from([(queued_id, "Waiting for an available slot".to_owned())]);
+
+        assert_eq!(
+            boss_outcome_row_reason(Some(&blocked), &waits).as_deref(),
+            Some("Needs a signing key")
+        );
+        assert_eq!(
+            boss_outcome_row_reason(Some(&queued), &waits).as_deref(),
+            Some("Waiting for an available slot")
+        );
+        assert_eq!(boss_outcome_row_reason(None, &waits), None);
+        let ordinary = boss::BossOutcomeMember {
+            employee: boss_employee(EmployeeLifecycle::Working, None),
+            queue_rank: None,
+        };
+        assert_eq!(boss_outcome_row_reason(Some(&ordinary), &waits), None);
     }
 
     /// The lifecycle contract the Goals panel's sectioning depends on:
@@ -11360,6 +11425,7 @@ impl Waku {
                 .min_by_key(|member| member.queue_rank.unwrap_or(usize::MAX))
                 .copied()
         });
+        let reason = boss_outcome_row_reason(speaker_member, &self.boss_ui.queued);
         let last_assignment = row.outcome.assignments.last();
         let speaker_session = speaker_member
             .map(|member| member.employee.session_id)
@@ -11461,7 +11527,10 @@ impl Waku {
         BossOutcomePanelRow {
             outcome: row.outcome.id,
             focus,
-            height: boss_goal_row_height(self.state.ui_font_size),
+            height: {
+                let height = boss_goal_row_height(self.state.ui_font_size);
+                height + if reason.is_some() { (height * 0.3).ceil() } else { 0.0 }
+            },
             bucket,
             status,
             queued_extra,
@@ -11469,6 +11538,7 @@ impl Waku {
             avatar,
             project_label,
             detail,
+            reason,
             worktree,
             updated_label,
             attention: row.attention || status.attention(),
