@@ -1,0 +1,1 @@
+- Boss now uses CLI help when it needs command guidance, with runnable examples and clear authorization limits.

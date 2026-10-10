@@ -9,12 +9,18 @@ goddard-agent merge submit
 
 Submission is opt-in per project — the flag lives on the registered project
 and survives daemon restarts. Until the boss enables it with
-`goddard-agent boss '{"type":"setProjectSubmissions","project":"<name>","enabled":true}'`,
+`goddard-agent boss script --text 'op(#{type: "setProjectSubmissions", project: "<name>", enabled: true})'`,
 `merge submit` fails with "submissions not enabled for this project".
+
+These settings are scripting-only operations invoked through the Rhai `op`
+binding; substitute the project and branch placeholders before running them.
+Use `goddard-agent boss --help` to discover capabilities or correct usage, and
+`--schema` only for precise machine contracts. Help does not override
+authorization or workflow limits.
 
 The QA branch defaults to the daemon-global setting (normally `dev`), and the
 boss can retarget a single project with
-`goddard-agent boss '{"type":"setProjectQaBranch","project":"<name>","branch":"<branch>"}'`
+`goddard-agent boss script --text 'op(#{type: "setProjectQaBranch", project: "<name>", branch: "<branch>"})'`
 — the override covers both `merge submit` landings and the review train; omit
 `branch` to clear it. The named branch must be checked out somewhere in the
 project's repository for submissions to land on it.
@@ -32,7 +38,7 @@ the command leaves the rebase in progress and leaves the QA branch unchanged;
 resolve the conflict in the employee worktree, continue the rebase, rerun the
 required verification, commit any repair, and submit again. Verification or
 checkout failures also leave the QA branch unchanged. Report conflicts and
-failures to the boss with `goddard-agent boss` using `reportBlocker`, or include
+failures to the boss with `goddard-agent boss report-blocker --text 'BLOCKER'`, or include
 the outcome in the task finish. Never claim a unit landed until the command
 returns its SHA.
 
