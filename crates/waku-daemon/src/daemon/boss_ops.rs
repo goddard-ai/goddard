@@ -184,6 +184,98 @@ impl WakuBackend {
             self.wake_summon_queue();
         }
         match operation {
+            BossOperation::Chain { action } => {
+                self.boss.with_operation_lock(|| {
+                    use waku_protocol::chains::ChainOperation;
+                    anyhow::ensure!(
+                        matches!(action, ChainOperation::RecordResult { .. })
+                            || caller.is_none_or(|id| self.boss.is_boss_principal(id)),
+                        "only the boss or a human can inspect or control chains"
+                    );
+                    let existing_request = match &action {
+                        ChainOperation::Create { request_id, .. } => self
+                            .boss
+                            .document()
+                            .chains
+                            .iter()
+                            .any(|chain| chain.request_id == *request_id),
+                        _ => false,
+                    };
+                    // Lost-response retries use the accepted record even if external
+                    // dependencies have since changed; conflicts are checked by the reducer.
+                    if !existing_request {
+                        let steps: Vec<_> = match &action {
+                            ChainOperation::Create { definition, .. } => {
+                                definition.steps.iter().collect()
+                            }
+                            ChainOperation::Revise { definition, .. } => vec![definition],
+                            _ => vec![],
+                        };
+                        for step in steps {
+                            let project = self
+                                .task_state
+                                .lock()
+                                .projects
+                                .iter()
+                                .find(|project| project.id == step.project_id)
+                                .cloned()
+                                .ok_or_else(|| anyhow!("unknown chain project"))?;
+                            anyhow::ensure!(project.path.is_dir(), "chain project is unavailable");
+                            if !step.resources.is_empty() {
+                                self.resource_broker()?.validate_set(&step.resources)?;
+                            }
+                            anyhow::ensure!(
+                                !step.model.trim().is_empty()
+                                    && step.model == step.model.trim()
+                                    && !matches!(step.model.as_str(), "auto" | "default"),
+                                "chain model must be a concrete, normalized selection"
+                            );
+                            let selection = AgentCreateSelection {
+                                provider: Some(step.provider),
+                                model: Some(step.model.clone()),
+                                reasoning_effort: step.reasoning_effort.clone(),
+                                title: None,
+                                service_tier: None,
+                                context_window: None,
+                            };
+                            self.resolve_agent_task_selection(
+                                None,
+                                &selection,
+                                &project.path,
+                                &step.prompt,
+                                true,
+                            )?;
+                            if let Some(revision) = &step.base_revision {
+                                anyhow::ensure!(
+                                    (revision.len() == 40 || revision.len() == 64)
+                                        && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                                    "chain source revision must be a full commit id"
+                                );
+                                let output = std::process::Command::new("git")
+                                    .arg("-C")
+                                    .arg(&project.path)
+                                    .args(["rev-parse", "--verify", "--end-of-options"])
+                                    .arg(format!("{revision}^{{commit}}"))
+                                    .output()
+                                    .context("check chain source revision")?;
+                                anyhow::ensure!(
+                                    output.status.success(),
+                                    "chain source revision is unavailable"
+                                );
+                            }
+                        }
+                    }
+                    let is_result = matches!(action, ChainOperation::RecordResult { .. });
+                    self.boss.chain_operation(caller, action)?;
+                    if is_result {
+                        Ok(BossResult::Saved)
+                    } else {
+                        Ok(BossResult::State {
+                            state: self.boss.document(),
+                        })
+                    }
+                })
+            }
             BossOperation::Automation { action } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can manage automations");

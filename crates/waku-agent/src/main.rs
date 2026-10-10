@@ -350,6 +350,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"default":{"type":"roster","roster":"compact active employee roster"},"--all":{"employees":"employee IDs, names, titles, lifecycle, and work goal"}}),
             "goddard-agent boss roster".to_owned(),
         ),
+        "boss chain" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"schema":{"$ref":"#/definitions/ChainOperation"}},"notes":"Phase 1 safety contracts only; no provider dispatch. Creation is opt-in; controls require expectedRevision."}),
+            json!({"json":"BossResult::State with durable chains; RecordResult returns Saved"}),
+            "goddard-agent boss chain --json-file chain.json".to_owned(),
+        ),
         "boss view" => (
             json!({}),
             json!({"json":{"type":"state","state":"BossState including identity, employees, personas, deliverables, plans, and resource policy"}}),
@@ -772,6 +777,7 @@ fn schema() -> serde_json::Value {
         "boss prompt",
         "boss transcript",
         "boss roster",
+        "boss chain",
         "boss view",
         "boss context",
         "boss stop",
@@ -1126,6 +1132,7 @@ fn run() -> anyhow::Result<()> {
                         | "prompt"
                         | "transcript"
                         | "roster"
+                        | "chain"
                         | "script"
                         | "file"
                         | "persona"
@@ -1444,6 +1451,12 @@ fn read_content_file(path: &str) -> anyhow::Result<String> {
 fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     match action {
+        "chain" => {
+            let (_, opts) = flags(args, &["json", "json-file"], false)?;
+            let action = serde_json::from_str(&json_input(&opts)?)
+                .context("invalid typed chain operation")?;
+            print_boss(boss_request(BossOperation::Chain { action })?)
+        }
         "view" | "context" | "roster" => {
             if action == "view" {
                 if !args.is_empty() {

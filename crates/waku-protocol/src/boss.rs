@@ -1703,6 +1703,9 @@ impl PlanItem {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    /// Opt-in linear chain safety state. Older documents have no chains.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chains: Vec<crate::chains::EmployeeChain>,
     pub identity: BossIdentity,
     pub persona_id: Uuid,
     /// The canonical Employee default persona — the stable identity of
@@ -2494,6 +2497,8 @@ pub struct BossFile {
     deny_unknown_fields
 )]
 pub enum BossOperation {
+    /// Phase 1 stores safety contracts; provider dispatch remains disabled.
+    Chain { action: crate::chains::ChainOperation },
     View,
     /// A compact text summary of employee state, without session transcripts.
     Roster,

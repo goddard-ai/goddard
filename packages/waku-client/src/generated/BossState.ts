@@ -8,12 +8,17 @@ import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
+import type { EmployeeChain } from "./EmployeeChain";
 import type { PersonaDefaultNotice } from "./PersonaDefaultNotice";
 import type { PersonaDefaultRole } from "./PersonaDefaultRole";
 import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
-export type BossState = { identity: BossIdentity, personaId: string,
+export type BossState = {
+/**
+ * Opt-in linear chain safety state. Older documents have no chains.
+ */
+chains?: Array<EmployeeChain>, identity: BossIdentity, personaId: string,
 /**
  * The canonical Employee default persona — the stable identity of
  * the shipped Employee role regardless of renames; a custom persona

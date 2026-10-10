@@ -654,6 +654,7 @@ mod tests {
             outbox: Vec::new(),
             waves: Vec::new(),
             wave_outbox: Vec::new(),
+            chains: Vec::new(),
             revision: 0,
         }
     }

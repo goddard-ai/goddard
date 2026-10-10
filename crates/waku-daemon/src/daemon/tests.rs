@@ -14077,3 +14077,95 @@ fn boss_operation_history_search_uses_boss_reach_for_the_human_only() {
     }
     std::fs::remove_dir_all(root).ok();
 }
+
+#[test]
+fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
+    use waku_protocol::boss::{BossOperation, BossResult, PersonaPermissions};
+    use waku_protocol::chains::{
+        ChainDefinition, ChainOperation, ChainStatus, ChainStepDefinition, HandoffBoundary,
+    };
+    let root = std::env::temp_dir().join(format!("chain-api-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let project_id = backend.task_state.lock().projects[0].id;
+    let outcome = backend
+        .boss
+        .create_outcome(
+            Some(boss),
+            "Investigate then verify",
+            "Evidence is verified",
+        )
+        .unwrap();
+    let step = ChainStepDefinition {
+        title: "Investigate".into(),
+        prompt: "Read-only investigation".into(),
+        project_id,
+        persona_id: None,
+        provider: ProviderKind::Codex,
+        model: "gpt-5.5".into(),
+        reasoning_effort: None,
+        permissions: PersonaPermissions::default(),
+        resources: Default::default(),
+        workspace: AgentWorkspace::Local,
+        base_revision: None,
+        boundary: HandoffBoundary::ArtifactsReady,
+        required_checks: vec![],
+        required_artifacts: vec![],
+        required_approvals: vec![],
+        max_retries: 0,
+        plan_id: None,
+        item_id: None,
+        successor_brief: "Verify the evidence".into(),
+    };
+    let mut definition = ChainDefinition {
+        outcome_id: outcome.id,
+        finishes_outcome: false,
+        steps: vec![step.clone(), step],
+    };
+    definition.steps[1].project_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
+    let operation = |definition| BossOperation::Chain {
+        action: ChainOperation::Create {
+            request_id,
+            definition,
+        },
+    };
+    assert!(
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                operation(definition.clone()),
+                &EventSink::detached()
+            )
+            .is_err()
+    );
+    assert!(backend.boss.document().chains.is_empty());
+    assert!(backend.boss.document().employees.is_empty());
+    definition.steps[1].project_id = project_id;
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            operation(definition.clone()),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    assert_eq!(state.chains.len(), 1);
+    assert_eq!(state.chains[0].status, ChainStatus::Waiting);
+    assert!(state.chains[0].steps[0].attempts[0].employee_id.is_none());
+    assert!(state.chains[0].steps[1].attempts.is_empty());
+    let accepted = state.chains[0].id;
+    // A repeated accepted request remains queryable even after project access disappears.
+    backend.task_state.lock().projects.clear();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(Some(boss), operation(definition), &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    assert_eq!(state.chains.len(), 1);
+    assert_eq!(state.chains[0].id, accepted);
+    assert!(state.employees.is_empty());
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -493,6 +493,7 @@ impl BossService {
         }
         reconcile_waves(&mut state, now);
         reconcile_outcome_assignments(&mut state);
+        crate::chains::reconcile(&mut state)?;
         *self.state.lock() = state;
         *self.interrupted.lock() = self
             .state
@@ -558,6 +559,7 @@ impl BossService {
         }
         reconcile_waves(&mut state, now);
         reconcile_outcome_assignments(&mut state);
+        crate::chains::reconcile(&mut state)?;
         let service = Self {
             root,
             active: std::sync::atomic::AtomicBool::new(true),
@@ -1310,6 +1312,13 @@ impl BossService {
                 actor,
             });
             updated = Some(entry.clone());
+            if state != OutcomeState::Open {
+                for chain in &mut doc.chains {
+                    if chain.request.outcome_id == outcome {
+                        chain.finisher_reserved = false;
+                    }
+                }
+            }
             Ok(())
         })?;
         Ok((updated.unwrap(), stop))
@@ -1548,6 +1557,14 @@ impl BossService {
                 finisher.is_some_and(|employee| !employee.expired && !employee.cancelled);
             if finishes_outcome {
                 anyhow::ensure!(
+                    !state
+                        .chains
+                        .iter()
+                        .any(|chain| chain.request.outcome_id == outcome_id
+                            && chain.finisher_reserved),
+                    "task {outcome_id} has a reserved chain finisher"
+                );
+                anyhow::ensure!(
                     after_success.is_none(),
                     "a finishing assignment completes the task silently — it cannot also carry follow-up intent"
                 );
@@ -1635,6 +1652,13 @@ impl BossService {
     /// completion conflict: the boss has chosen the next attempt.
     pub fn designate_finisher(&self, outcome_id: Uuid, assignment: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
+            anyhow::ensure!(
+                !state
+                    .chains
+                    .iter()
+                    .any(|chain| chain.request.outcome_id == outcome_id && chain.finisher_reserved),
+                "outcome has a reserved chain finisher"
+            );
             if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
                 task.finishing_assignment = Some(assignment);
                 task.completion_conflict = None;
@@ -2244,7 +2268,7 @@ impl BossService {
         })
     }
 
-    fn validate_bucket_ids(&self, buckets: &[String]) -> anyhow::Result<()> {
+    pub(crate) fn validate_bucket_ids(&self, buckets: &[String]) -> anyhow::Result<()> {
         let known =
             waku_memory_engine::buckets::BucketStore::open(self.root.join("files/memory-engine"))?
                 .list_buckets()?
@@ -4003,7 +4027,8 @@ impl BossService {
         operation: BossOperation,
     ) -> anyhow::Result<BossResult> {
         match operation {
-            BossOperation::Context
+            BossOperation::Chain { .. }
+            | BossOperation::Context
             | BossOperation::Roster
             | BossOperation::Open { .. }
             | BossOperation::Browse { .. }
@@ -4104,6 +4129,7 @@ impl BossService {
                     state.specialist_persona_ids.clear();
                     state.persona_defaults = PersonaDefaultsState::default();
                     state.persona_default_notice = None;
+                    state.chains.clear();
                     state.employees.retain(|entry| {
                         entry.session_id == caller || entry.supervisor_id == caller
                     });
@@ -5026,7 +5052,7 @@ impl BossService {
         Some(body.trim_end().to_owned())
     }
 
-    fn update(
+    pub(crate) fn update(
         &self,
         change: impl FnOnce(&mut BossState) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
@@ -7137,6 +7163,7 @@ fn fresh_state() -> BossState {
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
+        chains: Vec::new(),
         revision: 0,
     }
 }
@@ -7169,6 +7196,7 @@ fn disabled_state() -> BossState {
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
+        chains: Vec::new(),
         revision: 0,
     }
 }

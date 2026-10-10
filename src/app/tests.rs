@@ -1938,6 +1938,7 @@ fn boss_state(
         outbox: Vec::new(),
         waves: Vec::new(),
         wave_outbox: Vec::new(),
+        chains: Vec::new(),
         revision: 0,
     }
 }

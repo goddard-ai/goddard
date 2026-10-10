@@ -4,6 +4,7 @@ pub mod boss;
 pub mod boss_context;
 pub mod boss_eval;
 pub mod boss_rotation;
+pub mod chains;
 
 pub use boss::BossService;
 

@@ -115,25 +115,26 @@ def patch_obj(schema, fragment):
                     v['default'] = 0
             if m[2].strip().startswith('u') and v.get('type') == 'integer':
                 v['minimum'] = 0
-for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction']:
+for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction', 'ChainOperation']:
+    enum_source = pathlib.Path('crates/waku-protocol/src/chains.rs').read_text() if name == 'ChainOperation' else source
     schema = defs[name]
     for variant in schema.get('anyOf', []):
         tag = variant.get('properties', {}).get('type', {}).get('const')
         if not tag:
             continue
         rust = tag[0].upper() + tag[1:]
-        m = re.search('\\b' + rust + '\\s*\\{', source)
+        m = re.search('\\b' + rust + '\\s*\\{', enum_source)
         if m:
             i = m.end()
             depth = 1
             j = i
             while depth:
-                if source[j] == '{':
+                if enum_source[j] == '{':
                     depth += 1
-                if source[j] == '}':
+                if enum_source[j] == '}':
                     depth -= 1
                 j += 1
-            patch_obj(variant, source[i:j - 1])
+            patch_obj(variant, enum_source[i:j - 1])
 for variant in defs['BossOperation']['anyOf']:
     if variant['properties']['type']['const'] == 'summon':
         variant['properties']['workGoal']['default'] = 'errand'

@@ -6,6 +6,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chain"
+            },
+            "action": {
+              "$ref": "#/definitions/ChainOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "view"
             }
           },
@@ -2315,6 +2331,502 @@
       ],
       "additionalProperties": true
     },
+    "ChainOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "definition": {
+              "$ref": "#/definitions/ChainDefinition"
+            }
+          },
+          "required": [
+            "type",
+            "requestId",
+            "definition"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "show"
+            },
+            "chainId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "chainId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "control"
+            },
+            "chainId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "control": {
+              "$ref": "#/definitions/ChainControl"
+            },
+            "sourceRevision": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "chainId",
+            "expectedRevision",
+            "control"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "revise"
+            },
+            "chainId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "expectedDefinitionVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "step": {
+              "type": "integer"
+            },
+            "definition": {
+              "$ref": "#/definitions/ChainStepDefinition"
+            }
+          },
+          "required": [
+            "type",
+            "chainId",
+            "expectedRevision",
+            "expectedDefinitionVersion",
+            "step",
+            "definition"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "approve"
+            },
+            "chainId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "gate": {
+              "type": "string"
+            },
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "chainId",
+            "expectedRevision",
+            "gate",
+            "approved"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "recordResult"
+            },
+            "chainId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "attemptId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "definitionVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "result": {
+              "$ref": "#/definitions/ChainResult"
+            }
+          },
+          "required": [
+            "type",
+            "chainId",
+            "attemptId",
+            "definitionVersion",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ChainControl": {
+      "anyOf": [
+        {
+          "const": "pause"
+        },
+        {
+          "const": "resume"
+        },
+        {
+          "const": "retry"
+        },
+        {
+          "const": "cancel"
+        }
+      ]
+    },
+    "ChainDefinition": {
+      "type": "object",
+      "properties": {
+        "outcomeId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "finishesOutcome": {
+          "type": "boolean"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChainStepDefinition"
+          }
+        }
+      },
+      "required": [
+        "outcomeId",
+        "finishesOutcome",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "ChainResult": {
+      "type": "object",
+      "properties": {
+        "disposition": {
+          "$ref": "#/definitions/ResultDisposition"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChainCheck"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChainArtifact"
+          }
+        },
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChainCodeEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "disposition",
+        "checks",
+        "artifacts",
+        "limitations"
+      ],
+      "additionalProperties": false
+    },
+    "ChainArtifact": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "reference"
+      ],
+      "additionalProperties": false
+    },
+    "ChainCheck": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/CheckStatus"
+        },
+        "evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "ChainCodeEvidence": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "sourceRevision": {
+          "type": "string"
+        },
+        "committedRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "landedRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "qaBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submissionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "workspace",
+        "sourceRevision"
+      ],
+      "additionalProperties": false
+    },
+    "ChainStepDefinition": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "personaId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/ProviderKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "permissions": {
+          "$ref": "#/definitions/PersonaPermissions"
+        },
+        "resources": {
+          "$ref": "#/definitions/ResourceSet"
+        },
+        "workspace": {
+          "$ref": "#/definitions/AgentWorkspace"
+        },
+        "baseRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "boundary": {
+          "$ref": "#/definitions/HandoffBoundary"
+        },
+        "requiredChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredArtifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requiredApprovals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "planId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "itemId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "successorBrief": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "prompt",
+        "projectId",
+        "provider",
+        "model",
+        "permissions",
+        "resources",
+        "workspace",
+        "boundary",
+        "requiredChecks",
+        "requiredArtifacts",
+        "requiredApprovals",
+        "maxRetries",
+        "successorBrief"
+      ],
+      "additionalProperties": false
+    },
+    "CheckStatus": {
+      "anyOf": [
+        {
+          "const": "pass"
+        },
+        {
+          "const": "fail"
+        },
+        {
+          "const": "notRun"
+        }
+      ]
+    },
     "ComputerUseVerification": {
       "type": "object",
       "properties": {
@@ -2468,6 +2980,19 @@
         },
         {
           "const": "goal"
+        }
+      ]
+    },
+    "HandoffBoundary": {
+      "anyOf": [
+        {
+          "const": "artifactsReady"
+        },
+        {
+          "const": "committedWorkspace"
+        },
+        {
+          "const": "landed"
         }
       ]
     },
@@ -2900,6 +3425,22 @@
       },
       "required": [],
       "additionalProperties": false
+    },
+    "ResultDisposition": {
+      "anyOf": [
+        {
+          "const": "success"
+        },
+        {
+          "const": "blocked"
+        },
+        {
+          "const": "needsGuidance"
+        },
+        {
+          "const": "failed"
+        }
+      ]
     },
     "RuntimeMode": {
       "anyOf": [

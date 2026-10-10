@@ -36,6 +36,7 @@ pub mod auto_prompts;
 pub mod automations;
 pub mod blob;
 pub mod boss;
+pub mod chains;
 pub mod checkpoint;
 pub mod composer;
 pub mod computer_use;
