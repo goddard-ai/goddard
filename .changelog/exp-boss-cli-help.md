@@ -1,0 +1,1 @@
+- Discover Boss capabilities with `goddard-agent boss --help`: complete local help, family guides, role limits, and canonical command usage remain readable when piped. Whole-operation JSON invocations now fail with guidance to use command paths and flags.

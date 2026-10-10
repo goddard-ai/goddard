@@ -22,8 +22,8 @@ The QA branch defaults to the daemon-global setting (normally `dev`), and the
 boss can retarget a single project with
 `goddard-agent boss script --text 'op(#{type: "setProjectQaBranch", project: "<name>", branch: "<branch>"})'`
 — the override covers both `merge submit` landings and the review train; omit
-`branch` to clear it. The named branch must be checked out somewhere in the
-project's repository for submissions to land on it.
+`branch` or set it to `()` to clear it. The named branch must be checked out
+somewhere in the project's repository for submissions to land on it.
 
 The daemon queues submissions in arrival order, checks that the employee's
 recorded worktree is clean, rebases it onto the configured QA branch (normally

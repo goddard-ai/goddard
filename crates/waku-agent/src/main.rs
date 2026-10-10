@@ -19,6 +19,7 @@
 //! user.
 
 mod boss_contract;
+mod help;
 mod resources;
 
 use std::io::IsTerminal;
@@ -43,152 +44,93 @@ use waku_protocol::{
 };
 
 const USAGE: &str = "\
-goddard-agent — Goddard's scoped agent surface inside a session
+goddard-agent — scoped task and Boss commands
 
-USAGE
-    goddard-agent create --project PATH --file PROMPT.md
-    goddard-agent prompt '<json>'            Send a prompt to an existing task
-    goddard-agent rename '<json>'            Rename this task after the user approves the request
-    goddard-agent archive '<json>'           Propose archiving tasks after the user approves the request
-    goddard-agent read '<json>'              Read a task's transcript
-    goddard-agent search --text QUERY         Search task transcripts — this project's, or every project's for the boss
-    goddard-agent history search --text QUERY [--project P] [--person N] [--after D] [--before D] [--kind task|employee|boss|plan] [--limit N] [--offset N]
-        Search retained history — tasks, employees, Boss chats — archives included
-    goddard-agent map --text QUESTION         Find relevant code in this workspace
-    goddard-agent merge submit               Rebase, verify, and land this employee worktree
-    goddard-agent memory overview|scan|zoom|record|summary|buckets
-        This session's shared project memory — omit the bucket to use it
-    goddard-agent ask '<json>'               Ask the user a structured question
-    goddard-agent computer js '<json>'       Execute JavaScript in this task's persistent CUA kernel
-    goddard-agent computer js --stdin        Read that JSON payload from stdin
-    goddard-agent computer run '<json>'      Run a bounded Jev-selected browser task
-    goddard-agent computer run --stdin       Read that JSON payload from stdin
-    goddard-agent computer reset             Reset this task's CUA kernel
-    goddard-agent resource acquire '<json>'   Acquire resources (waits, prints id)
-    goddard-agent resource run '<json>' -- COMMAND [ARGS]   Run with supervised resources
-    goddard-agent resource release '{\"id\":\"UUID\"}'  Release a reservation
-    goddard-agent resource cancel '{\"id\":\"UUID\"}'   Cancel a queue entry or workload
-    goddard-agent resource status            Print host owners, queue, capacity, and observations
-    goddard-agent boss summon --persona NAME --title TITLE --file BRIEF.md
-    goddard-agent boss prompt EMPLOYEE_ID --file BRIEF.md
-    goddard-agent boss transcript EMPLOYEE_ID [--turn N]
-    goddard-agent boss resume EMPLOYEE_ID     Revive an expired employee — transcript and worktree intact
-    goddard-agent boss roster [--all]
-    goddard-agent read [TASK_ID] [--turn N]
-        Employee-only: steer your supervisor or start its next turn; never queue
-    goddard-agent prompt TASK_ID (--text TEXT | --file PATH|-)
-    goddard-agent models                     List the provider/model options `create` accepts
-    goddard-agent command list               List the user's custom commands
-    goddard-agent command upsert '<json>'    Add or update a custom command
-    goddard-agent command remove '<json>'    Remove a custom command
-    goddard-agent schema                     Print the JSON payload schemas
-    goddard-agent --help                     Show this text
+    goddard-agent boss --help       Complete Boss guide and companion operations
+    goddard-agent boss              Same local, readable guide
+    goddard-agent boss employee --help  Focused family guide
+    goddard-agent COMMAND --help    Focused command help
+    goddard-agent COMMAND --schema  Precise machine contract
+    goddard-agent schema [--all]    Command index or all contracts
+    goddard-agent --help | -h | help  This orientation
 
-USAGE CONTRACT
-    `boss` exposes role-scoped Boss operations. Only the boss or a human
-    can edit personas and Boss files; employees read only granted memory
-    and knowledge. Delegation is permitted only by the assigned persona.
-    `boss script --file` is an advanced boss-only capability: each Rhai
-    invocation uses a fresh scope and can batch authorized operations.
-    Bosses should delegate execution and long-running commands
-    to employees, then verify committed work in their
-    worktrees before reporting completion. Respect user-set model and
-    resource limits.
-    `command` manages the user's settings — today their custom commands —
-    and is available whenever changing a setting would help them.
-    `create`, `prompt`, and foreign `read` are the cross-task surface. When
-    the human asks you to create, start, or spawn another task or session —
-    including running work in a separate task — use `create`; when they ask
-    you to send a message to another task, use `prompt`. `read` is the read
-    half of that surface — it reads a task's transcript, title, provider,
-    and status. With no address fields it reads this task's own data; use it
-    when another task's transcript holds context you need, for example when
-    GODDARD_PARENT_TASK_ID names the task this session is a side chat of.
-    `search` is read-only within this task's project — daemon-wide for the
-    boss, whose `project:` filters may name any registered project; use it
-    to find tasks worth `read`ing. Use `create` and `prompt` only when the
-    human you are working for has explicitly asked — never for exploration,
-    convenience, or self-orchestration.
-    `history search` finds retained work — task transcripts, employee
-    sessions (expired and retired included), and earlier Boss chats — by
-    natural-language terms plus project/person/date/kind filters. Archived
-    records are always in scope. The corpus is what your credential may
-    already open: the boss reaches everything the daemon retains, an
-    employee reaches its own record and the employees it supervises, and any
-    other task reaches its own project's ordinary tasks. Every hit is a
-    source you can open (`read <taskId>`, `boss transcript <taskId>`), and
-    the coverage block reports exactly what was searched, what the limit
-    capped, and what access excluded — an empty result means no matching
-    record inside that scope, never that the work did not happen. Search is
-    read-only: it never revives, resumes, or unarchives anything.
-    Employees cannot prompt or steer the Boss or supervisor. Use
-    `boss report-blocker` only when supervisor or human action is required
-    to proceed; report routine results in the turn-end/final report.
-    `map` searches this workspace's indexed declarations for code relevant to
-    the current task. Ask a specific question, add `anchors` for known symbol
-    names, and use `known_paths` when you have already inspected files; then
-    read the returned source locations before drawing conclusions. Narrow with
-    `path` when you know the relevant directory.
-    `memory` reads and records durable notes in this session's shared project
-    bucket — `overview` is the compacted entry point, `scan` and `zoom` drill
-    into notes, `record` appends one, `summary` answers a pending compression
-    request, `buckets` lists every bucket the session can see. Omit the bucket
-    to use the project bucket; `--project` addresses another registered
-    project when its bucket is granted. Bucket `create` and `migrate` are
-    Boss-only and stay under `boss memory`.
-    `rename` changes only this task's title. Before deciding, read this task's
-    transcript with `goddard-agent read '{}'` to see its current title. Keep
-    that title unless the task has substantially changed or pivoted. If
-    renaming, preserve its unique subject and describe the task's purpose, not
-    recent steps or progress. Unless the task already granted standing
-    permission, each call asks the user first — it blocks on the request card
-    and fails when the user declines.
-    `archive` proposes archiving tasks by Goddard task id — siblings in this
-    task's project, found through `search`; the boss may name tasks in any
-    project on this daemon. It is a proposal, not an action:
-    each call renders a request card naming the tasks and your reason, blocks
-    until the user answers, and fails when they decline. Nothing is archived
-    without that approval. Use it when the human asked for cleanup or a
-    task's work is clearly finished — never for exploration or
-    self-orchestration.
-    `ask` renders a question card in the user's Goddard client and blocks
-    until they answer, clarify, or dismiss it. Use it when the human's
-    decision — a choice between options or a confirmation — must come back
-    before you can proceed; it is not a substitute for ordinary questions
-    you can just ask in your reply.
-    `models` lists the provider/model combinations `create` accepts, in
-    preference order — read it instead of guessing model ids.
-    `computer js`, `computer run`, and `computer reset` operate only on this
-    task's enabled Computer Use runtime. JavaScript bindings persist; emitted
-    images return file paths to open with your image reader. `computer run`
-    requires an explicit URL and goal, and can receive field values plus
-    machine-checkable completion conditions. Jev sees redacted page context
-    and candidate ids; executable browser refs and supplied values stay in the
-    daemon. Missing or ambiguous values return a handoff to the parent agent.
-    Browser runs use a new isolated profile and close their browser session
-    when finished. App, browser, clipboard, and desktop access keep their
-    Goddard approval prompts. Actions are never automatically replayed after
-    a lost response.
-    `resource` reserves contended host resources — native builds, iOS/Android
-    virtual devices, and shared desktop input — across every Goddard task on
-    this machine. Wrap the workload in `resource run '<json>' -- COMMAND` so
-    the reservation queues without retries and supervises the command's
-    process group. `resource status` shows owners, queues, and user-owned
-    devices. Enforcement is cooperative; commands launched outside a
-    reservation bypass the broker.
-    There is no per-call approval gate for task/settings writes; the daemon records
-    this task's id on every accepted write, so agent-originated commands and
-    turns are visibly attributed to it.
+Invoke operations with command paths, positionals, and flags. Whole-operation
+JSON payload invocation is retired. JSON remains valid for documented structured
+input data, machine schemas, and --output json. Help is local, read-only, and
+complete when piped; it never requires a daemon or credential.
 
-ENVIRONMENT
-    GODDARD_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
-    GODDARD_AGENT_TOKEN      Per-session scoped credential (injected)
-    GODDARD_TASK_ID          This session's task id (injected)
-    GODDARD_PARENT_TASK_ID   Parent task id — side-chat sessions only (injected)
+Use create or prompt only when the human explicitly asked. There is no per-call approval
+gate for ordinary task/settings writes; role grants and human-review requirements
+still apply. Employees report actionable blockers with boss report-blocker and
+results at turn end; task prompts and steer-supervisor are unavailable to them.
+Find code context with goddard-agent map --text QUESTION.
+Run goddard-agent boss --help for usage, authority, outcomes and recovery.";
 
-Run `goddard-agent schema` for the accepted payloads.";
+const VALUE_OPTIONS: &[&str] = &[
+    "--text",
+    "--file",
+    "--json",
+    "--json-file",
+    "--persona",
+    "--title",
+    "--icon",
+    "--project",
+    "--provider",
+    "--model",
+    "--effort",
+    "--work-goal",
+    "--workspace",
+    "--base-branch",
+    "--adopt-worktree",
+    "--request-id",
+    "--delivery",
+    "--turn",
+    "--person",
+    "--after",
+    "--before",
+    "--kind",
+    "--limit",
+    "--offset",
+    "--last-turns",
+    "--output",
+    "--timeout-ms",
+    "--cwd",
+    "--script",
+    "--name",
+    "--id",
+    "--path",
+    "--reason",
+    "--url",
+    "--permissions-json",
+    "--permissions-json-file",
+    "--resources-json",
+    "--resources-json-file",
+    "--new-outcome-json",
+    "--new-outcome-json-file",
+    "--prerequisites-json",
+    "--prerequisites-json-file",
+    "--group-id",
+    "--priority",
+    "--outcome-id",
+    "--after-success",
+    "--plan",
+    "--item",
+    "--items",
+    "--plan-file",
+    "--intent",
+    "--anchors",
+    "--known-paths",
+    "--max-tokens",
+    "--service-tier",
+    "--context-window",
+    "--mode",
+    "--dry-run",
+    "--bucket",
+    "--source",
+];
 
 static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
+static HELP_JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
 macro_rules! println {
     ($($arg:tt)*) => {{
@@ -224,13 +166,6 @@ fn text_output(value: &str) -> String {
 }
 
 fn discovery(args: &[String]) -> anyhow::Result<bool> {
-    if args == ["boss", "--schema"] {
-        std::println!(
-            "{}",
-            serde_json::to_string_pretty(&boss_contract::aggregate())?
-        );
-        return Ok(true);
-    }
     if args.first().is_some_and(|arg| arg == "schema") {
         match &args[1..] {
             [] => {
@@ -252,45 +187,89 @@ fn discovery(args: &[String]) -> anyhow::Result<bool> {
         }
         return Ok(true);
     }
-    let content_options = [
-        "--text",
-        "--file",
-        "--json",
-        "--json-file",
-        "--permissions-json",
-        "--permissions-json-file",
-        "--resources-json",
-        "--resources-json-file",
-        "--new-outcome-json",
-        "--new-outcome-json-file",
-        "--prerequisites-json",
-        "--prerequisites-json-file",
-    ];
-    let Some((marker, index)) = args.iter().enumerate().find_map(|(i, arg)| {
-        let is_content = i > 0 && content_options.contains(&args[i - 1].as_str());
-        (!is_content && matches!(arg.as_str(), "--help" | "-h" | "--schema"))
-            .then_some((arg.as_str(), i))
-    }) else {
+    let documentation_args = &args[..args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len())];
+    let selectors: Vec<_> = documentation_args
+        .iter()
+        .enumerate()
+        .filter(|(i, arg)| {
+            let is_content = *i > 0 && VALUE_OPTIONS.contains(&args[*i - 1].as_str());
+            !is_content && matches!(arg.as_str(), "--help" | "-h" | "--schema")
+        })
+        .collect();
+    if selectors.len() > 1 {
+        bail!("choose exactly one documentation selector: --help (or -h), or --schema");
+    }
+    let contracts = schema();
+    let commands = contracts["commands"].as_object().unwrap();
+    let marker = selectors.first().map(|(_, arg)| arg.as_str());
+    let mut path = match selectors.first() {
+        Some((index, _)) => args[..*index].join(" "),
+        None => args.join(" "),
+    };
+    if matches!(path.as_str(), "" | "help") && marker != Some("--schema") {
+        if HELP_JSON_OUTPUT.load(Ordering::Relaxed) {
+            std::println!("{}", serde_json::to_string_pretty(&json!({"help":USAGE}))?);
+        } else {
+            std::println!("{USAGE}");
+        }
+        return Ok(true);
+    }
+    if marker.is_some() && !commands.contains_key(&path) {
+        if let Some(leaf) = commands
+            .keys()
+            .filter(|command| path.starts_with(&format!("{command} ")))
+            .max_by_key(|command| command.len())
+        {
+            path = leaf.clone();
+        }
+    }
+    let is_leaf = commands.contains_key(&path);
+    let is_family = commands
+        .keys()
+        .any(|command| command.starts_with(&format!("{path} ")));
+    if marker.is_none() && !is_family {
         return Ok(false);
-    };
-    let command_index = (1..=index)
-        .rev()
-        .find(|end| schema()["commands"].get(args[..*end].join(" ")).is_some());
-    let Some(command_index) = command_index else {
-        let attempted = args[..index].join(" ");
-        bail!("unknown command `{attempted}`; run `goddard-agent schema` to list command paths");
-    };
-    let path = args[..command_index].join(" ");
-    let leaf = leaf_schema(&path);
-    if marker == "--schema" {
-        std::println!("{}", serde_json::to_string_pretty(&leaf)?);
-    } else {
-        println!(
-            "{path}\n\n{}\n\nSchema: goddard-agent {path} --schema",
-            leaf["help"]
-                .as_str()
-                .unwrap_or("Use the documented flags for this command.")
+    }
+    if !is_leaf && !is_family {
+        let token = path.split_whitespace().last().unwrap_or("(root)");
+        let parts: Vec<_> = path.split_whitespace().collect();
+        let family = (1..parts.len())
+            .rev()
+            .map(|end| parts[..end].join(" "))
+            .find(|prefix| {
+                commands
+                    .keys()
+                    .any(|command| command.starts_with(&format!("{prefix} ")))
+            })
+            .unwrap_or_else(|| "boss".to_owned());
+        bail!(
+            "unknown command `{token}`; run goddard-agent {family} --help for valid commands or goddard-agent boss --help for the complete guide"
         );
+    }
+    if marker == Some("--schema") {
+        let contract = if is_leaf {
+            leaf_schema(&path)
+        } else if path == "boss" {
+            boss_contract::aggregate()
+        } else {
+            let selected = commands
+                .iter()
+                .filter(|(command, _)| path == "boss" || command.starts_with(&format!("{path} ")))
+                .map(|(command, value)| (command.clone(), value.clone()))
+                .collect::<serde_json::Map<_, _>>();
+            json!({"commands":selected})
+        };
+        std::println!("{}", serde_json::to_string_pretty(&contract)?);
+    } else {
+        let guide = help::guide(&contracts, &path);
+        if HELP_JSON_OUTPUT.load(Ordering::Relaxed) {
+            std::println!("{}", serde_json::to_string_pretty(&guide)?);
+        } else {
+            std::println!("{}", help::render(&guide));
+        }
     }
     Ok(true)
 }
@@ -672,14 +651,14 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss resource-policy set --json-file policy.json".to_owned(),
         ),
         "computer js" => (
-            json!({"JSON":{"positional":true,"required":true,"or":"--stdin","object":{"code":{"required":true,"type":"JavaScript source"},"timeout_ms":{"type":"integer milliseconds","optional":true},"title":{"type":"string","optional":true}}}}),
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw JavaScript source; --file - reads stdin","maxBytes":1048576},"--timeout-ms":{"type":"unsigned integer milliseconds","optional":true,"notes":"Daemon runtime supplies the default and enforces its time budget"},"--title":{"type":"string","optional":true}}),
             json!({"json":"Computer Use result object; failures carry isError=true and an error description"}),
-            "goddard-agent computer js --stdin".to_owned(),
+            "goddard-agent computer js --text 'jsRepl.write(1 + 1)'".to_owned(),
         ),
         "computer run" => (
-            json!({"JSON":{"positional":true,"required":true,"or":"--stdin","maxBytes":65536,"object":{"url":{"required":true,"type":"HTTP(S) URL"},"goal":{"required":true,"type":"nonempty string"},"values":{"type":"object of string values","default":{}},"verify":{"optional":true,"object":{"urlContains":{"type":"string","optional":true},"textContains":{"type":"string[]","default":[]},"fields":{"type":"object of string values","default":{}}}},"maxActions":{"type":"integer","minimum":1,"maximum":32,"default":12},"timeoutMs":{"type":"integer","minimum":1,"maximum":120000,"default":60000}}}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"maxBytes":65536,"object":{"url":{"required":true,"type":"HTTP(S) URL"},"goal":{"required":true,"type":"nonempty string"},"values":{"type":"object of string values","default":{}},"verify":{"optional":true,"object":{"urlContains":{"type":"string","optional":true},"textContains":{"type":"string[]","default":[]},"fields":{"type":"object of string values","default":{}}}},"maxActions":{"type":"integer","minimum":1,"maximum":32,"default":12},"timeoutMs":{"type":"integer","minimum":1,"maximum":120000,"default":60000}}}}),
             json!({"json":{"status":"verified|not_verified|needs_input|needs_parent|stopped|cancelled|unavailable","reason":"completion or stop reason","actions":"bounded action history","checks":"verification details when requested","fields":"required unsupplied input names for needs_input","page":"redacted page summary or null","cleanup":"ended|incomplete when a browser session was started"}}),
-            "goddard-agent computer run --stdin".to_owned(),
+            "goddard-agent computer run --json-file request.json".to_owned(),
         ),
         "computer reset" => (
             json!({}),
@@ -687,19 +666,19 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent computer reset".to_owned(),
         ),
         "resource acquire" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"resources":{"required":true,"fields":{"exclusive":{"type":"string[]","default":[]},"resident_devices":{"type":"integer","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer","default":600},"parent":{"type":"reservation UUID","optional":true}}}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"fields":{"exclusive":{"type":"string[]","default":[]},"resident_devices":{"type":"integer","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}}}),
             json!({"json":{"id":"reservation UUID","borrowed":"whether an enclosing reservation was reused"}}),
-            "goddard-agent resource acquire '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}'".to_owned(),
+            "goddard-agent resource acquire --json '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}'".to_owned(),
         ),
         "resource run" => (
-            json!({"JSON":{"positional":true,"required":true,"object":"same acquisition fields as resource acquire"},"--":{"required":true,"type":"terminates reservation input; followed by executable and arguments"},"COMMAND":{"required":true,"type":"executable and arguments"}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"type":"ResourceSet; exclusive string[] and resident_devices/native_builds/desktop_input unsigned counts, each default 0"},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}},"--":{"required":true,"type":"terminates reservation input; followed by executable and arguments"},"COMMAND":{"required":true,"type":"executable and arguments"}}),
             json!({"stdout":"subprocess stdout, passed through","stderr":"subprocess stderr, passed through","exitStatus":"subprocess exit code; reservation released on completion"}),
-            "goddard-agent resource run '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}' -- mbx build".to_owned(),
+            "goddard-agent resource run --json '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}' -- mbx build".to_owned(),
         ),
         "resource release" | "resource cancel" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"id":{"required":true,"type":"reservation UUID"}}}}),
-            json!({"json":"ResourceStatus snapshot after release or cancellation"}),
-            format!("goddard-agent {path} '{{\"id\":\"RESERVATION_ID\"}}'"),
+            json!({"RESERVATION_ID":{"positional":true,"required":true,"type":"reservation UUID owned by this task"}}),
+            json!({"json":"ResourceStatus snapshot after release or cancellation; live owned workloads/devices retain capacity until stopped"}),
+            format!("goddard-agent {path} RESERVATION_ID"),
         ),
         "resource status" => (
             json!({}),
@@ -712,14 +691,14 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent command list".to_owned(),
         ),
         "command upsert" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"id":{"type":"UUID","optional":"omit to create"},"name":{"type":"string","optional":true},"icon":{"enum":command_icons,"default":"terminal"},"shell":{"type":"shell path","optional":true},"script":{"required":true,"type":"shell script"},"close_on_success":{"type":"boolean","default":false}}}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"id":{"type":"UUID","optional":"omit to create"},"name":{"type":"string","optional":true},"icon":{"enum":command_icons,"default":"terminal"},"shell":{"type":"shell path","optional":true},"script":{"required":true,"type":"shell script"},"close_on_success":{"type":"boolean","default":false}}}}),
             json!({"json":"updated CustomCommand[]"}),
-            "goddard-agent command upsert '{\"name\":\"Check\",\"script\":\"mbx check -p waku-agent\"}'".to_owned(),
+            "goddard-agent command upsert --json '{\"name\":\"Check\",\"script\":\"mbx check -p waku-agent\"}'".to_owned(),
         ),
         "command remove" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"id":{"type":"UUID","optional":true},"name":{"type":"string","optional":true},"constraint":"provide id or name"}}}),
+            json!({"--id|--name":{"required":true,"exactlyOne":true,"type":"saved command UUID or exact name"}}),
             json!({"json":"updated CustomCommand[]"}),
-            "goddard-agent command remove '{\"name\":\"Check\"}'".to_owned(),
+            "goddard-agent command remove --name Check".to_owned(),
         ),
         "merge submit" => (
             json!({}),
@@ -727,19 +706,19 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent merge submit".to_owned(),
         ),
         "rename" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"title":{"required":true,"type":"this task's new title"}}}}),
-            json!({"accepted":{"ok":true},"approvalRequired":"AgentAskOutcome tagged object; invocation waits for the user decision"}),
-            "goddard-agent rename '{\"title\":\"Implement CLI schema coverage\"}'".to_owned(),
+            json!({"TITLE":{"positional":true,"required":true,"type":"this task's new title; inspect read first and preserve its unique purpose"}}),
+            json!({"accepted":{"ok":true},"approvalRequired":"AgentAskOutcome; waits for human approval unless standing permission exists"}),
+            "goddard-agent rename 'Implement CLI discovery'".to_owned(),
         ),
         "archive" => (
-            json!({"JSON":{"positional":true,"required":true,"object":{"task_ids":{"required":true,"type":"UUID[]"},"reason":{"type":"string","optional":true}}}}),
-            json!({"accepted":{"ok":true},"approvalRequired":"AgentAskOutcome tagged object; tasks archive only after explicit approval"}),
-            "goddard-agent archive '{\"task_ids\":[\"TASK_UUID\"],\"reason\":\"work is complete\"}'".to_owned(),
+            json!({"TASK_ID...":{"positional":true,"required":true,"type":"one or more accessible task UUIDs"},"--reason":{"type":"human-readable reason","optional":true}}),
+            json!({"accepted":{"ok":true},"approvalRequired":"AgentAskOutcome; waits for human approval before archiving"}),
+            "goddard-agent archive TASK_UUID --reason 'Work is complete'".to_owned(),
         ),
         "ask" => (
-            json!({"JSON":{"positional":true,"required":true,"type":"question array or {questions: [...]} object","question":{"id":"optional string","header":"required short label","question":"required prompt","options":"optional array of {label, description?}","multiSelect":"boolean, default false"}}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"type":"question array or {questions: [...]} object","question":{"id":"optional string","header":"required short label","question":"required prompt","options":"optional array of {label, description?}","multiSelect":"boolean, default false"}}}),
             json!({"json":"AgentAskOutcome tagged object: type=answers with answers[], type=clarified with content, or type=cancelled"}),
-            "goddard-agent ask '{\"questions\":[{\"header\":\"Deploy\",\"question\":\"Which environment?\",\"options\":[{\"label\":\"Staging\"}]}]}'".to_owned(),
+            "goddard-agent ask --json '{\"questions\":[{\"header\":\"Deploy\",\"question\":\"Which environment?\",\"options\":[{\"label\":\"Staging\"}]}]}'".to_owned(),
         ),
         "models" => (
             json!({}),
@@ -761,10 +740,14 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         help.push(' ');
         help.push_str(description);
     }
-    boss_contract::enrich_leaf(
+    let mut leaf = boss_contract::enrich_leaf(
         path,
         json!({"command":path,"help":help,"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]}),
-    )
+    );
+    if path == "computer js" {
+        leaf["inputs"].as_object_mut().unwrap().remove("JSON");
+    }
+    leaf
 }
 
 fn schema() -> serde_json::Value {
@@ -872,6 +855,7 @@ fn schema() -> serde_json::Value {
     })
 }
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreatePayload {
@@ -894,6 +878,7 @@ struct CreatePayload {
     context_window: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PromptPayload {
@@ -910,6 +895,7 @@ struct PromptPayload {
 
 // `read` — a transcript, not the task. With neither address field the
 // daemon reads the caller's own task.
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ReadPayload {
@@ -925,6 +911,7 @@ struct ReadPayload {
     turn: Option<usize>,
 }
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchPayload {
@@ -934,29 +921,7 @@ struct SearchPayload {
     last_turns: Option<usize>,
 }
 
-/// `history search '<json>'` — field names mirror the flag spellings.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HistorySearchPayload {
-    /// Empty only when a filter does the narrowing.
-    #[serde(default)]
-    query: String,
-    #[serde(default)]
-    project: Option<String>,
-    #[serde(default)]
-    person: Option<String>,
-    #[serde(default)]
-    after: Option<String>,
-    #[serde(default)]
-    before: Option<String>,
-    #[serde(default)]
-    kind: Option<HistorySourceKind>,
-    #[serde(default)]
-    limit: Option<usize>,
-    #[serde(default)]
-    offset: usize,
-}
-
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectMapPayload {
@@ -973,12 +938,14 @@ struct ProjectMapPayload {
     known_paths: Vec<PathBuf>,
 }
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RenamePayload {
     title: String,
 }
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ArchivePayload {
@@ -1034,6 +1001,7 @@ where
     Option::<CustomCommandIcon>::deserialize(deserializer).map(Some)
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum AgentWorkspaceArg {
@@ -1041,6 +1009,7 @@ enum AgentWorkspaceArg {
     Worktree,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum DeliveryArg {
@@ -1058,13 +1027,31 @@ fn main() -> ExitCode {
             if JSON_OUTPUT.load(Ordering::Relaxed) {
                 std::eprintln!(
                     "{}",
-                    json!({"error":{"code":"invalid_input","command":"goddard-agent","message":message,"hint":"Run the command with --help or --schema."}})
+                    json!({"error":{"code":"invalid_input","command":"goddard-agent","message":message,"hint":error_hint()}})
                 );
             } else {
                 eprintln!("goddard-agent: {message}");
             }
             ExitCode::from(2)
         }
+    }
+}
+
+fn error_hint() -> String {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let contracts = schema();
+    let path = contracts["commands"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|path| {
+            let parts: Vec<_> = path.split_whitespace().collect();
+            args.len() >= parts.len() && parts.iter().zip(&args).all(|(part, arg)| *part == arg)
+        })
+        .max_by_key(|path| path.len());
+    match path {
+        Some(path) => format!("Run goddard-agent {path} --help for usage or goddard-agent {path} --schema for the precise contract."),
+        None => "Run goddard-agent boss --help for the complete guide or goddard-agent schema for valid command paths.".to_owned(),
     }
 }
 
@@ -1076,55 +1063,11 @@ fn run() -> anyhow::Result<()> {
     }
     let mut explicit_output = None;
     let mut index = 0;
-    let value_options = [
-        "--text",
-        "--file",
-        "--json",
-        "--json-file",
-        "--persona",
-        "--title",
-        "--icon",
-        "--project",
-        "--provider",
-        "--model",
-        "--effort",
-        "--work-goal",
-        "--workspace",
-        "--base-branch",
-        "--adopt-worktree",
-        "--request-id",
-        "--delivery",
-        "--turn",
-        "--person",
-        "--after",
-        "--before",
-        "--kind",
-        "--limit",
-        "--offset",
-        "--last-turns",
-        "--output",
-        "--timeout-ms",
-        "--cwd",
-        "--script",
-        "--name",
-        "--id",
-        "--path",
-        "--reason",
-        "--url",
-        "--permissions-json",
-        "--permissions-json-file",
-        "--resources-json",
-        "--resources-json-file",
-        "--new-outcome-json",
-        "--new-outcome-json-file",
-        "--prerequisites-json",
-        "--prerequisites-json-file",
-        "--group-id",
-        "--priority",
-        "--outcome-id",
-        "--after-success",
-    ];
+
     while index < raw_args.len() {
+        if raw_args[index] == "--" {
+            break;
+        }
         if raw_args[index] == "--output" {
             if explicit_output.is_some() {
                 bail!("--output may be supplied only once");
@@ -1137,7 +1080,7 @@ fn run() -> anyhow::Result<()> {
             }
             explicit_output = Some(value.clone());
             raw_args.drain(index..=index + 1);
-        } else if value_options.contains(&raw_args[index].as_str()) {
+        } else if VALUE_OPTIONS.contains(&raw_args[index].as_str()) {
             index = (index + 2).min(raw_args.len());
         } else {
             index += 1;
@@ -1150,6 +1093,11 @@ fn run() -> anyhow::Result<()> {
             .unwrap_or_else(|| !std::io::stdout().is_terminal()),
         Ordering::Relaxed,
     );
+    HELP_JSON_OUTPUT.store(
+        explicit_output.as_deref() == Some("json"),
+        Ordering::Relaxed,
+    );
+    reject_retired_payloads(&raw_args)?;
     if discovery(&raw_args)? {
         return Ok(());
     }
@@ -1199,30 +1147,9 @@ fn run() -> anyhow::Result<()> {
             boss_everyday(&action, arguments.collect())
         }
         "prompt" | "read" | "steer-supervisor" => task_everyday(&subcommand, arguments.collect()),
-        "create"
-            if arguments
-                .clone()
-                .next()
-                .is_some_and(|arg| arg.starts_with("--")) =>
-        {
-            task_create(arguments.collect())
-        }
-        "map"
-            if arguments
-                .clone()
-                .next()
-                .is_some_and(|arg| arg.starts_with("--")) =>
-        {
-            task_map(arguments.collect())
-        }
-        "search"
-            if arguments
-                .clone()
-                .next()
-                .is_some_and(|arg| arg.starts_with("--")) =>
-        {
-            task_search(arguments.collect())
-        }
+        "create" => task_create(arguments.collect()),
+        "map" => task_map(arguments.collect()),
+        "search" => task_search(arguments.collect()),
         "history" => {
             let action = arguments.next().unwrap_or_default();
             if action != "search" {
@@ -1233,10 +1160,7 @@ fn run() -> anyhow::Result<()> {
                 );
             }
             let args: Vec<String> = arguments.collect();
-            match args.first().map(String::as_str) {
-                Some(payload) if !payload.starts_with('-') => history_search_json(payload),
-                _ => history_search(args),
-            }
+            history_search(args)
         }
         "models" => {
             if arguments.next().is_some() {
@@ -1275,15 +1199,41 @@ fn run() -> anyhow::Result<()> {
         "resource" => resources::command(arguments),
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
-        "command" => command(arguments.next().as_deref(), arguments.next()),
-        "create" | "search" | "map" | "rename" | "archive" | "ask" | "boss" => {
-            let payload = arguments
-                .next()
-                .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `goddard-agent schema` for its shape"))?;
-            if arguments.next().is_some() {
-                bail!("`{subcommand}` accepts exactly one JSON object argument");
-            }
-            let command = build_command(&subcommand, &payload)?;
+        "command" => command_flags(arguments.collect()),
+        "rename" | "archive" | "ask" => {
+            let args: Vec<String> = arguments.collect();
+            let command = match subcommand.as_str() {
+                "rename" => {
+                    let (pos, _) = flags(args, &[], true)?;
+                    if pos.len() != 1 {
+                        bail!(
+                            "usage: goddard-agent rename TITLE; inspect goddard-agent read first"
+                        );
+                    }
+                    Command::AgentRenameSelf {
+                        title: pos[0].clone(),
+                    }
+                }
+                "archive" => {
+                    let (pos, opts) = flags(args, &["reason"], true)?;
+                    if pos.is_empty() {
+                        bail!("usage: goddard-agent archive TASK_ID... [--reason TEXT]");
+                    }
+                    Command::AgentProposeArchive {
+                        task_ids: pos
+                            .iter()
+                            .map(|id| id.parse().context("invalid task ID"))
+                            .collect::<anyhow::Result<Vec<_>>>()?,
+                        reason: opts.get("reason").cloned(),
+                    }
+                }
+                _ => {
+                    let (_, opts) = flags(args, &["json", "json-file"], false)?;
+                    Command::AgentAsk {
+                        questions: ask_questions(&json_input(&opts)?)?,
+                    }
+                }
+            };
             let client = connect()?;
             // `ask`, `archive`, and an ungranted `rename` wait on a human —
             // a clock can't bound that, so they park until the daemon
@@ -1325,6 +1275,7 @@ fn run() -> anyhow::Result<()> {
             }
             Ok(())
         }
+        "boss" => bail!("unknown Boss operation; run goddard-agent boss --help for valid paths"),
         "" => {
             eprintln!("{USAGE}");
             Err(anyhow!("a subcommand is required"))
@@ -1333,6 +1284,69 @@ fn run() -> anyhow::Result<()> {
             "unknown subcommand `{other}`; run `goddard-agent --help`"
         )),
     }
+}
+
+fn reject_retired_payloads(args: &[String]) -> anyhow::Result<()> {
+    if args.first().is_some_and(|arg| arg == "__resource_exec") {
+        return Ok(());
+    }
+    let mut content = false;
+    for arg in args {
+        if content {
+            content = false;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if VALUE_OPTIONS.contains(&arg.as_str()) {
+            content = true;
+            continue;
+        }
+        if arg.trim_start().starts_with(['{', '[']) || arg == "--stdin" {
+            let path = args
+                .iter()
+                .take_while(|part| {
+                    !part.starts_with('-') && !part.trim_start().starts_with(['{', '['])
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            bail!(
+                "whole-operation JSON invocation is retired; use command paths, positionals and flags. Run goddard-agent {path} --help for canonical usage, or goddard-agent boss --help. Structured data uses documented --json/--json-file inputs; raw content uses --text/--file"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn command_flags(args: Vec<String>) -> anyhow::Result<()> {
+    let (action, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("run goddard-agent command --help"))?;
+    let payload = match action.as_str() {
+        "list" => {
+            if !rest.is_empty() {
+                bail!("command list takes no arguments");
+            }
+            None
+        }
+        "upsert" => {
+            let (_, opts) = flags(rest.to_vec(), &["json", "json-file"], false)?;
+            Some(json_input(&opts)?)
+        }
+        "remove" => {
+            let (_, opts) = flags(rest.to_vec(), &["id", "name"], false)?;
+            if opts.contains_key("id") == opts.contains_key("name") {
+                bail!("choose exactly one of --id UUID or --name NAME");
+            }
+            Some(serde_json::to_string(
+                &json!({"id":opts.get("id"),"name":opts.get("name")}),
+            )?)
+        }
+        _ => bail!("unknown saved-command operation; run goddard-agent command --help"),
+    };
+    command(Some(action), payload)
 }
 
 /// Parse the small, explicit flag grammar used by the everyday commands.
@@ -1348,8 +1362,10 @@ fn flags(
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         if let Some(key) = arg.strip_prefix("--") {
-            if matches!(key, "all" | "new" | "clear" | "reference")
-                || (value_flags.contains(&key) && matches!(key, "allow-burst" | "finishes-outcome"))
+            if matches!(
+                key,
+                "all" | "new" | "clear" | "reference" | "allow-burst" | "finishes-outcome"
+            ) && value_flags.contains(&key)
             {
                 if values.insert(key.to_owned(), String::new()).is_some() {
                     bail!("`--{key}` may be supplied only once");
@@ -1368,7 +1384,7 @@ fn flags(
         } else if positional {
             positionals.push(arg);
         } else {
-            bail!("unexpected argument `{arg}`");
+            bail!("unexpected positional argument; use the documented flags (--help)");
         }
     }
     Ok((positionals, values))
@@ -1434,7 +1450,7 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
                 }
                 print_boss(boss_request(BossOperation::Context)?)
             } else {
-                let (_, opts) = flags(args, &[], false)?;
+                let (_, opts) = flags(args, &["all"], false)?;
                 if opts.contains_key("all") {
                     let waku_protocol::boss::BossResult::State { state } =
                         boss_request(BossOperation::View)?
@@ -1519,6 +1535,9 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
         args.insert(0, group.to_owned());
         return boss_admin_leaf(&args);
     }
+    if args.is_empty() {
+        bail!("run goddard-agent boss {group} --help for valid commands");
+    }
     args.remove(0);
     match (group, operation.as_str()) {
         ("avatar", "regenerate") => {
@@ -1592,7 +1611,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
         ("persona", "upsert") => {
             let (_, opts) = flags(
                 args,
-                &["id", "name", "file", "text", "json", "json-file"],
+                &["id", "name", "file", "text", "json", "json-file", "new"],
                 false,
             )?;
             let is_new = opts.contains_key("new");
@@ -1838,7 +1857,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             })?)
         }
         ("employee", "icon") => {
-            let (pos, opts) = flags(args, &[], true)?;
+            let (pos, opts) = flags(args, &["clear"], true)?;
             let clear = opts.contains_key("clear");
             if pos.len() != if clear { 1 } else { 2 } {
                 bail!("usage: boss employee icon EMPLOYEE_ID ICON|--clear");
@@ -1854,7 +1873,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             })?)
         }
         ("employee", "persona") => {
-            let (pos, opts) = flags(args, &[], true)?;
+            let (pos, opts) = flags(args, &["clear"], true)?;
             let clear = opts.contains_key("clear");
             if pos.len() != if clear { 1 } else { 2 } {
                 bail!("usage: boss employee persona EMPLOYEE_ID PERSONA|--clear");
@@ -1920,7 +1939,28 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             };
             let mut action = serde_json::Map::new();
             action.insert("type".into(), json!(action_type));
-            action.insert(field.into(), input);
+            if operation == "workspace" {
+                let fields = input
+                    .as_object()
+                    .ok_or_else(|| anyhow!("workspace configuration must be an object"))?;
+                for key in fields.keys() {
+                    if !matches!(key.as_str(), "workspace" | "baseBranch") {
+                        bail!("unknown workspace configuration field");
+                    }
+                }
+                action.insert(
+                    "workspace".into(),
+                    fields
+                        .get("workspace")
+                        .cloned()
+                        .ok_or_else(|| anyhow!("workspace configuration requires workspace"))?,
+                );
+                if let Some(branch) = fields.get("baseBranch") {
+                    action.insert("baseBranch".into(), branch.clone());
+                }
+            } else {
+                action.insert(field.into(), input);
+            }
             let op: Op =
                 serde_json::from_value(json!({"type":"control","sessionId":id,"action":action}))?;
             print_boss(boss_request(op)?)
@@ -2159,7 +2199,7 @@ fn boss_admin_leaf(args: &[String]) -> anyhow::Result<()> {
                 command,
             })?)
         }
-        _ => bail!("unsupported Boss command path: {}", args.join(" ")),
+        _ => bail!("unsupported Boss command path; run goddard-agent boss --help"),
     }
 }
 
@@ -2555,32 +2595,6 @@ fn history_search(args: Vec<String>) -> anyhow::Result<()> {
     history_send(history_command_parts(&query, &opts)?)
 }
 
-/// `history search '<json>'` — the payload form, same command the flags build.
-fn history_search_json(payload: &str) -> anyhow::Result<()> {
-    let payload: HistorySearchPayload = serde_json::from_str(payload).context(
-        "`history search` takes a JSON object; run `goddard-agent schema` for its shape",
-    )?;
-    if payload.query.trim().is_empty()
-        && payload.project.is_none()
-        && payload.person.is_none()
-        && payload.after.is_none()
-        && payload.before.is_none()
-        && payload.kind.is_none()
-    {
-        bail!("history search needs `query` text or at least one filter");
-    }
-    history_send(Command::AgentHistorySearch {
-        query: payload.query,
-        project: payload.project,
-        person: payload.person,
-        after: payload.after,
-        before: payload.before,
-        kind: payload.kind,
-        limit: payload.limit,
-        offset: payload.offset,
-    })
-}
-
 fn history_command_parts(
     query: &str,
     opts: &std::collections::BTreeMap<String, String>,
@@ -2710,54 +2724,47 @@ fn print_boss(result: waku_protocol::boss::BossResult) -> anyhow::Result<()> {
 }
 
 fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
-    let command = match arguments {
-        [action] if action == "reset" => Command::AgentComputerUseReset,
-        [action, payload] if action == "js" => {
-            let payload = computer_payload(payload, 1024 * 1024)?;
-            #[derive(serde::Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Input {
-                code: String,
-                #[serde(default)]
-                timeout_ms: Option<u64>,
-                #[serde(default)]
-                title: Option<String>,
+    let (action, args) = arguments
+        .split_first()
+        .ok_or_else(|| anyhow!("run goddard-agent computer --help"))?;
+    match action.as_str() {
+        "reset" if args.is_empty() => Ok(Command::AgentComputerUseReset),
+        "js" => {
+            let (_, opts) = flags(
+                args.to_vec(),
+                &["text", "file", "timeout-ms", "title"],
+                false,
+            )?;
+            let code = raw_input(&opts)?;
+            if code.len() > 1024 * 1024 {
+                bail!("JavaScript source exceeds 1048576 bytes");
             }
-            let input: Input =
-                serde_json::from_str(&payload).context("invalid computer js payload")?;
-            Command::AgentComputerUse {
-                code: input.code,
-                timeout_ms: input.timeout_ms,
-                title: input.title,
-            }
+            Ok(Command::AgentComputerUse {
+                code,
+                timeout_ms: opts
+                    .get("timeout-ms")
+                    .map(|v| {
+                        v.parse()
+                            .context("--timeout-ms must be an unsigned integer")
+                    })
+                    .transpose()?,
+                title: opts.get("title").cloned(),
+            })
         }
-        [action, payload] if action == "run" => {
-            let payload = computer_payload(payload, 64 * 1024)?;
+        "run" => {
+            let (_, opts) = flags(args.to_vec(), &["json", "json-file"], false)?;
+            let payload = json_input(&opts)?;
+            if payload.len() > 64 * 1024 {
+                bail!("browser request exceeds 65536 bytes");
+            }
             let request: ComputerUseRunRequest =
-                serde_json::from_str(&payload).context("invalid computer run payload")?;
-            Command::AgentComputerUseRun { request }
+                serde_json::from_str(&payload).context("invalid computer run request")?;
+            Ok(Command::AgentComputerUseRun { request })
         }
-        _ => bail!("use `computer js '<json>'`, `computer run '<json>'`, or `computer reset`"),
-    };
-    Ok(command)
-}
-
-fn computer_payload(payload: &str, max_bytes: usize) -> anyhow::Result<String> {
-    if payload != "--stdin" {
-        if payload.len() > max_bytes {
-            bail!("computer payload exceeds {} bytes", max_bytes);
-        }
-        return Ok(payload.to_owned());
+        _ => bail!(
+            "use computer js --file SCRIPT.js, computer run --json-file REQUEST.json, or computer reset"
+        ),
     }
-    let mut input = String::new();
-    std::io::Read::read_to_string(
-        &mut std::io::Read::take(std::io::stdin().lock(), max_bytes as u64 + 1),
-        &mut input,
-    )?;
-    if input.len() > max_bytes {
-        bail!("computer payload exceeds {} bytes", max_bytes);
-    }
-    Ok(input)
 }
 
 fn computer(arguments: Vec<String>) -> anyhow::Result<()> {
@@ -2826,6 +2833,7 @@ fn upsert_payload(payload: &Option<String>) -> anyhow::Result<CustomCommand> {
     })
 }
 
+#[cfg(test)]
 fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
     match subcommand {
         "boss" => Ok(Command::Boss {
@@ -2922,6 +2930,7 @@ fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
     }
 }
 
+#[cfg(test)]
 fn parse_boss_operation(payload: &str) -> anyhow::Result<waku_protocol::boss::BossOperation> {
     #[derive(Deserialize)]
     struct Header {
@@ -3080,7 +3089,12 @@ mod tests {
     fn computer_commands_accept_js_and_bounded_run_payloads_without_task_selectors() {
         let command = super::computer_command(&[
             "js".into(),
-            r#"{"code":"var value = 42","timeout_ms":1000,"title":"Initialize"}"#.into(),
+            "--text".into(),
+            "var value = 42".into(),
+            "--timeout-ms".into(),
+            "1000".into(),
+            "--title".into(),
+            "Initialize".into(),
         ])
         .unwrap();
         assert!(matches!(
@@ -3101,6 +3115,7 @@ mod tests {
         );
         let run = super::computer_command(&[
             "run".into(),
+            "--json".into(),
             r#"{"url":"https://example.test/form","goal":"Fill the form","values":{"Email":"user@example.test"},"verify":{"textContains":["Saved"]}}"#.into(),
         ])
         .unwrap();

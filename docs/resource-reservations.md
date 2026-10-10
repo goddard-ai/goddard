@@ -22,7 +22,7 @@ For a native build:
 
 ```sh
 goddard-agent resource run \
-  '{"resources":{"native_builds":1},"purpose":"debug native build","wait_seconds":600}' \
+  --json '{"resources":{"native_builds":1},"purpose":"debug native build","wait_seconds":600}' \
   -- cargo build
 ```
 
@@ -38,7 +38,7 @@ For an iOS workflow, replace the example UUID with a simulator UUID from
 
 ```sh
 goddard-agent resource run \
-  '{"resources":{"exclusive":["ios:00000000-0000-0000-0000-000000000001"],"resident_devices":1,"native_builds":1},"purpose":"iOS smoke test"}' \
+  --json '{"resources":{"exclusive":["ios:00000000-0000-0000-0000-000000000001"],"resident_devices":1,"native_builds":1},"purpose":"iOS smoke test"}' \
   -- ./scripts/ios-smoke-test.sh
 ```
 
@@ -58,8 +58,8 @@ reboots, or adopts an already-running user-owned device.
 
 ```sh
 goddard-agent resource status
-goddard-agent resource cancel '{"id":"RESERVATION-UUID"}'
-goddard-agent resource release '{"id":"RESERVATION-UUID"}'
+goddard-agent resource cancel RESERVATION-UUID
+goddard-agent resource release RESERVATION-UUID
 ```
 
 Status returns JSON with `policy`, `reservations`, `external_devices`, and
@@ -75,7 +75,7 @@ For a multi-command shell workflow, manual acquisition prints a reservation ID:
 
 ```sh
 goddard-agent resource acquire \
-  '{"resources":{"desktop_input":1},"purpose":"interactive desktop check"}'
+  --json '{"resources":{"desktop_input":1},"purpose":"interactive desktop check"}'
 ```
 
 Copy the returned ID into `GODDARD_RESOURCE_RESERVATION` when invoking nested

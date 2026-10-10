@@ -23,11 +23,12 @@ Computer Use enable flag itself off.
 All supported providers use the same task-scoped CLI:
 
 ```sh
-goddard-agent computer js '{"code":"jsRepl.write(1 + 1)","timeout_ms":10000,"title":"Check runtime"}'
+goddard-agent computer js --text 'jsRepl.write(1 + 1)' --timeout-ms 10000 --title 'Check runtime'
 goddard-agent computer reset
 ```
 
-For multiline scripts, `computer js --stdin` reads the JSON object from stdin.
+For multiline scripts, `computer js --file script.js` reads raw JavaScript;
+`--file -` reads it from stdin.
 Shared-service providers receive a session-specific launcher path in their
 Goddard instructions; use that path in place of `goddard-agent`.
 
@@ -35,7 +36,7 @@ Use `computer run` for a bounded browser workflow when the caller supplies an
 explicit URL and goal:
 
 ```sh
-goddard-agent computer run '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
+goddard-agent computer run --json '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
 ```
 
 The optional `values` object maps accessible field labels to supplied text;

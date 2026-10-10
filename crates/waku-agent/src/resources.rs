@@ -140,10 +140,15 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
             );
         }
         "release" | "cancel" => {
-            let payload: Id =
-                serde_json::from_str(&arguments.next().context("expected JSON with id")?)?;
+            let payload = Id {
+                id: arguments
+                    .next()
+                    .context("expected reservation UUID")?
+                    .parse()
+                    .context("invalid reservation UUID")?,
+            };
             if arguments.next().is_some() {
-                bail!("expected exactly one JSON argument");
+                bail!("expected exactly one reservation UUID");
             }
             // Nested tooling must not release the outer command's ownership.
             if std::env::var(PARENT_ENV).ok().as_deref() == Some(&payload.id.to_string()) {
@@ -157,11 +162,15 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&request(operation)?)?);
         }
         "acquire" | "run" => {
-            let payload: Acquire =
-                serde_json::from_str(&arguments.next().context("expected acquisition JSON")?)?;
+            let all: Vec<String> = arguments.collect();
+            let split = all.iter().position(|arg| arg == "--").unwrap_or(all.len());
+            let (_, opts) = super::flags(all[..split].to_vec(), &["json", "json-file"], false)?;
+            let payload: Acquire = serde_json::from_str(&super::json_input(&opts)?)
+                .context("invalid resource request data")?;
+            let mut arguments = all[split..].iter().cloned();
             if action == "acquire" {
                 if arguments.next().is_some() {
-                    bail!("resource acquire takes one JSON argument");
+                    bail!("resource acquire accepts only --json or --json-file request data");
                 }
                 #[cfg(unix)]
                 let holder = unsafe { libc::getppid() as u32 };
