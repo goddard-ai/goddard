@@ -6759,6 +6759,214 @@ fn summon_op(
     }
 }
 
+/// Exercise the asynchronous scheduler used in production, including dispatch
+/// while the summon RPC is preparing its response. The provider prompt is
+/// gated so a dispatch intent alone cannot accidentally satisfy confirmation.
+#[test]
+fn summon_response_waits_for_completed_dispatch() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("summon-confirm-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "start",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { workspace, .. } = &mut operation {
+        *workspace = Some(AgentWorkspace::Local);
+    }
+    let capture = Arc::new(CaptureDriver::default());
+    let prompt_guard = capture.prompts.lock();
+    std::thread::scope(|scope| {
+        let (sent, received) = std::sync::mpsc::channel();
+        let backend = &backend;
+        scope.spawn(move || {
+            sent.send(backend.handle_boss_operation(Some(boss), operation, &EventSink::detached()))
+                .unwrap();
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let employee = loop {
+            if let Some(employee) = backend.boss.queued_heads().first().cloned() {
+                break employee;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "summon did not enqueue"
+            );
+            std::thread::yield_now();
+        };
+        backend.sessions.lock().insert(
+            employee.session_id,
+            RuntimeEntry {
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+        );
+        scope.spawn(move || {
+            // The RPC must release this lock before waiting for admission.
+            {
+                let _guard = backend.boss.operation_guard();
+            }
+            backend.run_summon_scheduler();
+        });
+        while backend.boss.employee_lifecycle(employee.session_id)
+            != Some(EmployeeLifecycle::Dispatching)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "dispatch was blocked by the summon RPC"
+            );
+            std::thread::yield_now();
+        }
+        assert!(
+            matches!(
+                received.recv_timeout(std::time::Duration::from_millis(100)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ),
+            "dispatching is not a completed launch"
+        );
+        drop(prompt_guard);
+        let result = received
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        let BossResult::Summoned {
+            state, admission, ..
+        } = result
+        else {
+            panic!("expected summon")
+        };
+        assert_eq!(state, EmployeeLifecycle::Working);
+        let admission = admission.unwrap();
+        assert_eq!(admission.queue_position, None);
+        assert!(admission.blocked_by.is_empty());
+        assert_eq!(capture.prompts.lock().len(), 1);
+    });
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn summon_response_waits_for_verified_queue_denial() {
+    use waku_protocol::boss::{AdmissionBlocker, BossResult, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("summon-denied-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let operation = summon_op(
+        &backend,
+        &root,
+        "wait",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    std::thread::scope(|scope| {
+        let (sent, received) = std::sync::mpsc::channel();
+        let backend = &backend;
+        scope.spawn(move || {
+            sent.send(backend.handle_boss_operation(Some(boss), operation, &EventSink::detached()))
+                .unwrap();
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while backend.boss.queued_heads().is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "summon did not enqueue"
+            );
+            std::thread::yield_now();
+        }
+        assert!(
+            received.try_recv().is_err(),
+            "an unattempted ticket is not verified queued"
+        );
+        backend.run_summon_scheduler();
+        let BossResult::Summoned {
+            state,
+            admission,
+            session_id,
+        } = received
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("expected summon")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        let admission = admission.unwrap();
+        assert_eq!(admission.queue_position, Some(1));
+        assert!(
+            admission
+                .blocked_by
+                .iter()
+                .any(|blocker| matches!(blocker, AdmissionBlocker::ModelLimit { limit: 0, .. }))
+        );
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+    });
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn summon_response_times_out_without_inventing_admission() {
+    let root = std::env::temp_dir().join(format!("summon-timeout-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "wait",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let waku_protocol::boss::BossOperation::Summon { request_id, .. } = &mut operation {
+        *request_id = Some(Uuid::new_v4());
+    }
+    let error = backend
+        .handle_boss_operation(Some(boss), operation.clone(), &EventSink::detached())
+        .unwrap_err();
+    let employee = backend.boss.queued_heads().pop().unwrap();
+    let message = error.to_string();
+    assert!(
+        message.contains("admission is not yet confirmed"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&employee.session_id.to_string()),
+        "{message}"
+    );
+    assert!(employee.ticket.unwrap().blocked_by.is_empty());
+    backend.run_summon_scheduler();
+    let retry = backend
+        .handle_boss_operation(Some(boss), operation, &EventSink::detached())
+        .unwrap();
+    let waku_protocol::boss::BossResult::Summoned {
+        session_id, state, ..
+    } = retry
+    else {
+        panic!("expected summon")
+    };
+    assert_eq!(session_id, employee.session_id);
+    assert_eq!(state, waku_protocol::boss::EmployeeLifecycle::Queued);
+    assert_eq!(backend.boss.queued_heads().len(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// At capacity a valid summon is not an error — it is a durable
 /// queued ticket that creates no worktree, no runtime, and no claims.
 /// The returned admission carries the position and the wait reason.

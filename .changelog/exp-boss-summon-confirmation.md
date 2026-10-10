@@ -1,0 +1,1 @@
+- Boss summon now returns working only after dispatch completes and queued only with a verified blocker. A confirmation timeout identifies the accepted employee, allowing inspection or a retry with the same request ID.

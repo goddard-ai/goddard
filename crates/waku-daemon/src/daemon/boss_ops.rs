@@ -479,37 +479,40 @@ impl WakuBackend {
                 plan,
                 item,
                 request_id,
-            } => self.boss.with_operation_lock(|| {
-                self.summon_employee(
-                    caller,
-                    persona_id,
-                    job_title,
-                    prompt,
-                    project,
-                    provider,
-                    model,
-                    reasoning_effort,
-                    workspace,
-                    base_branch,
-                    adopt_worktree,
-                    permissions,
-                    work_goal,
-                    icon,
-                    resources,
-                    allow_burst,
-                    group_id,
-                    priority,
-                    outcome_id,
-                    new_outcome,
-                    after_success,
-                    finishes_outcome,
-                    prerequisites,
-                    plan,
-                    item,
-                    request_id,
-                    events,
-                )
-            }),
+            } => {
+                let (session_id, newly_admitted) = self.boss.with_operation_lock(|| {
+                    self.summon_employee(
+                        caller,
+                        persona_id,
+                        job_title,
+                        prompt,
+                        project,
+                        provider,
+                        model,
+                        reasoning_effort,
+                        workspace,
+                        base_branch,
+                        adopt_worktree,
+                        permissions,
+                        work_goal,
+                        icon,
+                        resources,
+                        allow_burst,
+                        group_id,
+                        priority,
+                        outcome_id,
+                        new_outcome,
+                        after_success,
+                        finishes_outcome,
+                        prerequisites,
+                        plan,
+                        item,
+                        request_id,
+                        events,
+                    )
+                })?;
+                self.confirm_summoned_result(session_id, newly_admitted)
+            }
             BossOperation::Control { session_id, action } => {
                 if matches!(&action, EmployeeControl::Prompt { .. })
                     && caller

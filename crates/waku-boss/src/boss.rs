@@ -3081,30 +3081,42 @@ impl BossService {
     /// The employee's position inside its own queue group, 1-based —
     /// `None` when it is not waiting.
     pub fn queue_position(&self, session: Uuid) -> Option<u64> {
+        self.employee_with_queue_position(session)
+            .and_then(|(_, position)| position)
+    }
+
+    /// Snapshot lifecycle, admission blockers, and queue position together so
+    /// a concurrent dispatch cannot produce a mixed summon response.
+    pub fn employee_with_queue_position(
+        &self,
+        session: Uuid,
+    ) -> Option<(BossEmployee, Option<u64>)> {
         let state = self.state.lock();
         let employee = state
             .employees
             .iter()
             .find(|entry| entry.session_id == session)?;
-        if employee.lifecycle() != EmployeeLifecycle::Queued {
-            return None;
-        }
-        let root = Self::queue_root(&state, employee);
-        let sequence = employee.ticket.as_ref()?.sequence;
-        Some(
-            state
-                .employees
-                .iter()
-                .filter(|entry| {
-                    entry.lifecycle() == EmployeeLifecycle::Queued
-                        && Self::queue_root(&state, entry) == root
-                        && entry
-                            .ticket
-                            .as_ref()
-                            .is_some_and(|ticket| ticket.sequence <= sequence)
-                })
-                .count() as u64,
-        )
+        let position = if employee.lifecycle() == EmployeeLifecycle::Queued {
+            let root = Self::queue_root(&state, employee);
+            let sequence = employee.ticket.as_ref()?.sequence;
+            Some(
+                state
+                    .employees
+                    .iter()
+                    .filter(|entry| {
+                        entry.lifecycle() == EmployeeLifecycle::Queued
+                            && Self::queue_root(&state, entry) == root
+                            && entry
+                                .ticket
+                                .as_ref()
+                                .is_some_and(|ticket| ticket.sequence <= sequence)
+                    })
+                    .count() as u64,
+            )
+        } else {
+            None
+        };
+        Some((employee.clone(), position))
     }
 
     /// Persist an accepted admission: the employee joins the roster as

@@ -999,9 +999,9 @@ impl WakuBackend {
     /// caller, persona, grants, prompt, project, resource shape, and a
     /// concrete provider+model — then persist the one admission ticket:
     /// employee record, task shell, and queue sequence. Capacity is a
-    /// wait reason, never an RPC error: the answer is `queued` (or the
-    /// state the ticket reached before the bounded wait elapsed), and
-    /// the scheduler claims a slot and launches asynchronously.
+    /// wait reason, never an admission rejection. Returns the employee id
+    /// and whether it was newly admitted; the caller confirms its status
+    /// outside the operation lock while the scheduler launches asynchronously.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn summon_employee(
         &self,
@@ -1032,7 +1032,7 @@ impl WakuBackend {
         item: Option<Uuid>,
         request_id: Option<Uuid>,
         events: &EventSink,
-    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+    ) -> anyhow::Result<(Uuid, bool)> {
         let supervisor = caller
             .or(self.boss.document().session_id)
             .ok_or_else(|| anyhow!("open the boss before summoning employees"))?;
@@ -1074,7 +1074,7 @@ impl WakuBackend {
         {
             if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str()) {
                 // Lost-response retry — the original admission stands.
-                return self.summoned_result(existing.session_id);
+                return Ok((existing.session_id, false));
             }
             bail!("requestId was already used for a different summon");
         }
@@ -1232,26 +1232,53 @@ impl WakuBackend {
         record_boss_event(&self.task_state, &self.task_store, supervisor, &event)?;
         let _ = events.send(event_to_wire(event)?);
         self.wake_summon_queue();
-        // Answer with the state the ticket actually reached — a free slot
-        // dispatches nearly synchronously, so most summons still return
-        // `working`/`dispatching` rather than `queued`.
+        Ok((session_id, true))
+    }
+
+    /// Wait for a persisted admission denial or a completed dispatch, outside
+    /// the operation lock so the scheduler and cancellation can make progress.
+    pub(super) fn confirm_summoned_result(
+        &self,
+        session_id: Uuid,
+        newly_admitted: bool,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::{BossResult, EmployeeLifecycle};
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            match self.boss.employee_lifecycle(session_id) {
-                Some(state) if state != waku_protocol::boss::EmployeeLifecycle::Queued => break,
-                _ if std::time::Instant::now() >= deadline => break,
-                _ => std::thread::sleep(std::time::Duration::from_millis(25)),
+        let result = loop {
+            let result = self.summoned_result(session_id)?;
+            let confirmed = match &result {
+                BossResult::Summoned {
+                    state: EmployeeLifecycle::Queued,
+                    admission,
+                    ..
+                } => admission
+                    .as_ref()
+                    .is_some_and(|admission| !admission.blocked_by.is_empty()),
+                BossResult::Summoned {
+                    state: EmployeeLifecycle::Dispatching,
+                    ..
+                } => false,
+                _ => true,
+            };
+            if confirmed {
+                break result;
             }
-        }
-        let result = self.summoned_result(session_id)?;
-        // A launch that failed inside the wait surfaces as the summon
+            if std::time::Instant::now() >= deadline {
+                bail!(
+                    "summon accepted as {session_id}, but admission is not yet confirmed; inspect this employee or retry with the same requestId; do not summon a duplicate"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        // A new launch that failed inside the wait surfaces as the summon
         // error it used to be — the ticket is expired either way, and a
         // supervisor that scripted on failure sees it immediately rather
         // than in the finish report.
-        if let waku_protocol::boss::BossResult::Summoned {
-            state: waku_protocol::boss::EmployeeLifecycle::Expired,
-            ..
-        } = result
+        if newly_admitted
+            && let waku_protocol::boss::BossResult::Summoned {
+                state: waku_protocol::boss::EmployeeLifecycle::Expired,
+                ..
+            } = result
             && let Some(error) = self
                 .boss
                 .employee(session_id)
@@ -1273,8 +1300,9 @@ impl WakuBackend {
         use waku_protocol::boss::{BossResult, SummonAdmission};
         let employee = self
             .boss
-            .employee(session_id)
+            .employee_with_queue_position(session_id)
             .ok_or_else(|| anyhow!("employee record is missing"))?;
+        let (employee, queue_position) = employee;
         Ok(BossResult::Summoned {
             session_id,
             state: employee.lifecycle(),
@@ -1282,7 +1310,7 @@ impl WakuBackend {
                 provider: ticket.provider,
                 model: ticket.model.clone(),
                 reasoning_effort: ticket.reasoning_effort.clone(),
-                queue_position: self.boss.queue_position(session_id),
+                queue_position,
                 blocked_by: ticket.blocked_by.clone(),
             }),
         })
