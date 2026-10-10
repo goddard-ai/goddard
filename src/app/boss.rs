@@ -419,8 +419,10 @@ pub(super) struct BossUi {
     /// context, so the click parks its deliverable here and the finish reapplies
     /// the arm once the boss chat is on screen. The flag is whether the
     /// landing should write a history entry: a fresh row click pushes the
-    /// page; a back/forward hop restoring it must not re-push.
-    pub pending_deliverable: Option<(DaemonKey, Uuid, bool)>,
+    /// page from its original surface; a back/forward hop restoring it
+    /// must not re-push. The final field retains that original surface
+    /// across activation of the boss chat underneath the preview.
+    pub pending_deliverable: Option<(DaemonKey, Uuid, bool, Option<NavigationLocation>)>,
     /// The deliverable whose preview page covers the boss chat's transcript: a
     /// previewable file's own page rather than a panel off the chat. Lives
     /// and dies with `command_deliverable` — the same arm brands the composer's
@@ -2921,17 +2923,17 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return;
         }
-        // Re-opening the boss chat hands the deliverable preview page back to
-        // the chat transcript it covers, even when it was already selected —
-        // the armed composer context and any parked landing die with it.
-        self.boss_ui.command_deliverable = None;
+        // Leave the current deliverable mounted until session activation
+        // records the departure. Clearing its arm here makes history see
+        // the covered chat instead of the page the user is leaving.
+        // Activation owns the page's unmount and composer draft handoff.
         self.boss_ui.pending_deliverable = None;
         self.boss_ui.command_memory_correction = None;
-        // The page's draft goes home before the chat's slot reclaims the
-        // composer; without one the hint still needs the re-read.
-        if !self.unmount_deliverable_page(cx) {
-            self.sync_composer_placeholder(cx);
-        }
+        self.sync_composer_placeholder(cx);
+        self.open_boss_chat(key, cx);
+    }
+
+    fn open_boss_chat(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -4046,12 +4048,19 @@ impl Waku {
         deliverable_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.boss_experiment_enabled {
+            return;
+        }
+        let from = self.navigation_location();
         self.boss_ui
             .forget_unread_deliverable_scroll(key, deliverable_id);
         self.mark_deliverable_viewed(key, deliverable_id, cx);
-        self.chat_with_boss(key, cx);
-        self.boss_ui.command_deliverable = Some((key, deliverable_id));
-        self.boss_ui.pending_deliverable = Some((key, deliverable_id, true));
+        // Park before requesting Open: an in-flight Boss request can
+        // activate a cached chat synchronously. Keep the outgoing page's
+        // arm intact until activation records its history and files its draft.
+        self.boss_ui.pending_deliverable = Some((key, deliverable_id, true, from));
+        self.boss_ui.command_memory_correction = None;
+        self.open_boss_chat(key, cx);
         self.sync_composer_placeholder(cx);
         cx.notify();
     }
@@ -4138,7 +4147,7 @@ impl Waku {
         // holds the outgoing page's text.
         self.unmount_deliverable_page(cx);
         self.boss_ui.command_deliverable = Some((key, deliverable_id));
-        self.boss_ui.pending_deliverable = Some((key, deliverable_id, false));
+        self.boss_ui.pending_deliverable = Some((key, deliverable_id, false, None));
         self.sync_composer_placeholder(cx);
         self.request_session_activation(session_id, SessionActivationTransition::Silent, cx);
         cx.notify();
@@ -4180,7 +4189,8 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, deliverable_id, record_visit)) = self.boss_ui.pending_deliverable.take()
+        let Some((key, deliverable_id, record_visit, from)) =
+            self.boss_ui.pending_deliverable.take()
         else {
             return;
         };
@@ -4227,12 +4237,11 @@ impl Waku {
         self.sync_voice_scratchpad_capture(cx);
         self.restore_selected_composer_draft(cx);
         if record_visit {
-            // The page mounts over the chat it parked on, so the chat is
-            // what back returns to.
-            self.session_navigation.visit(
-                Some(NavigationLocation::Task(session_id)),
-                NavigationLocation::Deliverable(key, deliverable_id),
-            );
+            // Opening the covered chat is preparation for the preview,
+            // not an intermediate destination. Back returns to the surface
+            // the user opened the deliverable from, including a planning chat.
+            self.session_navigation
+                .visit(from, NavigationLocation::Deliverable(key, deliverable_id));
         }
     }
 

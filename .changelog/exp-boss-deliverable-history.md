@@ -1,0 +1,1 @@
+- Back from a Boss deliverable preview returns to the chat or planning session you opened it from, and Forward reopens the same deliverable.

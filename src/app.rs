@@ -1721,8 +1721,8 @@ enum NavigationLocation {
     DraftsPage,
     AutomationsPage,
     BossPage(waku_client::DaemonKey, boss::BossTab),
-    /// A deliverable's preview page mounted over its boss chat — the chat's
-    /// `Task` entry sits underneath it on the stack.
+    /// A deliverable's preview page mounted over its boss chat. History
+    /// returns to the surface from which the user opened the deliverable.
     Deliverable(waku_client::DaemonKey, Uuid),
     Inbox,
     /// The settings overlay. It never enters `back` — the surface it
