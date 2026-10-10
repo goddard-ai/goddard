@@ -7512,7 +7512,6 @@ impl Waku {
         if !enabled {
             self.boss_ui.page = None;
             self.boss_ui.command_deliverable = None;
-            self.boss_ui.command_memory_correction = None;
             self.boss_ui.pending_deliverable = None;
             self.unmount_deliverable_page(cx);
         }

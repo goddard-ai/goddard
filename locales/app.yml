@@ -3633,6 +3633,48 @@ annotations.count_many:
   en: "%{count} annotations"
 annotations.earlier_chat:
   en: Earlier boss chat
+memory.add_note:
+  en: Add note
+memory.save_note:
+  en: Save note
+memory.add_note_to_memory:
+  en: Add a note to this memory
+memory.add_annotation:
+  en: Add annotation
+memory.note_placeholder:
+  en: What should Boss know about this memory?
+memory.whole_memory:
+  en: Whole memory
+memory.selected_text:
+  en: Selected text
+memory.selected_quote:
+  en: '"%{quote}"'
+memory.pending_one:
+  en: 1 pending memory note
+memory.pending_many:
+  en: "%{count} pending memory notes"
+memory.hidden_one:
+  en: 1 hidden by filters
+memory.hidden_many:
+  en: "%{count} hidden by filters"
+memory.review:
+  en: Review
+memory.annotation_label:
+  en: Annotation %{index}
+memory.edit_note:
+  en: Edit note
+memory.remove_note:
+  en: Remove note
+memory.locate:
+  en: Show memory
+memory.changed:
+  en: Memory changed since this note
+memory.unavailable:
+  en: Original memory unavailable
+memory.feedback_sent:
+  en: Feedback sent to Boss
+memory.empty_note:
+  en: No note yet
 composer.remove_attachment:
   en: Remove %{name}
 composer.pasted_block:
@@ -6450,6 +6492,8 @@ boss.command_placeholder_deliverable:
   en: Use the boss to edit this deliverable...
 boss.command_placeholder_memory:
   en: Ask the boss to correct this memory...
+boss.command_placeholder_memory_feedback:
+  en: Send memory feedback to the boss...
 boss.command_hint:
   en: Messages go to %{name}
 boss.save_first:

@@ -143,6 +143,20 @@ pub(super) struct AnnotationRefHover {
 /// annotation leads with `@path` and its line-span marker above a fenced
 /// block of the selected code; a transcript annotation is just its text.
 fn annotation_prompt_passage(annotation: &TranscriptAnnotation) -> String {
+    if let Some(memory) = &annotation.memory {
+        let scope = if annotation.spans.is_empty() {
+            "[Whole memory]"
+        } else {
+            "[Selected text]"
+        };
+        return format!(
+            "Memory record buckets/{}/note-{}\n{}\n```\n{}\n```",
+            memory.bucket,
+            memory.sequence,
+            scope,
+            annotation.quoted_text().trim_end()
+        );
+    }
     let Some(file) = &annotation.file else {
         return annotation.quoted_text();
     };
@@ -181,6 +195,38 @@ fn annotation_file_path(
 /// that pulls the original turn — `goddard-agent read` resolves archived
 /// boss sessions by task id, and `--turn` narrows to the message's turn.
 fn annotation_source_line(annotation: &TranscriptAnnotation) -> Option<String> {
+    if annotation.file.is_none()
+        && let Some(memory) = &annotation.memory
+    {
+        // Provenance over row labels: the record reference is what the
+        // Boss resolves, and the snapshot status is what a changed or
+        // vanished record surfaces — feedback never silently retargets.
+        let mut line = format!(
+            "Source: Boss memory record buckets/{}/note-{}",
+            memory.bucket, memory.sequence
+        );
+        if let Some(project) = &memory.project {
+            line.push_str(&format!(
+                ", project {}",
+                project.name.as_deref().unwrap_or("unknown project")
+            ));
+        }
+        match memory.status {
+            Some(crate::md::selection::MemoryNoteStatus::Changed) => {
+                line.push_str(
+                    " — the record changed since this note; the quote shows it as pinned",
+                );
+            }
+            Some(crate::md::selection::MemoryNoteStatus::Unavailable) => {
+                line.push_str(
+                    " — the record is no longer available; the quote is the pinned snapshot",
+                );
+            }
+            None => {}
+        }
+        line.push('.');
+        return Some(line);
+    }
     let history = annotation.history.as_ref()?;
     let read = match history.turn {
         Some(turn) => format!(
@@ -1018,6 +1064,7 @@ impl Waku {
                 comment: String::new(),
                 file: None,
                 history,
+                memory: None,
             });
             annotations.hovered = None;
         }
@@ -1059,6 +1106,7 @@ impl Waku {
                 comment: String::new(),
                 file: None,
                 history: None,
+                memory: None,
             });
             annotations.hovered = None;
         }
@@ -1134,6 +1182,7 @@ impl Waku {
                     plan_session: None,
                 }),
                 history: None,
+                memory: None,
             });
             annotations.hovered = None;
         }
@@ -1281,6 +1330,7 @@ impl Waku {
                     plan_session: None,
                 }),
                 history: None,
+                memory: None,
             });
             annotations.hovered = None;
         }
@@ -1435,6 +1485,7 @@ impl Waku {
                     plan_session: Some(session_id),
                 }),
                 history: None,
+                memory: None,
             });
             annotations.hovered = None;
         }
@@ -1625,8 +1676,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// The composer chip's X: drop every annotation — transcript and file —
-    /// and close an open editor.
+    /// The composer chip's X: drop every annotation — transcript, file,
+    /// and the armed memory batch — and close an open editor.
     fn clear_annotations(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(editor) = self.annotation_editor.take() {
             let focus = editor
@@ -1659,6 +1710,9 @@ impl Waku {
             annotations.items.clear();
             annotations.hovered = None;
             annotations.editing = None;
+        }
+        if let Some(daemon) = self.memory_feedback_armed_daemon() {
+            self.clear_memory_notes(daemon);
         }
         self.schedule_composer_draft_save(cx);
         cx.notify();
@@ -1699,6 +1753,7 @@ impl Waku {
             + self
                 .composer_plan_annotations()
                 .map_or(0, |store| store.borrow().items.len())
+            + self.memory_feedback_count()
     }
 
     pub(super) fn has_annotations(&self) -> bool {
@@ -1719,6 +1774,7 @@ impl Waku {
             || self
                 .composer_plan_annotations()
                 .is_some_and(|store| !store.borrow().items.is_empty())
+            || self.memory_feedback_armed_daemon().is_some()
     }
 
     /// Drain the live sets for a submission — transcript annotations plus
@@ -2064,9 +2120,7 @@ impl Waku {
                     .items
                     .iter()
                     .find(|annotation| annotation.id == editor.annotation_id)
-                    .and_then(|annotation| {
-                        annotation_editor_provenance(&editor.target, annotation)
-                    })
+                    .and_then(|annotation| annotation_editor_provenance(&editor.target, annotation))
             })
         });
         let card = div()
@@ -3502,7 +3556,7 @@ fn annotation_ref_hit_at(
 /// so a long selection cannot blow the card up. A file annotation's quote
 /// leads with its `@path` and line marker, so the citation reads "Annotation
 /// N → that spot in that file".
-fn annotation_quote_preview(annotation: &TranscriptAnnotation) -> String {
+pub(super) fn annotation_quote_preview(annotation: &TranscriptAnnotation) -> String {
     const MAX_CHARS: usize = 240;
     let quote = annotation.quoted_text();
     let quote = quote.trim();
@@ -3561,6 +3615,7 @@ mod tests {
             comment: comment.to_owned(),
             file: None,
             history: None,
+            memory: None,
         }
     }
 
@@ -3637,6 +3692,7 @@ mod tests {
                 plan_session: None,
             }),
             history: None,
+            memory: None,
         }
     }
 

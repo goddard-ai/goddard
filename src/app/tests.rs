@@ -887,6 +887,7 @@ fn voice_pad_appends_composer_annotations_atoms_and_attachments() {
         comment: "annotation note".to_owned(),
         file: None,
         history: None,
+        memory: None,
     };
     let composer_display = atom_display_content(
         &format!("typed draft {}", crate::input::INLINE_ATOM_MARKER),

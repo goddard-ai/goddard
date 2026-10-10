@@ -558,6 +558,62 @@ pub struct HistorySource {
     pub created_at: Option<u64>,
 }
 
+/// The project association a pinned memory record carried — the feed's
+/// resolved `{key, name}` pair: `key` is the repository's shared project
+/// bucket id, `name` its catalog label — `None` for "Unknown project".
+/// The whole option is `None` on the record for a bucket with no project
+/// association at all ("No project").
+#[derive(Clone, Debug)]
+pub struct MemoryProjectSource {
+    pub key: String,
+    pub name: Option<String>,
+}
+
+/// Boss memory-record provenance for an annotation pinned on the Memory
+/// surface: the feed record it quotes plus the pin-time snapshots that keep
+/// the feedback's context intact across reloads and later record edits.
+///
+/// `daemon` is the remote host's id, `None` for the local daemon — the app
+/// crate's `DaemonKey` cannot live in this crate. `bucket_id` + `record_id`
+/// are the record's stable identity; `bucket` + `sequence` are its
+/// `buckets/<name>/note-<seq>` display reference. `record_text` snapshots
+/// the whole record at pin time: it is a whole-memory annotation's quote,
+/// the submission's original-text context, and the baseline a "memory
+/// changed since this note" check compares.
+#[derive(Clone, Debug)]
+pub struct MemorySource {
+    pub daemon: Option<uuid::Uuid>,
+    /// The feed's `bucketId` — identity, never the display label.
+    pub bucket_id: String,
+    /// The feed's `id` — `"{sequence}-{digest}"`, bucket-local.
+    pub record_id: String,
+    /// The owning bucket's display name.
+    pub bucket: String,
+    /// The note's sequence inside the bucket — the `note-<seq>` reference.
+    pub sequence: u64,
+    /// The resolved project association, when the feed carries one.
+    pub project: Option<MemoryProjectSource>,
+    /// The original note's creation time.
+    pub created_at: u64,
+    pub record_text: String,
+    /// Snapshot staleness at last check — the review and the sent prompt
+    /// label "memory changed since this note" / "original memory
+    /// unavailable" from it rather than silently retargeting.
+    pub status: Option<MemoryNoteStatus>,
+}
+
+/// How a pinned memory note's source compares to the record as it stands
+/// now — recomputed whenever the pending batch is reviewed or packed for
+/// submission; `None` while the record still matches its snapshot (or its
+/// bucket has not loaded, which proves nothing).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryNoteStatus {
+    /// The record exists but its text no longer matches `record_text`.
+    Changed,
+    /// The record's bucket loaded and the record itself is gone.
+    Unavailable,
+}
+
 /// A highlighted passage of transcript text carrying a user comment.
 ///
 /// Annotations are created from a finished selection confined to one agent
@@ -568,6 +624,10 @@ pub struct HistorySource {
 /// right-panel file editor's selection instead: `spans` holds one span over
 /// the selected text alone, `message_id` is nil, and the passage formats as
 /// `@path` plus a fenced block rather than a plain quote.
+///
+/// A memory annotation — `memory` set — is pinned on a Boss memory record:
+/// `spans` holds the selected passage, or is empty when the note targets
+/// the whole record, whose snapshot `memory.record_text` then carries.
 #[derive(Clone, Debug)]
 pub struct TranscriptAnnotation {
     pub id: u64,
@@ -580,12 +640,20 @@ pub struct TranscriptAnnotation {
     pub file: Option<FileAnnotation>,
     /// Earlier-boss-chat provenance; `None` for live-session annotations.
     pub history: Option<HistorySource>,
+    /// Boss memory-record provenance; `None` outside the Memory surface.
+    pub memory: Option<MemorySource>,
 }
 
 impl TranscriptAnnotation {
     /// The annotated text, spans joined in document order the way copy joins
-    /// them.
+    /// them. A whole-memory note has no passage spans — its quote is the
+    /// record snapshot itself.
     pub fn quoted_text(&self) -> String {
+        if self.spans.is_empty()
+            && let Some(memory) = &self.memory
+        {
+            return memory.record_text.clone();
+        }
         let mut out = String::new();
         let mut has_span = false;
         for span in &self.spans {
@@ -832,6 +900,9 @@ impl From<ComposerDraftAnnotation> for TranscriptAnnotation {
             comment: annotation.comment,
             file: annotation.file.map(Into::into),
             history: annotation.history.map(Into::into),
+            // Pending memory annotations are session-scoped and never
+            // serialize into a composer draft.
+            memory: None,
         }
     }
 }

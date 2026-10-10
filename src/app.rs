@@ -4196,6 +4196,12 @@ pub struct Waku {
     /// and whether it has ever been confirmed.
     annotation_editor: Option<annotations::AnnotationEditor>,
     annotation_comment_input: Entity<TextInput>,
+    /// Pending memory-record feedback: the notes batch, its selection
+    /// surface, and the one floating editor. Its annotations' ids come from
+    /// `annotation_next_id` like every other pin, so a submission's
+    /// numbering is one global creation order.
+    memory_feedback: memory_annotations::MemoryFeedback,
+    memory_note_input: Entity<TextInput>,
     /// The pasted-text chip's floating editor — which atom is being edited
     /// and the field that carries its text.
     pasted_text_editor: Option<composer::PastedTextEditor>,
@@ -4340,6 +4346,7 @@ mod incognito_dialog;
 mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
+mod memory_annotations;
 mod model_picker;
 mod notifications;
 mod phases;
@@ -4387,7 +4394,12 @@ mod window_chrome;
 mod wireframe;
 mod worktrees;
 
-pub use annotations::init as init_annotation_keys;
+/// Annotation-family keybindings — transcript comments and the memory
+/// note editor share the same rebind lifecycle.
+pub fn init_annotation_keys(cx: &mut App) {
+    annotations::init(cx);
+    memory_annotations::init(cx);
+}
 pub use archive_dialog::init as init_archive_dialog_keys;
 pub use autocomplete::init as init_composer_autocomplete;
 pub use automations::init as init_automations_keys;
@@ -5372,6 +5384,15 @@ impl Waku {
                 .max_lines(8)
                 .accessibility_label(tr!("a11y.comment"))
                 .placeholder(tr!("annotations.comment_placeholder"))
+        });
+        let memory_note_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .submit_on_enter()
+                .auto_height()
+                .max_lines(8)
+                .accessibility_label(tr!("a11y.comment"))
+                .placeholder(tr!("memory.note_placeholder"))
         });
         // Pasted text is usually several lines — Enter must break lines,
         // so committing is click-outside and Escape is discard.
@@ -6409,6 +6430,19 @@ impl Waku {
                 &annotation_comment_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.commit_annotation_editor(cx),
+                    InputEvent::Edited
+                    | InputEvent::Focus
+                    | InputEvent::BackspaceOnEmpty
+                    | InputEvent::InlineAtomClicked(_)
+                    | InputEvent::InlineAtomActivated(_) => {}
+                },
+            )
+            .detach();
+
+            cx.subscribe(
+                &memory_note_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.commit_memory_note_editor(cx),
                     InputEvent::Edited
                     | InputEvent::Focus
                     | InputEvent::BackspaceOnEmpty
@@ -7797,6 +7831,8 @@ impl Waku {
                 annotation_next_id,
                 annotation_editor: None,
                 annotation_comment_input,
+                memory_feedback: memory_annotations::MemoryFeedback::default(),
+                memory_note_input,
                 pasted_text_editor: None,
                 pasted_text_input,
                 press_to_talk_bubble_edit: None,

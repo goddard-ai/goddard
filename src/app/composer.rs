@@ -3751,6 +3751,9 @@ impl Waku {
             None if !annotations.is_empty() => {
                 annotation_prompt_prefix(&annotations).trim_end().to_owned()
             }
+            // An armed memory-feedback batch counts as draft content too —
+            // the Boss-command path packs the notes into the submission.
+            None if self.memory_feedback_armed_daemon().is_some() => String::new(),
             None => return None,
         };
         // Presentation splits two ways: the bubble shows each annotation's
@@ -4545,8 +4548,15 @@ impl Waku {
             // plan store, the rest to the transcript store. A file whose
             // editor is gone parks in `pending_file_annotations` until it
             // opens again.
-            let (file_annotations, transcript_annotations): (Vec<_>, Vec<_>) = submission
+            let (memory_annotations, rest): (Vec<_>, Vec<_>) = submission
                 .annotations
+                .into_iter()
+                .partition(|annotation| annotation.memory.is_some());
+            // Memory notes return to the pending feedback batch — never
+            // the transcript store, which would orphan them on a session
+            // that cannot show their records.
+            self.restore_memory_feedback(memory_annotations);
+            let (file_annotations, transcript_annotations): (Vec<_>, Vec<_>) = rest
                 .into_iter()
                 .partition(|annotation| annotation.file.is_some());
             self.transcript_selection

@@ -1,4 +1,7 @@
 //! Desktop control plane for daemon-owned Boss roles.
+use super::annotations::{
+    annotation_bubble_content, annotation_display_content, annotation_prompt_prefix,
+};
 use super::boss_moods::AVATAR_SOURCE_SIZE;
 use super::*;
 use crate::ui::ActivationExt;
@@ -235,18 +238,18 @@ pub(super) enum BossTab {
 /// never appear; the feed lists originals only.
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MemoryFeedRecord {
+pub(super) struct MemoryFeedRecord {
     /// The note's bucket-local stable id — `"{sequence}-{digest}"`.
-    id: String,
-    bucket_id: String,
+    pub(super) id: String,
+    pub(super) bucket_id: String,
     /// The owning bucket's display name — a provenance label, not a filter.
-    bucket: String,
-    sequence: u64,
-    text: String,
-    created_at: u64,
+    pub(super) bucket: String,
+    pub(super) sequence: u64,
+    pub(super) text: String,
+    pub(super) created_at: u64,
     /// `None` — the bucket is confirmed to have no project association, the
     /// feed's "No project" grouping.
-    project: Option<MemoryFeedProject>,
+    pub(super) project: Option<MemoryFeedProject>,
 }
 
 /// The record's repository association, keyed on the project bucket id so
@@ -255,9 +258,9 @@ struct MemoryFeedRecord {
 /// the feed's "Unknown project" grouping.
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MemoryFeedProject {
-    key: String,
-    name: Option<String>,
+pub(super) struct MemoryFeedProject {
+    pub(super) key: String,
+    pub(super) name: Option<String>,
 }
 
 impl MemoryFeedRecord {
@@ -295,11 +298,11 @@ const MEMORY_EXPAND_LINES: usize = 6;
 /// One host's unified Memory Records feed — the whole accessible corpus
 /// plus its browse state. `records` keep the daemon's newest-first order;
 /// filtering and paging never reorder them.
-struct MemoryFeed {
-    records: Vec<MemoryFeedRecord>,
+pub(super) struct MemoryFeed {
+    pub(super) records: Vec<MemoryFeedRecord>,
     /// A response has landed — distinguishes "loading" from "failed before
     /// anything arrived".
-    loaded: bool,
+    pub(super) loaded: bool,
     /// A request is in flight or parked behind another boss operation.
     loading: bool,
     /// The last failure — records already on screen stay beside it.
@@ -400,7 +403,7 @@ fn memory_project_options(records: &[MemoryFeedRecord]) -> Vec<(MemoryProjectFil
 }
 
 /// The feed row's compact creation age — `now`, `5m`, `2h`, `3d`.
-fn memory_record_age(seconds: u64) -> String {
+pub(super) fn memory_record_age(seconds: u64) -> String {
     match seconds {
         0..=59 => tr!("boss.memory_now"),
         60..=3_599 => tr!("sidebar.minutes_ago", count = seconds / 60),
@@ -626,10 +629,6 @@ pub(super) struct BossUi {
     /// Cleared by a send or any landing that is not re-arming it — the
     /// `pending_deliverable` half carries it across its own navigation.
     pub command_deliverable: Option<(DaemonKey, Uuid)>,
-    /// Memory record armed as context for a user-requested correction in
-    /// Boss chat — `(key, label, content)` where the label is a
-    /// `buckets/<name>/note-<seq>` record reference.
-    pub(super) command_memory_correction: Option<(DaemonKey, String, String)>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
@@ -684,7 +683,7 @@ pub(super) struct BossUi {
     persona_diff: RefCell<Option<(Uuid, u64, String)>>,
     /// The unified Memory Records feed per host — records, browse state,
     /// and the pending refresh a visit re-checks for.
-    memory_feed: HashMap<DaemonKey, MemoryFeed>,
+    pub(super) memory_feed: HashMap<DaemonKey, MemoryFeed>,
     /// The feed's project choice per host — absent means All projects.
     memory_project: HashMap<DaemonKey, MemoryProjectFilter>,
     /// The `boss_memory_search` field's current text, mirrored on Edited so
@@ -771,7 +770,6 @@ impl Default for BossUi {
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             command_deliverable: None,
-            command_memory_correction: None,
             pending_deliverable: None,
             deliverable_page: None,
             deliverable_page_scroll: HashMap::new(),
@@ -1052,16 +1050,14 @@ pub(super) struct BossCommand {
 }
 
 /// What a boss-command submission attaches: the live employee whose task
-/// is on screen, or the deliverable a sidebar click armed.
+/// is on screen, the deliverable a sidebar click armed, or the pending
+/// memory-feedback batch.
 pub(super) enum BossCommandContext {
     Employee(Uuid),
-    /// A read-only memory record the user is asking the Boss to correct —
-    /// `path` is the record's `buckets/<name>/note-<seq>` label; `content`
-    /// is the shown text.
-    MemoryCorrection {
-        path: String,
-        content: String,
-    },
+    /// Pending memory notes fold into the submission as annotations for
+    /// this daemon's boss — the daemon the records belong to, needed to
+    /// drain only that host's batch.
+    MemoryFeedback(DaemonKey),
     Deliverable {
         path: PathBuf,
         name: String,
@@ -1849,6 +1845,11 @@ impl Waku {
         self.notifications.open = false;
         self.selected_terminal = None;
         self.pending_session_activation = None;
+        if self.boss_ui.page.map(|(_, open)| open) == Some(BossTab::Memory)
+            && tab != BossTab::Memory
+        {
+            self.commit_memory_note_editor(cx);
+        }
         self.boss_ui.page = Some((key, tab));
         self.boss_ui.last_section.insert(key, tab);
         self.fold_terminals_group_for_navigation();
@@ -2447,6 +2448,9 @@ impl Waku {
                 feed.filter_notice = Some(tr!("boss.memory_filter_cleared"));
             }
         }
+        // A record that left the corpus — deleted, or no longer accessible
+        // — takes its pending notes with it.
+        self.prune_memory_feedback(key, cx);
         self.sync_boss_page_rows();
         cx.notify();
     }
@@ -2466,6 +2470,7 @@ impl Waku {
             let keys: HashSet<String> = feed.records.iter().map(MemoryFeedRecord::key).collect();
             feed.expanded.retain(|key| keys.contains(key));
         }
+        self.prune_memory_feedback(key, cx);
         self.sync_boss_page_rows();
         self.boss_ui
             .list
@@ -2596,18 +2601,16 @@ impl Waku {
         if self.big_picture.is_open() {
             return None;
         }
-        if let Some((key, path, content)) = self.boss_ui.command_memory_correction.as_ref()
-            && let Some(state) = self.boss_ui.states.get(key)
-            && self.state.selected_session == state.session_id
+        // Pending memory notes reroute the next submission at their boss —
+        // live while the Memory page (or the boss chat itself) is on screen.
+        if let Some(key) = self.memory_feedback_armed_daemon()
+            && let Some(state) = self.boss_ui.states.get(&key)
             && let Some(session_id) = state.session_id
         {
             return Some(BossCommand {
                 session_id,
                 identity: state.identity.clone(),
-                context: BossCommandContext::MemoryCorrection {
-                    path: path.clone(),
-                    content: content.clone(),
-                },
+                context: BossCommandContext::MemoryFeedback(key),
             });
         }
         if let Some((key, deliverable_id)) = self.boss_ui.command_deliverable {
@@ -2655,8 +2658,13 @@ impl Waku {
     /// reference for the viewed employee, the published file itself for
     /// an armed deliverable. Its mention token splices into the provider-
     /// facing prompt while the chip lands in the boss transcript's bubble.
-    fn boss_command_attachment(&self, context: &BossCommandContext) -> MessageAttachment {
-        match context {
+    /// Memory feedback carries none — its notes ride the submission's
+    /// annotations instead.
+    fn boss_command_attachment(
+        &self,
+        context: &BossCommandContext,
+    ) -> Option<MessageAttachment> {
+        Some(match context {
             BossCommandContext::Employee(session_id) => {
                 let name = self
                     .boss_ui
@@ -2693,20 +2701,9 @@ impl Waku {
                 pasted_text_preview: None,
                 session_id: None,
             },
-            // The chip wears the entry's label; the shown text rides the
-            // pasted-text preview so the user sees exactly what the Boss is
-            // asked to reconcile.
-            BossCommandContext::MemoryCorrection { path, content } => MessageAttachment {
-                path: PathBuf::from(path),
-                mention: path.clone(),
-                name: path.rsplit('/').next().unwrap_or(path).to_owned(),
-                is_dir: false,
-                is_image: false,
-                blob_reference: None,
-                pasted_text_preview: Some(content.clone()),
-                session_id: None,
-            },
-        }
+            // Drained ahead of the attachment read — unreachable here.
+            BossCommandContext::MemoryFeedback(_) => return None,
+        })
     }
 
     /// The armed boss command's shared landing: the context attachment
@@ -2719,7 +2716,62 @@ impl Waku {
         mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) -> (Uuid, ComposerSubmission) {
-        let attachment = self.boss_command_attachment(&command.context);
+        if let BossCommandContext::MemoryFeedback(daemon) = command.context {
+            // Pending notes fold into the submission as numbered
+            // annotations — merged with whatever the draft already staged
+            // and kept in global creation order, so "Annotation N" in the
+            // prompt, the bubble, and any reply citations all agree. A
+            // failed send restores the drained batch through the ordinary
+            // submission-restore path.
+            let drained = self.drain_memory_feedback(daemon, cx);
+            if !drained.is_empty() {
+                let body = submission
+                    .prompt
+                    .strip_prefix(&annotation_prompt_prefix(&submission.annotations))
+                    .unwrap_or(submission.prompt.as_str())
+                    .trim_end()
+                    .to_owned();
+                submission.annotations.extend(drained);
+                submission
+                    .annotations
+                    .sort_by_key(|annotation| annotation.id);
+                // Feedback reads as a request — the Boss decides how to
+                // reconcile its memory; nothing claims a record changed.
+                let instruction = "Please consider this memory feedback and update the Boss-managed memory if appropriate.";
+                submission.prompt = format!(
+                    "{}{instruction}\n\n{body}",
+                    annotation_prompt_prefix(&submission.annotations)
+                )
+                .trim_end()
+                .to_owned();
+                submission.display_content = Some(annotation_bubble_content(
+                    &submission.annotations,
+                    &body,
+                ));
+                submission.human_content = if body.is_empty() {
+                    Some(annotation_display_content(&submission.annotations))
+                } else {
+                    None
+                };
+                self.show_toast(tr!("memory.feedback_sent"));
+                self.note_user_message_target(command.session_id);
+                // Re-activating the already-viewed boss chat resets its
+                // transcript before the send path can honor the reader's
+                // scroll preference.
+                if self.state.selected_session != Some(command.session_id) {
+                    self.request_session_activation(
+                        command.session_id,
+                        SessionActivationTransition::Visit,
+                        cx,
+                    );
+                }
+                self.sync_composer_placeholder(cx);
+            }
+            return (command.session_id, submission);
+        }
+        let Some(attachment) = self.boss_command_attachment(&command.context) else {
+            return (command.session_id, submission);
+        };
         // The same token `merged_submission` appends: a session
         // reference's `[session ...]` form, a file's `@mention`.
         let token = composer::session_attachment_token(&attachment)
@@ -2730,18 +2782,6 @@ impl Waku {
             submission.display_content = Some(submission.prompt.trim_end().to_owned());
         }
         let prompt = submission.prompt.trim_end().to_owned();
-        // A correction request reads as a request — the Boss decides how to
-        // reconcile its memory; nothing claims the record changed.
-        let prompt = if matches!(command.context, BossCommandContext::MemoryCorrection { .. }) {
-            let instruction = "Please consider this memory correction request and update the Boss-managed memory if appropriate.";
-            if prompt.is_empty() {
-                instruction.to_owned()
-            } else {
-                format!("{instruction}\n\n{prompt}")
-            }
-        } else {
-            prompt
-        };
         submission.prompt = if prompt.is_empty() {
             token
         } else {
@@ -2749,7 +2789,6 @@ impl Waku {
         };
         submission.attachments.push(attachment);
         self.boss_ui.command_deliverable = None;
-        self.boss_ui.command_memory_correction = None;
         self.unmount_deliverable_page(cx);
         self.note_user_message_target(command.session_id);
         // Re-activating the already-viewed boss chat resets its transcript
@@ -2781,8 +2820,8 @@ impl Waku {
             Some(BossCommandContext::Deliverable { .. }) => {
                 tr!("boss.command_placeholder_deliverable")
             }
-            Some(BossCommandContext::MemoryCorrection { .. }) => {
-                tr!("boss.command_placeholder_memory")
+            Some(BossCommandContext::MemoryFeedback(_)) => {
+                tr!("boss.command_placeholder_memory_feedback")
             }
             None => tr!("input.do_anything"),
         };
@@ -3230,7 +3269,6 @@ impl Waku {
         // the covered chat instead of the page the user is leaving.
         // Activation owns the page's unmount and composer draft handoff.
         self.boss_ui.pending_deliverable = None;
-        self.boss_ui.command_memory_correction = None;
         self.sync_composer_placeholder(cx);
         self.open_boss_chat(key, cx);
     }
@@ -4449,7 +4487,6 @@ impl Waku {
         // activate a cached chat synchronously. Keep the outgoing page's
         // arm intact until activation records its history and files its draft.
         self.boss_ui.pending_deliverable = Some((key, deliverable_id, true, from));
-        self.boss_ui.command_memory_correction = None;
         self.open_boss_chat(key, cx);
         self.sync_composer_placeholder(cx);
         cx.notify();
@@ -4979,14 +5016,37 @@ impl Waku {
     }
 
     /// The section list — virtualized rows plus the shared scrollbar, sized
-    /// for whichever column width the caller wraps it in.
+    /// for whichever column width the caller wraps it in. On the Memory tab
+    /// the rows' painted text also registers for selection and note
+    /// pinning: a zero-size reset clears the frame's registry ahead of the
+    /// rows and a hit-region canvas installs the listeners.
     fn boss_item_list(&self, cx: &mut Context<Self>) -> Div {
         let visible_rows = self.boss_ui.rows.clone();
         let weak = cx.entity().downgrade();
+        let on_memory = self.boss_ui.page.map(|(_, tab)| tab) == Some(BossTab::Memory);
+        let frame_reset = on_memory.then(|| {
+            md::render::frame_reset(self.memory_feedback_selection()).into_any_element()
+        });
+        let listeners = on_memory.then(|| {
+            let selection = self.memory_feedback_selection();
+            let weak = cx.entity().downgrade();
+            canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+                move |_, region, window, cx| {
+                    md::render::install_selection_input(region, window, &selection, None);
+                    Waku::install_memory_annotation_input(region, window, cx, &selection, &weak);
+                },
+            )
+            .absolute()
+            .inset_0()
+            .size_full()
+            .into_any_element()
+        });
         div()
             .flex_1()
             .min_h_0()
             .relative()
+            .when_some(frame_reset, |element, reset| element.child(reset))
             .child(
                 list(self.boss_ui.list.clone(), move |visible_index, _, cx| {
                     let Some(item) = visible_rows.get(visible_index).cloned() else {
@@ -5002,6 +5062,9 @@ impl Waku {
                 &self.boss_ui.list,
                 &self.boss_ui.scrollbar,
             ))
+            .when_some(listeners, |element, listeners| {
+                element.child(listeners)
+            })
     }
 
     // ── Memory ───────────────────────────────────────────────────────────
@@ -5012,10 +5075,36 @@ impl Waku {
     fn render_boss_memory_section(
         &mut self,
         key: DaemonKey,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        // A Review "Show memory" asks the feed to reveal its record: clear
+        // whatever browse state hides it, reveal the row, scroll it into
+        // view.
+        if let Some(locate) = self.consume_memory_feedback_locate(key) {
+            self.boss_memory_search
+                .update(cx, |input, cx| input.set_content(String::new(), cx));
+            self.boss_ui.memory_query.clear();
+            self.boss_ui.memory_project.remove(&key);
+            if let Some(feed) = self.boss_ui.memory_feed.get_mut(&key)
+                && let Some(index) = feed.records.iter().position(|record| {
+                    record.bucket_id == locate.bucket && record.id == locate.reference
+                })
+            {
+                feed.visible = feed.visible.max(index + 1);
+                feed.filter_notice = None;
+                self.sync_boss_page_rows();
+                if let Some(row_index) = self.boss_ui.rows.iter().position(|item| {
+                    matches!(item, BossItem::MemoryRecord(i) if *i == index)
+                }) {
+                    self.boss_ui.list.scroll_to(gpui::ListOffset {
+                        item_ix: row_index,
+                        offset_in_item: px(0.0),
+                    });
+                }
+            }
+        }
         let feed = self.boss_ui.memory_feed.get(&key);
         let filter = self
             .boss_ui
@@ -5357,6 +5446,34 @@ impl Waku {
                 .into_any_element(),
             None => div().flex_1().into_any_element(),
         };
+        // The records the list actually renders right now — the pending
+        // count's filter warning is measured against them.
+        let visible_keys: HashSet<memory_annotations::MemoryAnnotationKey> = self
+            .boss_ui
+            .rows
+            .iter()
+            .filter_map(|item| match item {
+                BossItem::MemoryRecord(index) => self
+                    .boss_ui
+                    .memory_feed
+                    .get(&key)
+                    .and_then(|feed| feed.records.get(*index)),
+                _ => None,
+            })
+            .map(|record| memory_annotations::MemoryAnnotationKey {
+                daemon: key,
+                bucket: record.bucket_id.clone(),
+                reference: record.id.clone(),
+            })
+            .collect();
+        let supplement = self.render_memory_feedback_supplement(
+            window,
+            move |key| visible_keys.contains(key),
+            cx,
+        );
+        let offer = self.render_memory_annotation_offer(cx);
+        let editor = self.render_memory_annotation_editor(cx);
+        let tooltip = self.render_memory_annotation_tooltip(cx);
         div()
             .flex_1()
             .min_h_0()
@@ -5367,6 +5484,8 @@ impl Waku {
             .child(header)
             .child(notices)
             .child(body)
+            .when_some(supplement, |element, supplement| element.child(supplement))
+            .children([offer, editor, tooltip].into_iter().flatten())
             .into_any_element()
     }
 
@@ -8383,7 +8502,7 @@ impl Waku {
         .into_any_element()
     }
 
-    fn render_boss_item(&self, item: BossItem, cx: &mut Context<Self>) -> AnyElement {
+    fn render_boss_item(&mut self, item: BossItem, cx: &mut Context<Self>) -> AnyElement {
         let Some((key, _)) = self.boss_ui.page else {
             return div().into_any_element();
         };
@@ -8518,10 +8637,12 @@ impl Waku {
 
     /// One Memory Records row — bucket label and muted relative creation
     /// time on one line (the exact timestamp rides the tooltip), the note's
-    /// text beneath, and the correction affordance at the row's right edge.
-    /// Read-only; corrections still arm Boss chat rather than editing.
+    /// text beneath as selectable markdown, the "Add note" affordance at
+    /// the row's right edge, and any pending notes pinned on the record
+    /// beneath that. Read-only; feedback gathers for Boss chat rather than
+    /// editing.
     fn render_boss_memory_record(
-        &self,
+        &mut self,
         key: DaemonKey,
         index: usize,
         cx: &mut Context<Self>,
@@ -8548,13 +8669,52 @@ impl Waku {
             provenance.push_str(" · ");
             provenance.push_str(project_name);
         }
-        let correct_label = format!("buckets/{}/note-{}", record.bucket, record.sequence);
-        let correct_content = record.text.clone();
-        let correct_name = format!(
+        let record_ref = memory_annotations::MemoryRecordRef {
+            key: memory_annotations::MemoryAnnotationKey {
+                daemon: key,
+                bucket: record.bucket_id.clone(),
+                reference: record.id.clone(),
+            },
+            sequence: record.sequence,
+            bucket: record.bucket.clone(),
+            project: record.project.clone(),
+            created_at: record.created_at,
+            text: Rc::from(record.text.as_str()),
+        };
+        let annotate_name = format!(
             "{} — {}",
-            tr!("boss.ask_correct"),
+            tr!("memory.add_note_to_memory"),
             record.text.chars().take(80).collect::<String>()
         );
+        // Painted text registers under the record's stable key so a settled
+        // selection or a pinned highlight resolves to the record, never the
+        // row's position.
+        let selection = self.memory_feedback_selection();
+        let palette = MarkdownPalette::from_theme(&theme);
+        let ctx = MarkdownCtx::new(
+            memory_annotations::memory_row_key(&record_ref.key),
+            &palette,
+            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
+            selection,
+        )
+        .with_families(crate::fonts::current(cx));
+        let document = {
+            let view = self
+                .memory_feedback
+                .record_views
+                .entry(record_ref.key.clone())
+                .or_insert_with(MarkdownView::document);
+            view.set_text(&record.text, false);
+            md::render::markdown(view, &ctx)
+        };
+        let annotate = self.render_memory_record_annotate_button(
+            &record_ref,
+            &group,
+            annotate_name,
+            &theme,
+            cx,
+        );
+        let notes = self.render_memory_record_notes(&record_ref, cx);
         let long_text = record.text.len() > MEMORY_EXPAND_CHARS
             || record.text.lines().nth(MEMORY_EXPAND_LINES).is_some();
         let mut row = div()
@@ -8590,35 +8750,7 @@ impl Waku {
                             .tooltip(Tooltip::text(exact.clone()))
                             .child(provenance),
                     )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "boss-memory-correct-{record_key}"
-                            )))
-                            .tab_index(0)
-                            .flex_none()
-                            .p(px(4.0))
-                            .rounded(px(4.0))
-                            .cursor_pointer()
-                            .opacity(0.45)
-                            .group_hover(group.clone(), |style| style.opacity(1.0))
-                            .hover(|style| style.bg(theme.overlay))
-                            .focus_visible(|style| {
-                                style.bg(theme.focus_highlight()).opacity(1.0)
-                            })
-                            .tooltip(Tooltip::text(tr!("boss.ask_correct")))
-                            .aria_label(correct_name)
-                            .child(icon("icons/message-square.svg", 13.0, theme.text_secondary))
-                            .on_activation(cx, move |this, _, cx| {
-                                this.chat_with_boss(key, cx);
-                                this.boss_ui.command_memory_correction = Some((
-                                    key,
-                                    correct_label.clone(),
-                                    correct_content.clone(),
-                                ));
-                                this.sync_composer_placeholder(cx);
-                            }),
-                    ),
+                    .child(annotate),
             )
             .child(
                 div()
@@ -8626,10 +8758,13 @@ impl Waku {
                     .text_size(sp(13.0))
                     .line_height(sp(19.0))
                     .when(!expanded, |element| {
-                        element.line_clamp(MEMORY_EXPAND_LINES)
+                        element
+                            .max_h(px(MEMORY_EXPAND_LINES as f32 * 19.0))
+                            .overflow_hidden()
                     })
-                    .child(record.text.clone()),
-            );
+                    .children(document),
+            )
+            .children(notes);
         if long_text {
             let expanding = !expanded;
             row = row.child(
@@ -9361,7 +9496,7 @@ mod loading_indicator_tests {
 }
 
 #[track_caller]
-fn boss_button(
+pub(super) fn boss_button(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     theme: &Theme,
