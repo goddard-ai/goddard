@@ -179,13 +179,16 @@ impl From<BossPersona> for BossPersonaUpsert {
 // ── Shipped persona defaults ────────────────────────────────────────────
 //
 // The canonical Boss and Employee personas ship instruction text that
-// evolves with the app. The revision catalog below keeps every text a
-// release has installed so a saved persona that byte-matches one is
-// provably untouched — only those adopt a newer shipped text
-// automatically, while customized or unknown-origin text stays put.
-// Revision labels are per role and monotonic; when editing a shipped
-// default, archive its text under the previous revision and bump the
-// current entry.
+// evolves with the app. A canonical persona's saved text is always the
+// current shipped base plus whatever the human appended beneath it —
+// shipped revisions are tracked separately, so an upgrade swaps the
+// base under a preserved customization automatically and never needs a
+// review gate. The revision catalog below keeps every text a release
+// has installed so saved text can be decomposed into base + appended
+// customization — anything past a catalog prefix is user-authored and
+// is carried forward verbatim. Revision labels are per role and
+// monotonic; when editing a shipped default, archive its text under
+// the previous revision and bump the current entry.
 
 /// The canonical instruction roles Goddard ships: `Boss` is the boss
 /// chat's own persona, `Employee` the shared base every employee
@@ -390,6 +393,45 @@ pub fn shipped_persona_revision(role: PersonaDefaultRole, markdown: &str) -> Opt
         .map(|entry| entry.revision)
 }
 
+/// Decompose saved canonical-default text into a shipped base and the
+/// user-authored customization appended beneath it. Returns the newest
+/// catalog revision the text begins with — an exact match or a prefix
+/// ending at a line boundary — plus the remainder. `None` means the
+/// text starts with nothing shipped, so its whole content is
+/// customization (or is of unknown origin).
+pub fn shipped_persona_prefix(
+    role: PersonaDefaultRole,
+    markdown: &str,
+) -> Option<(u32, &str)> {
+    shipped_persona_revisions(role)
+        .iter()
+        .rev()
+        .find_map(|entry| {
+            let rest = markdown.strip_prefix(entry.markdown)?;
+            (rest.is_empty() || rest.starts_with(char::is_whitespace))
+                .then(|| (entry.revision, rest.trim_start()))
+        })
+}
+
+/// The canonical form of a shipped default persona: the latest shipped
+/// base with the preserved customization appended beneath it. `saved`
+/// may be a bare customization, an older revision with or without an
+/// appended customization, or text of unknown origin — in every case
+/// the user-authored part survives verbatim and the latest base lands
+/// on top, so upgrades and edits both flow through the same rule.
+pub fn compose_persona_default(role: PersonaDefaultRole, saved: &str) -> String {
+    let shipped = shipped_persona_default(role);
+    let customization = match shipped_persona_prefix(role, saved) {
+        Some((_, suffix)) => suffix,
+        None => saved,
+    };
+    if customization.trim().is_empty() {
+        shipped.markdown.to_owned()
+    } else {
+        format!("{}\n\n{}", shipped.markdown, customization)
+    }
+}
+
 /// A `@@`-grouped unified line diff between two instruction texts —
 /// `-`/`+`/space markers with three context lines. `None` when identical.
 pub fn instruction_diff(old: &str, new: &str) -> Option<String> {
@@ -418,22 +460,24 @@ pub fn instruction_diff(old: &str, new: &str) -> Option<String> {
 }
 
 /// Revision provenance for one canonical default persona. Persisted in
-/// [`BossState`] so untouched detection, review acknowledgment, undo, and
-/// pending notices all survive restarts.
+/// [`BossState`] so untouched detection, acknowledgment, undo, and
+/// pending notices all survive restarts. The saved instructions are
+/// always the shipped base plus an appended customization — shipped
+/// updates flow in automatically, so nothing here gates on review.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PersonaDefaultState {
     /// The shipped revision the saved instructions demonstrably began
-    /// from — `None` marks text of unknown origin, which never compares
-    /// as untouched and never adopts automatically.
+    /// from — under the append-only model that is always the base in
+    /// use, so `None` only survives on documents the reconciler has not
+    /// normalized yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub starting_revision: Option<u32>,
-    /// The newest shipped revision the human acknowledged — keeping the
-    /// current text, approving a proposal, or resetting. Kept separate
-    /// from `starting_revision`: reviewing an update never claims its
-    /// instructions were adopted, and a partial incorporation still reads
-    /// as customized.
+    /// The newest shipped revision acknowledged — automatic adoption,
+    /// keeping the current text, approving a proposal, or resetting.
+    /// Kept separate from `starting_revision` for documents written
+    /// under the review-gated model.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reviewed_revision: Option<u32>,
@@ -497,10 +541,15 @@ pub struct PersonaDefaultNoticeEntry {
     pub role: PersonaDefaultRole,
     /// The shipped revision the entry reports.
     pub revision: u32,
-    /// True when untouched instructions adopted the revision
-    /// automatically — the notice reports the change; false means the
-    /// saved text is customized or unknown and awaits review.
+    /// True when the saved instructions adopted the revision
+    /// automatically — the notice reports the change. Entries written
+    /// under the review-gated model may carry `false` for customized
+    /// text; the reconciler resolves them on sight.
     pub adopted: bool,
+    /// True when the adoption landed beneath a preserved customization —
+    /// the notice can say the human's appended text survived.
+    #[serde(default)]
+    pub customized: bool,
 }
 
 /// The consolidated persona-defaults upgrade notice, delivered once into
@@ -624,11 +673,18 @@ pub struct PersonaDefaultInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub saved_markdown: Option<String>,
-    /// The saved text byte-matches the latest shipped instructions.
+    /// The saved text byte-matches the latest shipped instructions —
+    /// no customization is appended.
     pub using_latest: bool,
     /// The saved text byte-matches some shipped revision — provably free
-    /// of custom edits, so upgrades may adopt the latest automatically.
+    /// of custom edits.
     pub untouched: bool,
+    /// The user-authored text appended beneath the shipped base —
+    /// preserved verbatim across shipped updates. `None` means the
+    /// saved text carries no customization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub customization: Option<String>,
     /// The revision the saved text demonstrably started from — `None`
     /// reads as "starting revision unknown," and no difference below may
     /// be labeled a user addition.

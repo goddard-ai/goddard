@@ -4,22 +4,24 @@ import type { PersonaDefaultUndo } from "./PersonaDefaultUndo";
 
 /**
  * Revision provenance for one canonical default persona. Persisted in
- * [`BossState`] so untouched detection, review acknowledgment, undo, and
- * pending notices all survive restarts.
+ * [`BossState`] so untouched detection, acknowledgment, undo, and
+ * pending notices all survive restarts. The saved instructions are
+ * always the shipped base plus an appended customization — shipped
+ * updates flow in automatically, so nothing here gates on review.
  */
 export type PersonaDefaultState = {
 /**
  * The shipped revision the saved instructions demonstrably began
- * from — `None` marks text of unknown origin, which never compares
- * as untouched and never adopts automatically.
+ * from — under the append-only model that is always the base in
+ * use, so `None` only survives on documents the reconciler has not
+ * normalized yet.
  */
 startingRevision?: number,
 /**
- * The newest shipped revision the human acknowledged — keeping the
- * current text, approving a proposal, or resetting. Kept separate
- * from `starting_revision`: reviewing an update never claims its
- * instructions were adopted, and a partial incorporation still reads
- * as customized.
+ * The newest shipped revision acknowledged — automatic adoption,
+ * keeping the current text, approving a proposal, or resetting.
+ * Kept separate from `starting_revision` for documents written
+ * under the review-gated model.
  */
 reviewedRevision?: number,
 /**

@@ -14,14 +14,21 @@ export type PersonaDefaultInfo = { role: PersonaDefaultRole,
  */
 personaId?: string, name?: string, savedMarkdown?: string,
 /**
- * The saved text byte-matches the latest shipped instructions.
+ * The saved text byte-matches the latest shipped instructions —
+ * no customization is appended.
  */
 usingLatest: boolean,
 /**
  * The saved text byte-matches some shipped revision — provably free
- * of custom edits, so upgrades may adopt the latest automatically.
+ * of custom edits.
  */
 untouched: boolean,
+/**
+ * The user-authored text appended beneath the shipped base —
+ * preserved verbatim across shipped updates. `None` means the
+ * saved text carries no customization.
+ */
+customization?: string,
 /**
  * The revision the saved text demonstrably started from — `None`
  * reads as "starting revision unknown," and no difference below may

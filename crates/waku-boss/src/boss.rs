@@ -22,7 +22,8 @@ use waku_protocol::boss::{
     PersonaDefaultNoticeEntry, PersonaDefaultProposal, PersonaDefaultRole, PersonaDefaultState,
     PersonaDefaultUndo, PersonaDefaultsState, PersonaPermissions, PlanActor, PlanItem,
     PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition, SummonTicket,
-    WaveMember, WaveMemberOutcome, WaveNotification, instruction_diff, shipped_persona_default,
+    WaveMember, WaveMemberOutcome, WaveNotification, compose_persona_default, instruction_diff,
+    shipped_persona_default, shipped_persona_prefix,
     shipped_persona_revision, shipped_persona_revisions,
 };
 
@@ -2411,7 +2412,8 @@ impl BossService {
     /// next natural turn — prefixed to the prompt being sent, marked
     /// delivered at composition, and never delivered to employees or
     /// planning sessions. It neither starts a turn nor repeats once
-    /// delivered; open review entries persist for the settings surface.
+    /// delivered; entries from the review-gated model may persist for
+    /// the settings surface.
     fn prepend_persona_default_notice(&self, session: Uuid, prompt: String) -> String {
         if !self.is_boss(session) {
             return prompt;
@@ -2431,8 +2433,9 @@ impl BossService {
                 && !notice.delivered
             {
                 notice.delivered = true;
-                // Reported adoptions need no review — they drop at
-                // delivery; open reviews stay discoverable in settings.
+                // Reported adoptions drop at delivery; entries written
+                // by the review-gated model stay discoverable in
+                // settings until the reconciler resolves them.
                 notice.updates.retain(|update| !update.adopted);
                 if notice.updates.is_empty() {
                     state.persona_default_notice = None;
@@ -3693,9 +3696,8 @@ impl BossService {
 
     /// The `personaDefault` operation — inspect is read-only for the boss
     /// and human; reset/undo/propose/dismiss run under the ordinary owner
-    /// gate; `keep` and `adopt` are human-only because customized
-    /// instructions change — or get acknowledged — only on the human's
-    /// decision.
+    /// gate; `keep` and `adopt` are human-only because changing — or
+    /// acknowledging — the human's customization is the human's call.
     fn persona_default(
         &self,
         caller: Option<Uuid>,
@@ -3807,28 +3809,16 @@ impl BossService {
                             label(role)
                         );
                     }
-                    state.personas[index].markdown = undo.markdown;
+                    // The restore lands through the same composition the
+                    // reconciler applies — an old base in the undo text
+                    // upgrades to the current shipped revision while the
+                    // customization returns verbatim.
+                    state.personas[index].markdown =
+                        compose_persona_default(role, &undo.markdown);
                     let defaults = state.persona_defaults.get_mut(role);
-                    defaults.starting_revision = undo.starting_revision;
-                    defaults.reviewed_revision = undo.reviewed_revision;
+                    defaults.starting_revision = Some(shipped.revision);
+                    defaults.reviewed_revision = Some(shipped.revision);
                     defaults.undo = None;
-                    // Restoring pre-review text reopens the review — the
-                    // notice reports it again unless the human already
-                    // acknowledged this revision.
-                    if defaults
-                        .reviewed_revision
-                        .is_none_or(|reviewed| reviewed < shipped.revision)
-                        && shipped_persona_revision(role, &state.personas[index].markdown).is_none()
-                    {
-                        push_persona_default_notice(
-                            state,
-                            PersonaDefaultNoticeEntry {
-                                role,
-                                revision: shipped.revision,
-                                adopted: false,
-                            },
-                        );
-                    }
                 }
                 Keep { .. } => {
                     let defaults = state.persona_defaults.get_mut(role);
@@ -3877,22 +3867,21 @@ impl BossService {
                     if markdown.len() > MAX_FILE_BYTES {
                         bail!("persona is too large");
                     }
+                    // Approved text normalizes like any canonical write —
+                    // the shipped base stays in front and whatever the
+                    // approval kept beneath it is the customization.
+                    let applied = compose_persona_default(role, &markdown);
                     let defaults = state.persona_defaults.get_mut(role);
                     defaults.undo = Some(PersonaDefaultUndo {
                         markdown: saved.clone(),
                         starting_revision: defaults.starting_revision,
                         reviewed_revision: defaults.reviewed_revision,
-                        applied_markdown: markdown.clone(),
+                        applied_markdown: applied.clone(),
                     });
-                    state.personas[index].markdown = markdown.clone();
+                    state.personas[index].markdown = applied;
                     let defaults = state.persona_defaults.get_mut(role);
                     defaults.reviewed_revision = Some(shipped.revision);
-                    // An approved result that lands on shipped text is a
-                    // full adoption; anything else stays customized with
-                    // its original starting point.
-                    if let Some(revision) = shipped_persona_revision(role, &markdown) {
-                        defaults.starting_revision = Some(revision);
-                    }
+                    defaults.starting_revision = Some(shipped.revision);
                     defaults.proposal = None;
                     clear_persona_default_notice(state, role);
                 }
@@ -4253,7 +4242,7 @@ impl BossService {
                         .iter()
                         .find(|entry| entry.id == id)
                         .and_then(|entry| entry.icon);
-                    let record = BossPersona {
+                    let mut record = BossPersona {
                         id,
                         name,
                         markdown: persona.markdown,
@@ -4261,6 +4250,15 @@ impl BossService {
                         permissions: persona.permissions,
                         icon: persona.icon.unwrap_or(stored_icon),
                     };
+                    // Canonical defaults are append-only over the shipped
+                    // base: an edit that keeps the base as a prefix saves
+                    // its tail as the customization, and any other text
+                    // lands whole beneath the latest base — the user's
+                    // words always survive verbatim, never silently
+                    // merged or dropped.
+                    if let Some(role) = state.persona_default_role(id) {
+                        record.markdown = compose_persona_default(role, &record.markdown);
+                    }
                     if let Some(existing) = state
                         .personas
                         .iter_mut()
@@ -4270,12 +4268,12 @@ impl BossService {
                     } else {
                         state.personas.push(record);
                     }
-                    // Saving a canonical default reclassifies its
-                    // provenance: text matching a shipped revision is
-                    // untouched from it — a hand-applied latest default
-                    // resolves any pending review — while divergent text
-                    // keeps the recorded starting revision and leaves
-                    // open proposals to drift stale on their baseline.
+                    // Saving a canonical default refreshes its
+                    // provenance: the composed base is always the latest
+                    // shipped revision, and a save that lands on the bare
+                    // base resolves any pending review while customized
+                    // text leaves open proposals to drift stale on their
+                    // baseline.
                     let saved_markdown = state
                         .personas
                         .iter()
@@ -4283,13 +4281,12 @@ impl BossService {
                         .map(|entry| entry.markdown.clone())
                         .unwrap_or_default();
                     let canonical = state.persona_default_role(id);
-                    if let Some(role) = canonical
-                        && let Some(revision) = shipped_persona_revision(role, &saved_markdown)
-                    {
+                    if let Some(role) = canonical {
+                        let shipped = shipped_persona_default(role);
                         let defaults = state.persona_defaults.get_mut(role);
-                        defaults.starting_revision = Some(revision);
-                        if revision == shipped_persona_default(role).revision {
-                            defaults.reviewed_revision = Some(revision);
+                        defaults.starting_revision = Some(shipped.revision);
+                        defaults.reviewed_revision = Some(shipped.revision);
+                        if saved_markdown == shipped.markdown {
                             defaults.proposal = None;
                             clear_persona_default_notice(state, role);
                         }
@@ -6760,7 +6757,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         // a canonical specialist already carries a shipped identity and
         // is never the base. A unique survivor
         // is unambiguous; among several, only one whose instructions
-        // byte-match a shipped Employee revision identifies itself —
+        // are built on a shipped Employee base identifies itself —
         // anything else stays `None` and waits on the human's explicit
         // choice in Persona settings rather than a positional or name
         // guess. While the marker is unset, employee dispatch and resume
@@ -6806,7 +6803,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                             .iter()
                             .find(|persona| persona.id == *id)
                             .is_some_and(|persona| {
-                                shipped_persona_revision(
+                                shipped_persona_prefix(
                                     PersonaDefaultRole::Employee,
                                     &persona.markdown,
                                 )
@@ -6824,7 +6821,8 @@ fn reconcile_persona_defaults(state: &mut BossState) {
     // Shipped specialist roles seed on first sight — including existing
     // installs — as ordinary persona records employees can select. A
     // custom persona with distinct instructions stays a custom persona;
-    // lost markers recover only from byte-identical shipped instructions.
+    // lost markers recover only from text built on the shipped base —
+    // the base alone or the base with an appended customization.
     let mut claimed: HashSet<Uuid> = [state.persona_id]
         .into_iter()
         .chain(state.employee_persona_id)
@@ -6844,8 +6842,8 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                 claimed.insert(id);
                 // The canonical record is restored under the same id so
                 // employees still referencing it keep their assigned
-                // role — the revision check below classifies its
-                // provenance.
+                // role — the normalization pass below composes its
+                // base and customization.
                 if !state.personas.iter().any(|persona| persona.id == id) {
                     state.personas.push(seeded_persona(id, role));
                 }
@@ -6856,7 +6854,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                     .iter()
                     .find(|persona| {
                         !claimed.contains(&persona.id)
-                            && shipped_persona_revision(role, &persona.markdown).is_some()
+                            && shipped_persona_prefix(role, &persona.markdown).is_some()
                     })
                     .map(|persona| persona.id);
                 let id = existing.unwrap_or_else(Uuid::new_v4);
@@ -6897,76 +6895,60 @@ fn reconcile_persona_defaults(state: &mut BossState) {
             continue;
         };
         let shipped = shipped_persona_default(role);
-        let matched = shipped_persona_revision(role, &state.personas[index].markdown);
         let mut defaults = state.persona_defaults.get(role).clone();
-        if defaults.seen_revision == 0 {
-            // First load under revision tracking — classify, and let
-            // provably untouched text from an older shipped revision take
-            // the same automatic adoption an upgrade would apply. Text
-            // matching nothing shipped stays: it is customized or of
-            // unknown origin and belongs to the human.
-            defaults.seen_revision = shipped.revision;
-            match matched {
-                Some(revision) if revision == shipped.revision => {
-                    defaults.starting_revision = Some(revision);
-                    defaults.reviewed_revision = Some(revision);
-                    *state.persona_defaults.get_mut(role) = defaults;
-                }
-                Some(_) => {
-                    state.personas[index].markdown = shipped.markdown.to_owned();
-                    defaults.starting_revision = Some(shipped.revision);
-                    defaults.reviewed_revision = Some(shipped.revision);
-                    *state.persona_defaults.get_mut(role) = defaults;
-                    push_persona_default_notice(
-                        state,
-                        PersonaDefaultNoticeEntry {
-                            role,
-                            revision: shipped.revision,
-                            adopted: true,
-                        },
-                    );
-                }
-                None => {
-                    *state.persona_defaults.get_mut(role) = defaults;
-                }
-            }
+        if defaults.seen_revision > shipped.revision {
+            // A downgrade never replaces a newer saved baseline — the
+            // text may be composed on a shipped revision this build does
+            // not know, so decomposition cannot run safely.
             continue;
         }
-        if shipped.revision <= defaults.seen_revision {
-            // Same or older installed build — an older version never
-            // replaces a newer saved baseline.
-            continue;
+        // The append-only model: canonical text is always the latest
+        // shipped base with the human's customization appended beneath
+        // it. Normalizing is idempotent — a first load migrates a
+        // pre-composition document, an upgrade swaps the base under a
+        // preserved customization, and a same-build load rewrites
+        // nothing. Either way every byte of user-authored text survives
+        // and no review gate applies.
+        let saved = state.personas[index].markdown.clone();
+        let normalized = compose_persona_default(role, &saved);
+        let customized = normalized != shipped.markdown;
+        let changed = normalized != saved;
+        if changed {
+            state.personas[index].markdown = normalized;
         }
-        // An upgrade this install has not seen. Untouched text adopts the
-        // latest shipped instructions; customized or unknown-origin text
-        // stays saved and is reported for review. Stamping the revision
-        // keeps the notice from re-arming on every restart.
-        defaults.seen_revision = shipped.revision;
-        let adopted = matched.is_some();
-        if adopted {
-            state.personas[index].markdown = shipped.markdown.to_owned();
-            defaults.starting_revision = Some(shipped.revision);
-            defaults.reviewed_revision = Some(shipped.revision);
-        }
+        let upgrade =
+            defaults.seen_revision != 0 && shipped.revision > defaults.seen_revision;
+        defaults.seen_revision = defaults.seen_revision.max(shipped.revision);
+        defaults.starting_revision = Some(shipped.revision);
+        defaults.reviewed_revision = Some(shipped.revision);
         *state.persona_defaults.get_mut(role) = defaults;
-        push_persona_default_notice(
-            state,
-            PersonaDefaultNoticeEntry {
-                role,
-                revision: shipped.revision,
-                adopted,
-            },
-        );
+        // The notice reports a base that actually moved — a first
+        // classification against the installed revision stays quiet
+        // unless normalization rewrote the text.
+        if upgrade || changed {
+            push_persona_default_notice(
+                state,
+                PersonaDefaultNoticeEntry {
+                    role,
+                    revision: shipped.revision,
+                    adopted: true,
+                    customized,
+                },
+            );
+        }
     }
-    // The pending notice reflects the current result: a role already at
-    // the latest text asks for no review, and a reported adoption only
-    // outlives its delivery.
+    // The pending notice reflects the current result: a role whose base
+    // is already the latest shipped text asks for no review, and a
+    // reported adoption only outlives its delivery.
     if let Some(notice) = &state.persona_default_notice {
         let delivered = notice.delivered;
         let mut updates = notice.updates.clone();
         updates.retain(|update| {
             let resolved = default_persona_index(state, update.role).is_some_and(|index| {
-                state.personas[index].markdown == shipped_persona_default(update.role).markdown
+                shipped_persona_prefix(update.role, &state.personas[index].markdown)
+                    .is_some_and(|(revision, _)| {
+                        revision == shipped_persona_default(update.role).revision
+                    })
             });
             if !resolved {
                 return true;
@@ -6991,6 +6973,16 @@ fn persona_default_info(state: &BossState, role: PersonaDefaultRole) -> PersonaD
     let persona = default_persona_index(state, role).map(|index| &state.personas[index]);
     let saved = persona.map(|persona| persona.markdown.as_str());
     let untouched = saved.and_then(|saved| shipped_persona_revision(role, saved));
+    // The customization is whatever the saved text carries past the
+    // current shipped base — text normalized under an older base was
+    // recomposed on load, so a mismatched prefix is still the human's.
+    let customization = saved.and_then(|saved| {
+        let suffix = match shipped_persona_prefix(role, saved) {
+            Some((_, suffix)) => suffix,
+            None => saved,
+        };
+        (!suffix.trim().is_empty()).then(|| suffix.to_owned())
+    });
     // A starting revision is only as good as the catalog entry behind
     // it — an unrecognized label collapses to "unknown" rather than
     // pointing at a comparison that cannot exist.
@@ -7007,6 +6999,7 @@ fn persona_default_info(state: &BossState, role: PersonaDefaultRole) -> PersonaD
         saved_markdown: saved.map(str::to_owned),
         using_latest: saved == Some(shipped.markdown),
         untouched: untouched.is_some(),
+        customization,
         starting_revision: starting.map(|(revision, _)| revision).or(untouched),
         starting_markdown: starting.map(|(_, markdown)| markdown.to_owned()),
         reviewed_revision: defaults.reviewed_revision,
@@ -7036,28 +7029,33 @@ fn persona_default_info(state: &BossState, role: PersonaDefaultRole) -> PersonaD
 }
 
 /// The notice text delivered into the boss's next turn — what updated
-/// automatically, what stayed customized, and how to inspect or propose.
+/// automatically and whose appended customization rode along.
 fn persona_default_notice_text(notice: &PersonaDefaultNotice) -> String {
     let mut text = String::from("Goddard's shipped persona default instructions changed.");
     for update in &notice.updates {
         let role = update.role.label();
-        if update.adopted {
+        if update.adopted && update.customized {
+            text.push_str(&format!(
+                " {role} adopted shipped revision {} automatically — the saved customization was preserved beneath the new default.",
+                update.revision
+            ));
+        } else if update.adopted {
             text.push_str(&format!(
                 " {role} instructions were untouched and adopted shipped revision {} automatically.",
                 update.revision
             ));
         } else {
             text.push_str(&format!(
-                " {role} instructions have a newer shipped revision {} — the saved text was kept because it is customized or of unknown origin and changes only on human approval.",
+                " {role} instructions have a newer shipped revision {} — the saved text was kept because it is customized or of unknown origin.",
                 update.revision
             ));
         }
     }
     text.push_str(
-        " Inspect both defaults with the `personaDefault` operation (`inspect` returns full \
-         shipped texts, revision labels, and saved↔shipped diffs) or point the human at the \
-         Personas settings page; draft a merged proposal with `propose` — `adopt` and `keep` \
-         are human-only. This notice does not interrupt active work.",
+        " Inspect the defaults with the `personaDefault` operation (`inspect` returns full \
+         shipped texts, revision labels, saved↔shipped diffs, and each preserved \
+         customization) or point the human at the Personas settings page. This notice \
+         does not interrupt active work.",
     );
     text
 }
@@ -7812,7 +7810,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             fs::read_to_string(&persona_file).unwrap(),
-            "revised persona"
+            format!(
+                "{}\n\nrevised persona",
+                shipped_persona_default(PersonaDefaultRole::Employee).markdown
+            )
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -12710,7 +12711,10 @@ mod memory_op_tests {
                 .find(|persona| persona.id == id)
                 .unwrap()
                 .markdown,
-            "Custom researcher instructions"
+            format!(
+                "{}\n\nCustom researcher instructions",
+                shipped_persona_default(PersonaDefaultRole::Researcher).markdown
+            )
         );
         let mut collision = BossPersonaUpsert::from(edited.personas[0].clone());
         collision.name = original.name.clone();
@@ -13072,9 +13076,9 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// Customized specialist text survives reloads untouched — the
-    /// revision catalog proves nothing shipped, so the update machinery
-    /// keeps it and a reset restores the shipped instructions.
+    /// Customized specialist text survives reloads — the appended
+    /// customization rides beneath the shipped base so later shipped
+    /// revisions still flow in, and a reset clears the customization.
     #[test]
     fn specialist_persona_customization_is_preserved_and_resettable() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
@@ -13100,9 +13104,13 @@ mod memory_op_tests {
             .iter()
             .find(|persona| persona.id == researcher_id)
             .unwrap();
-        assert_eq!(persona.markdown, "Custom researcher policy.");
-        // Customized text claims no shipped provenance and no notice —
-        // nothing newer was installed.
+        assert_eq!(
+            persona.markdown,
+            format!(
+                "{}\n\nCustom researcher policy.",
+                shipped_persona_default(PersonaDefaultRole::Researcher).markdown
+            )
+        );
         assert_eq!(
             state
                 .persona_defaults
@@ -13110,7 +13118,12 @@ mod memory_op_tests {
                 .starting_revision,
             Some(shipped_persona_default(PersonaDefaultRole::Researcher).revision)
         );
-        assert!(state.persona_default_notice.is_none());
+        // Recomposing under the shipped base is reported once — the
+        // user's text moved, nothing awaits review.
+        let notice = state.persona_default_notice.as_ref().unwrap();
+        assert_eq!(notice.updates.len(), 1);
+        assert!(notice.updates[0].adopted);
+        assert!(notice.updates[0].customized);
         // Reset reaches the specialist the same way it reaches a base.
         restored
             .handle(
@@ -13476,7 +13489,13 @@ mod memory_op_tests {
         let state = service.document();
         assert_eq!(state.employee_persona_id, Some(candidate));
         assert_eq!(state.personas[0].name, "Teammate");
-        assert_eq!(state.personas[0].markdown, "Custom employee policy.");
+        assert_eq!(
+            state.personas[0].markdown,
+            format!(
+                "{}\n\nCustom employee policy.",
+                shipped_persona_default(PersonaDefaultRole::Employee).markdown
+            )
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -13598,7 +13617,8 @@ mod memory_op_tests {
         assert!(service.handle(Some(boss), choose(second)).is_err());
         assert!(service.handle(None, choose(state.persona_id)).is_err());
         assert!(service.handle(None, choose(Uuid::new_v4())).is_err());
-        // The human's pick records the marker and nothing else changes.
+        // The human's pick records the marker; the chosen record keeps
+        // its text whole, recomposed beneath the shipped base.
         service.handle(None, choose(second)).unwrap();
         let state = service.document();
         assert_eq!(state.employee_persona_id, Some(second));
@@ -13608,7 +13628,13 @@ mod memory_op_tests {
                 .iter()
                 .find(|persona| persona.id == second)
                 .map(|persona| persona.markdown.as_str()),
-            Some("Reviewer scope only.")
+            Some(
+                format!(
+                    "{}\n\nReviewer scope only.",
+                    shipped_persona_default(PersonaDefaultRole::Employee).markdown
+                )
+                .as_str()
+            )
         );
         service
             .prepare_employee(
@@ -13629,10 +13655,10 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// A document written before revision tracking classifies provenance
-    /// on first load: text matching a previous shipped revision adopts the
-    /// latest automatically and reports once; customized text stays and
-    /// queues a review; unknown origin is preserved.
+    /// A document written before revision tracking composes provenance
+    /// on first load: text matching a previous shipped revision adopts
+    /// the latest automatically and reports once; customized text moves
+    /// beneath the shipped base with every byte preserved.
     #[test]
     fn persona_default_upgrade_classifies_and_consolidates() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
@@ -13677,26 +13703,41 @@ mod memory_op_tests {
             state.persona_defaults.employee.starting_revision,
             Some(shipped_persona_default(employee).revision)
         );
-        // The customized Boss text survived untouched.
+        // The customized Boss text survived whole — recomposed beneath
+        // the latest shipped base.
         let boss_index = state
             .personas
             .iter()
             .position(|persona| persona.id == state.persona_id)
             .unwrap();
-        assert_eq!(state.personas[boss_index].markdown, "Custom boss policy.");
-        assert_eq!(state.persona_defaults.boss.starting_revision, None);
-        // One consolidated notice reports the adoption; the customized
-        // Boss text predates this install's baseline, so it earns no
-        // notice entry — only a changed shipped revision does.
+        assert_eq!(
+            state.personas[boss_index].markdown,
+            format!(
+                "{}\n\nCustom boss policy.",
+                shipped_persona_default(PersonaDefaultRole::Boss).markdown
+            )
+        );
+        assert_eq!(
+            state.persona_defaults.boss.starting_revision,
+            Some(shipped_persona_default(PersonaDefaultRole::Boss).revision)
+        );
+        // One consolidated notice reports both adoptions — the
+        // untouched Employee text and the customized Boss text whose
+        // appended policy was preserved.
         let notice = state.persona_default_notice.as_ref().unwrap();
         assert!(!notice.delivered);
-        assert_eq!(notice.updates.len(), 1);
-        assert!(
+        assert_eq!(notice.updates.len(), 2);
+        let entry = |role: PersonaDefaultRole| {
             notice
                 .updates
                 .iter()
-                .any(|update| update.role == employee && update.adopted)
-        );
+                .find(|update| update.role == role)
+                .unwrap_or_else(|| panic!("{} has no notice entry", role.label()))
+        };
+        assert!(entry(employee).adopted);
+        assert!(!entry(employee).customized);
+        assert!(entry(PersonaDefaultRole::Boss).adopted);
+        assert!(entry(PersonaDefaultRole::Boss).customized);
 
         // The notice lands once, in the boss's next natural turn, and
         // never reaches an employee prompt.
@@ -13711,17 +13752,17 @@ mod memory_op_tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    /// An upgrade event on customized text: the saved instructions stay,
-    /// the notice reports the open review once, and the entry persists
-    /// after delivery so the settings surface keeps it discoverable.
+    /// An upgrade event on customized text: the new shipped base lands
+    /// automatically and the appended customization rides along verbatim
+    /// — the notice reports the adoption once and no review gate opens.
     #[test]
-    fn persona_default_upgrade_keeps_customized_text_for_review() {
+    fn persona_default_upgrade_flows_into_customized_text() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
         service.set_session_id(boss).unwrap();
         // Pretend this install last saw revision 1 with customized text —
-        // the running build ships revision 2, so load is an upgrade.
+        // the running build ships a newer revision, so load is an upgrade.
         service
             .update(|state| {
                 let employee = state.employee_persona_id.unwrap();
@@ -13738,6 +13779,7 @@ mod memory_op_tests {
                 Ok(())
             })
             .unwrap();
+        let shipped = shipped_persona_default(PersonaDefaultRole::Employee);
         let restored = BossService::open(root.clone()).unwrap();
         let state = restored.document();
         let employee_id = state.employee_persona_id.unwrap();
@@ -13746,37 +13788,103 @@ mod memory_op_tests {
             .iter()
             .find(|persona| persona.id == employee_id)
             .unwrap();
-        assert_eq!(persona.markdown, "Custom employee policy.");
+        // The shipped base is the current revision and the user's text
+        // survives whole beneath it.
+        assert_eq!(
+            persona.markdown,
+            format!("{}\n\nCustom employee policy.", shipped.markdown)
+        );
         let notice = state.persona_default_notice.as_ref().unwrap();
         assert_eq!(notice.updates.len(), 1);
-        assert!(!notice.updates[0].adopted);
-        assert_eq!(
-            notice.updates[0].revision,
-            shipped_persona_default(PersonaDefaultRole::Employee).revision
-        );
+        assert!(notice.updates[0].adopted);
+        assert!(notice.updates[0].customized);
+        assert_eq!(notice.updates[0].revision, shipped.revision);
         let prompt = restored.prompt_with_context(boss, "hello".into());
-        assert!(prompt.contains("kept"));
-        let document = restored.document();
-        let notice = document.persona_default_notice.as_ref().unwrap();
-        assert!(notice.delivered);
-        assert_eq!(notice.updates.len(), 1);
-        // A restart must not re-arm an already delivered notice.
+        assert!(prompt.contains("adopted"));
+        assert!(prompt.contains("preserved"));
+        // A fully adopted update clears at delivery — nothing to review.
+        assert!(restored.document().persona_default_notice.is_none());
+        // A restart neither re-arms the notice nor rewrites the text.
         drop(restored);
         let reloaded = BossService::open(root.clone()).unwrap();
         let next = reloaded.prompt_with_context(boss, "once more".into());
         assert!(!next.contains("shipped revision"));
-        // Keeping the current text resolves the open entry.
-        reloaded
-            .handle(
-                None,
-                BossOperation::PersonaDefault {
-                    action: PersonaDefaultAction::Keep {
-                        role: PersonaDefaultRole::Employee,
-                    },
-                },
-            )
+        let state = reloaded.document();
+        assert!(state.persona_default_notice.is_none());
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == employee_id)
             .unwrap();
-        assert!(reloaded.document().persona_default_notice.is_none());
+        assert_eq!(
+            persona.markdown,
+            format!("{}\n\nCustom employee policy.", shipped.markdown)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A customization appended beneath an older shipped base rides
+    /// forward on upgrade — the saved text swaps to the latest base and
+    /// the appended section survives byte-for-byte. Loading again is a
+    /// no-op: composed text is already canonical.
+    #[test]
+    fn persona_default_upgrade_carries_the_appended_customization() {
+        let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let employee_id = service.document().employee_persona_id.unwrap();
+        let older = &shipped_persona_revisions(PersonaDefaultRole::Employee)[0];
+        let customization = "Always cite the exact file path.";
+        service
+            .update(|state| {
+                let persona = state
+                    .personas
+                    .iter_mut()
+                    .find(|persona| persona.id == employee_id)
+                    .unwrap();
+                persona.markdown = format!("{}\n\n{customization}", older.markdown);
+                let defaults = &mut state.persona_defaults.employee;
+                defaults.seen_revision = older.revision;
+                defaults.starting_revision = Some(older.revision);
+                Ok(())
+            })
+            .unwrap();
+        let shipped = shipped_persona_default(PersonaDefaultRole::Employee);
+        let expected = format!("{}\n\n{customization}", shipped.markdown);
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == employee_id)
+            .unwrap();
+        assert_eq!(persona.markdown, expected);
+        let entry = state
+            .persona_default_notice
+            .as_ref()
+            .unwrap()
+            .updates
+            .iter()
+            .find(|update| update.role == PersonaDefaultRole::Employee)
+            .unwrap();
+        assert!(entry.adopted && entry.customized);
+        drop(restored);
+        // Idempotent: a second load rewrites nothing and adds nothing —
+        // the still-undelivered entry is the same one, not a re-arm.
+        let reloaded = BossService::open(root.clone()).unwrap();
+        let state = reloaded.document();
+        let persona = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == employee_id)
+            .unwrap();
+        assert_eq!(persona.markdown, expected);
+        assert_eq!(
+            state
+                .persona_default_notice
+                .as_ref()
+                .map(|notice| notice.updates.len()),
+            Some(1)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -13834,7 +13942,8 @@ mod memory_op_tests {
                 .is_err()
         );
 
-        // Undo restores the previous instructions.
+        // Undo restores the previous instructions — recomposed under the
+        // current shipped base like every canonical write.
         service
             .handle(
                 None,
@@ -13853,7 +13962,7 @@ mod memory_op_tests {
                 .find(|p| p.id == employee)
                 .unwrap()
                 .markdown,
-            "Custom role text."
+            format!("{}\n\nCustom role text.", shipped.markdown)
         );
 
         // A later edit blocks undo: the restore previews instead of
@@ -13899,7 +14008,7 @@ mod memory_op_tests {
                 .find(|p| p.id == employee)
                 .unwrap()
                 .markdown,
-            "Edited after reset."
+            format!("{}\n\nEdited after reset.", shipped.markdown)
         );
         fs::remove_dir_all(root).unwrap();
     }

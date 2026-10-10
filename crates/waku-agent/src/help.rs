@@ -238,7 +238,7 @@ fn purpose(path: &str) -> &str {
             "Update the employee's named setting; active work may be reconfigured."
         }
         p if p.starts_with("boss persona ") => {
-            "Inspect or maintain role instructions and default-review state."
+            "Inspect or maintain role instructions and shipped-default state."
         }
         p if p.contains(" memory ") || p.starts_with("memory ") => {
             "Read or maintain durable notes in an explicitly accessible bucket."

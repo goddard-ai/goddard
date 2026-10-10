@@ -10,8 +10,14 @@ export type PersonaDefaultNoticeEntry = { role: PersonaDefaultRole,
  */
 revision: number,
 /**
- * True when untouched instructions adopted the revision
- * automatically — the notice reports the change; false means the
- * saved text is customized or unknown and awaits review.
+ * True when the saved instructions adopted the revision
+ * automatically — the notice reports the change. Entries written
+ * under the review-gated model may carry `false` for customized
+ * text; the reconciler resolves them on sight.
  */
-adopted: boolean, };
+adopted: boolean,
+/**
+ * True when the adoption landed beneath a preserved customization —
+ * the notice can say the human's appended text survived.
+ */
+customized: boolean, };

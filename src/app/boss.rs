@@ -9,7 +9,7 @@ use waku_client::DaemonKey;
 use waku_client::boss::{
     BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
     MemoryOperation, PersonaDefaultAction, PersonaDefaultRole, PersonaPermissions,
-    instruction_diff, shipped_persona_default, shipped_persona_revision,
+    instruction_diff, shipped_persona_default, shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
@@ -3365,9 +3365,24 @@ impl Waku {
             .as_ref()
             .map(|entry| entry.name.clone())
             .unwrap_or_default();
+        // A shipped default's editor owns only the appended
+        // customization — the shipped base stays read-only in the
+        // detail pane and reattaches on save, so an edit can never
+        // fork or lose the default itself.
+        let canonical_role = persona.as_ref().and_then(|entry| {
+            self.boss_ui
+                .states
+                .get(&key)
+                .and_then(|state| state.persona_default_role(entry.id))
+        });
         let content = persona
             .as_ref()
-            .map(|entry| entry.markdown.clone())
+            .map(|entry| match canonical_role {
+                Some(role) => shipped_persona_prefix(role, &entry.markdown)
+                    .map(|(_, customization)| customization.to_owned())
+                    .unwrap_or_else(|| entry.markdown.clone()),
+                None => entry.markdown.clone(),
+            })
             .unwrap_or_default();
         let original = vec![
             name_value.clone(),
@@ -8876,13 +8891,31 @@ impl Waku {
                 tr!("boss.persona_select"),
             );
         }
+        let canonical = self
+            .boss_ui
+            .states
+            .get(&editor.key)
+            .and_then(|state| state.persona_default_role(editor.persona))
+            .is_some();
         let mut form = div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(tr!("boss.name_path"))
             .child(boss_input(editor.name.clone(), &theme))
-            .child(tr!("boss.markdown"))
+            .child(if canonical {
+                tr!("boss.markdown_customization")
+            } else {
+                tr!("boss.markdown")
+            })
+            .when(canonical, |form| {
+                form.child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("boss.markdown_customization_hint")),
+                )
+            })
             .child(boss_input(editor.content.clone(), &theme))
             .child(tr!("boss.persona_buckets"))
             .child(boss_input(editor.buckets.clone(), &theme))

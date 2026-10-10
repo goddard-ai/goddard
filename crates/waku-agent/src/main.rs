@@ -452,12 +452,12 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss persona upsert" => (
             json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"bucketIds":"string[] of existing Boss-created buckets","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
-            json!({"json":{"type":"state","state":"updated BossState including the persona record"}}),
+            json!({"json":{"type":"state","state":"updated BossState including the persona record"},"notes":"editing a canonical default keeps the text beneath the latest shipped base — submissions without the base prefix save whole as the appended customization"}),
             "goddard-agent boss persona upsert --new --name Reviewer --file persona.md".to_owned(),
         ),
         "boss persona defaults" => (
             json!({}),
-            json!({"json":{"type":"personaDefaults","defaults":"one record per canonical role: shipped text and revision, saved provenance (starting/reviewed/seen revisions), untouched/latest/updatePending flags, diffs, undo and proposal state"}}),
+            json!({"json":{"type":"personaDefaults","defaults":"one record per canonical role: shipped text and revision, saved provenance (starting/reviewed/seen revisions), the preserved customization appended beneath the base, untouched/latest/updatePending flags, diffs, undo and proposal state"}}),
             "goddard-agent boss persona defaults".to_owned(),
         ),
         "boss persona reset" => (

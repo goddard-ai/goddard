@@ -6280,6 +6280,10 @@ boss.name_path:
   en: Name or file path
 boss.markdown:
   en: Markdown content
+boss.markdown_customization:
+  en: Customization appended beneath the shipped default
+boss.markdown_customization_hint:
+  en: This role layers your text beneath Goddard's shipped instructions, which update automatically — write only your additions.
 boss.pinned_files:
   en: Pinned documents (one path beneath the Boss files root per line)
 boss.permissions_hint:
