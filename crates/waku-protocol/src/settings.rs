@@ -89,6 +89,12 @@ pub struct DaemonSettings {
     /// Context fraction that makes a settled Boss session eligible to rotate.
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
+    /// Days of employee-chat history the command palette's "Search employee
+    /// chats" view reaches back — archived records included. `0` hides the
+    /// command; any other value bounds the search to chats with activity in
+    /// that window.
+    #[serde(default = "default_employee_chat_search_days")]
+    pub employee_chat_search_days: u32,
     /// Experimental opt-in for cross-session composer drafts. Defaults on in
     /// development builds and off in release builds.
     #[serde(default = "default_experiment_enabled")]
@@ -167,6 +173,14 @@ fn default_boss_rotation_threshold() -> f64 {
     0.8
 }
 
+/// The shipped employee-chat search window — recent work without a scan
+/// that reaches into stale records by default.
+pub const DEFAULT_EMPLOYEE_CHAT_SEARCH_DAYS: u32 = 3;
+
+fn default_employee_chat_search_days() -> u32 {
+    DEFAULT_EMPLOYEE_CHAT_SEARCH_DAYS
+}
+
 impl Default for DaemonSettings {
     fn default() -> Self {
         Self {
@@ -187,6 +201,7 @@ impl Default for DaemonSettings {
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
+            employee_chat_search_days: default_employee_chat_search_days(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: BTreeMap::new(),
             integrations_enabled: default_experiment_enabled(),

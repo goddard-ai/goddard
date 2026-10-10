@@ -75,6 +75,10 @@ fn default_boss_rotation_threshold() -> f64 {
     0.8
 }
 
+fn default_employee_chat_search_days() -> u32 {
+    waku_protocol::settings::DEFAULT_EMPLOYEE_CHAT_SEARCH_DAYS
+}
+
 fn default_analytics_enabled() -> bool {
     true
 }
@@ -385,6 +389,9 @@ pub struct PersistedState {
     pub boss_rotation_disabled: bool,
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
+    /// Employee-chat search window (days) mirrored from daemon settings.
+    #[serde(default = "default_employee_chat_search_days")]
+    pub employee_chat_search_days: u32,
     /// Experimental cross-session composer draft setting mirrored from daemon
     /// settings.
     #[serde(default = "default_experiment_enabled")]
@@ -537,6 +544,7 @@ impl PersistedState {
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: 0.8,
+            employee_chat_search_days: default_employee_chat_search_days(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: Default::default(),
             eval: None,
@@ -695,6 +703,7 @@ impl PersistedState {
             boss_experiment_enabled: self.boss_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
+            employee_chat_search_days: self.employee_chat_search_days,
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             title_models: self.title_models.clone(),
             eval: self.eval.clone(),
@@ -763,6 +772,7 @@ impl PersistedState {
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
+        self.employee_chat_search_days = settings.employee_chat_search_days;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.title_models = settings.title_models;
         self.eval = settings.eval;

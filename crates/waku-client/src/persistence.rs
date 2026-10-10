@@ -585,6 +585,10 @@ fn default_boss_rotation_threshold() -> f64 {
     0.8
 }
 
+fn default_employee_chat_search_days() -> u32 {
+    waku_protocol::settings::DEFAULT_EMPLOYEE_CHAT_SEARCH_DAYS
+}
+
 /// Graduated features default on — their real gate is a configured eval
 /// backend, not a flag.
 fn default_enabled() -> bool {
@@ -1691,6 +1695,10 @@ pub const DEFAULT_DORMANT_AFTER_DAYS: u32 = 7;
 pub const DORMANT_AFTER_DAYS_OPTIONS: [Option<u32>; 7] =
     [Some(1), Some(2), Some(3), Some(7), Some(14), Some(30), None];
 
+/// The choices the employee-chat search window picker offers, in days;
+/// `0` is its "Off" row, which hides the palette command.
+pub const EMPLOYEE_CHAT_SEARCH_DAYS_OPTIONS: [u32; 6] = [1, 3, 7, 14, 30, 0];
+
 /// The completion sound's relative volume tops out at twice its recorded level.
 pub const MAX_COMPLETION_SOUND_VOLUME: f32 = 2.0;
 /// Fraction of the Sidebar vibrancy let through the sidebar's tint by
@@ -2426,6 +2434,11 @@ pub struct PersistedState {
     pub boss_rotation_disabled: bool,
     #[serde(default = "default_boss_rotation_threshold")]
     pub boss_rotation_context_threshold: f64,
+    /// Days of employee-chat history the command palette's employee-chat
+    /// search reaches back. Daemon-owned; mirrored here so the palette and
+    /// the settings surface read the same window. `0` hides the command.
+    #[serde(default = "default_employee_chat_search_days")]
+    pub employee_chat_search_days: u32,
     /// Experimental: whether cross-session composer drafts are enabled.
     /// Daemon-owned; mirrored here so clients can render the toggle.
     #[serde(default = "default_experiment_enabled")]
@@ -2759,6 +2772,7 @@ impl PersistedState {
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
+            employee_chat_search_days: default_employee_chat_search_days(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: Default::default(),
             eval: None,
@@ -3037,6 +3051,7 @@ impl PersistedState {
             boss_experiment_enabled: self.boss_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
+            employee_chat_search_days: self.employee_chat_search_days,
             composer_drafts_experiment_enabled: self.composer_drafts_experiment_enabled,
             title_models: self.title_models.clone(),
             custom_commands: self.custom_commands.clone(),
@@ -3075,6 +3090,7 @@ impl PersistedState {
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
+        self.employee_chat_search_days = settings.employee_chat_search_days;
         self.composer_drafts_experiment_enabled = settings.composer_drafts_experiment_enabled;
         self.title_models = settings.title_models;
         self.custom_commands = settings.custom_commands;

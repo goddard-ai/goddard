@@ -96,6 +96,13 @@ boss_rotation_disabled: boolean,
  */
 boss_rotation_context_threshold: number,
 /**
+ * Days of employee-chat history the command palette's "Search employee
+ * chats" view reaches back — archived records included. `0` hides the
+ * command; any other value bounds the search to chats with activity in
+ * that window.
+ */
+employee_chat_search_days: number,
+/**
  * Experimental opt-in for cross-session composer drafts. Defaults on in
  * development builds and off in release builds.
  */

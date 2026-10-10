@@ -2403,7 +2403,12 @@ impl Waku {
     /// archived sources archived — the lookup is read-only end to end —
     /// and a record the task list no longer carries reports instead of
     /// failing silently.
-    fn open_history_hit(&mut self, task_id: Uuid, message_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn open_history_hit(
+        &mut self,
+        task_id: Uuid,
+        message_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
         if !self
             .state
             .sessions

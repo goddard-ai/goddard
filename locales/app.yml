@@ -313,6 +313,20 @@ command_palette.save_prompt_placeholder:
   en: Name this prompt…
 command_palette.open_prompts_folder:
   en: Open prompts folder
+command_palette.search_employee_chats:
+  en: Search employee chats…
+command_palette.employee_chats:
+  en: Employee chats
+command_palette.employee_search_placeholder:
+  en: Search employee chats — name, job, or message…
+command_palette.searching_employee_chats:
+  en: Searching employee chats…
+command_palette.no_employee_chats:
+  en: No employee chats found
+command_palette.no_employee_chats_hint:
+  en: Chats with activity in the %{days}-day window appear here — archived included
+command_palette.employee_search_unavailable:
+  en: Couldn't search employee chats
 prompt_templates.nothing_to_save:
   en: Nothing to save — the composer is empty
 prompt_templates.name_required:
@@ -977,6 +991,10 @@ experiments.boss_title:
   en: Boss and employees
 experiments.boss_description:
   en: Enable the Boss assistant, employee tasks, personas, and plans.
+experiments.employee_search_window:
+  en: Employee chat search
+experiments.employee_search_off:
+  en: Off
 experiments.computer_use_description:
   en: Reveal the Computer Use settings page and let sessions drive Cua Driver capture and input through the bundled helper. Turning it off also turns Computer Use itself off.
 experiments.friends_title:

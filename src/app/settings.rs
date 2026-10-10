@@ -725,6 +725,16 @@ fn dormant_after_label(days: Option<u32>) -> String {
     }
 }
 
+/// The employee-chat search window's row label — "1 day", "N days", or
+/// "Off" for the `0` position that hides the palette command.
+fn employee_chat_search_days_label(days: u32) -> String {
+    match days {
+        0 => tr!("experiments.employee_search_off"),
+        1 => tr!("settings.dormant_after_one_day"),
+        days => tr!("settings.dormant_after_days", count = days),
+    }
+}
+
 /// The key's product name — Command/Option on macOS, Ctrl/Alt elsewhere.
 fn link_modifier_label(modifier: TerminalLinkModifier) -> &'static str {
     match modifier {
@@ -5443,7 +5453,7 @@ impl Waku {
                 enabled: self.state.boss_experiment_enabled,
                 set: Self::set_boss_experiment_enabled,
                 eval_backed: false,
-                tuning: None,
+                tuning: Some(Self::boss_tuning),
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -7232,6 +7242,55 @@ impl Waku {
                 })
                 .into_any_element(),
         )
+    }
+
+    /// The Boss card's tuning block: how far back the command palette's
+    /// "Search employee chats" view reaches — archived records included —
+    /// or Off to hide the command.
+    fn boss_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let days = self.state.employee_chat_search_days;
+        let handle = self.menu_handle("employee-chat-search-days".to_owned(), cx);
+        let weak = cx.entity().downgrade();
+        let selector = dropdown_menu(
+            MenuChip::new("employee-chat-search-days")
+                .label(employee_chat_search_days_label(days))
+                .outlined()
+                .selected(handle.is_open())
+                .w(px(140.0))
+                .justify_between(),
+            "employee-chat-search-days-menu",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                crate::persistence::EMPLOYEE_CHAT_SEARCH_DAYS_OPTIONS
+                    .into_iter()
+                    .map(|option| {
+                        let weak = weak.clone();
+                        MenuItem::new(employee_chat_search_days_label(option), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_employee_chat_search_days(option, cx)
+                            });
+                        })
+                        .selected(option == days)
+                    })
+                    .collect()
+            },
+        );
+        div()
+            .mt(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .w(px(110.0))
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("experiments.employee_search_window")),
+            )
+            .child(selector)
+            .into_any_element()
     }
 
     /// Guided reading's three parameters: fixation 1–5, saccade 10–50 in
@@ -12164,6 +12223,17 @@ impl Waku {
             return;
         }
         self.state.dormant_after_days = days;
+        self.save();
+        cx.notify();
+    }
+
+    /// The daemon-owned palette window — `0` hides the "Search employee
+    /// chats" command entirely.
+    fn set_employee_chat_search_days(&mut self, days: u32, cx: &mut Context<Self>) {
+        if self.state.employee_chat_search_days == days {
+            return;
+        }
+        self.state.employee_chat_search_days = days;
         self.save();
         cx.notify();
     }

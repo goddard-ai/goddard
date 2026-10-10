@@ -34,6 +34,9 @@ const MIN_EXACT_COMMAND_SUBSTRING_CHARS: usize = 3;
 const MAX_RESUME_RESULTS: usize = 30;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
 const MESSAGE_SEARCH_LIMIT: usize = 50;
+/// Sources one employee-chat lookup returns — the daemon caps per-source
+/// hits anyway, so this bounds the drill-in's list length.
+const EMPLOYEE_CHAT_SEARCH_LIMIT: usize = 20;
 const MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
 const PAGE_STEP: isize = 7;
 const MESSAGE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(90);
@@ -101,6 +104,9 @@ enum PaletteSection {
     // The "Change base branch" picker's branch listing; never in Commands
     // view.
     Branches,
+    // The "Search employee chats" drill-in's listing; never in Commands
+    // view.
+    EmployeeChats,
 }
 
 impl PaletteSection {
@@ -121,6 +127,7 @@ impl PaletteSection {
             Self::Directories => "command_palette.directories",
             Self::Templates => "command_palette.templates",
             Self::Branches => "command_palette.branches",
+            Self::EmployeeChats => "command_palette.employee_chats",
         })
     }
 
@@ -139,7 +146,8 @@ impl PaletteSection {
             | Self::Worktrees
             | Self::Directories
             | Self::Templates
-            | Self::Branches => 4,
+            | Self::Branches
+            | Self::EmployeeChats => 4,
         }
     }
 }
@@ -259,6 +267,11 @@ enum PaletteAction {
     NewCustomCommand,
     InsertPromptTemplate(SlashCommand),
     OpenSavePrompt,
+    /// "Search employee chats…" — opens the employee-history drill-in.
+    OpenEmployeeChats,
+    /// A resolved employee-chat hit: open its record on the matched
+    /// passage.
+    OpenEmployeeChat { task_id: Uuid, message_id: Uuid },
     DoubleCheck,
     SavePromptAs(String),
     RevealPromptTemplates,
@@ -325,6 +338,9 @@ enum CommandPaletteView {
     /// The "Save as prompt template" step: the query field is the file's
     /// command name, confirmed with Enter.
     SavePrompt,
+    /// The "Search employee chats" retained-work lookup — the query field
+    /// drives the daemon's history search over employee records.
+    EmployeeChats,
 }
 
 /// What a resolved template fetch does next: a repo with templates shows
@@ -567,6 +583,71 @@ fn should_keep_previous_command_palette_results(
     next_result_count == 0 && search_pending && previous_result_count > 0
 }
 
+/// The `after` bound an employee-chat lookup sends — `days` back from
+/// `now`, saturating so a huge setting value widens to all time instead of
+/// wrapping the window.
+fn employee_chat_search_after(now: u64, days: u32) -> u64 {
+    now.saturating_sub(u64::from(days) * 86_400)
+}
+
+/// One employee-chat hit row — the record's title, its metadata line, and
+/// the excerpted passage rendered like a transcript match. The action
+/// carries both ids so Enter lands on the matched message rather than the
+/// chat's tail.
+fn employee_chat_hit_item(
+    hit: &waku_protocol::model::AgentHistorySearchHit,
+    order: usize,
+) -> CommandPaletteItem {
+    let mut details = Vec::new();
+    if let Some(person) = hit
+        .person
+        .as_ref()
+        .filter(|person| person.as_str() != hit.title.as_str())
+    {
+        details.push(person.clone());
+    }
+    if let Some(job) = hit.job_title.as_ref().filter(|job| !job.is_empty()) {
+        details.push(job.clone());
+    }
+    if !hit.project.is_empty() {
+        details.push(hit.project.clone());
+    }
+    if hit.archived {
+        details.push(tr!("session.archived"));
+    }
+    if hit.employee_expired == Some(true) {
+        details.push(tr!("boss.status_expired"));
+    }
+    let mut search_text = format!("{} {}", hit.title, details.join(" "));
+    if let Some(recorded_by) = hit.recorded_by.as_ref() {
+        search_text.push(' ');
+        search_text.push_str(recorded_by);
+    }
+    let content_match = (!hit.excerpt.is_empty()).then(|| {
+        crate::persistence::SessionMessageMatch {
+            session_id: hit.task_id,
+            message_id: hit.message_id,
+            source: hit.role,
+            snippet: hit.excerpt.clone(),
+        }
+    });
+    CommandPaletteItem {
+        section: PaletteSection::EmployeeChats,
+        label: hit.title.clone(),
+        detail: (!details.is_empty()).then(|| details.join(" · ")),
+        icon: PaletteIcon::Asset("icons/bot.svg"),
+        shortcut: None,
+        action: PaletteAction::OpenEmployeeChat {
+            task_id: hit.task_id,
+            message_id: hit.message_id,
+        },
+        content_match,
+        search_text,
+        order,
+        recency: hit.updated_at,
+    }
+}
+
 fn confirm_within_open_grace(opened_at: Option<Instant>, now: Instant) -> bool {
     opened_at.is_some_and(|at| now.saturating_duration_since(at) < CONFIRM_OPEN_GRACE)
 }
@@ -661,6 +742,15 @@ pub(super) struct CommandPaletteUi {
     /// captured up front so a composer draft change mid-pick can't alter
     /// what lands in the file.
     save_prompt_body: Option<String>,
+    /// The "Search employee chats" drill-in's daemon lookup: the issued
+    /// query, the hits its last resolved reply landed, and the
+    /// in-flight/error state behind them. `generation` drops a stale reply
+    /// once the view or the query moved on.
+    employee_search_query: Option<String>,
+    employee_hits: Vec<waku_protocol::model::AgentHistorySearchHit>,
+    employee_search_pending: bool,
+    employee_search_error: Option<String>,
+    employee_search_generation: u64,
     /// Most recent visible composer prompt, retained after send clears the field.
     pub(super) last_submitted_prompt: Option<String>,
     selected: usize,
@@ -710,6 +800,11 @@ impl CommandPaletteUi {
             rebase_base: None,
             rebase_generation: 0,
             save_prompt_body: None,
+            employee_search_query: None,
+            employee_hits: Vec::new(),
+            employee_search_pending: false,
+            employee_search_error: None,
+            employee_search_generation: 0,
             last_submitted_prompt: None,
             selected: 0,
             scroll: ScrollHandle::new(),
@@ -871,6 +966,12 @@ impl Waku {
         self.command_palette.issue_generation =
             self.command_palette.issue_generation.wrapping_add(1);
         self.command_palette.save_prompt_body = None;
+        self.command_palette.employee_search_query = None;
+        self.command_palette.employee_hits.clear();
+        self.command_palette.employee_search_pending = false;
+        self.command_palette.employee_search_error = None;
+        self.command_palette.employee_search_generation =
+            self.command_palette.employee_search_generation.wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -938,6 +1039,9 @@ impl Waku {
         self.command_palette.issue_templates_pending = false;
         self.command_palette.issue_generation =
             self.command_palette.issue_generation.wrapping_add(1);
+        self.command_palette.employee_search_pending = false;
+        self.command_palette.employee_search_generation =
+            self.command_palette.employee_search_generation.wrapping_add(1);
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -1411,6 +1515,145 @@ impl Waku {
             order: 0,
             recency: 0,
         }];
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
+    /// "Search employee chats…" — a read-only lookup over the local
+    /// daemon's retained employee records (expired, retired, and archived
+    /// included) bounded to the settings window. An empty field lists the
+    /// window's recent chats.
+    fn open_command_palette_employee_search_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::EmployeeChats;
+        self.command_palette.employee_search_query = None;
+        self.command_palette.employee_hits.clear();
+        self.command_palette.employee_search_pending = false;
+        self.command_palette.employee_search_error = None;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(
+                tr!("command_palette.employee_search_placeholder"),
+                cx,
+            );
+            input.clear(cx);
+        });
+        self.schedule_employee_chat_search("", cx);
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    /// Debounce the employee-chat lookup behind the view's query — each
+    /// distinct text issues at most one daemon request, and a superseded
+    /// generation's reply never lands.
+    fn schedule_employee_chat_search(&mut self, query: &str, cx: &mut Context<Self>) {
+        let query = query.trim().to_owned();
+        self.command_palette.employee_search_query = Some(query.clone());
+        self.command_palette.employee_search_pending = true;
+        self.command_palette.employee_search_error = None;
+        let generation = self
+            .command_palette
+            .employee_search_generation
+            .wrapping_add(1);
+        self.command_palette.employee_search_generation = generation;
+        let Some(client) = self
+            .daemons
+            .supervisor(waku_client::DaemonKey::Local)
+            .map(|supervisor| supervisor.client())
+        else {
+            self.command_palette.employee_search_pending = false;
+            self.command_palette.employee_search_error = Some(tr!("boss.unreachable"));
+            return;
+        };
+        let days = self.state.employee_chat_search_days;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(MESSAGE_SEARCH_DEBOUNCE)
+                .await;
+            let current = this
+                .update(cx, |this, _| {
+                    this.command_palette.open
+                        && this.command_palette.view == CommandPaletteView::EmployeeChats
+                        && this.command_palette.employee_search_generation == generation
+                        && this.command_palette.employee_search_query.as_deref()
+                            == Some(query.as_str())
+                })
+                .unwrap_or(false);
+            if !current {
+                return;
+            }
+            let response = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss {
+                            operation: waku_client::boss::BossOperation::HistorySearch {
+                                query,
+                                project: None,
+                                person: None,
+                                after: Some(
+                                    employee_chat_search_after(unix_time(), days).to_string(),
+                                ),
+                                before: None,
+                                kind: Some(waku_protocol::model::HistorySourceKind::Employee),
+                                limit: Some(EMPLOYEE_CHAT_SEARCH_LIMIT),
+                                offset: 0,
+                            },
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if !this.command_palette.open
+                    || this.command_palette.view != CommandPaletteView::EmployeeChats
+                    || this.command_palette.employee_search_generation != generation
+                {
+                    return;
+                }
+                this.command_palette.employee_search_pending = false;
+                match response {
+                    Ok(waku_client::ResponsePayload::Boss {
+                        result: waku_client::boss::BossResult::HistorySearch { result },
+                    }) => {
+                        this.command_palette.employee_hits = result.hits;
+                        this.command_palette.employee_search_error = None;
+                    }
+                    Ok(_) => {
+                        // A mismatched reply clears the rows too — stale
+                        // hits under a new query would read as current.
+                        this.command_palette.employee_hits.clear();
+                        this.command_palette.employee_search_error =
+                            Some(tr!("boss.unexpected_response"));
+                    }
+                    Err(error) => {
+                        this.command_palette.employee_hits.clear();
+                        this.command_palette.employee_search_error = Some(error.to_string());
+                    }
+                }
+                let query = this.command_palette.search.read(cx).content().to_owned();
+                this.refresh_command_palette_results(&query, false, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The drill-in lists the daemon's hits verbatim — the search already
+    /// matched and ranked them; while the next request is in flight the
+    /// last landed page stays on screen.
+    fn refresh_command_palette_employee_results(&mut self, preserve_selection: bool) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        self.command_palette.results = self
+            .command_palette
+            .employee_hits
+            .iter()
+            .enumerate()
+            .map(|(order, hit)| employee_chat_hit_item(hit, order))
+            .collect();
         self.finish_drill_in_refresh(selected_action.flatten(), None);
     }
 
@@ -1908,6 +2151,7 @@ impl Waku {
             CommandPaletteView::IssueTemplates => self.open_command_palette_issue_projects_view(cx),
             CommandPaletteView::RebaseBase => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::SavePrompt => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::EmployeeChats => self.leave_command_palette_drill_in_view(cx),
         }
     }
 
@@ -1958,6 +2202,9 @@ impl Waku {
                 }
             }
             CommandPaletteView::SavePrompt => tr!("command_palette.save_prompt_placeholder"),
+            CommandPaletteView::EmployeeChats => {
+                tr!("command_palette.employee_search_placeholder")
+            }
         };
         self.command_palette.search.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("a11y.command_palette"), cx);
@@ -1971,6 +2218,14 @@ impl Waku {
 
     pub(super) fn command_palette_query_edited(&mut self, query: &str, cx: &mut Context<Self>) {
         if !self.command_palette.open {
+            return;
+        }
+        if self.command_palette.view == CommandPaletteView::EmployeeChats {
+            // Every keystroke re-issues the daemon lookup behind the
+            // debounce; the last landed hits stay listed until it replies.
+            self.schedule_employee_chat_search(query, cx);
+            self.refresh_command_palette_results(query, false, cx);
+            cx.notify();
             return;
         }
         if matches!(
@@ -2278,6 +2533,20 @@ impl Waku {
                 None,
                 PaletteAction::ReclaimSpace,
                 "reclaim disk space free storage clean purge delete worktree node_modules target build artifacts dependencies",
+                next(),
+            ));
+        }
+
+        // Employees only exist under the Boss experiment; a `0`-day window
+        // is the setting's off position and hides the command outright.
+        if self.state.boss_experiment_enabled && self.state.employee_chat_search_days > 0 {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.search_employee_chats"),
+                "icons/bot.svg",
+                None,
+                PaletteAction::OpenEmployeeChats,
+                "search employee chats history find messages conversations archived recent",
                 next(),
             ));
         }
@@ -4375,6 +4644,10 @@ impl Waku {
                 self.refresh_command_palette_save_prompt_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::EmployeeChats => {
+                self.refresh_command_palette_employee_results(preserve_selection);
+                return;
+            }
             CommandPaletteView::Commands => {}
         }
         let updater_available = cx
@@ -4922,6 +5195,10 @@ impl Waku {
                 self.open_command_palette_save_prompt_view(cx);
                 return;
             }
+            PaletteAction::OpenEmployeeChats => {
+                self.open_command_palette_employee_search_view(cx);
+                return;
+            }
             PaletteAction::ChangeBaseBranch => {
                 self.open_command_palette_rebase_base_view(cx);
                 return;
@@ -5043,6 +5320,14 @@ impl Waku {
                 if let Some(editor) = self.custom_command_editor.as_mut() {
                     editor.exit_settings_on_save = true;
                 }
+            }
+            PaletteAction::OpenEmployeeChat {
+                task_id,
+                message_id,
+            } => {
+                // Same landing the Boss History list uses — Inspect keeps
+                // archived records archived and lands on the passage.
+                self.open_history_hit(task_id, message_id, cx);
             }
             PaletteAction::SelectTask(session_id) => {
                 self.settings_page = None;
@@ -5278,6 +5563,7 @@ impl Waku {
             | PaletteAction::CreateGitHubIssue
             | PaletteAction::ChooseIssueProject(_)
             | PaletteAction::OpenSavePrompt
+            | PaletteAction::OpenEmployeeChats
             | PaletteAction::ChangeBaseBranch
             | PaletteAction::SavePromptAs(_) => {
                 unreachable!("view-navigation actions are handled before closing the palette")
@@ -5352,6 +5638,7 @@ impl Waku {
                 .rebase_base
                 .as_ref()
                 .is_some_and(|picker| picker.pending),
+            CommandPaletteView::EmployeeChats => self.command_palette.employee_search_pending,
             CommandPaletteView::ResumeProviders
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::RemoveProject
@@ -5392,7 +5679,10 @@ impl Waku {
                     .command_palette
                     .rebase_base
                     .as_ref()
-                    .is_some_and(|picker| picker.pending));
+                    .is_some_and(|picker| picker.pending))
+            || (view == CommandPaletteView::EmployeeChats
+                && self.command_palette.results.is_empty()
+                && self.command_palette.employee_search_pending);
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -5425,6 +5715,8 @@ impl Waku {
                         tr!("command_palette.loading_issue_templates")
                     } else if view == CommandPaletteView::RebaseBase {
                         tr!("command_palette.loading_branches")
+                    } else if view == CommandPaletteView::EmployeeChats {
+                        tr!("command_palette.searching_employee_chats")
                     } else {
                         tr!("command_palette.loading_sessions")
                     },
@@ -5520,6 +5812,25 @@ impl Waku {
                     Some(tr!("command_palette.no_branches_hint")),
                     false,
                 )
+            } else if view == CommandPaletteView::EmployeeChats {
+                if let Some(error) = self.command_palette.employee_search_error.clone() {
+                    (
+                        "icons/alert.svg",
+                        tr!("command_palette.employee_search_unavailable"),
+                        Some(error),
+                        false,
+                    )
+                } else {
+                    (
+                        "icons/bot.svg",
+                        tr!("command_palette.no_employee_chats"),
+                        Some(tr!(
+                            "command_palette.no_employee_chats_hint",
+                            days = self.state.employee_chat_search_days as usize
+                        )),
+                        false,
+                    )
+                }
             } else {
                 (
                     "icons/search.svg",
@@ -6120,6 +6431,82 @@ mod tests {
             command_palette_results_height(&providers, false),
             PROVIDER_SECTION_TOP_MARGIN + RESULT_ROW_HEIGHT * 2.0 + RESULTS_BOTTOM_PADDING
         );
+    }
+
+    #[test]
+    fn employee_chat_search_window_bounds_by_days() {
+        let now = 30 * 86_400;
+        assert_eq!(employee_chat_search_after(now, 3), 27 * 86_400);
+        assert_eq!(employee_chat_search_after(now, 30), 0);
+        // A huge setting widens to the epoch instead of wrapping the bound.
+        assert_eq!(employee_chat_search_after(now, u32::MAX), 0);
+        assert_eq!(employee_chat_search_after(100, 3), 0);
+    }
+
+    fn employee_hit(
+        task: u8,
+        message: u8,
+    ) -> waku_protocol::model::AgentHistorySearchHit {
+        waku_protocol::model::AgentHistorySearchHit {
+            task_id: Uuid::from_u128(task as u128),
+            kind: waku_protocol::model::HistorySourceKind::Employee,
+            title: format!("employee {task}"),
+            project: "project".into(),
+            person: Some(format!("employee {task}")),
+            job_title: Some("Add a thing".into()),
+            employee_expired: Some(false),
+            status: waku_protocol::model::SessionStatus::Idle,
+            archived: false,
+            created_at: 10,
+            updated_at: 20,
+            message_id: Uuid::from_u128(message as u128),
+            role: waku_protocol::model::MessageRole::Assistant,
+            recorded_by: None,
+            excerpt: "the matched passage".into(),
+            excerpt_matched: true,
+            excerpt_at: 15,
+            matched_terms: vec!["matched".into()],
+            title_matched: false,
+            matched_messages: 1,
+        }
+    }
+
+    #[test]
+    fn employee_chat_hit_items_land_on_the_matched_message() {
+        let hit = employee_hit(7, 9);
+        let item = employee_chat_hit_item(&hit, 0);
+        assert_eq!(
+            item.action,
+            PaletteAction::OpenEmployeeChat {
+                task_id: Uuid::from_u128(7),
+                message_id: Uuid::from_u128(9),
+            }
+        );
+        assert_eq!(item.section, PaletteSection::EmployeeChats);
+        assert_eq!(item.label, "employee 7");
+        // The person's name repeats the title — the detail drops it and
+        // keeps the distinguishing fields.
+        assert_eq!(item.detail.as_deref(), Some("Add a thing · project"));
+        let matched = item.content_match.expect("excerpt rides the row");
+        assert_eq!(matched.session_id, Uuid::from_u128(7));
+        assert_eq!(matched.message_id, Uuid::from_u128(9));
+        assert_eq!(matched.snippet, "the matched passage");
+
+        // Archived and expired records flag themselves in the detail.
+        let mut settled = employee_hit(8, 9);
+        settled.archived = true;
+        settled.employee_expired = Some(true);
+        settled.job_title = None;
+        let detail = employee_chat_hit_item(&settled, 1)
+            .detail
+            .expect("settled metadata line");
+        assert!(detail.contains("project"));
+        assert!(!detail.contains("Add a thing"));
+
+        // An empty excerpt draws a plain row, not a blank passage line.
+        let mut bare = employee_hit(9, 9);
+        bare.excerpt.clear();
+        assert!(employee_chat_hit_item(&bare, 2).content_match.is_none());
     }
 
     #[test]
