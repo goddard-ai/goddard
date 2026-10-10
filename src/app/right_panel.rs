@@ -10212,7 +10212,6 @@ impl Waku {
         // the source/preview mode flipped, and run a pending scroll reveal
         // here where the frame still owns a `Window` for the retry path.
         self.sync_file_search_target(relative_path, cx);
-        self.apply_pending_preview_search_reveal(relative_path, window, cx);
         let search_highlights = self.file_preview_search_highlights(relative_path);
         let find_bar = self.render_file_search_bar(pane_width, false, window, cx);
 
@@ -10234,8 +10233,8 @@ impl Waku {
         };
         // The document mounts one top-level block per list item, so a large
         // file's flatten and layout stay proportional to the viewport instead
-        // of the document. A block-count change splices; a same-count edit
-        // only invalidates measured heights.
+        // of the document. Resize at the tail so content updates retain the
+        // current block anchor, then invalidate changed blocks' measurements.
         let list_state = if deliverable_page {
             self.boss_ui.deliverable_page.map(|page| {
                 self.boss_ui
@@ -10250,10 +10249,39 @@ impl Waku {
         .or_else(|| self.preview_list_state(relative_path))
         .unwrap_or_else(|| ListState::new(0, ListAlignment::Top, px(1024.0)));
         if list_state.item_count() != block_count {
-            list_state.splice(0..list_state.item_count(), block_count);
-        } else if content_changed {
+            let retained = list_state.item_count().min(block_count);
+            list_state.splice(retained..list_state.item_count(), block_count - retained);
+        }
+        if content_changed {
             list_state.remeasure();
         }
+        // Scroll restoration belongs to the list, but opening a preview
+        // starts a new reading session. Keep this guard with the mounted
+        // surface, not the shared parsed cache or the retained list state.
+        let scroll_initialized = window.use_keyed_state(
+            SharedString::from(format!(
+                "markdown-preview-scroll-{:?}-{:?}",
+                editor_state.entity_id(),
+                if deliverable_page {
+                    self.boss_ui.deliverable_page
+                } else {
+                    None
+                },
+            )),
+            cx,
+            |_, _| Cell::new(false),
+        );
+        // The asynchronous read can initially mount an empty list. Anchor
+        // only after its first blocks arrive: splicing into an empty list
+        // can otherwise carry a restored end offset past the new content.
+        if block_count > 0 && !scroll_initialized.read(cx).replace(true) {
+            list_state.scroll_to(gpui::ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.0),
+            });
+        }
+        // Explicit navigation wins over the initial reading position.
+        self.apply_pending_preview_search_reveal(relative_path, window, cx);
         let mut preview_selection = self.file_preview_selection.clone();
         if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
             preview_selection.annotations = editor.annotations.clone();

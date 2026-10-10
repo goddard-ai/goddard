@@ -1,1 +1,1 @@
-- Reopen a Boss deliverable to return to its previous reading position; each deliverable keeps its own position. A deliverable marked unread — new, or re-published since you last opened it — opens at the top.
+- Markdown previews of Boss deliverables open at the beginning of the document and keep your reading position while you read, search, or receive content updates.
