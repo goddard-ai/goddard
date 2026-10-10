@@ -5835,28 +5835,32 @@ impl Waku {
                             )),
                     )
                     .child({
-                        let prefix = tr!("voice_scratchpad.hint_prefix");
-                        let command = tr!("voice_scratchpad.hint_command");
-                        let middle = tr!("voice_scratchpad.hint_middle");
-                        let enter = tr!("voice_scratchpad.hint_enter");
-                        let suffix = tr!("voice_scratchpad.hint_suffix");
-                        let ui_family = crate::fonts::current(cx).ui;
-                        let mut bold = font(ui_family.clone());
-                        bold.weight = FontWeight::BOLD;
-                        let run = |len: usize, font: gpui::Font| TextRun {
-                            len,
-                            font,
-                            color: theme.text_tertiary,
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        };
-                        div()
+                        let hint = div()
                             .absolute()
                             .left(px(24.0))
                             .bottom(px(overlap + HINT_CLEARANCE))
                             .text_size(sp(12.0))
-                            .child(
+                            .text_color(theme.text_tertiary);
+                        if self.state.press_to_talk_enabled {
+                            hint.child(tr!("voice_scratchpad.ptt_hint"))
+                        } else {
+                            let prefix = tr!("voice_scratchpad.hint_prefix");
+                            let command = tr!("voice_scratchpad.hint_command");
+                            let middle = tr!("voice_scratchpad.hint_middle");
+                            let enter = tr!("voice_scratchpad.hint_enter");
+                            let suffix = tr!("voice_scratchpad.hint_suffix");
+                            let ui_family = crate::fonts::current(cx).ui;
+                            let mut bold = font(ui_family.clone());
+                            bold.weight = FontWeight::BOLD;
+                            let run = |len: usize, font: gpui::Font| TextRun {
+                                len,
+                                font,
+                                color: theme.text_tertiary,
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            };
+                            hint.child(
                                 gpui::StyledText::new(format!(
                                     "{prefix}{command}{middle}{enter}{suffix}"
                                 ))
@@ -5868,6 +5872,7 @@ impl Waku {
                                     run(suffix.len(), font(ui_family)),
                                 ]),
                             )
+                        }
                     })
                     .child(
                         div()
@@ -5976,6 +5981,10 @@ impl Waku {
             return div();
         };
         let muted = scratchpad.muted;
+        let press_to_talk_recording = matches!(
+            self.press_to_talk.phase(),
+            press_to_talk::PressToTalkPhase::Starting | press_to_talk::PressToTalkPhase::Recording
+        );
         div()
             .absolute()
             .right(px(CONTROLS_INSET))
@@ -5984,43 +5993,56 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(9.0))
-            .child(if self.state.press_to_talk_enabled {
-                // The held chord is the only recorder in this mode — the
-                // control speaks for it instead of offering an unmute
-                // gesture `set_voice_scratchpad_muted` would refuse.
-                div()
-                    .flex()
-                    .items_center()
-                    .h(px(32.0))
-                    .text_size(sp(11.5))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("voice_scratchpad.ptt_hint"))
+            .child(
+                if self.state.press_to_talk_enabled && press_to_talk_recording {
+                    div()
+                        .id("vs-mute")
+                        .flex()
+                        .items_center()
+                        .h(px(32.0))
+                        .px(px(24.0))
+                        .flex_none()
+                        .rounded(px(PILL_RADIUS))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.inverse)
+                        .justify_center()
+                        .text_size(sp(14.0))
+                        .text_color(theme.on_inverse)
+                        .child(format!(
+                            "🔴 {}",
+                            tr!("press_to_talk.recording").trim_end_matches('…')
+                        ))
+                        .into_any_element()
+                } else {
+                    self.scratchpad_pill(
+                        "vs-mute",
+                        &scratchpad.mute_focus,
+                        if muted {
+                            tr!("voice_scratchpad.unmute")
+                        } else {
+                            tr!("voice_scratchpad.mute")
+                        },
+                        // "Mute" sets the width — the narrower label keeps the
+                        // pill constant across the toggle without over-widening.
+                        Some(tr!("voice_scratchpad.mute")),
+                        24.0,
+                        true,
+                        theme,
+                        |this, _window, cx| {
+                            let muted = this
+                                .selected_voice_scratchpad()
+                                .is_some_and(|scratchpad| !scratchpad.muted);
+                            if !muted && this.state.press_to_talk_enabled {
+                                this.set_press_to_talk_enabled(false, cx);
+                            }
+                            this.set_voice_scratchpad_muted(muted, cx);
+                        },
+                        cx,
+                    )
                     .into_any_element()
-            } else {
-                self.scratchpad_pill(
-                    "vs-mute",
-                    &scratchpad.mute_focus,
-                    if muted {
-                        tr!("voice_scratchpad.unmute")
-                    } else {
-                        tr!("voice_scratchpad.mute")
-                    },
-                    // "Mute" sets the width — the narrower label keeps the
-                    // pill constant across the toggle without over-widening.
-                    Some(tr!("voice_scratchpad.mute")),
-                    24.0,
-                    true,
-                    theme,
-                    |this, _window, cx| {
-                        let muted = this
-                            .selected_voice_scratchpad()
-                            .is_some_and(|scratchpad| !scratchpad.muted);
-                        this.set_voice_scratchpad_muted(muted, cx);
-                    },
-                    cx,
-                )
-                .into_any_element()
-            })
+                },
+            )
             .child(self.scratchpad_pill(
                 "vs-hide",
                 &scratchpad.hide_focus,
