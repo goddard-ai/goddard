@@ -2348,6 +2348,8 @@ sidebar.chats:
   en: Chats
 sidebar.recent_deliverables:
   en: Deliverables
+sidebar.deliverables_view_all:
+  en: View all deliverables
 sidebar.yesterday:
   en: Yesterday
 sidebar.this_week:

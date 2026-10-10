@@ -1,0 +1,1 @@
+- **Boss:** the sidebar's Deliverables group header gains a hover-revealed button that opens the full Deliverables list in the Boss brain; it also takes keyboard focus, so Tab reaches it without hovering.

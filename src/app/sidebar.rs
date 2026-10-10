@@ -4711,6 +4711,89 @@ impl Waku {
                         })),
                 )
         });
+        // Recent deliverables merge every boss's records into one recency
+        // preview; the group's header action opens the full library on the
+        // daemon that published the freshest one.
+        let open_all = (group == SidebarGroup::Deliverables)
+            .then(|| {
+                self.boss_ui
+                    .states
+                    .iter()
+                    .flat_map(|(key, state)| {
+                        state
+                            .deliverables
+                            .iter()
+                            .map(move |deliverable| (*key, deliverable))
+                    })
+                    .filter(|(_, deliverable)| deliverable.archived_at.is_none())
+                    .max_by_key(|(_, deliverable)| deliverable.updated_at)
+                    .map(|(key, _)| key)
+            })
+            .flatten()
+            .map(|key| {
+                let open_focus = self
+                    .sidebar_group_open_focuses
+                    .borrow_mut()
+                    .entry(group)
+                    .or_insert_with(|| cx.focus_handle())
+                    .clone();
+                div()
+                    .w(px(20.0))
+                    .h(px(22.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "sidebar-group-open-{group_key}"
+                            )))
+                            .track_focus(&open_focus)
+                            .tab_index(0)
+                            .tab_stop(true)
+                            .w_0()
+                            .h(px(22.0))
+                            .overflow_hidden()
+                            .rounded(px(4.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .opacity(0.0)
+                            .group_hover(group_name.clone(), |style| {
+                                style.w(px(20.0)).opacity(1.0)
+                            })
+                            .focus_visible(|style| {
+                                style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
+                            })
+                            .hover(|style| style.bg(theme.overlay))
+                            .active(|style| style.bg(theme.overlay_strong))
+                            .aria_label(tr!("sidebar.deliverables_view_all"))
+                            .tooltip(Tooltip::text(tr!("sidebar.deliverables_view_all")))
+                            .child(icon("icons/brain.svg", 14.0, theme.text_secondary))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.open_boss_page(key, boss::BossTab::Deliverables, window, cx);
+                            }))
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        this.open_boss_page(
+                                            key,
+                                            boss::BossTab::Deliverables,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )),
+                    )
+            });
 
         // The Terminals group reads as a third action row, so it matches the
         // New Task and Search rows' metrics — height, padding, icon box,
@@ -4868,6 +4951,7 @@ impl Waku {
                 .child(div().flex_1()),
         )
         .when_some(compose, |element, compose| element.child(compose))
+        .when_some(open_all, |element, open_all| element.child(open_all))
         // The folded group's unread dot takes the same right-edge slot a
         // session row's indicator does, past the always-reserved compose
         // box so it stays put whether or not hover reveals the button.

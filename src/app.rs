@@ -3350,9 +3350,10 @@ pub struct Waku {
     /// the "Show dormant" fold — runtime-only like the live reveal counts.
     sidebar_project_dormant_reveals: HashMap<SidebarGroup, usize>,
     /// Stable keyboard focus for each virtualized sidebar group header and
-    /// its hover-revealed New Task control.
+    /// its hover-revealed New Task and open-library controls.
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_group_compose_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    sidebar_group_open_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     /// Stable keyboard focus for each session row's hover-revealed archive
     /// control.
     sidebar_session_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
@@ -7383,6 +7384,7 @@ impl Waku {
                 sidebar_project_dormant_reveals: HashMap::new(),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
+                sidebar_group_open_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_deliverable_finder_focuses: RefCell::new(HashMap::new()),
