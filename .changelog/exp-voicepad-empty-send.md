@@ -1,0 +1,1 @@
+- **VoicePad:** Pressing Enter with the VoicePad open and no transcript now sends the text in the composer as expected.

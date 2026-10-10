@@ -4522,9 +4522,9 @@ impl Waku {
         }) {
             return;
         }
-        // The visible scratchpad sends its transcript on Enter — the typed
-        // draft stays in the composer underneath it.
-        if self.voice_scratchpad_visible() {
+        // A sendable scratchpad transcript takes Enter; otherwise let the
+        // typed composer draft follow its normal send path.
+        if self.voice_scratchpad_sendable() {
             self.submit_voice_scratchpad(cx);
             return;
         }
