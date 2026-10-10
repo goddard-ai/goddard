@@ -12508,7 +12508,7 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
         let mut state = backend.task_state.lock();
         let session = state.session_mut(old).unwrap();
         session.context_usage = Some(crate::model::ContextUsage {
-            tokens: 80,
+            tokens: 75,
             window: Some(100),
         });
         backend.task_store.save(&mut state).unwrap();
@@ -12527,7 +12527,7 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
         .context_usage
         .as_mut()
         .unwrap()
-        .tokens = 81;
+        .tokens = 76;
     backend
         .reconcile_boss_rotation(crate::model::unix_time())
         .unwrap();
@@ -12565,7 +12565,7 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         let now = crate::model::unix_time();
         journal.begin(identity.id, old, next, now).unwrap();
         journal.intent.as_mut().unwrap().reason = Some(
-            "boss_rotation_context_threshold=0.8 exceeded (context_tokens=81, context_window=100)"
+            "boss_rotation_context_threshold=0.75 exceeded (context_tokens=76, context_window=100)"
                 .into(),
         );
         journal.persist(&root.join("boss/rotation.json")).unwrap();

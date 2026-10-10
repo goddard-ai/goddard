@@ -170,7 +170,7 @@ fn default_experiment_enabled() -> bool {
 }
 
 fn default_boss_rotation_threshold() -> f64 {
-    0.8
+    0.75
 }
 
 /// The shipped employee-chat search window — recent work without a scan

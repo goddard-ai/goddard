@@ -13,6 +13,8 @@ pub struct BossRotationConfig {
     pub context_threshold: f64,
 }
 
+const MAX_CONTEXT_THRESHOLD: f64 = 0.75;
+
 impl Default for BossRotationConfig {
     fn default() -> Self {
         let policy = BossRotationPolicy::default();
@@ -25,7 +27,16 @@ impl Default for BossRotationConfig {
 impl BossRotationConfig {
     pub fn from_settings(settings: &crate::DaemonSettings) -> Self {
         Self {
-            context_threshold: settings.boss_rotation_context_threshold,
+            // Older persisted settings carry the previous 0.8 default. Keep
+            // rotation ahead of provider compaction even before they are
+            // rewritten; lower configured thresholds remain effective.
+            context_threshold: if settings.boss_rotation_context_threshold.is_finite() {
+                settings
+                    .boss_rotation_context_threshold
+                    .min(MAX_CONTEXT_THRESHOLD)
+            } else {
+                settings.boss_rotation_context_threshold
+            },
         }
     }
 

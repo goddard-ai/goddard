@@ -72,7 +72,7 @@ fn default_experiment_enabled() -> bool {
 }
 
 fn default_boss_rotation_threshold() -> f64 {
-    0.8
+    0.75
 }
 
 fn default_employee_chat_search_days() -> u32 {
@@ -543,7 +543,7 @@ impl PersistedState {
             subagents_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
             boss_rotation_disabled: false,
-            boss_rotation_context_threshold: 0.8,
+            boss_rotation_context_threshold: 0.75,
             employee_chat_search_days: default_employee_chat_search_days(),
             composer_drafts_experiment_enabled: default_experiment_enabled(),
             title_models: Default::default(),

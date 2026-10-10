@@ -21,7 +21,7 @@ pub struct BossRotationConfig {
 impl Default for BossRotationConfig {
     fn default() -> Self {
         Self {
-            context_threshold: 0.8,
+            context_threshold: 0.75,
         }
     }
 }
@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn trigger_requires_threshold_crossing_only() {
         let config = BossRotationConfig::default();
-        assert!(!config.should_rotate(79, Some(100)));
-        assert!(!config.should_rotate(80, Some(100)));
-        assert!(config.should_rotate(81, Some(100)));
+        assert!(!config.should_rotate(74, Some(100)));
+        assert!(!config.should_rotate(75, Some(100)));
+        assert!(config.should_rotate(76, Some(100)));
         assert!(!config.should_rotate(90, None));
         assert!(!config.should_rotate(90, Some(0)));
         let disabled = BossRotationConfig {

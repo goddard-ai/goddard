@@ -82,7 +82,7 @@ function fixture(options: { attached?: boolean } = {}) {
             sandbox_experiment_enabled: false, sandbox_default_enabled: false,
             keep_awake: false, qa_branch: 'qa', auto_prompts: [],
             boss_experiment_enabled: false, boss_rotation_disabled: false,
-            boss_rotation_context_threshold: 0.8, employee_chat_search_days: 3,
+            boss_rotation_context_threshold: 0.75, employee_chat_search_days: 3,
             wireframes_experiment_enabled: false,
           } };
         case 'loadTaskState':

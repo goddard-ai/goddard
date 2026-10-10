@@ -1,0 +1,1 @@
+- Reduce the chance of provider compaction in long Boss conversations by rotating after context usage passes 75% of the provider-reported context window.
