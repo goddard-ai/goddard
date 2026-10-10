@@ -5187,10 +5187,18 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let session_id = session.id;
+        let boss_chat = self
+            .boss_ui
+            .states
+            .values()
+            .any(|state| state.session_id == Some(session_id));
         if !session.queued_messages.iter().any(|message| {
             // A steer parked mid-turn renders at the transcript's end, not
             // in this card.
-            !super::runtime::queued_message_is_pending_steer(session, message)
+            // Employee notifications stay in the durable queue, where the
+            // daemon waits behind user prompts; they are not Boss chat drafts.
+            (!boss_chat || !message.is_agent_owned())
+                && !super::runtime::queued_message_is_pending_steer(session, message)
                 && (!message.hidden || queued_message_is_continue(message))
         }) {
             return None;
@@ -5251,6 +5259,9 @@ impl Waku {
                         .child(div().h(px(30.0)).flex().items_center().child(remove_button)),
                 );
                 rows += 1;
+                continue;
+            }
+            if boss_chat && message.is_agent_owned() {
                 continue;
             }
             if message.hidden {
