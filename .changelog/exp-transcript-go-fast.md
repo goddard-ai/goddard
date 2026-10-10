@@ -1,0 +1,1 @@
+- The **Go fast** speed reader is now an experiment opt-in — turn on Speed reader under Settings → Experiments to keep the right-click entry on assistant replies and Markdown previews.

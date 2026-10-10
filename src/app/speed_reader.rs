@@ -75,6 +75,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.speed_reader_enabled {
+            return;
+        }
         let focus = self.transcript_control_focus("speed-reader", cx);
         let Some(reader) = SpeedReader::new(
             title,

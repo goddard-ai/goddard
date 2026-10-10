@@ -9930,6 +9930,7 @@ impl Waku {
         let reader_source = text.to_owned();
         let reader_title = tr!("speed_reader.preview_title", path = "plan");
         let reader_waku = cx.entity().downgrade();
+        let speed_reader_enabled = self.state.speed_reader_enabled;
         let ctx = MarkdownCtx::new(
             format!("plan-preview-{session_id}"),
             &palette,
@@ -9941,6 +9942,9 @@ impl Waku {
         .with_guided_reading(self.guided_reading())
         .with_standalone_context_menu(self.menu_handle("plan-preview-math", cx))
         .with_context_menu_items(Rc::new(move |_| {
+            if !speed_reader_enabled {
+                return Vec::new();
+            }
             let source = reader_selection
                 .selection
                 .borrow()
@@ -10076,6 +10080,7 @@ impl Waku {
         let reader_selection = preview_selection.clone();
         let reader_title = tr!("speed_reader.preview_title", path = "plan");
         let reader_waku = cx.entity().downgrade();
+        let speed_reader_enabled = self.state.speed_reader_enabled;
         let (block, count) = {
             let cache = self.plan_markdown.borrow();
             let Some((_, view)) = cache.as_ref().filter(|(id, _)| *id == session_id) else {
@@ -10093,6 +10098,9 @@ impl Waku {
             .with_guided_reading(self.guided_reading())
             .with_standalone_context_menu(self.menu_handle("plan-preview-math", cx))
             .with_context_menu_items(Rc::new(move |_| {
+                if !speed_reader_enabled {
+                    return Vec::new();
+                }
                 let source = reader_selection
                     .selection
                     .borrow()
@@ -10236,6 +10244,7 @@ impl Waku {
         let reader_editor_state = editor_state.clone();
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
+        let speed_reader_enabled = self.state.speed_reader_enabled;
         let menu_composer = self.composer.clone();
         let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
@@ -10268,6 +10277,9 @@ impl Waku {
                     &reader_waku,
                     cx,
                 );
+            }
+            if !speed_reader_enabled {
+                return Vec::new();
             }
             let source = reader_selection
                 .selection
@@ -10423,6 +10435,7 @@ impl Waku {
         let reader_editor_state = editor_state;
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
+        let speed_reader_enabled = self.state.speed_reader_enabled;
         let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
@@ -10434,6 +10447,9 @@ impl Waku {
         .with_guided_reading(self.guided_reading())
         .with_standalone_context_menu(self.menu_handle("file-preview-math", cx))
         .with_context_menu_items(Rc::new(move |cx| {
+            if !speed_reader_enabled {
+                return Vec::new();
+            }
             let source = reader_selection
                 .selection
                 .borrow()

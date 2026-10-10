@@ -1472,6 +1472,9 @@ pub struct AppSettings {
     /// Experimental: the quick-action dock that rises above the sidebar
     /// footer on hover. Defaults on in debug builds.
     pub sidebar_dock_enabled: bool,
+    /// Experimental: the "Go fast" reader that plays Markdown prose one
+    /// word at a time. Defaults on in debug builds.
+    pub speed_reader_enabled: bool,
     /// Guided reading emphasizes word-leading graphemes in transcript prose.
     pub guided_reading_enabled: bool,
     /// How much of each word is emphasized: 1–5 mapping to ~20–60% of the
@@ -1642,6 +1645,7 @@ impl Default for AppSettings {
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
+            speed_reader_enabled: default_experiment_enabled(),
             guided_reading_enabled: false,
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
@@ -2207,6 +2211,10 @@ pub struct PersistedState {
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub sidebar_dock_enabled: bool,
+    /// Experimental: the "Go fast" reader that plays Markdown prose one
+    /// word at a time. Defaults on in debug builds.
+    #[serde(default = "default_experiment_enabled")]
+    pub speed_reader_enabled: bool,
     #[serde(default)]
     pub guided_reading_enabled: bool,
     #[serde(default = "default_guided_reading_fixation")]
@@ -2679,6 +2687,7 @@ impl PersistedState {
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
             sidebar_dock_enabled: default_experiment_enabled(),
+            speed_reader_enabled: default_experiment_enabled(),
             guided_reading_enabled: false,
             guided_reading_fixation: default_guided_reading_fixation(),
             guided_reading_saccade: default_guided_reading_saccade(),
@@ -3156,6 +3165,7 @@ impl PersistedState {
             disabled_suggested_actions: self.disabled_suggested_actions.clone(),
             automations_enabled: self.automations_enabled,
             sidebar_dock_enabled: self.sidebar_dock_enabled,
+            speed_reader_enabled: self.speed_reader_enabled,
             guided_reading_enabled: self.guided_reading_enabled,
             guided_reading_fixation: self.guided_reading_fixation,
             guided_reading_saccade: self.guided_reading_saccade,
@@ -3326,6 +3336,7 @@ impl PersistedState {
         self.disabled_suggested_actions = settings.disabled_suggested_actions;
         self.automations_enabled = settings.automations_enabled;
         self.sidebar_dock_enabled = settings.sidebar_dock_enabled;
+        self.speed_reader_enabled = settings.speed_reader_enabled;
         self.guided_reading_enabled = settings.guided_reading_enabled;
         self.guided_reading_fixation = settings.guided_reading_fixation.clamp(1, 5);
         // Saccade is ten-stepped; a hand-edited value snaps to the nearest

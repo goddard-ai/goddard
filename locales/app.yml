@@ -999,6 +999,10 @@ experiments.sidebar_dock_title:
   en: Sidebar dock
 experiments.sidebar_dock_description:
   en: A quick-action dock that rises above the sidebar footer on hover — inbox, archive, keyboard shortcuts, and settings one click away.
+experiments.speed_reader_title:
+  en: Speed reader
+experiments.speed_reader_description:
+  en: The "Go fast" context-menu entry on assistant replies and Markdown previews — prose plays one word at a time, pausing at code, equations, and tables.
 experiments.voice_briefing_title:
   en: Voice briefing
 experiments.voice_briefing_description:

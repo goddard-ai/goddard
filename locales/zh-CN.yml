@@ -2274,6 +2274,8 @@ experiments.sandbox_description: 在输入框的访问菜单中显示环境选�
 experiments.sandbox_title: 沙箱 VM
 experiments.sidebar_dock_description: 一个悬停时在侧边栏底部升起的快捷操作坞 — 收件箱、归档、键盘快捷键和设置一键可达。
 experiments.sidebar_dock_title: 侧边栏操作坞
+experiments.speed_reader_description: 在智能体回复和 Markdown 预览的右键菜单中提供“快速阅读”入口 — 逐词播放正文，并在代码、公式和表格处暂停。
+experiments.speed_reader_title: 快速阅读器
 experiments.subagents_description: 让会话把运行委派给具名子智能体，支持按服务商分档和带成本标注的路由，并在转录中清晰展示。Claude Code、GitHub Copilot 和 Pi 完全支持；Codex 和 OpenCode 仅提供建议；其他服务商保持禁用。只有提供工具策略的服务商会强制执行只读助手。对开启后启动的会话生效。
 experiments.subagents_title: 子智能体
 experiments.voice_briefing_title: 语音简报

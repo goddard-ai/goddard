@@ -5621,6 +5621,17 @@ impl Waku {
                 eval_backed: false,
                 tuning: None,
             },
+            ExperimentDef {
+                group: ExperimentGroup::Surfaces,
+                id: "speed-reader-experiment-toggle",
+                icon: "icons/gauge.svg",
+                title_key: "experiments.speed_reader_title",
+                description_key: "experiments.speed_reader_description",
+                enabled: self.state.speed_reader_enabled,
+                set: Self::set_speed_reader_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
         ];
         let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
             let cards: Vec<AnyElement> = experiments
@@ -7557,6 +7568,17 @@ impl Waku {
 
     fn set_sidebar_dock_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.sidebar_dock_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    /// The reader overlay is transient, so disabling only has to drop any
+    /// open instance — its menu entries disappear on the next rebuild.
+    fn set_speed_reader_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.speed_reader_enabled = enabled;
+        if !enabled {
+            self.speed_reader = None;
+        }
         self.save();
         cx.notify();
     }

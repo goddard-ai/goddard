@@ -2946,7 +2946,13 @@ pub(super) fn message_menu_items(
         }));
     }
 
-    if offer_speed_reader {
+    // The experiment opt-in reads through the weak entity; a dead handle —
+    // only possible in tests — falls back to enabled since the item's own
+    // update call would no-op anyway.
+    let speed_reader_enabled = waku
+        .upgrade()
+        .is_none_or(|waku| waku.read(_cx).state.speed_reader_enabled);
+    if offer_speed_reader && speed_reader_enabled {
         let reader_content = copy_content;
         let waku = waku.clone();
         items.push(MenuItem::Separator);

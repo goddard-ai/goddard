@@ -2322,6 +2322,8 @@ experiments.sandbox_description: 入力欄のアクセスメニューに環境�
 experiments.sandbox_title: サンドボックス VM
 experiments.sidebar_dock_description: ホバーでサイドバーのフッターの上に現れるクイックアクションドックです — 受信トレイ、アーカイブ、キーボードショートカット、設定にワンクリックでアクセスできます。
 experiments.sidebar_dock_title: サイドバードック
+experiments.speed_reader_description: アシスタントの返信や Markdown プレビューのコンテキストメニューに「高速で読む」エントリを表示します — 本文を一語ずつ再生し、コード・数式・表で一時停止します。
+experiments.speed_reader_title: スピードリーダー
 experiments.subagents_description: セッションが実行を名前付きサブエージェントに委任できるようにします。Claude Code、GitHub Copilot、Pi は完全対応、Codex と OpenCode は助言のみ、それ以外のプロバイダーでは無効です。読み取り専用ヘルパーの強制は、ツールポリシーを提供するプロバイダーに限られます。有効化後に開始したセッションに適用されます。
 experiments.subagents_title: サブエージェント
 experiments.voice_briefing_title: 音声ブリーフィング
