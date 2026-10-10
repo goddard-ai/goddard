@@ -6860,8 +6860,8 @@ voice_scratchpad.pill_one:
   en: Voicepad · 1 line
 voice_scratchpad.pill_many:
   en: Voicepad · %{count} lines
-voice_scratchpad.open_pad:
-  en: Open VoicePad
+voice_scratchpad.show_latest_transcription:
+  en: Show latest transcription
 voice_scratchpad.clear_pad:
   en: Clear VoicePad
 voice_scratchpad.pad_cleared:

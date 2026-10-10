@@ -3353,7 +3353,7 @@ voice_scratchpad.connection_lost: 接続が切れました——文字起こし�
 voice_scratchpad.paused: サービスが文字起こしを一時停止しました——待機中です
 voice_scratchpad.pill_one: Voicepad · 1 行
 voice_scratchpad.pill_many: Voicepad · %{count} 行
-voice_scratchpad.open_pad: VoicePad を開く
+voice_scratchpad.show_latest_transcription: 最新の文字起こしを表示
 voice_scratchpad.clear_pad: VoicePad をクリア
 voice_scratchpad.pad_cleared: VoicePad をクリアしました
 voice_scratchpad.undo_clear: クリアを取り消す

@@ -3304,7 +3304,7 @@ voice_scratchpad.connection_lost: 连接已断开——转写暂停
 voice_scratchpad.paused: 服务已暂停转写——仍在监听
 voice_scratchpad.pill_one: Voicepad · 1 行
 voice_scratchpad.pill_many: Voicepad · %{count} 行
-voice_scratchpad.open_pad: 打开 VoicePad
+voice_scratchpad.show_latest_transcription: 显示最新转写
 voice_scratchpad.clear_pad: 清空 VoicePad
 voice_scratchpad.pad_cleared: 已清空 VoicePad
 voice_scratchpad.undo_clear: 撤销清空

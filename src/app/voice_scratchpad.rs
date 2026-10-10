@@ -4913,15 +4913,15 @@ impl Waku {
         cx.notify();
     }
 
-    /// The pill's main action — opens or resurfaces `owner`'s pad,
-    /// never discarding an already-visible one. In Press to Talk mode
-    /// the pad stays muted; a pad that isn't on the selected chat opens
-    /// through the session activation it lives on.
-    fn open_voice_pad(&mut self, owner: press_to_talk::VoicePadOwner, cx: &mut Context<Self>) {
-        let on_screen = self.voice_pad_owner_on_screen(owner);
-        // The pill also resurfaces a bubble dismissed by typing or an
-        // outside click — the shared field rebinds so the text opens
-        // editable again.
+    /// The VoicePad pill resurfaces its latest dismissed transcription
+    /// without changing the pad's visibility.
+    fn reveal_latest_press_to_talk_bubble(
+        &mut self,
+        owner: press_to_talk::VoicePadOwner,
+        cx: &mut Context<Self>,
+    ) {
+        // The pill resurfaces the latest bubble dismissed by typing or an
+        // outside click. It leaves the VoicePad panel's visibility alone.
         let revealed = self.voice_scratchpads.get_mut(&owner).and_then(|pad| {
             let bubble = pad.press_to_talk_bubble.filter(|bubble| bubble.dismissed)?;
             let text = pad.transcript.paragraph_text(bubble.paragraph)?.to_owned();
@@ -4931,28 +4931,6 @@ impl Waku {
         if let Some((paragraph, text)) = revealed {
             self.bind_press_to_talk_bubble(owner, paragraph, text, cx);
         }
-        let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) else {
-            return;
-        };
-        let hidden = scratchpad.hidden;
-        if on_screen {
-            if hidden {
-                scratchpad.hidden = false;
-                scratchpad.follow_tail = true;
-                cx.notify();
-            }
-            return;
-        }
-        // The pad belongs to another chat — activating the session is
-        // what "open VoicePad" means for it. A deliverable's pad only
-        // reaches here while its own page is live, so this fallback sees
-        // session ids alone.
-        self.select_session(owner, cx);
-        if let Some(scratchpad) = self.voice_scratchpads.get_mut(&owner) {
-            scratchpad.hidden = false;
-            scratchpad.follow_tail = true;
-        }
-        cx.notify();
     }
 
     /// The pill's posture for `owner`'s pad: content lines to show, the
@@ -5387,8 +5365,13 @@ impl Waku {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text_secondary)
                         .focus_visible(|button| button.bg(theme.overlay))
-                        .tooltip(Tooltip::text(tr!("voice_scratchpad.open_pad")))
-                        .on_activation(cx, move |this, _, cx| this.open_voice_pad(owner, cx))
+                        .tooltip(Tooltip::text(tr!(
+                            "voice_scratchpad.show_latest_transcription"
+                        )))
+                        .aria_label(tr!("voice_scratchpad.show_latest_transcription"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.reveal_latest_press_to_talk_bubble(owner, cx)
+                        })
                         .child(if lines == 1 {
                             tr!("voice_scratchpad.pill_one")
                         } else {
