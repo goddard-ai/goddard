@@ -4694,16 +4694,17 @@ mod tests {
             palette().text,
             &[],
         );
+        let slot = crate::input::nonbreaking_chip_text(crate::input::ATOM_ICON_SLOT);
+        let label = crate::input::nonbreaking_chip_text("Goddard");
         assert_eq!(
             flat.text.as_ref(),
-            format!(
-                "ship {SLOT}Goddard{ATOM_CHIP_EDGE} now",
-                SLOT = crate::input::ATOM_ICON_SLOT
-            )
+            format!("ship {slot}{label}{ATOM_CHIP_EDGE} now")
         );
+        let start = "ship ".len();
+        let end = start + slot.len() + label.len() + ATOM_CHIP_EDGE.len();
         assert_eq!(
             flat.atom_ranges,
-            vec![(5..27, AtomChipTarget::Ref(AtomRefKind::Project))]
+            vec![(start..end, AtomChipTarget::Ref(AtomRefKind::Project))]
         );
         assert!(flat.links.is_empty());
         // A kind nibble this build does not know still opens a chip —
@@ -4722,7 +4723,10 @@ mod tests {
             palette().text,
             &[],
         );
-        assert_eq!(flat.atom_ranges, vec![(0..22, AtomChipTarget::Text)]);
+        let end = crate::input::nonbreaking_chip_text(crate::input::ATOM_ICON_SLOT).len()
+            + crate::input::nonbreaking_chip_text("Mystery").len()
+            + ATOM_CHIP_EDGE.len();
+        assert_eq!(flat.atom_ranges, vec![(0..end, AtomChipTarget::Text)]);
     }
 
     #[test]
@@ -4856,14 +4860,15 @@ mod tests {
             &[],
         );
         assert_runs_tile(&flat);
+        let slot = crate::input::nonbreaking_chip_text(crate::input::ATOM_ICON_SLOT);
+        let label = crate::input::nonbreaking_chip_text("Pasted text");
         assert_eq!(
             flat.text.as_ref(),
-            format!(
-                "a {SLOT}Pasted text{ATOM_CHIP_EDGE} b  c",
-                SLOT = crate::input::ATOM_ICON_SLOT
-            )
+            format!("a {slot}{label}{ATOM_CHIP_EDGE} b  c")
         );
-        assert_eq!(flat.atom_ranges, vec![(2..28, AtomChipTarget::Text)]);
+        let start = "a ".len();
+        let end = start + slot.len() + label.len() + ATOM_CHIP_EDGE.len();
+        assert_eq!(flat.atom_ranges, vec![(start..end, AtomChipTarget::Text)]);
     }
 
     #[test]
@@ -4884,11 +4889,12 @@ mod tests {
             &mentions,
         );
         assert_runs_tile(&flat);
-        let slot = crate::input::ATOM_AVATAR_SLOT;
+        let slot = crate::input::nonbreaking_chip_text(crate::input::ATOM_AVATAR_SLOT);
+        let name = crate::input::nonbreaking_chip_text("Rhea");
         assert_eq!(
             flat.text.as_ref(),
             format!(
-                "ask {slot}Rhea{ATOM_CHIP_EDGE}, {slot}Rhea{ATOM_CHIP_EDGE} Rhea Rhea and Rheana too"
+                "ask {slot}{name}{ATOM_CHIP_EDGE}, {slot}{name}{ATOM_CHIP_EDGE} Rhea Rhea and Rheana too"
             )
         );
         assert_eq!(flat.atom_ranges.len(), 2);

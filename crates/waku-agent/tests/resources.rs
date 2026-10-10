@@ -218,6 +218,7 @@ fn run_preserves_standard_streams_exit_status_and_releases() {
         .args([
             "resource",
             "run",
+            "--json",
             PAYLOAD,
             "--",
             "/bin/sh",
@@ -251,6 +252,7 @@ fn refused_registration_never_starts_the_workload() {
         .args([
             "resource",
             "run",
+            "--json",
             PAYLOAD,
             "--",
             "/bin/sh",
@@ -273,11 +275,12 @@ fn nested_run_borrows_parent_and_only_outer_runner_attaches_and_releases() {
         .args([
             "resource",
             "run",
+            "--json",
             PAYLOAD,
             "--",
             "/bin/sh",
             "-c",
-            "\"$TEST_CLI\" resource run \"$TEST_PAYLOAD\" -- /bin/sh -c 'printf nested'",
+            "\"$TEST_CLI\" resource run --json \"$TEST_PAYLOAD\" -- /bin/sh -c 'printf nested'",
         ])
         .output()
         .unwrap();
@@ -298,7 +301,7 @@ fn cancellation_terminates_only_the_owned_simulated_process_group() {
     let daemon = Daemon::start();
     let child = daemon
         .cli()
-        .args(["resource", "run", PAYLOAD, "--", "/bin/sleep", "30"])
+        .args(["resource", "run", "--json", PAYLOAD, "--", "/bin/sleep", "30"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -594,9 +594,9 @@ mod tests {
         );
         assert_eq!(
             rows[turns[2].row_index],
-            TranscriptRowKind::BossHistory(second.id, BossHistoryRow::Message(1))
+            TranscriptRowKind::BossHistory(second.id, BossHistoryRow::Message(2))
         );
-        assert_eq!(rows[turns[3].row_index], TranscriptRowKind::Message(1));
+        assert_eq!(rows[turns[3].row_index], TranscriptRowKind::Message(2));
         assert_eq!(turns[2].response, "Answer to Third");
         assert_eq!(turns[3].response, "Answer to Fourth");
     }
@@ -625,7 +625,7 @@ mod tests {
         let list = ListState::new(before.len(), ListAlignment::Top, px(240.0));
         let live_row = before
             .iter()
-            .position(|row| *row == TranscriptRowKind::Message(1))
+            .position(|row| *row == TranscriptRowKind::Message(2))
             .unwrap();
         list.scroll_to(ListOffset {
             item_ix: live_row,
@@ -633,7 +633,7 @@ mod tests {
         });
         list.splice(replaced, inserted);
         let scroll = list.logical_scroll_top();
-        assert_eq!(after[scroll.item_ix], TranscriptRowKind::Message(1));
+        assert_eq!(after[scroll.item_ix], TranscriptRowKind::Message(2));
         assert_eq!(scroll.offset_in_item, px(7.0));
     }
 

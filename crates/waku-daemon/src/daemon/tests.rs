@@ -8816,22 +8816,22 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// An employee's `prompt` to its supervisor is the report channel — it
-/// delivers with sender attribution. A prompt to any other task fails
-/// with the actionable channel names instead of a bare roster refusal.
+/// An employee's `prompt` — supervisor resolution or an explicit task —
+/// is refused before delivery: the only channels upward are the blocker
+/// report and the final report. A non-employee caller without an address
+/// gets the retired steer-supervisor error, and a boss prompt to an
+/// employee still delivers.
 #[test]
-fn an_employee_prompt_reaches_its_supervisor_and_refuses_elsewhere() {
+fn an_employee_prompt_is_refused_with_the_report_channels() {
     let root = std::env::temp_dir().join(format!("boss-report-channel-{}", Uuid::new_v4()));
-    let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
+    let (backend, supervisor, employee_id, parent_capture, child_capture) =
+        employee_finish_fixture(&root);
     let decoy = detach_boss_session(&backend, supervisor);
     let mut settings = backend.settings.get();
     settings.agent_tools_enabled = true;
     backend.settings.replace(settings).unwrap();
-    // Even while the sender works, an idle supervisor starts immediately.
-    backend
-        .agent
-        .note_driver_event(employee_id, &DriverEvent::TurnStarted);
-    backend
+    // The command surface refuses before resolving the supervisor target.
+    let error = backend
         .handle(
             Request {
                 request_id: Uuid::new_v4(),
@@ -8848,128 +8848,91 @@ fn an_employee_prompt_reaches_its_supervisor_and_refuses_elsewhere() {
             EventSink::detached(),
             Some(employee_id),
         )
-        .unwrap();
-    {
-        let prompts = parent_capture.prompts.lock();
-        assert_eq!(prompts.len(), 1, "{prompts:?}");
-        assert!(prompts[0].contains("status update"));
-        assert!(prompts[0].contains(&employee_id.to_string()));
-    }
-    assert!(!backend.agent.has_queued(supervisor));
-    backend
-        .agent
-        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
-    // Every legacy delivery mode must steer, never park behind either turn.
-    for delivery in [
-        crate::protocol::AgentPromptDelivery::Queue,
-        crate::protocol::AgentPromptDelivery::Interrupt,
-        crate::protocol::AgentPromptDelivery::Steer,
-    ] {
-        backend
-            .agent_prompt(
-                Some(employee_id),
-                Some(supervisor),
-                None,
-                None,
-                "live update".into(),
-                delivery,
-                EventSink::detached(),
-            )
-            .unwrap();
-        assert!(!backend.agent.has_queued(supervisor));
-    }
-    let steers = parent_capture.steers.lock();
-    assert_eq!(steers.len(), 3);
-    assert!(
-        steers
-            .iter()
-            .all(|text| text.contains("live update") && text.contains(&employee_id.to_string()))
-    );
-    drop(steers);
-    assert!(
-        backend
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == supervisor)
-            .unwrap()
-            .queued_messages
-            .is_empty()
-    );
-    // An unrelated task is not a report target — the error names the
-    // channels the employee can actually use.
-    let project_id = backend.task_state.lock().sessions[0].project_id;
+        .unwrap_err();
+    let text = format!("{error:#}");
+    assert!(text.contains("cannot prompt or steer"), "{text}");
+    assert!(text.contains("report-blocker"), "{text}");
+    // Supervisor, another task, an unknown id, self, and the empty
+    // address — every delivery mode is refused the same way.
     let other = {
         let mut state = backend.task_state.lock();
-        let session = AgentSession::new(project_id, ProviderKind::Codex);
+        let session = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
         let id = session.id;
         state.push_session(session);
         backend.task_store.save(&mut state).unwrap();
         id
     };
-    let error = backend
-        .agent_prompt(
-            Some(employee_id),
+    for delivery in [
+        crate::protocol::AgentPromptDelivery::Queue,
+        crate::protocol::AgentPromptDelivery::Interrupt,
+        crate::protocol::AgentPromptDelivery::Steer,
+    ] {
+        for target in [
+            Some(supervisor),
             Some(other),
+            Some(Uuid::new_v4()),
+            Some(employee_id),
+            None,
+        ] {
+            let error = backend
+                .agent_prompt(
+                    Some(employee_id),
+                    target,
+                    None,
+                    None,
+                    "wrong channel".into(),
+                    delivery,
+                    EventSink::detached(),
+                )
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("cannot prompt or steer"),
+                "target {target:?}: {error}"
+            );
+        }
+    }
+    // Nothing was delivered anywhere.
+    assert!(parent_capture.prompts.lock().is_empty());
+    assert!(parent_capture.steers.lock().is_empty());
+    assert!(!backend.agent.has_queued(supervisor));
+    // A non-employee caller without an address gets the retired
+    // steer-supervisor error, not silent supervisor resolution.
+    let error = backend
+        .agent_prompt(
+            Some(decoy),
             None,
             None,
-            "wrong channel".into(),
-            crate::protocol::AgentPromptDelivery::Queue,
+            None,
+            "no address".into(),
+            crate::protocol::AgentPromptDelivery::Interrupt,
             EventSink::detached(),
         )
         .unwrap_err();
-    let text = format!("{error:#}");
-    assert!(text.contains("employees report upward only"), "{text}");
-    assert!(text.contains("steer-supervisor"), "{text}");
-    // Unknown and self addresses are refused just as clearly; no fallback
-    // may silently deliver a message intended for another task.
-    for target in [Uuid::new_v4(), employee_id] {
-        let error = backend
-            .agent_prompt(
-                Some(employee_id),
-                Some(target),
-                None,
-                None,
-                "wrong address".into(),
-                crate::protocol::AgentPromptDelivery::Interrupt,
-                EventSink::detached(),
-            )
-            .unwrap_err();
-        assert!(error.to_string().contains("steer-supervisor"));
-    }
     assert!(
-        backend
-            .agent_prompt(
-                Some(decoy),
-                None,
-                None,
-                None,
-                "not an employee".into(),
-                crate::protocol::AgentPromptDelivery::Interrupt,
-                EventSink::detached(),
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("employee-only")
+        error.to_string().contains("steer-supervisor is unavailable"),
+        "{error}"
     );
-    // A provider incapable of steering must fail, never acknowledge a
-    // queued message that can disappear when either employee finishes.
-    backend.sessions.lock().get_mut(&supervisor).unwrap().driver =
-        DriverHandle::from_control(Arc::new(IdleDriver));
-    let error = backend
+    // A boss prompt to a working employee still steers — supervisor
+    // controls are untouched by the report-channel restriction.
+    backend
+        .agent
+        .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    backend
         .agent_prompt(
+            Some(decoy),
             Some(employee_id),
             None,
             None,
-            None,
-            "cannot steer".into(),
-            crate::protocol::AgentPromptDelivery::Queue,
+            "direction".into(),
+            crate::protocol::AgentPromptDelivery::Interrupt,
             EventSink::detached(),
         )
-        .unwrap_err();
-    assert!(error.to_string().contains("message was not queued"));
-    assert!(!backend.agent.has_queued(supervisor));
+        .unwrap();
+    assert!(child_capture
+        .steers
+        .lock()
+        .iter()
+        .any(|text| text.contains("direction")));
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

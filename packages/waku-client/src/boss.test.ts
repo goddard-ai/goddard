@@ -33,6 +33,7 @@ import type {
   BossState,
   Command,
   DaemonSettings,
+  PersonaDefaultsState,
   ResponsePayload,
   SequencedEvent,
 } from "./generated";
@@ -66,10 +67,20 @@ function bossPayload(result: BossResult): ResponsePayload {
 
 const IDENTITY = { id: "boss-1", name: "Boss", avatarSeed: "seed", avatarStyle: "diceBear" as const };
 
+const PERSONA_DEFAULTS: PersonaDefaultsState = {
+  boss: { seenRevision: 0 },
+  employee: { seenRevision: 0 },
+  researcher: { seenRevision: 0 },
+  featureDeveloper: { seenRevision: 0 },
+  bugInvestigator: { seenRevision: 0 },
+  verifier: { seenRevision: 0 },
+};
+
 function bossState(overrides: Partial<BossState> = {}): BossState {
   return {
     identity: IDENTITY,
     personaId: "persona-1",
+    personaDefaults: PERSONA_DEFAULTS,
     sessionId: "boss-session",
     personas: [],
     employees: [],

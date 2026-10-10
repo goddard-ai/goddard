@@ -2703,6 +2703,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.send_file.dismiss", All, "escape", SendFileDialog),
     // === app::init_annotation_keys ========================================================
     e("menu.dismiss", All, "escape", Annotation),
+    e("menu.dismiss", All, "escape", MemoryNote),
     // === app::init_composer_keys =========================================================
     e("menu.dismiss", All, "escape", PastedText),
     // === app::init_image_preview_keys ======================================================
@@ -3050,6 +3051,7 @@ mod ctx {
     pub const SendFileInput: &str = "SendFileDialog > TextInput";
     pub const SendFileDialog: &str = "SendFileDialog";
     pub const Annotation: &str = "Annotation";
+    pub const MemoryNote: &str = "MemoryNote";
     pub const PastedText: &str = "PastedText";
     pub const ImagePreview: &str = "ImagePreview";
     pub const SessionRenameField: &str = "SessionRename > TextInput";

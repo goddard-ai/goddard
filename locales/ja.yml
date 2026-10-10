@@ -1073,14 +1073,14 @@ full_access.confirm_description: エージェントは承認を求めずにフ�
 full_access.confirm_effect: この変更は現在のタスクにすぐ適用され、新しいタスクのデフォルトになります。
 full_access.confirm_enable: フルアクセスを有効にする
 provider_switch.title: "%{provider} に切り替えますか？"
-provider_switch.description_new: Jev がこのタスクのトランスクリプトを圧縮し、抽出したコンテキストで新しい %{provider} セッションをシードします。%{provider} の入力レートで一度だけ取り込みます — 長いタスクでは費用がかかることがあります。%{from} のセッションは再開可能なまま残り、戻ると復元されます。
+provider_switch.description_new: 新しい %{provider} セッションはメッセージとコンパクトなターン単位のトランスクリプト索引を受け取り、必要に応じて任意のターンの全文を取得します — 全体を取り込むよりはるかに低コストです。%{from} のセッションは再開可能なまま残り、切り替えを戻すと復元されます。
 provider_switch.description_return: Jev が %{provider} が見逃した作業を圧縮し、以前の %{provider} セッションをその内容で再開します。%{provider} の入力レートで一度だけ取り込みます — 長いタスクでは費用がかかることがあります。
-provider_switch.estimate: "約 %{items} 件のトランスクリプト項目、およそ %{tokens} トークン。"
+provider_switch.estimate: "約 %{turns} ターンのトランスクリプト。"
 provider_switch.confirm: "%{provider} に切り替える"
 provider_switch.working: "%{provider} 用に履歴を圧縮しています…"
 provider_switch.failed: "プロバイダーの切り替えに失敗しました — %{error}"
-provider_switch.needs_eval_backend: プロバイダーの切り替えにはトランスクリプトを圧縮する評価バックエンドが必要です — 構成されていません。
-provider_switch.needs_eval_backend_remote: プロバイダーの切り替えにはトランスクリプトを圧縮する評価バックエンドが必要です — リモートホストで構成されていません。
+provider_switch.needs_eval_backend: Jev プロバイダーが構成されていません — %{provider} はレビュー済み索引ではなく、素のトランスクリプトポインタで起動します。設定 → プロバイダーの「推論プロバイダー」で構成してください。
+provider_switch.needs_eval_backend_remote: リモートホストに Jev プロバイダーが構成されていません — %{provider} はレビュー済み索引ではなく、素のトランスクリプトポインタで起動します。
 sandbox.environment: 環境
 sandbox.this_mac: この Mac
 sandbox.this_mac_description: この Mac でコマンドと編集を実行
@@ -3367,3 +3367,164 @@ press_to_talk.mic_denied: プッシュトゥトークにはマイクへのアク
 press_to_talk.mic_unavailable: マイクを利用できません
 press_to_talk.no_credential: AI Gateway の認証情報がありません——「推論プロバイダー」で設定してください
 press_to_talk.cancelled: 録音をキャンセルしました
+
+command_palette.search_employee_chats: 従業員チャットを検索…
+command_palette.employee_chats: 従業員チャット
+command_palette.employee_search_placeholder: 従業員チャットを検索 — 名前、役職、メッセージ…
+command_palette.searching_employee_chats: 従業員チャットを検索中…
+command_palette.no_employee_chats: 従業員チャットが見つかりません
+command_palette.no_employee_chats_hint: 過去 %{days} 日以内にアクティビティのあったチャットがここに表示されます — アーカイブ済みも含む
+command_palette.employee_search_unavailable: 従業員チャットを検索できませんでした
+mcp_servers.title: カスタム MCP サーバー
+mcp_servers.description: 任意の MCP サーバー — 実行するコマンドまたはリモート URL — を宣言すると、Goddard は接続済みインテグレーションのようにエージェントへ公開します。リモートヘッダーはプロキシが注入し、プロバイダー設定には残りません。
+mcp_servers.add_server: サーバーを追加
+mcp_servers.edit_server: サーバーを編集
+mcp_servers.edit: 編集
+mcp_servers.name: 名前
+mcp_servers.name_placeholder: ファイルシステム
+mcp_servers.name_description: エージェントには goddard_<slug> として表示され、従業員には id で付与できます。
+mcp_servers.transport: トランスポート
+mcp_servers.transport_stdio: コマンド（stdio）
+mcp_servers.transport_http: リモート（HTTP）
+mcp_servers.command: コマンド
+mcp_servers.command_placeholder: npx
+mcp_servers.command_description: プロバイダーが起動する実行ファイル — 絶対パスまたは PATH 上の名前。
+mcp_servers.args: 引数
+mcp_servers.args_placeholder: "-y\n@modelcontextprotocol/server-filesystem\n~/Documents"
+mcp_servers.args_description: 1 行に 1 つの引数。
+mcp_servers.env: 環境変数
+mcp_servers.env_placeholder: API_KEY=…
+mcp_servers.env_description: 1 行に 1 つの KEY=value ペア。
+mcp_servers.url: URL
+mcp_servers.url_placeholder: https://mcp.example.com/mcp
+mcp_servers.url_description: ストリーミング HTTP MCP エンドポイント。リクエストはローカルプロキシ経由で送信されます。
+mcp_servers.headers: ヘッダー
+mcp_servers.headers_placeholder: Authorization=Bearer …
+mcp_servers.headers_description: 1 行に 1 つの Name=value ペア。プロキシが上流へ注入します。
+mcp_servers.name_required: サーバーには名前が必要です。
+mcp_servers.name_in_use: その名前は別のサーバーまたはインテグレーションですでに使用されています。
+mcp_servers.command_required: stdio サーバーにはコマンドが必要です。
+mcp_servers.url_invalid: リモートサーバーには http:// または https:// の URL が必要です。
+mcp_servers.pairs_invalid: 1 行に 1 つの KEY=value ペアを入力してください。
+mcp_servers.confirm_remove: "%{name} を削除しますか？"
+mcp_servers.confirm_remove_detail: サーバーはすべてのプロバイダーから削除され、プロキシは提供を停止します。
+experiments.employee_search_window: 従業員チャット検索
+experiments.employee_search_off: オフ
+experiments.voice_briefing_eager: 音声ブリーフィングを事前生成
+experiments.voice_briefing_eager_caption: 戻る前に要約と音声を準備します — オフにするとチャットを開いたときだけ生成します。自動再生が必要です。
+experiments.voice_scratchpad_margin_double_click_title: チャットの余白をダブルクリックで VoicePad を切り替え
+experiments.voice_scratchpad_margin_double_click_description: チャットコンテンツの横の空白をダブルクリックすると、開いている VoicePad の表示・非表示を切り替えられます。デフォルトはオフです。
+sidebar.deliverables_view_all: すべての成果物を表示
+annotations.earlier_chat: 過去のボスチャット
+memory.add_note: メモを追加
+memory.save_note: メモを保存
+memory.add_note_to_memory: このメモリにメモを追加
+memory.add_annotation: 注釈を追加
+memory.note_placeholder: このメモリについてボスに何を知らせますか？
+memory.whole_memory: メモリ全体
+memory.selected_text: 選択したテキスト
+memory.selected_quote: 「%{quote}」
+memory.pending_one: 1 件の保留中のメモリメモ
+memory.pending_many: "%{count} 件の保留中のメモリメモ"
+memory.hidden_one: フィルターで 1 件非表示
+memory.hidden_many: "フィルターで %{count} 件非表示"
+memory.review: レビュー
+memory.annotation_label: "注釈 %{index}"
+memory.edit_note: メモを編集
+memory.remove_note: メモを削除
+memory.locate: メモリを表示
+memory.changed: このメモ以降にメモリが変更されました
+memory.unavailable: 元のメモリは利用できません
+memory.feedback_sent: フィードバックをボスに送信しました
+memory.empty_note: メモはまだありません
+boss.memory_search: メモリを検索
+boss.memory_search_placeholder: メモリを検索…
+boss.memory_all_projects: すべてのプロジェクト
+boss.memory_recent: 最近のメモリ
+boss.memory_newest_first: 新しい順
+boss.memory_now: たった今
+boss.memory_loading: メモリを読み込み中…
+boss.memory_searching: 検索中…
+boss.memory_empty: メモリはまだありません。
+boss.memory_empty_hint: ボスが記録したメモリがここに表示されます。
+boss.memory_no_match: 検索に一致するメモリがありません。
+boss.memory_clear_search: 検索をクリア
+boss.memory_no_project_records: このプロジェクトのメモリはありません。
+boss.memory_show_more: "さらに表示（残り %{count} 件）"
+boss.memory_new_available: 新しいメモリがあります。
+boss.memory_refresh: 更新
+boss.memory_filter_cleared: そのプロジェクトは利用できなくなりました — すべてのプロジェクトを表示しています。
+boss.memory_stale_results: 更新できませんでした — 以前の結果を表示しています。
+boss.memory_expand: さらに表示
+boss.memory_collapse: 折りたたむ
+boss.memory_record_label: "%{bucket} メモリ、%{when} に記録"
+boss.status_switching_workspace: ワークスペースを切り替え中
+boss.employee_resume_queued: "%{name} は再開待ちです — メッセージは開始時に配信されます"
+boss.command_placeholder_memory_feedback: ボスにメモリのフィードバックを送信…
+boss.avatar_style: アバタースタイル
+boss.avatar_style_description: ボスとすべての従業員に使用するスタイルを選択します。
+boss.avatar_style_gaze: "アバタースタイル: Gaze"
+boss.avatar_style_dicebear: "アバタースタイル: Moods"
+boss.avatar_style_line_face: "アバタースタイル: Line Face"
+boss.avatar_style_agent: "アバタースタイル: Agent Avatars"
+boss.avatar_style_avvvatars: "アバタースタイル: Avvvatars"
+boss.history_search: 履歴を検索
+boss.history_search_placeholder: トピックまたは名前…
+boss.history_scope_hint: タスク · 従業員 · ボスチャット · プラン — アーカイブ済みも含む
+boss.history_submit_hint: Enter で保存済みの作業を検索
+boss.history_all_projects: すべてのプロジェクト
+boss.history_all_sources: すべてのソース
+boss.history_kind_task: タスク
+boss.history_kind_employee: 従業員
+boss.history_kind_boss: ボスチャット
+boss.history_kind_plan: プラン
+boss.history_date_any: すべての期間
+boss.history_date_7: 過去 7 日間
+boss.history_date_30: 過去 30 日間
+boss.history_date_90: 過去 90 日間
+boss.history_date_older: 90 日以上前
+boss.history_searching: 検索中…
+boss.history_searching_hint: 保存済みレコードをスキャン中 — クエリと以前のヒットは表示されたままです。
+boss.history_no_match: 一致するレコードがありません
+boss.history_no_match_hint: "%{scope} では一致しませんでした。別の言い方を試すか、フィルターを広げてください。"
+boss.history_coverage: "一致した %{matched} 件中 %{shown} 件を表示 · %{scanned} 件を検索 · %{scope}"
+boss.history_show_more: さらに表示
+boss.history_recorded_by: "%{name} 経由"
+boss.history_passages: "%{count} 個の抜粋"
+boss.history_excerpt_unmatched: "タイトルが一致 — 最新メッセージ: %{excerpt}"
+boss.history_source_missing: そのレコードはタスクリストにありません。
+boss.default_title: デフォルトの指示
+boss.default_latest: "最新のデフォルトを使用中 · リビジョン %{revision}"
+boss.default_untouched: "未変更 · 付属リビジョン %{revision} と一致"
+boss.default_customized: "カスタマイズ済み · リビジョン %{revision} がベース"
+boss.default_unknown: カスタマイズ済み · 開始リビジョンは不明
+boss.default_reviewed: 最新リビジョンを確認済み
+boss.default_update: "更新あり — 付属リビジョン %{revision}"
+boss.default_update_short: 更新
+boss.default_compare: 付属版と比較
+boss.default_review: 更新を確認
+boss.default_view_shipped: 最新の付属版
+boss.default_shipped_label: "最新の付属指示 · リビジョン %{revision}"
+boss.default_reset: 最新のデフォルトにリセット
+boss.default_undo: 取り消す
+boss.default_undo_stale: 取り消せません — その変更後に指示が編集されました。
+boss.default_reset_title: "%{name} を最新のデフォルトにリセットしますか？"
+boss.default_reset_scope: 指示のみ置き換えます — 名前、権限、アイコン、ピン留めドキュメントは変更されません。以前のテキストは「取り消す」で復元できます。
+boss.default_reset_custom: カスタムの指示変更は削除されます。
+boss.default_timing_boss: ボスはこのターンの残りでは現在の指示を使い続け、新しいテキストは次のターンから適用されます。
+boss.default_timing_employee: このロールを使う従業員は、次のターンまたは再開まで現在の指示を保持します。
+boss.default_saved: デフォルトの指示を更新しました。
+boss.default_proposal: "ボスからの更新提案 · 対象リビジョン %{revision}"
+boss.default_proposal_stale: 期限切れ — この提案の作成後に保存済みの指示が変更されました。ボスに再生成を依頼してください。
+boss.default_adopt: 提案を承認
+boss.default_dismiss_proposal: 提案を却下
+boss.default_keep: 現在の指示を維持
+boss.role_employee_shipped: 付属の従業員ロール — デフォルトのベースに重ねられます
+boss.role_default: デフォルト
+experiments.voice_briefing_tts_voice: 音声
+experiments.voice_briefing_tts_voice_placeholder: デフォルトの音声（または音声名 / ID を入力）
+experiments.voice_briefing_tts_voice_caption: "%{voice} を使用中。このモデルがサポートする音声名または ID を入力してください。クリアするとデフォルトに戻ります。"
+composer.dictation_retry: マイクをオンにして、保存された録音を再試行します。
+press_to_talk.retry_recording: もう一度押して離すと、保存された録音を再試行します。
+voice_scratchpad.recording_retained: 文字起こしに失敗しました — 録音は再試行用に保存されました
+composer.dictation_return_to_retry: 元のチャットに戻り、マイクをオンにして保存された録音を再試行してください。

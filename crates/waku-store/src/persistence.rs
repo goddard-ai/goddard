@@ -4578,6 +4578,30 @@ mod tests {
 
     #[test]
     fn default_path_is_build_specific() {
+        const PROBE: &str = "GODDARD_TEST_DEFAULT_PATH";
+        if std::env::var_os(PROBE).is_none() {
+            // Run in a child so data-dir overrides cannot race other
+            // tests — the daemon exports GODDARD_DATA_DIR into employee
+            // and dev shells.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "persistence::tests::default_path_is_build_specific",
+                    "--nocapture",
+                ])
+                .env(PROBE, "1")
+                .env_remove("GODDARD_DATA_DIR")
+                .env_remove("GODDARD_DEV_DATA_DIR")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let path = StateStore::default_path();
         assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("app.db")));
         let directory = path.parent().and_then(Path::file_name);

@@ -1058,14 +1058,14 @@ full_access.confirm_description: 代理将可以在不征求许可的情况下�
 full_access.confirm_effect: 此更改会立即应用于当前任务，并成为新任务的默认模式。
 full_access.confirm_enable: 启用完全访问
 provider_switch.title: "切换到 %{provider}？"
-provider_switch.description_new: Jev 将压缩此任务的对话记录，并用提取出的上下文启动新的 %{provider} 会话 — 按 %{provider} 的输入费率一次性摄入，长任务可能开销较大。%{from} 会话保持可恢复状态，切回时会恢复。
+provider_switch.description_new: 新的 %{provider} 会话会收到你的消息和一份紧凑的逐回合转录索引，并可按需拉取任意回合的完整文本 — 比整体摄入便宜得多。%{from} 会话保持可恢复状态，切回时会恢复。
 provider_switch.description_return: Jev 将压缩 %{provider} 错过的工作，并用其恢复你之前的 %{provider} 会话 — 按 %{provider} 的输入费率一次性摄入，长任务可能开销较大。
-provider_switch.estimate: "约 %{items} 条记录项，约 %{tokens} 个 token。"
+provider_switch.estimate: "约 %{turns} 个回合的对话记录。"
 provider_switch.confirm: "切换到 %{provider}"
 provider_switch.working: "正在为 %{provider} 压缩历史记录…"
 provider_switch.failed: "切换 provider 失败 — %{error}"
-provider_switch.needs_eval_backend: 切换 provider 需要评估后端来压缩转录 — 尚未配置。
-provider_switch.needs_eval_backend_remote: 切换 provider 需要评估后端来压缩转录 — 远程主机上尚未配置。
+provider_switch.needs_eval_backend: 未配置 Jev 服务商 — %{provider} 将以裸转录指针启动，而不是经过审阅的索引。可在设置 → 服务商的“推理服务商”下配置。
+provider_switch.needs_eval_backend_remote: 远程主机上未配置 Jev 服务商 — %{provider} 将以裸转录指针启动，而不是经过审阅的索引。
 sandbox.environment: 环境
 sandbox.this_mac: 这台 Mac
 sandbox.this_mac_description: 在此 Mac 上运行命令和编辑
@@ -3318,3 +3318,164 @@ press_to_talk.mic_denied: 按键说话需要麦克风权限
 press_to_talk.mic_unavailable: 麦克风不可用
 press_to_talk.no_credential: 没有 AI Gateway 凭据——请在"推理提供商"中设置
 press_to_talk.cancelled: 录音已取消
+
+command_palette.search_employee_chats: 搜索员工聊天…
+command_palette.employee_chats: 员工聊天
+command_palette.employee_search_placeholder: 搜索员工聊天 — 姓名、职责或消息…
+command_palette.searching_employee_chats: 正在搜索员工聊天…
+command_palette.no_employee_chats: 未找到员工聊天
+command_palette.no_employee_chats_hint: 最近 %{days} 天内有活动的聊天会显示在这里 — 包括已归档的
+command_palette.employee_search_unavailable: 无法搜索员工聊天
+mcp_servers.title: 自定义 MCP 服务器
+mcp_servers.description: 声明任意 MCP 服务器 — 要运行的命令或远程 URL — Goddard 会像已连接的集成一样把它提供给你的智能体。远程请求头由代理注入，不会进入服务商配置。
+mcp_servers.add_server: 添加服务器
+mcp_servers.edit_server: 编辑服务器
+mcp_servers.edit: 编辑
+mcp_servers.name: 名称
+mcp_servers.name_placeholder: 文件系统
+mcp_servers.name_description: 智能体将其视为 goddard_<slug>，员工可按 id 获得授权。
+mcp_servers.transport: 传输方式
+mcp_servers.transport_stdio: 命令（stdio）
+mcp_servers.transport_http: 远程（HTTP）
+mcp_servers.command: 命令
+mcp_servers.command_placeholder: npx
+mcp_servers.command_description: 服务商启动的可执行文件 — 绝对路径或 PATH 上的名称。
+mcp_servers.args: 参数
+mcp_servers.args_placeholder: "-y\n@modelcontextprotocol/server-filesystem\n~/Documents"
+mcp_servers.args_description: 每行一个参数。
+mcp_servers.env: 环境变量
+mcp_servers.env_placeholder: API_KEY=…
+mcp_servers.env_description: 每行一个 KEY=value 对。
+mcp_servers.url: URL
+mcp_servers.url_placeholder: https://mcp.example.com/mcp
+mcp_servers.url_description: 支持流式传输的 HTTP MCP 端点；请求经由本地代理。
+mcp_servers.headers: 请求头
+mcp_servers.headers_placeholder: Authorization=Bearer …
+mcp_servers.headers_description: 每行一个 Name=value 对，由代理注入到上游。
+mcp_servers.name_required: 服务器需要一个名称。
+mcp_servers.name_in_use: 另一个服务器或集成已使用该名称。
+mcp_servers.command_required: stdio 服务器需要一个命令。
+mcp_servers.url_invalid: 远程服务器需要 http:// 或 https:// URL。
+mcp_servers.pairs_invalid: 请每行输入一个 KEY=value 对。
+mcp_servers.confirm_remove: 移除 %{name}？
+mcp_servers.confirm_remove_detail: 该服务器将从所有服务商中移除，代理将停止提供它。
+experiments.employee_search_window: 员工聊天搜索
+experiments.employee_search_off: 关闭
+experiments.voice_briefing_eager: 预先生成语音简报
+experiments.voice_briefing_eager_caption: 在你返回之前准备好摘要和音频 — 关闭后仅在你打开聊天时才生成。需要启用自动播放。
+experiments.voice_scratchpad_margin_double_click_title: 双击聊天边距切换 VoicePad
+experiments.voice_scratchpad_margin_double_click_description: 双击聊天内容旁的空白区域即可显示或隐藏已打开的 VoicePad。默认关闭。
+sidebar.deliverables_view_all: 查看全部交付物
+annotations.earlier_chat: 更早的老板聊天
+memory.add_note: 添加备注
+memory.save_note: 保存备注
+memory.add_note_to_memory: 为这条记忆添加备注
+memory.add_annotation: 添加批注
+memory.note_placeholder: 老板应该了解这条记忆的什么？
+memory.whole_memory: 整条记忆
+memory.selected_text: 所选文本
+memory.selected_quote: “%{quote}”
+memory.pending_one: 1 条待处理记忆备注
+memory.pending_many: "%{count} 条待处理记忆备注"
+memory.hidden_one: 1 条被筛选条件隐藏
+memory.hidden_many: "%{count} 条被筛选条件隐藏"
+memory.review: 审阅
+memory.annotation_label: "批注 %{index}"
+memory.edit_note: 编辑备注
+memory.remove_note: 移除备注
+memory.locate: 显示记忆
+memory.changed: 这条记忆在备注之后已更改
+memory.unavailable: 原始记忆不可用
+memory.feedback_sent: 反馈已发送给老板
+memory.empty_note: 暂无备注
+boss.memory_search: 搜索记忆
+boss.memory_search_placeholder: 搜索记忆…
+boss.memory_all_projects: 所有项目
+boss.memory_recent: 最近的记忆
+boss.memory_newest_first: 最新在前
+boss.memory_now: 刚刚
+boss.memory_loading: 正在加载记忆…
+boss.memory_searching: 正在搜索…
+boss.memory_empty: 暂无记忆。
+boss.memory_empty_hint: 老板记录的内容会显示在这里。
+boss.memory_no_match: 没有匹配搜索的记忆。
+boss.memory_clear_search: 清除搜索
+boss.memory_no_project_records: 此项目暂无记忆。
+boss.memory_show_more: "显示更多（还有 %{count} 条）"
+boss.memory_new_available: 有新的记忆。
+boss.memory_refresh: 刷新
+boss.memory_filter_cleared: 该项目不再可用 — 正在显示所有项目。
+boss.memory_stale_results: 刷新失败 — 显示的是之前的结果。
+boss.memory_expand: 显示更多
+boss.memory_collapse: 收起
+boss.memory_record_label: "%{bucket} 记忆，记录于 %{when}"
+boss.status_switching_workspace: 正在切换工作区
+boss.employee_resume_queued: "%{name} 已排队等待恢复 — 消息将在其启动时送达"
+boss.command_placeholder_memory_feedback: 向老板发送记忆反馈…
+boss.avatar_style: 头像风格
+boss.avatar_style_description: 选择老板和所有员工使用的风格。
+boss.avatar_style_gaze: "头像风格：Gaze"
+boss.avatar_style_dicebear: "头像风格：Moods"
+boss.avatar_style_line_face: "头像风格：Line Face"
+boss.avatar_style_agent: "头像风格：Agent Avatars"
+boss.avatar_style_avvvatars: "头像风格：Avvvatars"
+boss.history_search: 搜索历史
+boss.history_search_placeholder: 主题或名称…
+boss.history_scope_hint: 任务 · 员工 · 老板聊天 · 计划 — 包括已归档的
+boss.history_submit_hint: 按回车搜索保留的工作记录
+boss.history_all_projects: 所有项目
+boss.history_all_sources: 所有来源
+boss.history_kind_task: 任务
+boss.history_kind_employee: 员工
+boss.history_kind_boss: 老板聊天
+boss.history_kind_plan: 计划
+boss.history_date_any: 全部时间
+boss.history_date_7: 最近 7 天
+boss.history_date_30: 最近 30 天
+boss.history_date_90: 最近 90 天
+boss.history_date_older: 90 天以前
+boss.history_searching: 正在搜索…
+boss.history_searching_hint: 正在扫描保留的记录 — 查询和之前的命中结果保持列出。
+boss.history_no_match: 没有匹配的记录
+boss.history_no_match_hint: "%{scope} 中没有匹配项。换个措辞或放宽筛选条件试试。"
+boss.history_coverage: "%{matched} 条匹配记录中显示 %{shown} 条 · 已搜索 %{scanned} 条 · %{scope}"
+boss.history_show_more: 显示更多
+boss.history_recorded_by: "来自 %{name}"
+boss.history_passages: "%{count} 个片段"
+boss.history_excerpt_unmatched: "标题匹配 — 最新消息：%{excerpt}"
+boss.history_source_missing: 该记录已不在任务列表中。
+boss.default_title: 默认指令
+boss.default_latest: "正在使用最新默认 · 修订版本 %{revision}"
+boss.default_untouched: "未修改 · 与内置修订版本 %{revision} 一致"
+boss.default_customized: "已自定义 · 基于修订版本 %{revision}"
+boss.default_unknown: 已自定义 · 起始修订版本未知
+boss.default_reviewed: 已查看最新修订版本
+boss.default_update: "有可用更新 — 内置修订版本 %{revision}"
+boss.default_update_short: 更新
+boss.default_compare: 与内置版本对比
+boss.default_review: 查看更新
+boss.default_view_shipped: 最新内置
+boss.default_shipped_label: "最新内置指令 · 修订版本 %{revision}"
+boss.default_reset: 重置为最新默认
+boss.default_undo: 撤销
+boss.default_undo_stale: 无法撤销 — 指令在该更改后又被编辑过。
+boss.default_reset_title: "将 %{name} 重置为最新默认？"
+boss.default_reset_scope: 仅替换指令 — 名称、权限、图标和置顶文档保持不变。之前的文本仍可通过撤销恢复。
+boss.default_reset_custom: 你的自定义指令更改将被移除。
+boss.default_timing_boss: 老板在本回合剩余时间继续使用当前指令；新文本在其下一回合生效。
+boss.default_timing_employee: 使用此角色的员工将保留当前指令，直到其下一回合或恢复。
+boss.default_saved: 默认指令已更新。
+boss.default_proposal: "老板提出的更新 · 目标修订版本 %{revision}"
+boss.default_proposal_stale: 已过期 — 保存的指令在此提案起草后已更改。请让老板刷新它。
+boss.default_adopt: 批准提案
+boss.default_dismiss_proposal: 忽略提案
+boss.default_keep: 保留当前指令
+boss.role_employee_shipped: 内置员工角色 — 叠加在默认基础之上
+boss.role_default: 默认
+experiments.voice_briefing_tts_voice: 声音
+experiments.voice_briefing_tts_voice_placeholder: 默认声音（或输入声音名称 / ID）
+experiments.voice_briefing_tts_voice_caption: "正在使用 %{voice}。输入此模型支持的声音名称或 ID；清空则恢复其默认。"
+composer.dictation_retry: 激活麦克风以重试已保存的录音。
+press_to_talk.retry_recording: 再次按住并松开以重试已保存的录音。
+voice_scratchpad.recording_retained: 转写失败 — 录音已保存，可重试
+composer.dictation_return_to_retry: 返回原聊天并激活麦克风，以重试已保存的录音。
