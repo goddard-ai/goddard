@@ -277,6 +277,8 @@ fn append_sidebar_group_rows(
 /// falling into a date or project group. Pinned and dormant deliverables are
 /// user-managed state and never age out; a pin outranks a sweep the way a
 /// pinned task cannot be dormant; archived deliverables leave the list entirely.
+/// A plan document's snapshot stays inside its planning flow instead — the
+/// daemon tags it `plan_id`, and it never lists here at all.
 fn sidebar_recent_deliverables(
     states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
     now: u64,
@@ -292,7 +294,7 @@ fn sidebar_recent_deliverables(
             .iter()
             .map(move |deliverable| (*key, deliverable))
     }) {
-        if deliverable.archived_at.is_some() {
+        if deliverable.archived_at.is_some() || deliverable.plan_id.is_some() {
             continue;
         }
         let pinned = deliverable.pinned_at.is_some();
@@ -3821,6 +3823,7 @@ impl Waku {
                 deliverable.archived_at.is_none()
                     && deliverable.dormant_at.is_none()
                     && deliverable.pinned_at.is_none()
+                    && deliverable.plan_id.is_none()
                     && now.saturating_sub(deliverable.updated_at) < SIDEBAR_DELIVERABLE_RECENT_SECS
             })
             .count() as u64;
@@ -7618,6 +7621,7 @@ mod tests {
             dormant_at: None,
             archived_at: None,
             viewed_at: None,
+            plan_id: None,
         };
         let hour = 3600;
         let fresh = deliverable(hour);
@@ -7665,6 +7669,7 @@ mod tests {
             dormant_at: None,
             archived_at: None,
             viewed_at: None,
+            plan_id: None,
         };
         let mut swept = pinned.clone();
         swept.id = Uuid::new_v4();
@@ -7715,6 +7720,51 @@ mod tests {
             ]
         );
         assert_eq!(dormant, vec![(waku_client::DaemonKey::Local, swept.id)]);
+    }
+
+    /// A plan document's published snapshot belongs to its planning flow,
+    /// so a `plan_id` record never lists — pinned or dormant state cannot
+    /// surface it either. Ordinary Markdown deliverables still list.
+    #[test]
+    fn plan_document_deliverables_never_list_in_the_sidebar() {
+        let now = 1_000_000_000;
+        let plan_id = Uuid::new_v4();
+        let deliverable = || BossDeliverable {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: String::new(),
+            source_path: None,
+            directory: false,
+            created_at: now,
+            updated_at: now,
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: None,
+            viewed_at: None,
+            plan_id: None,
+        };
+        let ordinary = deliverable();
+        let mut plan_doc = deliverable();
+        plan_doc.plan_id = Some(plan_id);
+        let mut pinned_plan = deliverable();
+        pinned_plan.plan_id = Some(plan_id);
+        pinned_plan.pinned_at = Some(now);
+        let mut swept_plan = deliverable();
+        swept_plan.plan_id = Some(plan_id);
+        swept_plan.dormant_at = Some(now);
+        let mut states = HashMap::new();
+        states.insert(
+            waku_client::DaemonKey::Local,
+            boss_state_with_deliverables(vec![
+                ordinary.clone(),
+                plan_doc,
+                pinned_plan,
+                swept_plan,
+            ]),
+        );
+        let (live, dormant) = sidebar_recent_deliverables(&states, now);
+        assert_eq!(live, vec![(waku_client::DaemonKey::Local, ordinary.id)]);
+        assert!(dormant.is_empty());
     }
 
     #[test]
@@ -8000,6 +8050,7 @@ mod tests {
             dormant_at: None,
             archived_at: None,
             viewed_at: None,
+            plan_id: None,
         };
         // Six live deliverables — the oldest pinned — plus one swept.
         let mut pinned = deliverable(6);

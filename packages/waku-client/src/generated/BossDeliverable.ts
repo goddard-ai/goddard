@@ -38,4 +38,11 @@ archivedAt: number | null,
  * When the user last opened the deliverable. `None` — or older than
  * `updated_at` after a re-publish — reads as unread in the sidebar.
  */
-viewedAt: number | null, };
+viewedAt: number | null,
+/**
+ * The plan whose document produced this deliverable — a planning
+ * session publishes its `plans/<name>.md` the same way, and the
+ * daemon tags the record so the deliverables listings can keep plan
+ * documents inside their planning flow.
+ */
+planId?: string, };

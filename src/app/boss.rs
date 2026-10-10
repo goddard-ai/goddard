@@ -771,6 +771,41 @@ fn boss_outcome_attention(
     })
 }
 
+/// The Deliverables library rows under `filter`. A planning session's
+/// published plan document (`plan_id` set) stays inside its planning
+/// flow — the Plans tab and the session row — so it never lists here
+/// under any filter, just as the sidebar group skips it.
+fn boss_deliverable_rows(state: &BossState, filter: BossDeliverablesFilter) -> Vec<BossItem> {
+    let mut deliverables: Vec<&waku_protocol::boss::BossDeliverable> = state
+        .deliverables
+        .iter()
+        .filter(|deliverable| deliverable.plan_id.is_none())
+        .filter(|deliverable| {
+            let pinned = deliverable.pinned_at.is_some();
+            let dormant = deliverable.dormant_at.is_some() && !pinned;
+            let archived = deliverable.archived_at.is_some();
+            match filter {
+                BossDeliverablesFilter::All => !dormant && !archived,
+                BossDeliverablesFilter::Pinned => pinned && !archived,
+                BossDeliverablesFilter::Dormant => dormant && !archived,
+                BossDeliverablesFilter::Archived => archived,
+            }
+        })
+        .collect();
+    // Pinned records lead the live list the way they lead the
+    // sidebar group; every filter then sorts by last publish.
+    deliverables.sort_by_key(|deliverable| {
+        (
+            !deliverable.pinned_at.is_some(),
+            std::cmp::Reverse(deliverable.updated_at),
+        )
+    });
+    deliverables
+        .into_iter()
+        .map(|deliverable| BossItem::Deliverable(deliverable.id))
+        .collect()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum BossItem {
     Employee(Uuid),
@@ -1499,33 +1534,7 @@ impl Waku {
                     .get(&key)
                     .copied()
                     .unwrap_or_default();
-                let mut deliverables: Vec<&waku_protocol::boss::BossDeliverable> = state
-                    .deliverables
-                    .iter()
-                    .filter(|deliverable| {
-                        let pinned = deliverable.pinned_at.is_some();
-                        let dormant = deliverable.dormant_at.is_some() && !pinned;
-                        let archived = deliverable.archived_at.is_some();
-                        match filter {
-                            BossDeliverablesFilter::All => !dormant && !archived,
-                            BossDeliverablesFilter::Pinned => pinned && !archived,
-                            BossDeliverablesFilter::Dormant => dormant && !archived,
-                            BossDeliverablesFilter::Archived => archived,
-                        }
-                    })
-                    .collect();
-                // Pinned records lead the live list the way they lead the
-                // sidebar group; every filter then sorts by last publish.
-                deliverables.sort_by_key(|deliverable| {
-                    (
-                        !deliverable.pinned_at.is_some(),
-                        std::cmp::Reverse(deliverable.updated_at),
-                    )
-                });
-                deliverables
-                    .into_iter()
-                    .map(|deliverable| BossItem::Deliverable(deliverable.id))
-                    .collect()
+                boss_deliverable_rows(state, filter)
             }
         }
     }
@@ -8817,6 +8826,7 @@ mod tests {
                 dormant_at: None,
                 archived_at: None,
                 viewed_at,
+                plan_id: None,
             }],
             goals_viewed_at: None,
             planning: Vec::new(),
@@ -8925,6 +8935,65 @@ mod tests {
         ui.states.insert(key, deliverable_state(100, Some(200)));
         ui.forget_unread_deliverable_scroll(key, Uuid::nil());
         assert!(ui.deliverable_page_scroll.contains_key(&page));
+    }
+
+    /// A published plan document (`plan_id`) belongs to its planning
+    /// flow, so the Deliverables library skips it under every filter
+    /// while ordinary records keep listing.
+    #[test]
+    fn plan_document_deliverables_stay_out_of_the_library() {
+        let mut state = deliverable_state(100, None);
+        let plan_id = Uuid::new_v4();
+        let ordinary = state.deliverables[0].clone();
+        let mut plan_live = ordinary.clone();
+        plan_live.id = Uuid::new_v4();
+        plan_live.plan_id = Some(plan_id);
+        let mut plan_pinned = plan_live.clone();
+        plan_pinned.id = Uuid::new_v4();
+        plan_pinned.pinned_at = Some(100);
+        let mut plan_dormant = plan_live.clone();
+        plan_dormant.id = Uuid::new_v4();
+        plan_dormant.dormant_at = Some(100);
+        let mut plan_archived = plan_live.clone();
+        plan_archived.id = Uuid::new_v4();
+        plan_archived.archived_at = Some(100);
+        let mut ordinary_archived = ordinary.clone();
+        ordinary_archived.id = Uuid::new_v4();
+        ordinary_archived.archived_at = Some(100);
+        let plan_owned = [
+            plan_live.id,
+            plan_pinned.id,
+            plan_dormant.id,
+            plan_archived.id,
+        ];
+        state.deliverables = vec![
+            plan_live,
+            plan_pinned,
+            plan_dormant,
+            plan_archived,
+            ordinary.clone(),
+            ordinary_archived.clone(),
+        ];
+
+        for filter in [
+            BossDeliverablesFilter::All,
+            BossDeliverablesFilter::Pinned,
+            BossDeliverablesFilter::Dormant,
+            BossDeliverablesFilter::Archived,
+        ] {
+            let rows = boss_deliverable_rows(&state, filter);
+            for id in plan_owned {
+                assert!(!rows.contains(&BossItem::Deliverable(id)));
+            }
+        }
+        assert_eq!(
+            boss_deliverable_rows(&state, BossDeliverablesFilter::All),
+            vec![BossItem::Deliverable(ordinary.id)]
+        );
+        assert_eq!(
+            boss_deliverable_rows(&state, BossDeliverablesFilter::Archived),
+            vec![BossItem::Deliverable(ordinary_archived.id)]
+        );
     }
 
     #[test]

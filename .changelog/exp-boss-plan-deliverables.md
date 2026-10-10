@@ -1,0 +1,1 @@
+- Plan documents a planning session publishes no longer list in the sidebar's Deliverables group or the Boss page's Deliverables tab — the plan stays reachable through its planning session and the Plans tab. Other deliverables are unaffected.

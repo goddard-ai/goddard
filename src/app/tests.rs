@@ -1958,6 +1958,7 @@ fn boss_deliverable(
         dormant_at: None,
         archived_at: None,
         viewed_at,
+        plan_id: None,
     }
 }
 

@@ -2243,6 +2243,18 @@ impl BossService {
         ))
     }
 
+    /// The registered plan whose document `target` is, under any spelling
+    /// of its absolute path — a planning session publishes its own
+    /// `plans/<name>.md`, and that snapshot belongs to the planning flow
+    /// rather than the deliverables listings.
+    fn plan_document_owner(&self, state: &BossState, target: &Path) -> Option<Uuid> {
+        let target = fs::canonicalize(target).ok()?;
+        state.planning.iter().find_map(|plan| {
+            let document = self.plan_document_path(&plan.plan_file).ok()?;
+            (fs::canonicalize(document).ok()? == target).then_some(plan.id)
+        })
+    }
+
     pub fn set_project_context(&self, session: Uuid, path: PathBuf) {
         // Recover only this session's registered document. Keep the project
         // original intact, and never replace a document already in Boss files.
@@ -4366,6 +4378,7 @@ impl BossService {
                 };
                 let now = waku_protocol::model::unix_time();
                 self.update(|state| {
+                    let plan_id = self.plan_document_owner(state, &target);
                     if let Some(deliverable) = state
                         .deliverables
                         .iter_mut()
@@ -4376,6 +4389,7 @@ impl BossService {
                         deliverable.updated_at = now;
                         deliverable.path = stored.clone().unwrap_or_else(|| path.clone());
                         deliverable.source_path = (!reference).then(|| path.clone());
+                        deliverable.plan_id = plan_id;
                     } else {
                         state.deliverables.push(BossDeliverable {
                             id,
@@ -4389,6 +4403,7 @@ impl BossService {
                             dormant_at: None,
                             archived_at: None,
                             viewed_at: None,
+                            plan_id,
                         });
                     }
                     Ok(())
@@ -8793,6 +8808,120 @@ mod tests {
             .unwrap();
         assert!(!stored_path.exists());
         drop(restored);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A published plan document belongs to its planning flow, so the
+    /// daemon tags the record's `plan_id` and the deliverables listings
+    /// skip it. The tag keys on the registered `BossPlan` — an unrelated
+    /// `plans/` file or ordinary Markdown publishes untagged.
+    #[test]
+    fn publishing_a_registered_plan_document_tags_its_deliverable() {
+        let root = std::env::temp_dir().join(format!("boss-plan-deliverable-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let copied_plan = Uuid::new_v4();
+        let referenced_plan = Uuid::new_v4();
+        service
+            .update(|state| {
+                for (id, plan_file) in [
+                    (copied_plan, "plans/auth.md"),
+                    (referenced_plan, "plans/billing.md"),
+                ] {
+                    state.planning.push(BossPlan {
+                        id,
+                        session_id: Uuid::new_v4(),
+                        plan_file: plan_file.into(),
+                        idea: "Plan".into(),
+                        finalized_at: None,
+                        items: Vec::new(),
+                        outcome: None,
+                        history: Vec::new(),
+                    });
+                }
+                Ok(())
+            })
+            .unwrap();
+        for plan_file in ["plans/auth.md", "plans/billing.md", "plans/draft.md"] {
+            let document = service.plan_document_path(plan_file).unwrap();
+            fs::create_dir_all(document.parent().unwrap()).unwrap();
+            fs::write(&document, format!("# {plan_file}")).unwrap();
+        }
+        let report = root.join("report.md");
+        fs::write(&report, "report").unwrap();
+        let report = report.to_string_lossy().into_owned();
+
+        // Ordinary Markdown publishes untagged.
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: report,
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        // `plans/draft.md` is a real document but no registered plan owns
+        // it — a path under `plans/` alone does not tag.
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: service
+                        .plan_document_path("plans/draft.md")
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        // Copy and reference publishes of registered plan documents both
+        // tag the record with the owning plan.
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: service
+                        .plan_document_path("plans/auth.md")
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    name: None,
+                    reference: false,
+                },
+            )
+            .unwrap();
+        service
+            .handle(
+                None,
+                BossOperation::PublishDeliverable {
+                    path: service
+                        .plan_document_path("plans/billing.md")
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                    name: None,
+                    reference: true,
+                },
+            )
+            .unwrap();
+
+        let deliverables = service.document().deliverables;
+        assert_eq!(deliverables.len(), 4);
+        let plan_tag = |name: &str| {
+            deliverables
+                .iter()
+                .find(|deliverable| deliverable.name == name)
+                .unwrap()
+                .plan_id
+        };
+        assert_eq!(plan_tag("report.md"), None);
+        assert_eq!(plan_tag("draft.md"), None);
+        assert_eq!(plan_tag("auth.md"), Some(copied_plan));
+        assert_eq!(plan_tag("billing.md"), Some(referenced_plan));
+        drop(service);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -1376,6 +1376,13 @@ pub struct BossDeliverable {
     /// `updated_at` after a re-publish — reads as unread in the sidebar.
     #[serde(default)]
     pub viewed_at: Option<u64>,
+    /// The plan whose document produced this deliverable — a planning
+    /// session publishes its `plans/<name>.md` the same way, and the
+    /// daemon tags the record so the deliverables listings can keep plan
+    /// documents inside their planning flow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_id: Option<Uuid>,
 }
 
 /// Who moved a plan or one of its work items — the audit trail's actor.
