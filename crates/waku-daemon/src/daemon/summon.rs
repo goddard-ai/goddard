@@ -41,11 +41,13 @@ impl WakuBackend {
                                 eprintln!("could not deliver outcome reminders: {error:#}");
                             }
                         }
+                    } else {
+                        backend.deliver_pending_agent_prompts();
                     }
                     let queued = backend.boss.identity_and_session().1.is_some()
                         || !backend.boss.queued_heads().is_empty()
                         || !backend.boss.pending_resource_updates().is_empty()
-                        || !backend.employee_update_targets().is_empty();
+                        || !backend.agent_queue_targets().is_empty();
                     let (lock, condvar) = &*wake;
                     let mut signaled = lock.lock();
                     // Queued tickets get a bounded tick so broker-side changes
@@ -70,86 +72,87 @@ impl WakuBackend {
             });
     }
 
-    /// Durable supervisor queues are also the record of reports waiting
-    /// for their sender. Reconciliation covers a finish with no boss wake.
-    fn employee_update_targets(&self) -> Vec<Uuid> {
-        // Resolving a planning supervisor calls back into task_state. Snapshot
-        // the queued senders first so that callback never reenters this lock.
+    /// Retry durable incoming agent queues by recipient, even when the
+    /// sender is unattributed or no longer in the employee roster.
+    fn agent_queue_targets(&self) -> Vec<Uuid> {
         let candidates: Vec<_> = self
             .task_state
             .lock()
             .sessions
             .iter()
-            .map(|session| {
-                let senders: Vec<_> = session
-                    .queued_messages
-                    .iter()
-                    .filter_map(|message| match message.source {
-                        crate::model::QueuedMessageSource::Agent { sent_by } => sent_by,
-                        _ => None,
-                    })
-                    .collect();
-                let plan_finalized = session.queued_messages.iter().any(|message| {
-                    message.report_trigger.as_ref().is_some_and(|trigger| {
-                        trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
-                    })
-                });
-                (session.id, senders, plan_finalized)
+            .filter(|session| session.archived_at.is_none())
+            .filter(|session| {
+                session.queued_messages.iter().any(|message| {
+                    message.is_agent_owned()
+                        && !self.agent.queued_steer_pending(session.id, message.id)
+                })
             })
-            .filter(|(_, senders, plan_finalized)| *plan_finalized || !senders.is_empty())
+            .map(|session| session.id)
             .collect();
         candidates
             .into_iter()
-            .filter_map(|(session_id, senders, plan_finalized)| {
-                (plan_finalized
-                    || senders.into_iter().any(|sender| {
-                        self.boss.employee(sender).is_some_and(|employee| {
-                            self.boss.report_target(&employee) == Some(session_id)
-                        })
-                    }))
-                .then_some(session_id)
+            .filter(|target| {
+                // Admission and workspace moves own their continuation;
+                // a parked queue must not revive a finished employee.
+                self.boss
+                    .employee_including_retired(*target)
+                    .is_none_or(|employee| {
+                        employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Working
+                            && !employee.workspace_transition
+                    })
             })
             .collect()
     }
 
-    fn deliver_settled_employee_updates(&self) {
+    fn deliver_pending_agent_prompts(&self) {
         let events = self.event_source.lock().clone();
-        for target in self.employee_update_targets() {
-            let plan_finalized = self
+        for target in self.agent_queue_targets() {
+            if self.session_quarantined(target) {
+                continue;
+            }
+            let pending = self
                 .task_state
                 .lock()
                 .sessions
                 .iter()
-                .find(|session| session.id == target)
-                .is_some_and(|session| {
-                    session.queued_messages.iter().any(|message| {
+                .find(|session| session.id == target && session.archived_at.is_none())
+                .and_then(|session| {
+                    let mut entries = session.queued_messages.iter().filter(|message| {
+                        message.is_agent_owned()
+                            && !self.agent.queued_steer_pending(target, message.id)
+                    });
+                    let first = entries.next()?;
+                    let sender = match first.source {
+                        crate::model::QueuedMessageSource::Agent { sent_by } => sent_by,
+                        _ => None,
+                    };
+                    let plan_finalized = std::iter::once(first).chain(entries).any(|message| {
                         message.report_trigger.as_ref().is_some_and(|trigger| {
                             trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
                         })
-                    })
+                    });
+                    Some((sender, plan_finalized, session.active_turn_id().is_some()))
                 });
+            // Cancellation or another drain may have emptied the queue
+            // since candidate selection. Never launch an empty recipient.
+            let Some((sender, plan_finalized, active_turn)) = pending else {
+                continue;
+            };
+            // Ordinary tasks join reconciliation only at an idle boundary.
+            // Managed reports retain their existing interrupt/parked-turn path.
+            if !plan_finalized
+                && !self.boss.is_managed(target)
+                && (active_turn || self.agent.is_working(target))
+            {
+                continue;
+            }
             if !plan_finalized
                 && boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
             {
                 continue;
             }
-            let sender = self
-                .task_state
-                .lock()
-                .sessions
-                .iter()
-                .find(|session| session.id == target)
-                .and_then(|session| {
-                    session
-                        .queued_messages
-                        .iter()
-                        .find_map(|message| match message.source {
-                            crate::model::QueuedMessageSource::Agent { sent_by } => Some(sent_by),
-                            _ => None,
-                        })
-                });
             let waiting = sender.is_some_and(|sent_by| {
-                employee_update_streaming(target, sent_by, &self.agent, &self.boss)
+                employee_update_streaming(target, Some(sent_by), &self.agent, &self.boss)
             });
             if waiting && !plan_finalized {
                 continue;
@@ -171,7 +174,7 @@ impl WakuBackend {
                         )
                     });
             if let Err(error) = result {
-                eprintln!("could not deliver settled employee update for {target}: {error:#}");
+                eprintln!("could not deliver pending agent prompts for {target}: {error:#}");
             }
         }
     }
@@ -264,7 +267,7 @@ impl WakuBackend {
         {
             eprintln!("could not reconcile host resource policy: {error:#}");
         }
-        self.deliver_settled_employee_updates();
+        self.deliver_pending_agent_prompts();
         self.retire_dispatch_notifications();
         self.deliver_wave_notifications();
         loop {

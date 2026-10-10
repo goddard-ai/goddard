@@ -1,0 +1,1 @@
+- Queued messages from other agents now resume delivery when their recipient is idle, even if the sender is no longer active.

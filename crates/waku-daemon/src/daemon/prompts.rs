@@ -303,9 +303,7 @@ impl WakuBackend {
                 );
             }
             // Wake even if the sender settled after the hold check.
-            if managed {
-                self.wake_summon_queue();
-            }
+            self.wake_summon_queue();
             return Ok(());
         }
         let (runtime_id, driver) = self.ensure_agent_runtime(target, events)?;
