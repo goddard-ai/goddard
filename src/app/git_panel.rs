@@ -2859,7 +2859,8 @@ impl Waku {
                     this.open_transcript_commit_diff_for_sha(&open_sha, window, cx);
                 });
             })
-            .disabled(!self.state.git_panel_enabled),
+            // The Review-tab route serves owners the Git panel cannot host.
+            .disabled(!self.state.git_panel_enabled && self.git_panel_owner_allowed()),
         );
         items
     }
@@ -3049,10 +3050,16 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.git_panel_enabled {
+        // The Git panel cannot host a managed owner's commit view — the Boss
+        // chat's SHA opens the commit in the right panel's Review tab instead,
+        // experiment flag or not.
+        let review_tab = !self.git_panel_owner_allowed();
+        if !self.state.git_panel_enabled && !review_tab {
             return;
         }
-        self.set_git_panel_visible(true, window, cx);
+        if !review_tab {
+            self.set_git_panel_visible(true, window, cx);
+        }
         let Some(workspace) = self
             .transcript_commit_details
             .get(sha)
@@ -3110,7 +3117,11 @@ impl Waku {
                 let _ = this.update(cx, |this, cx| match result {
                     Ok((path, entry)) => {
                         if this.selected_session().map(|session| session.id) == session_id {
-                            this.open_commit_diff(path, &entry, cx);
+                            if review_tab {
+                                this.open_right_panel_commit_review(path, &entry.sha, cx);
+                            } else {
+                                this.open_commit_diff(path, &entry, cx);
+                            }
                         }
                     }
                     Err(error) => {
@@ -3120,9 +3131,45 @@ impl Waku {
                 });
             })
             .detach();
+        } else if review_tab {
+            self.open_right_panel_commit_review(workspace, &entry.sha, cx);
         } else {
             self.open_commit_diff(workspace, &entry, cx);
         }
+    }
+
+    /// The transcript SHA's commit view where the Git panel cannot host it —
+    /// boss surfaces — pinned to the right panel's Review tab. A new target
+    /// drops the loaded snapshot the way a source switch does; the refresh
+    /// `open_right_panel_surface` runs refetches through `CommitDiff`.
+    fn open_right_panel_commit_review(
+        &mut self,
+        workspace: PathBuf,
+        sha: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.transcript_commit_hover = None;
+        *self.transcript_selection.hovered_commit.borrow_mut() = None;
+        let retargeted = self
+            .right_panel_diff_commit
+            .as_ref()
+            .is_none_or(|commit| commit.sha != sha || commit.workspace != workspace);
+        self.right_panel_diff_commit = Some(RightPanelDiffCommit {
+            sha: sha.to_owned(),
+            workspace,
+        });
+        if retargeted {
+            self.right_panel_diff_selection.clear();
+            self.right_panel_diff_snapshot = None;
+            self.right_panel_diff_error = None;
+            self.right_panel_diff_selected_file = None;
+            self.right_panel_diff_expanded_paths.clear();
+            self.right_panel_diff_tree_cursor = None;
+            self.right_panel_diff_tree_rows.borrow_mut().clear();
+            self.right_panel_diff_tree_list_state.reset(0);
+            self.right_panel_diff_list_state.reset(0);
+        }
+        self.set_right_panel_diff_source(ReviewDiffSource::Commit, cx);
     }
 
     /// First on-screen glyph rect of a transcript SHA, for anchoring its card.

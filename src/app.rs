@@ -1415,6 +1415,18 @@ enum RightPanelOwner {
     Bare,
 }
 
+/// The commit a Review tab is pinned to — set when a transcript SHA opens a
+/// commit review on an owner the Git panel cannot host. `CommitDiff` fetches
+/// it where `CollectReviewDiff` only takes ranges.
+#[derive(Clone, Debug)]
+struct RightPanelDiffCommit {
+    /// The full commit SHA when a lookup already resolved it.
+    sha: String,
+    /// The checkout holding the commit — a reference-decoded SHA can point
+    /// at a different worktree than the selected session's.
+    workspace: PathBuf,
+}
+
 struct RightPanelSessionState {
     visible: bool,
     surfaces: Vec<RightPanelSurface>,
@@ -1435,6 +1447,9 @@ struct RightPanelSessionState {
     /// last resolved to. `None` means the files slice is still empty.
     files_root: Option<PathBuf>,
     diff_source: ReviewDiffSource,
+    /// The pinned commit riding with `diff_source == Commit` — parked so a
+    /// Boss chat's commit-review tab survives a surface swap.
+    diff_commit: Option<RightPanelDiffCommit>,
     diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     diff_selected_file: Option<usize>,
     diff_expanded_paths: HashSet<String>,
@@ -1487,6 +1502,7 @@ impl RightPanelSessionState {
             ref_editors: HashMap::new(),
             files_root: None,
             diff_source: ReviewDiffSource::default(),
+            diff_commit: None,
             diff_snapshot: None,
             diff_selected_file: None,
             diff_expanded_paths: HashSet::new(),
@@ -3620,6 +3636,9 @@ pub struct Waku {
     /// lifecycle as `file_search`.
     go_to_line: Option<go_to_line::GoToLine>,
     right_panel_diff_source: ReviewDiffSource,
+    /// The commit the Review tab is pinned to — `right_panel_diff_source` is
+    /// `Commit` while set, and every range source clears it.
+    right_panel_diff_commit: Option<RightPanelDiffCommit>,
     right_panel_diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     right_panel_diff_loading: bool,
     right_panel_diff_error: Option<String>,
@@ -7519,6 +7538,7 @@ impl Waku {
                 file_search: None,
                 go_to_line: None,
                 right_panel_diff_source: ReviewDiffSource::default(),
+                right_panel_diff_commit: None,
                 right_panel_diff_snapshot: None,
                 right_panel_diff_loading: false,
                 right_panel_diff_error: None,

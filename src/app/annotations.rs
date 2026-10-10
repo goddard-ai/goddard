@@ -2741,9 +2741,11 @@ impl Waku {
                     git_panel::transcript_commit_hit_at(&selection, event.position)
                 {
                     let _ = waku.update(cx, |this, _| {
-                        // Without the Git panel opt-in a SHA click has nowhere
-                        // to go — leave the gesture to text selection.
-                        if this.state.git_panel_enabled {
+                        // Without the Git panel opt-in an unmanaged surface's
+                        // SHA click has nowhere to go — leave the gesture to
+                        // text selection. Owners the panel cannot host send it
+                        // to the right panel's Review tab.
+                        if this.state.git_panel_enabled || !this.git_panel_owner_allowed() {
                             this.transcript_commit_press = Some(git_panel::TranscriptCommitPress {
                                 key: hit.key,
                                 range: hit.range,

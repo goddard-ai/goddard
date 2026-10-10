@@ -4738,6 +4738,20 @@ impl Waku {
     /// issue/PR details and files rooted at the project, and pages without
     /// their own surface take nothing.
     fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
+        self.right_panel_owner_allows_with_commit(
+            surface,
+            self.right_panel_diff_commit.is_some(),
+        )
+    }
+
+    /// `commit_review` says the strip's Review tab is pinned to a single
+    /// commit — the transcript-SHA target on owners the Git panel cannot
+    /// host. Restore passes the parked state's flag, not the live strip's.
+    fn right_panel_owner_allows_with_commit(
+        &self,
+        surface: &RightPanelSurface,
+        commit_review: bool,
+    ) -> bool {
         let owner = self.active_right_panel_owner();
         if let RightPanelOwner::Session(id) = owner {
             if self.boss_ui.managed.contains(&id) {
@@ -4749,6 +4763,7 @@ impl Waku {
                 RightPanelSurface::Goals => {
                     self.boss_ui.page.is_none() && self.boss_chat_key().is_some()
                 }
+                RightPanelSurface::Diff => commit_review,
                 _ => managed_panel_surface(surface),
             };
         }
@@ -4785,9 +4800,9 @@ impl Waku {
             let active = state
                 .active_surface
                 .and_then(|index| state.surfaces.get(index).cloned());
-            state
-                .surfaces
-                .retain(|surface| self.right_panel_owner_allows(surface));
+            state.surfaces.retain(|surface| {
+                self.right_panel_owner_allows_with_commit(surface, state.diff_commit.is_some())
+            });
             state.active_surface = active
                 .and_then(|surface| state.surfaces.iter().position(|entry| *entry == surface));
             state.git_panel_open = false;
@@ -5063,6 +5078,7 @@ impl Waku {
             ref_editors: HashMap::new(),
             files_root: self.right_panel_files_root.take(),
             diff_source: self.right_panel_diff_source,
+            diff_commit: self.right_panel_diff_commit.take(),
             diff_snapshot: None,
             diff_selected_file: self.right_panel_diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
@@ -5109,6 +5125,7 @@ impl Waku {
         self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
         self.right_panel_diff_selection.clear();
         self.right_panel_diff_source = state.diff_source;
+        self.right_panel_diff_commit = state.diff_commit;
         self.right_panel_diff_snapshot = state.diff_snapshot;
         self.right_panel_diff_loading = false;
         self.right_panel_diff_error = None;
@@ -5428,6 +5445,7 @@ impl Waku {
             turn_id,
             turn_count,
         };
+        self.right_panel_diff_commit = None;
         self.right_panel_diff_selection.clear();
         self.right_panel_diff_snapshot = None;
         self.right_panel_diff_selected_file = None;
@@ -10738,65 +10756,79 @@ impl Waku {
         let source_label = self.review_diff_source_label(selected);
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("right-panel-diff-source", cx);
-        let source = dropdown_menu(
-            MenuChip::new("right-panel-diff-source")
+        let source = if selected == ReviewDiffSource::Commit {
+            // A commit review is pinned to its SHA — the range picker only
+            // applies to workspace diffs.
+            let mut chip = MenuChip::new("right-panel-diff-source")
                 .label(source_label)
                 .height(px(28.0))
                 .background(theme.surface)
-                .selected(handle.is_open()),
-            "right-panel-diff-source-menu",
-            &handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let mut items = Vec::new();
-                let last_turn_source = latest_turn.unwrap_or_default();
-                let last_turn_weak = weak.clone();
-                items.push(
-                    MenuItem::new(tr!("diff.source_last_turn"), move |_, cx| {
-                        let _ = last_turn_weak.update(cx, |this, cx| {
-                            this.set_right_panel_diff_source(last_turn_source, cx)
-                        });
-                    })
-                    .selected(latest_turn == Some(selected))
-                    .disabled(latest_turn.is_none()),
-                );
-                items.push(MenuItem::Separator);
-                for (choice, label) in [
-                    (
-                        ReviewDiffSource::Uncommitted,
-                        tr!("diff.source_uncommitted"),
-                    ),
-                    (ReviewDiffSource::Unstaged, tr!("diff.source_unstaged")),
-                    (ReviewDiffSource::Staged, tr!("diff.source_staged")),
-                ] {
-                    let choice_weak = weak.clone();
+                .caret(false);
+            if let Some(commit) = &self.right_panel_diff_commit {
+                chip = chip.suffix(commit.sha.chars().take(7).collect::<String>());
+            }
+            chip.into_any_element()
+        } else {
+            dropdown_menu(
+                MenuChip::new("right-panel-diff-source")
+                    .label(source_label)
+                    .height(px(28.0))
+                    .background(theme.surface)
+                    .selected(handle.is_open()),
+                "right-panel-diff-source-menu",
+                &handle,
+                MenuAlign::BelowLeft,
+                move |_| {
+                    let mut items = Vec::new();
+                    let last_turn_source = latest_turn.unwrap_or_default();
+                    let last_turn_weak = weak.clone();
                     items.push(
-                        MenuItem::new(label, move |_, cx| {
-                            let _ = choice_weak.update(cx, |this, cx| {
-                                this.set_right_panel_diff_source(choice, cx)
+                        MenuItem::new(tr!("diff.source_last_turn"), move |_, cx| {
+                            let _ = last_turn_weak.update(cx, |this, cx| {
+                                this.set_right_panel_diff_source(last_turn_source, cx)
                             });
                         })
-                        .selected(choice == selected),
+                        .selected(latest_turn == Some(selected))
+                        .disabled(latest_turn.is_none()),
                     );
-                }
-                items.push(MenuItem::Separator);
-                for (choice, label) in [
-                    (ReviewDiffSource::Committed, tr!("diff.source_committed")),
-                    (ReviewDiffSource::Branch, tr!("diff.source_branch")),
-                ] {
-                    let choice_weak = weak.clone();
-                    items.push(
-                        MenuItem::new(label, move |_, cx| {
-                            let _ = choice_weak.update(cx, |this, cx| {
-                                this.set_right_panel_diff_source(choice, cx)
-                            });
-                        })
-                        .selected(choice == selected),
-                    );
-                }
-                items
-            },
-        );
+                    items.push(MenuItem::Separator);
+                    for (choice, label) in [
+                        (
+                            ReviewDiffSource::Uncommitted,
+                            tr!("diff.source_uncommitted"),
+                        ),
+                        (ReviewDiffSource::Unstaged, tr!("diff.source_unstaged")),
+                        (ReviewDiffSource::Staged, tr!("diff.source_staged")),
+                    ] {
+                        let choice_weak = weak.clone();
+                        items.push(
+                            MenuItem::new(label, move |_, cx| {
+                                let _ = choice_weak.update(cx, |this, cx| {
+                                    this.set_right_panel_diff_source(choice, cx)
+                                });
+                            })
+                            .selected(choice == selected),
+                        );
+                    }
+                    items.push(MenuItem::Separator);
+                    for (choice, label) in [
+                        (ReviewDiffSource::Committed, tr!("diff.source_committed")),
+                        (ReviewDiffSource::Branch, tr!("diff.source_branch")),
+                    ] {
+                        let choice_weak = weak.clone();
+                        items.push(
+                            MenuItem::new(label, move |_, cx| {
+                                let _ = choice_weak.update(cx, |this, cx| {
+                                    this.set_right_panel_diff_source(choice, cx)
+                                });
+                            })
+                            .selected(choice == selected),
+                        );
+                    }
+                    items
+                },
+            )
+        };
 
         let (additions, deletions, truncated) = self
             .right_panel_diff_snapshot
@@ -12712,6 +12744,9 @@ impl Waku {
         if self.right_panel_diff_source != source {
             self.right_panel_diff_selection.clear();
             self.right_panel_diff_source = source;
+            if source != ReviewDiffSource::Commit {
+                self.right_panel_diff_commit = None;
+            }
             self.right_panel_diff_snapshot = None;
             self.right_panel_diff_error = None;
             self.right_panel_diff_selected_file = None;
@@ -12735,10 +12770,28 @@ impl Waku {
             self.right_panel_diff_error = Some(tr!("diff.unavailable"));
             return;
         };
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
-        else {
+        // A pinned commit names its own checkout — a reference-decoded SHA
+        // can point off the selected session's workspace. `Commit` is only
+        // ever fetched through `CommitDiff`; `CollectReviewDiff` has no SHA
+        // to key on, so a source restore that lost its commit is dead.
+        let commit = (self.right_panel_diff_source == ReviewDiffSource::Commit)
+            .then(|| self.right_panel_diff_commit.clone())
+            .flatten();
+        if self.right_panel_diff_source == ReviewDiffSource::Commit && commit.is_none() {
+            self.right_panel_diff_selection.clear();
+            self.right_panel_diff_snapshot = None;
+            self.right_panel_diff_loading = false;
+            self.right_panel_diff_error = Some(tr!("diff.unavailable"));
+            return;
+        }
+        let project_path = commit
+            .as_ref()
+            .map(|commit| commit.workspace.clone())
+            .or_else(|| {
+                self.selected_workspace_path()
+                    .map(std::path::Path::to_path_buf)
+            });
+        let Some(project_path) = project_path else {
             self.right_panel_diff_selection.clear();
             self.right_panel_diff_snapshot = None;
             self.right_panel_diff_loading = false;
@@ -12777,13 +12830,23 @@ impl Waku {
                 .background_executor()
                 .spawn({
                     let project_path = project_path.clone();
+                    let commit = commit.clone();
                     async move {
-                        match workspace.request(
-                            waku_client::WorkspaceOperation::CollectReviewDiff {
-                                cwd: project_path,
-                                source: crate::review_diff::wire_source(source),
-                            },
-                        )? {
+                        let result = match &commit {
+                            Some(commit) => workspace.request(
+                                waku_client::WorkspaceOperation::CommitDiff {
+                                    cwd: project_path,
+                                    sha: commit.sha.clone(),
+                                },
+                            )?,
+                            None => workspace.request(
+                                waku_client::WorkspaceOperation::CollectReviewDiff {
+                                    cwd: project_path,
+                                    source: crate::review_diff::wire_source(source),
+                                },
+                            )?,
+                        };
+                        match result {
                             waku_client::WorkspaceResult::ReviewDiff { data } => {
                                 Ok(crate::review_diff::parse_collected(
                                     source,
@@ -12801,9 +12864,18 @@ impl Waku {
                 let still_current = waku.state.selected_session == Some(session_id)
                     && waku.right_panel_diff_generation == generation
                     && waku.right_panel_diff_source == source
-                    && waku
-                        .selected_workspace_path()
-                        .is_some_and(|path| path == project_path);
+                    && match &commit {
+                        Some(commit) => waku
+                            .right_panel_diff_commit
+                            .as_ref()
+                            .is_some_and(|current| {
+                                current.sha == commit.sha
+                                    && current.workspace == commit.workspace
+                            }),
+                        None => waku
+                            .selected_workspace_path()
+                            .is_some_and(|path| path == project_path),
+                    };
                 if !still_current {
                     return;
                 }
