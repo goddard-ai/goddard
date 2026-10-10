@@ -4202,7 +4202,7 @@ impl BossService {
             }
             BossOperation::UpsertPersona { persona } => {
                 self.require_owner(caller)?;
-                validate_name(&persona.name)?;
+                validate_name(persona.name.trim())?;
                 if persona
                     .icon
                     .flatten()
@@ -4227,6 +4227,12 @@ impl BossService {
                     } else {
                         persona.id
                     };
+                    let name = persona.name.trim().to_owned();
+                    if let Some(existing) = state.personas.iter().find(|entry| {
+                        entry.id != id && entry.name.trim().to_lowercase() == name.to_lowercase()
+                    }) {
+                        bail!("persona name '{}' is already used; edit persona {} or choose another name", existing.name, existing.id);
+                    }
                     // `icon` is tri-state on the wire — an absent field
                     // preserves the stored default, null clears it, an
                     // identifier replaces it.
@@ -4237,7 +4243,7 @@ impl BossService {
                         .and_then(|entry| entry.icon);
                     let record = BossPersona {
                         id,
-                        name: persona.name,
+                        name,
                         markdown: persona.markdown,
                         pinned_files: persona.pinned_files,
                         permissions: persona.permissions,
@@ -4276,6 +4282,24 @@ impl BossService {
                             clear_persona_default_notice(state, role);
                         }
                     }
+                    Ok(())
+                })?;
+                Ok(BossResult::State {
+                    state: self.document(),
+                })
+            }
+            BossOperation::DeletePersona { persona_id } => {
+                self.require_owner(caller)?;
+                self.update(|state| {
+                    if state.persona_default_role(persona_id).is_some() {
+                        bail!("shipped persona defaults cannot be deleted; edit or reset the default instead");
+                    }
+                    if persona_is_referenced(state, persona_id) {
+                        bail!("persona is referenced by a current or retired employee; keep it to preserve assignment history");
+                    }
+                    let index = state.personas.iter().position(|persona| persona.id == persona_id)
+                        .ok_or_else(|| anyhow!("persona not found"))?;
+                    state.personas.remove(index);
                     Ok(())
                 })?;
                 Ok(BossResult::State {
@@ -6621,6 +6645,67 @@ fn clear_persona_default_notice(state: &mut BossState, role: PersonaDefaultRole)
     }
 }
 
+fn persona_matches_seed(persona: &BossPersona, role: PersonaDefaultRole) -> bool {
+    let seed = seeded_persona(persona.id, role);
+    persona.name == seed.name
+        && persona.markdown == seed.markdown
+        && persona.pinned_files.is_empty()
+        && persona.icon == seed.icon
+        && persona.permissions.bucket_ids.is_empty()
+        && persona.permissions.integration_ids.is_empty()
+        && !persona.permissions.summon_employees
+        && !persona.permissions.computer_use
+}
+
+fn persona_is_referenced(state: &BossState, id: Uuid) -> bool {
+    state
+        .employees
+        .iter()
+        .chain(&state.retired_employees)
+        .any(|employee| employee.persona_id == id)
+}
+
+// Canonical names win legacy collisions. Every other record keeps its ID,
+// instructions and grants, and gets a deterministic, bounded unique name.
+fn reconcile_persona_names(state: &mut BossState) {
+    let mut used = HashSet::new();
+    let order: Vec<usize> = (0..state.personas.len())
+        .filter(|index| {
+            state
+                .persona_default_role(state.personas[*index].id)
+                .is_some()
+        })
+        .chain((0..state.personas.len()).filter(|index| {
+            state
+                .persona_default_role(state.personas[*index].id)
+                .is_none()
+        }))
+        .collect();
+    // Reserve original names so suffixes cannot steal another saved name.
+    let reserved: HashSet<String> = state
+        .personas
+        .iter()
+        .map(|persona| persona.name.trim().to_lowercase())
+        .collect();
+    for index in order {
+        let persona = &mut state.personas[index];
+        let name = persona.name.trim().to_owned();
+        if used.insert(name.to_lowercase()) {
+            persona.name = name;
+            continue;
+        }
+        let base: String = name.chars().take(80).collect();
+        for suffix in 2.. {
+            let candidate = format!("{base} ({suffix})");
+            let key = candidate.to_lowercase();
+            if !reserved.contains(&key) && used.insert(key) {
+                persona.name = candidate;
+                break;
+            }
+        }
+    }
+}
+
 /// Align loaded state with this build's shipped persona defaults —
 /// identifies the canonical Employee record, classifies each default's
 /// provenance, adopts a newer shipped text into provably untouched saved
@@ -6632,9 +6717,12 @@ fn reconcile_persona_defaults(state: &mut BossState) {
     // marker pointing at a deleted record is restored under the same id,
     // so employees still referencing it keep their assigned role.
     if state.employee_persona_id == Some(state.persona_id)
-        || state
-            .employee_persona_id
-            .is_some_and(|id| state.specialist_persona_ids.values().any(|other| *other == id))
+        || state.employee_persona_id.is_some_and(|id| {
+            state
+                .specialist_persona_ids
+                .values()
+                .any(|other| *other == id)
+        })
     {
         // A corrupt marker can name the Boss persona or a canonical
         // specialist — the base is never the same record.
@@ -6723,8 +6811,8 @@ fn reconcile_persona_defaults(state: &mut BossState) {
     }
     // Shipped specialist roles seed on first sight — including existing
     // installs — as ordinary persona records employees can select. A
-    // custom persona that happens to share a role's name stays a custom
-    // persona; only the recorded id is canonical.
+    // custom persona with distinct instructions stays a custom persona;
+    // lost markers recover only from byte-identical shipped instructions.
     let mut claimed: HashSet<Uuid> = [state.persona_id]
         .into_iter()
         .chain(state.employee_persona_id)
@@ -6751,14 +6839,47 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                 }
             }
             None => {
-                let id = Uuid::new_v4();
-                state.personas.push(seeded_persona(id, role));
+                let existing = state
+                    .personas
+                    .iter()
+                    .find(|persona| {
+                        !claimed.contains(&persona.id)
+                            && shipped_persona_revision(role, &persona.markdown).is_some()
+                    })
+                    .map(|persona| persona.id);
+                let id = existing.unwrap_or_else(Uuid::new_v4);
+                if existing.is_none() {
+                    state.personas.push(seeded_persona(id, role));
+                }
                 state.specialist_persona_ids.insert(role, id);
                 claimed.insert(id);
-                *state.persona_defaults.get_mut(role) = current_persona_default_state(role);
+                if existing.is_none() {
+                    *state.persona_defaults.get_mut(role) = current_persona_default_state(role);
+                }
             }
         }
     }
+    // Only untouched, unreferenced seed copies are disposable. Referenced
+    // copies keep their identities so even retired assignments remain valid.
+    let removable: HashSet<Uuid> = state
+        .personas
+        .iter()
+        .filter(|persona| {
+            !claimed.contains(&persona.id)
+                && !persona_is_referenced(state, persona.id)
+                && PersonaDefaultRole::SPECIALISTS.iter().copied().any(|role| {
+                    persona_matches_seed(persona, role)
+                        && default_persona_index(state, role).is_some_and(|index| {
+                            persona_matches_seed(&state.personas[index], role)
+                        })
+                })
+        })
+        .map(|persona| persona.id)
+        .collect();
+    state
+        .personas
+        .retain(|persona| !removable.contains(&persona.id));
+    reconcile_persona_names(state);
     for role in PersonaDefaultRole::ALL.iter().copied() {
         let Some(index) = default_persona_index(state, role) else {
             continue;
@@ -6793,7 +6914,9 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                         },
                     );
                 }
-                None => {}
+                None => {
+                    *state.persona_defaults.get_mut(role) = defaults;
+                }
             }
             continue;
         }
@@ -12535,6 +12658,286 @@ mod memory_op_tests {
     /// identities for every role — the Employee base plus all four
     /// shipped specialists — with nothing pending.
     #[test]
+    fn persona_names_are_unique_and_canonical_edits_keep_identity() {
+        let root = std::env::temp_dir().join(format!("boss-persona-names-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let state = service.document();
+        let id = state.specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        let original = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == id)
+            .unwrap();
+        let mut duplicate = BossPersonaUpsert::from(original.clone());
+        duplicate.id = Uuid::nil();
+        duplicate.name = format!("  {}  ", original.name.to_uppercase());
+        duplicate.markdown = "Custom researcher instructions".into();
+        let error = service
+            .handle(
+                None,
+                BossOperation::UpsertPersona {
+                    persona: duplicate.clone(),
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains(&id.to_string()));
+        duplicate.id = id;
+        service
+            .handle(None, BossOperation::UpsertPersona { persona: duplicate })
+            .unwrap();
+        let edited = service.document();
+        assert_eq!(edited.personas.len(), state.personas.len());
+        assert_eq!(
+            edited.specialist_persona_ids[&PersonaDefaultRole::Researcher],
+            id
+        );
+        assert_eq!(
+            edited
+                .personas
+                .iter()
+                .find(|persona| persona.id == id)
+                .unwrap()
+                .markdown,
+            "Custom researcher instructions"
+        );
+        let mut collision = BossPersonaUpsert::from(edited.personas[0].clone());
+        collision.name = original.name.clone();
+        assert!(
+            service
+                .handle(None, BossOperation::UpsertPersona { persona: collision })
+                .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persona_delete_protects_defaults_and_assignment_references() {
+        let root = std::env::temp_dir().join(format!("boss-persona-delete-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                Ok(())
+            })
+            .unwrap();
+        for role in PersonaDefaultRole::ALL {
+            let persona_id = service.document().default_persona_id(*role).unwrap();
+            assert!(
+                service
+                    .handle(None, BossOperation::DeletePersona { persona_id })
+                    .is_err()
+            );
+        }
+        let mut custom = BossPersonaUpsert::from(service.document().personas[0].clone());
+        custom.id = Uuid::new_v4();
+        custom.name = "Temporary role".into();
+        let persona_id = custom.id;
+        service
+            .handle(Some(boss), BossOperation::UpsertPersona { persona: custom })
+            .unwrap();
+        assert!(
+            service
+                .handle(
+                    Some(Uuid::new_v4()),
+                    BossOperation::DeletePersona { persona_id }
+                )
+                .is_err()
+        );
+        let employee = service
+            .prepare_employee(
+                boss,
+                Some(persona_id),
+                "Use role".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        service.add_employee(employee).unwrap();
+        assert!(
+            service
+                .handle(Some(boss), BossOperation::DeletePersona { persona_id })
+                .is_err()
+        );
+        service
+            .update(|state| {
+                let employee = state.employees.remove(0);
+                state.retired_employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            service
+                .handle(None, BossOperation::DeletePersona { persona_id })
+                .is_err()
+        );
+        // A separate unused role can be removed by either owner interface.
+        for caller in [None, Some(boss)] {
+            let mut custom = BossPersonaUpsert::from(service.document().personas[0].clone());
+            custom.id = Uuid::new_v4();
+            custom.name = "Unused role".into();
+            let persona_id = custom.id;
+            service
+                .handle(caller, BossOperation::UpsertPersona { persona: custom })
+                .unwrap();
+            service
+                .handle(caller, BossOperation::DeletePersona { persona_id })
+                .unwrap();
+            assert!(
+                !service
+                    .document()
+                    .personas
+                    .iter()
+                    .any(|persona| persona.id == persona_id)
+            );
+            assert!(
+                service
+                    .handle(caller, BossOperation::DeletePersona { persona_id })
+                    .is_err()
+            );
+            assert!(!BossService::open(root.clone()).unwrap().document().personas.iter().any(|persona| persona.id == persona_id));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persona_reconciliation_adopts_lost_specialists_and_preserves_custom_content() {
+        let root = std::env::temp_dir().join(format!("boss-persona-reconcile-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let original = service.document().specialist_persona_ids;
+        let custom_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                for role in PersonaDefaultRole::SPECIALISTS {
+                    state.personas.push(seeded_persona(Uuid::new_v4(), *role));
+                }
+                let mut custom = seeded_persona(custom_id, PersonaDefaultRole::Researcher);
+                custom.markdown = "Distinct custom instructions".into();
+                state.personas.push(custom);
+                state.personas[0].markdown = "Customized Boss".into();
+                state
+                    .persona_defaults
+                    .get_mut(PersonaDefaultRole::Boss)
+                    .seen_revision = 0;
+                Ok(())
+            })
+            .unwrap();
+        drop(service);
+        for _ in 0..2 {
+            let path = root.join("boss.json");
+            let mut doc: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            doc.as_object_mut().unwrap().remove("specialistPersonaIds");
+            fs::write(path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+            let restored = BossService::open(root.clone()).unwrap();
+            let state = restored.document();
+            assert_eq!(state.specialist_persona_ids, original);
+            assert_eq!(state.personas.len(), PersonaDefaultRole::ALL.len() + 1);
+            let custom = state
+                .personas
+                .iter()
+                .find(|persona| persona.id == custom_id)
+                .unwrap();
+            assert_eq!(custom.markdown, "Distinct custom instructions");
+            assert_ne!(custom.name, PersonaDefaultRole::Researcher.label());
+            assert_eq!(
+                state
+                    .persona_defaults
+                    .get(PersonaDefaultRole::Boss)
+                    .seen_revision,
+                shipped_persona_default(PersonaDefaultRole::Boss).revision
+            );
+            let names: HashSet<_> = state
+                .personas
+                .iter()
+                .map(|persona| persona.name.trim().to_lowercase())
+                .collect();
+            assert_eq!(names.len(), state.personas.len());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persona_reconciliation_preserves_referenced_seeds_and_custom_settings() {
+        let root = std::env::temp_dir().join(format!("boss-persona-reference-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let referenced = Uuid::new_v4();
+        let customized = Uuid::new_v4();
+        let old_default = Uuid::new_v4();
+        let boss = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                state
+                    .personas
+                    .push(seeded_persona(referenced, PersonaDefaultRole::Researcher));
+                let mut custom = seeded_persona(customized, PersonaDefaultRole::Verifier);
+                custom.permissions.computer_use = true;
+                state.personas.push(custom);
+                state.personas.push(seeded_persona(
+                    old_default,
+                    PersonaDefaultRole::BugInvestigator,
+                ));
+                let canonical = state.specialist_persona_ids[&PersonaDefaultRole::BugInvestigator];
+                state
+                    .personas
+                    .iter_mut()
+                    .find(|persona| persona.id == canonical)
+                    .unwrap()
+                    .markdown = "Customized investigator".into();
+                Ok(())
+            })
+            .unwrap();
+        let employee = service
+            .prepare_employee(
+                boss,
+                Some(referenced),
+                "Research".into(),
+                None,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        service.add_employee(employee).unwrap();
+        drop(service);
+        let restored = BossService::open(root.clone()).unwrap();
+        let state = restored.document();
+        assert_eq!(state.employees[0].persona_id, referenced);
+        assert!(
+            state
+                .personas
+                .iter()
+                .any(|persona| persona.id == old_default)
+        );
+        assert!(
+            state
+                .personas
+                .iter()
+                .any(|persona| persona.id == referenced)
+        );
+        assert!(
+            state
+                .personas
+                .iter()
+                .find(|persona| persona.id == customized)
+                .unwrap()
+                .permissions
+                .computer_use
+        );
+        assert_ne!(
+            state
+                .personas
+                .iter()
+                .find(|persona| persona.id == referenced)
+                .unwrap()
+                .name,
+            PersonaDefaultRole::Researcher.label()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn persona_defaults_seed_the_shipped_revision() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
@@ -12642,16 +13045,16 @@ mod memory_op_tests {
                 shipped_persona_default(role).revision
             );
         }
-        // The user's own "Researcher" is a separate custom record —
-        // same name, different identity, text untouched.
+        // The user's own researcher keeps its separate identity and text,
+        // with a unique name alongside the canonical shipped role.
         let custom = state
             .personas
             .iter()
             .find(|persona| persona.markdown == "User's own researcher policy.")
             .unwrap();
-        assert_eq!(custom.name, "Researcher");
+        assert_eq!(custom.name, "Researcher (2)");
         assert_eq!(state.persona_default_role(custom.id), None);
-        assert_eq!(state.personas.iter().filter(|p| p.name == "Researcher").count(), 2);
+        assert_eq!(state.personas.iter().filter(|p| p.name == "Researcher").count(), 1);
         // Seeding is not an update — nothing for the boss to report.
         assert!(state.persona_default_notice.is_none());
         fs::remove_dir_all(root).unwrap();

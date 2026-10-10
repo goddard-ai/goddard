@@ -892,6 +892,23 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "deletePersona"
+            },
+            "personaId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "personaId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "personaDefault"
             },
             "action": {
@@ -1624,6 +1641,18 @@
             "type",
             "start",
             "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "feed"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": false
         },
@@ -3288,6 +3317,16 @@
               "anyOf": [
                 {
                   "protocolType": "MemoryMigrationReport"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "feed": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
                 },
                 {
                   "type": "null"

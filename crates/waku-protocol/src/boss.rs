@@ -2851,6 +2851,11 @@ pub enum BossOperation {
     UpsertPersona {
         persona: BossPersonaUpsert,
     },
+    /// Delete an unreferenced custom persona. Shipped defaults and records
+    /// referenced by current or retired employees are protected.
+    DeletePersona {
+        persona_id: Uuid,
+    },
     /// Inspect, reset, or review the shipped Boss/Employee default
     /// instructions — `action` picks the step. Read actions are
     /// boss/human; `keep` and `adopt` are human-only since customized

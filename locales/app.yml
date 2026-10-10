@@ -6984,3 +6984,8 @@ voice_scratchpad.recording_retained:
   en: Transcription failed — recording saved for Retry
 composer.dictation_return_to_retry:
   en: Return to the original chat and activate the microphone to retry the saved recording.
+
+boss.persona_delete:
+  en: Delete persona
+boss.persona_delete_confirm:
+  en: Confirm deletion

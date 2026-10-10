@@ -986,14 +986,15 @@ impl WakuBackend {
                 // saved text while a running turn keeps what it began
                 // with.
                 let personas_before: std::collections::HashMap<Uuid, String> = match operation {
-                    BossOperation::UpsertPersona { .. } | BossOperation::PersonaDefault { .. } => {
-                        self.boss
-                            .document()
-                            .personas
-                            .iter()
-                            .map(|persona| (persona.id, persona.markdown.clone()))
-                            .collect()
-                    }
+                    BossOperation::UpsertPersona { .. }
+                    | BossOperation::DeletePersona { .. }
+                    | BossOperation::PersonaDefault { .. } => self
+                        .boss
+                        .document()
+                        .personas
+                        .iter()
+                        .map(|persona| (persona.id, persona.markdown.clone()))
+                        .collect(),
                     _ => Default::default(),
                 };
                 // Recording the Employee base choice can release tickets

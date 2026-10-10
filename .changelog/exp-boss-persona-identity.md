@@ -1,0 +1,1 @@
+- Boss persona names are now unique, shipped roles recover without duplicate seeding, and unused custom personas can be deleted from Personas or the Boss CLI. Shipped defaults and personas referenced by current or retired employees are protected.

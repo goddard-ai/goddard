@@ -678,6 +678,7 @@ pub(super) struct BossUi {
     /// Per-persona expansion for the shipped-default card — comparison,
     /// shipped text, and the reset confirmation, keyed by persona id.
     persona_default_pane: HashMap<Uuid, PersonaDefaultPane>,
+    persona_delete_confirmation: Option<(DaemonKey, Uuid)>,
     /// The shipped↔saved diff text for an expanded comparison, keyed to
     /// the markdown fingerprint it was computed from.
     persona_diff: RefCell<Option<(Uuid, u64, String)>>,
@@ -789,6 +790,7 @@ impl Default for BossUi {
             persona_scroll: ScrollHandle::new(),
             persona_scrollbar: ScrollbarState::new(),
             persona_default_pane: HashMap::new(),
+            persona_delete_confirmation: None,
             persona_diff: RefCell::new(None),
             memory_feed: HashMap::new(),
             memory_project: HashMap::new(),
@@ -7371,6 +7373,49 @@ impl Waku {
                                             }),
                                     ),
                             )
+                            .when(default_role.is_none() && !boss_role, |header| {
+                                let persona_id = persona.id;
+                                let confirming = self.boss_ui.persona_delete_confirmation
+                                    == Some((key, persona_id));
+                                let label = if confirming {
+                                    tr!("boss.persona_delete_confirm")
+                                } else {
+                                    tr!("boss.persona_delete")
+                                };
+                                header.child(
+                                    boss_button("boss-delete-persona", label.clone(), &theme)
+                                        .child(icon(
+                                            "icons/trash.svg",
+                                            13.0,
+                                            theme.text_secondary,
+                                        ))
+                                        .child(label)
+                                        .on_activation(cx, move |this, _, cx| {
+                                            if confirming {
+                                                this.boss_ui.persona_delete_confirmation = None;
+                                                this.boss_request(
+                                                    key,
+                                                    BossOperation::DeletePersona { persona_id },
+                                                    BossReply::Saved,
+                                                    cx,
+                                                );
+                                            } else {
+                                                this.boss_ui.persona_delete_confirmation =
+                                                    Some((key, persona_id));
+                                                cx.notify();
+                                            }
+                                        }),
+                                ).when(confirming, |header| {
+                                    header.child(
+                                        boss_button("boss-delete-persona-cancel", tr!("common.cancel"), &theme)
+                                            .child(tr!("common.cancel"))
+                                            .on_activation(cx, |this, _, cx| {
+                                                this.boss_ui.persona_delete_confirmation = None;
+                                                cx.notify();
+                                            }),
+                                    )
+                                })
+                            })
                             .child(
                                 boss_button("boss-edit-persona", tr!("boss.edit"), &theme)
                                     .child(icon("icons/pencil.svg", 13.0, theme.text_secondary))

@@ -185,6 +185,7 @@ pub(super) fn aggregate() -> Value {
             "renameEmployee" => &["boss employee rename"],
             "regenerateAvatar" => &["boss avatar regenerate"],
             "upsertPersona" => &["boss persona upsert"],
+            "deletePersona" => &["boss persona delete"],
             "personaDefault" => &[
                 "boss persona defaults",
                 "boss persona reset",
@@ -227,9 +228,9 @@ pub(super) fn aggregate() -> Value {
         let human_only = matches!(name, "open" | "finalizePlan" | "setAvatarStyle");
         let output = match name {
             "view" | "rename" | "renameEmployee" | "regenerateAvatar" | "setAvatarStyle"
-            | "upsertPersona" | "setEmployeeIcon" | "updatePlanItems" | "setPlanItemState"
-            | "setPlanOutcome" | "createOutcome" | "setOutcomeState" | "resolveHandoff"
-            | "setOutcomeWaiting" | "attachPlan" => "state",
+            | "upsertPersona" | "deletePersona" | "setEmployeeIcon" | "updatePlanItems"
+            | "setPlanItemState" | "setPlanOutcome" | "createOutcome" | "setOutcomeState"
+            | "resolveHandoff" | "setOutcomeWaiting" | "attachPlan" => "state",
             "open" | "createPlan" => "session",
             "roster" => "roster",
             "context" => "context",

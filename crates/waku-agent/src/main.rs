@@ -445,6 +445,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"type":"saved"}}),
             "goddard-agent boss file mkdir plans/archive".to_owned(),
         ),
+        "boss persona delete" => (
+            json!({"PERSONA_ID":{"positional":true,"required":true,"type":"persona UUID"}}),
+            json!({"json":{"type":"state","state":"updated BossState"}}),
+            "goddard-agent boss persona delete PERSONA_ID".to_owned(),
+        ),
         "boss persona upsert" => (
             json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"bucketIds":"string[] of existing Boss-created buckets","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
             json!({"json":{"type":"state","state":"updated BossState including the persona record"}}),
@@ -782,6 +787,7 @@ fn schema() -> serde_json::Value {
         "boss persona list",
         "boss persona show",
         "boss persona upsert",
+        "boss persona delete",
         "boss persona defaults",
         "boss persona reset",
         "boss persona undo",
@@ -1607,6 +1613,14 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&selected)?);
             Ok(())
+        }
+        ("persona", "delete") => {
+            let (pos, _) = flags(args, &[], false)?;
+            if pos.len() != 1 {
+                bail!("usage: boss persona delete PERSONA_ID");
+            }
+            let persona_id = pos[0].parse().context("invalid persona ID")?;
+            print_boss(boss_request(Op::DeletePersona { persona_id })?)
         }
         ("persona", "upsert") => {
             let (_, opts) = flags(

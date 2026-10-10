@@ -166,8 +166,11 @@ fn purpose(path: &str) -> &str {
         "boss persona show" => {
             "Read one exact role name or UUID; use UUID when names are ambiguous."
         }
+        "boss persona delete" => {
+            "Delete an unreferenced custom persona by UUID; shipped defaults and current/retired assignments are protected."
+        }
         "boss persona upsert" => {
-            "Create or replace role instructions with explicit new/id selection."
+            "Create or replace role instructions with explicit new/id selection; names must be unique after trimming, ignoring case. Edit shipped roles by their existing ID."
         }
         "boss persona defaults" => {
             "Inspect shipped revisions, saved defaults and pending proposals."
