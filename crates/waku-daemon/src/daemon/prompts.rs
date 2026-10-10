@@ -267,6 +267,9 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        let plan_finalized = report_trigger
+            .as_ref()
+            .is_some_and(|trigger| trigger.kind == crate::model::ReportTriggerKind::PlanFinalized);
         let queued_id = queued_id.unwrap_or_else(Uuid::new_v4);
         // The parked id doubles as the delivered message's — the trigger's
         // dedupe identity matches it so a redriven delivery folds onto the
@@ -324,6 +327,18 @@ impl WakuBackend {
             )
         }) {
             return Ok(());
+        }
+        if plan_finalized {
+            let (runtime_id, driver) = self.ensure_agent_runtime(target, events)?;
+            if self.agent.has_open_turn(target) && !driver.supports_steer() {
+                self.agent.expect_daemon_interrupt(target);
+                driver.cancel();
+            }
+            return self.drain_agent_queue(
+                target,
+                &driver,
+                &events.for_session(target, runtime_id),
+            );
         }
         if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
             || self.agent.is_working(target)
@@ -416,11 +431,14 @@ impl WakuBackend {
     ) -> anyhow::Result<()> {
         rehydrate_agent_queue(&self.agent, &self.task_state, &self.task_store, session_id);
         while let Some(entry) = self.agent.pop_queued(session_id) {
-            if boss_notification_waiting(session_id, &self.agent, &self.boss, &self.task_state)
-                || (self.agent.is_working(session_id)
-                    && !(employee_report_interrupts(&entry) && driver.supports_steer()))
-                || employee_update_streaming(session_id, entry.sender, &self.agent, &self.boss)
-            {
+            if agent_prompt_waiting(
+                session_id,
+                &entry,
+                driver,
+                &self.agent,
+                &self.boss,
+                &self.task_state,
+            ) {
                 self.agent.requeue_front(session_id, entry);
                 break;
             }

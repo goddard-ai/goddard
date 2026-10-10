@@ -524,7 +524,7 @@ impl WakuBackend {
         // turn immediately; otherwise the hidden prompt is parked durably.
         if let Some(boss_session) = self.boss.document().session_id {
             let handoff = format!(
-                "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
+                "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Immediately confirm to the human that you received the finalized plan, then coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,
             );
             let trigger = crate::model::ReportTrigger::plan_finalized(&finalized);

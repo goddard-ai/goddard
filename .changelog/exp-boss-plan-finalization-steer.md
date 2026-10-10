@@ -1,1 +1,1 @@
-- Planning session approvals now reach the Boss immediately when its turn is open, while inactive Boss sessions keep the durable queued handoff.
+- Finalizing a planning session interrupts the current Boss turn and takes priority over employee notifications and queued employee or user prompts.

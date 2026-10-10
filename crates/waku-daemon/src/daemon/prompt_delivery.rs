@@ -84,12 +84,33 @@ pub(super) fn boss_notification_waiting(
                 }))
 }
 
+/// Only finalized plans bypass Boss notification and sender-settlement holds.
+/// Providers without steering finish cancellation before opening the handoff.
+pub(super) fn agent_prompt_waiting(
+    target: Uuid,
+    entry: &crate::agent::AgentPrompt,
+    driver: &DriverHandle,
+    agent: &crate::agent::AgentState,
+    boss: &crate::boss::BossService,
+    task_state: &Mutex<PersistedState>,
+) -> bool {
+    if entry.is_plan_finalization() {
+        return agent.has_open_turn(target) && !driver.supports_steer();
+    }
+    boss_notification_waiting(target, agent, boss, task_state)
+        || (agent.is_working(target)
+            && !(employee_report_interrupts(entry) && driver.supports_steer()))
+        || employee_update_streaming(target, entry.sender, agent, boss)
+}
+
 /// Urgent reports keep their interrupt delivery after waiting for the sender.
 pub(super) fn employee_report_interrupts(entry: &crate::agent::AgentPrompt) -> bool {
     entry.report_trigger.as_ref().is_some_and(|trigger| {
         matches!(
             trigger.kind,
-            crate::model::ReportTriggerKind::Blocker | crate::model::ReportTriggerKind::Interrupted
+            crate::model::ReportTriggerKind::Blocker
+                | crate::model::ReportTriggerKind::Interrupted
+                | crate::model::ReportTriggerKind::PlanFinalized
         )
     })
 }
@@ -112,7 +133,12 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
-    if boss_notification_waiting(session_id, agent, boss, task_state) {
+    if (!entry.is_plan_finalization()
+        && boss_notification_waiting(session_id, agent, boss, task_state))
+        || (entry.is_plan_finalization()
+            && agent.has_open_turn(session_id)
+            && !driver.supports_steer())
+    {
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
@@ -296,10 +322,12 @@ pub(super) fn persist_agent_prompt(
             return Ok(PromptPersistence::Duplicate);
         }
         if session.active_turn_id().is_some()
-            || session
+            || (!report_trigger.as_ref().is_some_and(|trigger| {
+                trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
+            }) && session
                 .queued_messages
                 .iter()
-                .any(|message| matches!(message.source, crate::model::QueuedMessageSource::User))
+                .any(|message| matches!(message.source, crate::model::QueuedMessageSource::User)))
         {
             return Ok(PromptPersistence::Waiting);
         }

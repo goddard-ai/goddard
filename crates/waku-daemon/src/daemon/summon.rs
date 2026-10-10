@@ -89,21 +89,25 @@ impl WakuBackend {
                         _ => None,
                     })
                     .collect();
-                (session.id, senders)
+                let plan_finalized = session.queued_messages.iter().any(|message| {
+                    message.report_trigger.as_ref().is_some_and(|trigger| {
+                        trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
+                    })
+                });
+                (session.id, senders, plan_finalized)
             })
-            .filter(|(_, senders)| !senders.is_empty())
+            .filter(|(_, senders, plan_finalized)| *plan_finalized || !senders.is_empty())
             .collect();
         candidates
             .into_iter()
-            .filter_map(|(session_id, senders)| {
-                senders
-                    .into_iter()
-                    .any(|sender| {
+            .filter_map(|(session_id, senders, plan_finalized)| {
+                (plan_finalized
+                    || senders.into_iter().any(|sender| {
                         self.boss.employee(sender).is_some_and(|employee| {
                             self.boss.report_target(&employee) == Some(session_id)
                         })
-                    })
-                    .then_some(session_id)
+                    }))
+                .then_some(session_id)
             })
             .collect()
     }
@@ -111,7 +115,22 @@ impl WakuBackend {
     fn deliver_settled_employee_updates(&self) {
         let events = self.event_source.lock().clone();
         for target in self.employee_update_targets() {
-            if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state) {
+            let plan_finalized = self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == target)
+                .is_some_and(|session| {
+                    session.queued_messages.iter().any(|message| {
+                        message.report_trigger.as_ref().is_some_and(|trigger| {
+                            trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
+                        })
+                    })
+                });
+            if !plan_finalized
+                && boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
+            {
                 continue;
             }
             let sender = self
@@ -132,12 +151,19 @@ impl WakuBackend {
             let waiting = sender.is_some_and(|sent_by| {
                 employee_update_streaming(target, sent_by, &self.agent, &self.boss)
             });
-            if waiting {
+            if waiting && !plan_finalized {
                 continue;
             }
             let result =
                 self.ensure_agent_runtime(target, &events)
                     .and_then(|(runtime, driver)| {
+                        if plan_finalized
+                            && self.agent.has_open_turn(target)
+                            && !driver.supports_steer()
+                        {
+                            self.agent.expect_daemon_interrupt(target);
+                            driver.cancel();
+                        }
                         self.drain_agent_queue(
                             target,
                             &driver,

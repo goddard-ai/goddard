@@ -64,6 +64,15 @@ pub struct AgentPrompt {
     pub report_trigger: Option<crate::model::ReportTrigger>,
 }
 
+impl AgentPrompt {
+    /// Human plan approval takes precedence over ordinary queued work.
+    pub fn is_plan_finalization(&self) -> bool {
+        self.report_trigger
+            .as_ref()
+            .is_some_and(|trigger| trigger.kind == crate::model::ReportTriggerKind::PlanFinalized)
+    }
+}
+
 /// What accepting a hidden context steer settles for the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextSteer {
@@ -471,11 +480,15 @@ impl AgentState {
             .push_back(prompt);
     }
 
-    /// Pop the next queued prompt in submission order.
+    /// Deliver finalized plans first, preserving submission order within each priority.
     pub fn pop_queued(&self, session_id: Uuid) -> Option<AgentPrompt> {
         let mut queues = self.queues.lock();
         let queue = queues.get_mut(&session_id)?;
-        let prompt = queue.pop_front();
+        let priority = queue.iter().position(AgentPrompt::is_plan_finalization);
+        let prompt = match priority {
+            Some(index) => queue.remove(index),
+            None => queue.pop_front(),
+        };
         if queue.is_empty() {
             queues.remove(&session_id);
         }

@@ -11460,25 +11460,31 @@ fn finalize_plan_steers_an_open_boss_turn() {
         BossResult::PlanFinalized { .. }
     ));
 
-    // The handoff waits out the open Boss turn — employee notifications
-    // never cut ahead of a turn the user is watching.
-    assert!(capture.steers.lock().is_empty());
+    // Human approval cuts into the open Boss turn without opening another.
+    let steers = capture.steers.lock().clone();
+    assert_eq!(steers.len(), 1);
+    assert!(steers[0].contains("finalized its design"));
+    assert!(steers[0].contains("plans/auth.md"));
     assert!(capture.prompts.lock().is_empty());
-    assert!(backend.agent.has_queued(boss));
-    let finished = DriverEvent::TurnFinished {
-        success: true,
-        summary: None,
-        summary_i18n: None,
-    };
-    record_boss_event(&backend.task_state, &backend.task_store, boss, &finished).unwrap();
-    backend.agent.note_driver_event(boss, &finished);
-    let driver = DriverHandle::from_control(capture.clone());
-    backend.drain_agent_queue(boss, &driver, &events).unwrap();
-    let prompts = capture.prompts.lock().clone();
-    assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains("finalized its design"));
-    assert!(prompts[0].contains("plans/auth.md"));
     assert!(!backend.agent.has_queued(boss));
+    let pending = backend.agent.take_pending_steer(boss, &steers[0]).unwrap();
+    let queued_id = pending.queued_id.unwrap();
+    record_agent_steer(
+        &backend.task_state,
+        &backend.task_store,
+        boss,
+        &pending.prompt,
+        pending.sender.unwrap(),
+        pending.hidden,
+        pending.report_trigger,
+    );
+    unmirror_agent_queued_prompt(
+        &backend.task_state,
+        &backend.task_store,
+        boss,
+        queued_id,
+    )
+    .unwrap();
     let mut state = backend.task_state.lock();
     let session = state
         .sessions
@@ -11493,9 +11499,9 @@ fn finalize_plan_steers_an_open_boss_turn() {
         .expect("the parked handoff delivers with its marker");
     let trigger = report.report_trigger.as_ref().unwrap();
     assert_eq!(trigger.kind, ReportTriggerKind::PlanFinalized);
-    assert_eq!(trigger.boundary, ReportTriggerBoundary::Opening);
+    assert_eq!(trigger.boundary, ReportTriggerBoundary::Steer);
     assert_eq!(trigger.employee, plan.session_id);
-    assert_eq!(trigger.event_id, report.id);
+    assert_eq!(trigger.event_id, queued_id);
     drop(state);
     let _ = std::fs::remove_dir_all(root);
 }
