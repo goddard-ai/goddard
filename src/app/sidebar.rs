@@ -5511,8 +5511,9 @@ impl Waku {
                             title: drag_title,
                         },
                         move |drag, _, _, cx| {
-                            cx.new(|_| composer::SidebarSessionDragView {
+                            cx.new(|_| composer::SidebarDragChipView {
                                 title: drag.title.clone(),
+                                icon: crate::input::ATOM_SESSION_ICON,
                             })
                         },
                     )

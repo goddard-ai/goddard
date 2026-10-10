@@ -926,6 +926,16 @@ impl Render for Waku {
                                     );
                                 },
                             ))
+                            .on_drop(cx.listener(
+                                |this, drag: &composer::SidebarDeliverableDrag, window, cx| {
+                                    this.stage_deliverable_reference_for(
+                                        &composer::ComposerCard::Main,
+                                        drag,
+                                        window,
+                                        cx,
+                                    );
+                                },
+                            ))
                     })
                     .when(
                         self.boss_ui.page.is_none()

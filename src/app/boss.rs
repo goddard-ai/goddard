@@ -3444,6 +3444,15 @@ impl Waku {
             || tr!("boss.group"),
             |name| format!("{} · {name}", tr!("boss.group")),
         );
+        // The row drags like a task row once the boss chat exists — the
+        // reference names its session, so an unopened chat has nothing to
+        // carry.
+        let session_drag = state.session_id.map(|session_id| {
+            composer::SidebarSessionDrag {
+                session_id,
+                title: SharedString::from(state.identity.name.clone()),
+            }
+        });
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -3459,6 +3468,14 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
+            .when_some(session_drag, |row, drag| {
+                row.on_drag(drag, |drag, _, _, cx| {
+                    cx.new(|_| composer::SidebarDragChipView {
+                        title: drag.title.clone(),
+                        icon: crate::input::ATOM_SESSION_ICON,
+                    })
+                })
+            })
             .child(self.boss_avatar_animated(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
@@ -3655,6 +3672,18 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
+            .on_drag(
+                composer::SidebarSessionDrag {
+                    session_id: id,
+                    title: SharedString::from(identity.name.clone()),
+                },
+                |drag, _, _, cx| {
+                    cx.new(|_| composer::SidebarDragChipView {
+                        title: drag.title.clone(),
+                        icon: crate::input::ATOM_SESSION_ICON,
+                    })
+                },
+            )
             .child(self.boss_avatar_animated(identity, 24.0, cx))
             .child(boss_sidebar_label(
                 identity.name.clone(),
@@ -3724,6 +3753,18 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
+            .on_drag(
+                composer::SidebarSessionDrag {
+                    session_id: id,
+                    title: SharedString::from(planning.idea.clone()),
+                },
+                |drag, _, _, cx| {
+                    cx.new(|_| composer::SidebarDragChipView {
+                        title: drag.title.clone(),
+                        icon: crate::input::ATOM_PLANNING_ICON,
+                    })
+                },
+            )
             .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key.as_str() == "f10" && event.keystroke.modifiers.shift {
                     keyboard_menu.open_context_menu(window, cx);
@@ -3826,6 +3867,20 @@ impl Waku {
         // send or session switch clears the arm.
         let armed = self.boss_ui.command_deliverable == Some((key, deliverable_id));
         let group_name = SharedString::from(format!("deliverable-row-{key:?}-{deliverable_id}"));
+        // The row drags like a task row: the drop stages a deliverable
+        // reference chip, so the payload carries the publishing daemon and
+        // the plain file name the `@` row shows as its detail.
+        let deliverable_drag = composer::SidebarDeliverableDrag {
+            key,
+            deliverable_id,
+            name: SharedString::from(deliverable.name.clone()),
+            detail: SharedString::from(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&deliverable.path)
+                    .to_owned(),
+            ),
+        };
         // The mini controls share the task row's chrome: zero-width until
         // the row is hovered or the button takes keyboard focus. The
         // Finder button stays on non-Markdown files and directories; Markdown
@@ -3980,6 +4035,14 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }))
+            .on_drag(deliverable_drag, |drag, _, _, cx| {
+                cx.new(|_| composer::SidebarDragChipView {
+                    title: drag.name.clone(),
+                    icon: crate::input::atom_ref_icon(
+                        waku_protocol::model::AtomRefKind::Deliverable,
+                    ),
+                })
+            })
             .child(
                 div()
                     .w_full()

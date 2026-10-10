@@ -788,7 +788,10 @@ impl Waku {
     /// The boss owning `surface`'s workspace — the surface's project is the
     /// boss-minted project id, so the boss chat, its planning sessions, and
     /// its deliverable page all resolve to the same daemon.
-    fn surface_boss_key(&self, surface: &composer::ComposerCard) -> Option<DaemonKey> {
+    pub(super) fn surface_boss_key(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> Option<DaemonKey> {
         let project = self.surface_project_id(surface)?;
         self.boss_key_for_project(project)
     }
@@ -843,7 +846,7 @@ impl Waku {
     /// Whether a `(kind, target)` reference is not already staged in
     /// `surface`'s field — the ref half of `surface_session_atom_allowed`'s
     /// dedupe rule.
-    fn surface_ref_atom_allowed(
+    pub(super) fn surface_ref_atom_allowed(
         &self,
         surface: &composer::ComposerCard,
         kind: AtomRefKind,
@@ -1294,7 +1297,7 @@ impl Waku {
     }
 
     /// The reference half of [`Self::record_session_atom_for`].
-    fn record_ref_atom_for(
+    pub(super) fn record_ref_atom_for(
         &mut self,
         surface: &composer::ComposerCard,
         reference: composer::ComposerRef,

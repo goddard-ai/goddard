@@ -187,22 +187,37 @@ struct ComputerUsePreviewDrag {
     cursor_offset: Cell<gpui::Point<Pixels>>,
 }
 
-/// A session row dragged out of the sidebar. Dropping it anywhere the
-/// composer is reachable stages a session-reference atom — `title` rides
-/// along so the drag preview and the atom never re-lookup the session.
+/// A session row dragged out of the sidebar — a task, the boss chat, an
+/// employee, or a planning session. Dropping it anywhere the composer is
+/// reachable stages a session-reference atom — `title` rides along so the
+/// drag preview and the atom never re-lookup the session.
 #[derive(Clone)]
 pub(super) struct SidebarSessionDrag {
     pub(super) session_id: Uuid,
     pub(super) title: SharedString,
 }
 
-/// The view GPUI drags under the cursor for a [`SidebarSessionDrag`]: the
-/// same chip the drop stages, minus its remove affordance.
-pub(super) struct SidebarSessionDragView {
-    pub(super) title: SharedString,
+/// A Recent deliverables row dragged out of the sidebar. Dropping it on a
+/// composer stages a deliverable-reference atom — `key` names the daemon
+/// that published the row so the drop can refuse a surface whose
+/// `deliverable_id` token would resolve against the wrong boss.
+#[derive(Clone)]
+pub(super) struct SidebarDeliverableDrag {
+    pub(super) key: waku_client::DaemonKey,
+    pub(super) deliverable_id: Uuid,
+    pub(super) name: SharedString,
+    pub(super) detail: SharedString,
 }
 
-impl gpui::Render for SidebarSessionDragView {
+/// The view GPUI drags under the cursor for a [`SidebarSessionDrag`] or
+/// [`SidebarDeliverableDrag`]: the same chip the drop stages, minus its
+/// remove affordance.
+pub(super) struct SidebarDragChipView {
+    pub(super) title: SharedString,
+    pub(super) icon: &'static str,
+}
+
+impl gpui::Render for SidebarDragChipView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
         div()
@@ -218,7 +233,7 @@ impl gpui::Render for SidebarSessionDragView {
             .gap(px(5.0))
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
-            .child(icon("icons/chat.svg", 11.0, theme.text_tertiary))
+            .child(icon(self.icon, 11.0, theme.text_tertiary))
             .child(self.title.clone())
     }
 }
@@ -3000,6 +3015,39 @@ impl Waku {
         let composer = self.surface_composer(surface);
         let marker = composer.update(cx, |composer, cx| composer.insert_inline_marker(cx));
         self.record_session_atom_for(surface, session_id, title, marker, cx);
+        let focus = composer.read(cx).focus();
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Stage a deliverable dragged from the sidebar as an inline reference
+    /// atom on `surface`'s field — the ref half of
+    /// [`Self::stage_session_reference_for`]. The drop lands only where the
+    /// `@` pool would offer the reference: a surface owned by the boss of
+    /// the daemon that published it. Anywhere else the `deliverable_id`
+    /// token would resolve against the wrong boss — or name nothing at all.
+    pub(super) fn stage_deliverable_reference_for(
+        &mut self,
+        surface: &ComposerCard,
+        drag: &SidebarDeliverableDrag,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.surface_boss_key(surface) != Some(drag.key) {
+            return;
+        }
+        let reference = ComposerRef {
+            kind: waku_protocol::model::AtomRefKind::Deliverable,
+            name: drag.name.clone(),
+            target: SharedString::from(drag.deliverable_id.to_string()),
+            detail: drag.detail.clone(),
+        };
+        if !self.surface_ref_atom_allowed(surface, reference.kind, &reference.target) {
+            return;
+        }
+        let composer = self.surface_composer(surface);
+        let marker = composer.update(cx, |composer, cx| composer.insert_inline_marker(cx));
+        self.record_ref_atom_for(surface, reference, marker, cx);
         let focus = composer.read(cx).focus();
         window.focus(&focus, cx);
         cx.notify();
@@ -6000,6 +6048,9 @@ impl Waku {
             .drag_over::<SidebarSessionDrag>(move |style, _, _, _| {
                 style.bg(drop_wash).border_color(drop_ring)
             })
+            .drag_over::<SidebarDeliverableDrag>(move |style, _, _, _| {
+                style.bg(drop_wash).border_color(drop_ring)
+            })
             .on_drop({
                 let surface = surface.clone();
                 cx.listener(move |this, drag: &SidebarSessionDrag, window, cx| {
@@ -6010,6 +6061,12 @@ impl Waku {
                         window,
                         cx,
                     );
+                })
+            })
+            .on_drop({
+                let surface = surface.clone();
+                cx.listener(move |this, drag: &SidebarDeliverableDrag, window, cx| {
+                    this.stage_deliverable_reference_for(&surface, drag, window, cx);
                 })
             })
             .when(interactive, |card| {
@@ -6024,6 +6081,10 @@ impl Waku {
                 .group_drag_over::<SidebarSessionDrag>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
+                .group_drag_over::<SidebarDeliverableDrag>(
+                    SESSION_DROP_GROUP,
+                    move |style| style.bg(drop_wash).border_color(drop_ring),
+                )
                 .on_drop(cx.listener(
                     |this, paths: &ExternalPaths, window, cx| {
                         this.stage_dropped_files(paths, window, cx);

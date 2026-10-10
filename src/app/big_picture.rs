@@ -2008,6 +2008,16 @@ impl Waku {
                     );
                 }),
             )
+            .on_drop(
+                cx.listener(|this, drag: &composer::SidebarDeliverableDrag, window, cx| {
+                    this.stage_deliverable_reference_for(
+                        &composer::ComposerCard::Main,
+                        drag,
+                        window,
+                        cx,
+                    );
+                }),
+            )
             // The blurred frame snapshot paints first; the scrim dims it.
             .children(backdrop.map(|image| {
                 img(image)
