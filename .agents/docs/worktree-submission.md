@@ -46,17 +46,8 @@ Bosses should include “agent-merge per rules” in assignments that use a
 daemon-managed worktree. The assigned employee commits, submits, and reports
 the SHA; a separate Worktree Integrator employee is not needed.
 
-For an update while working, use the employee-facing command:
-
-```sh
-goddard-agent steer-supervisor --text 'The focused checks passed; submission is next.'
-```
-
-No task ID is needed: the daemon resolves the employee's supervisor, falling
-back to the boss when that supervisor has expired. The message steers a live
-turn or immediately starts a new one, even while the sender is still working.
-It never waits in a prompt queue. A supervisor that cannot accept the message
-returns an error; retry when it is available. Legacy employee `prompt` calls
-to the supervisor use the same delivery, even with `--delivery queue`; any
-other target is rejected. Use `boss report-blocker` only when supervisor or
-human action is required to proceed.
+Employees must not prompt or steer the Boss or their supervisor during a turn.
+Report submission results in the normal turn-end/final report. Use
+`goddard-agent boss report-blocker --text 'what needs attention'` only when
+supervisor or human action is genuinely required to proceed. Recoverable check
+failures should be fixed within the assignment.

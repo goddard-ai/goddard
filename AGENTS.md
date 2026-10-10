@@ -119,11 +119,10 @@ Read the doc before working in its area:
 
 ## Employee communication
 
-Employees message their own supervisor with
-`goddard-agent steer-supervisor --text 'message'` (or `--file PATH`). No task ID
-is needed. Delivery steers a live turn or starts a new turn immediately; it
-never queues. Use `goddard-agent boss report-blocker` only when supervisor or
-human action is required to proceed.
+Employees must not prompt or steer the Boss or their supervisor during a turn.
+Use `goddard-agent boss report-blocker --text 'what needs attention'` only when
+supervisor or human action is genuinely required to proceed. Report routine
+results through the normal turn-end/final report.
 
 ## QA branch workflow
 

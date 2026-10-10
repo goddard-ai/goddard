@@ -75,7 +75,6 @@ USAGE
     goddard-agent boss resume EMPLOYEE_ID     Revive an expired employee — transcript and worktree intact
     goddard-agent boss roster [--all]
     goddard-agent read [TASK_ID] [--turn N]
-    goddard-agent steer-supervisor (--text TEXT | --file PATH|-)
         Employee-only: steer your supervisor or start its next turn; never queue
     goddard-agent prompt TASK_ID (--text TEXT | --file PATH|-)
     goddard-agent models                     List the provider/model options `create` accepts
@@ -122,10 +121,9 @@ USAGE CONTRACT
     capped, and what access excluded — an empty result means no matching
     record inside that scope, never that the work did not happen. Search is
     read-only: it never revives, resumes, or unarchives anything.
-    Employees use `steer-supervisor --text TEXT` to message their own
-    supervisor without a task id: steer its live turn or start a new turn
-    immediately; never queue. Use `boss report-blocker` when you cannot
-    proceed without supervisor or human action.
+    Employees cannot prompt or steer the Boss or supervisor. Use
+    `boss report-blocker` only when supervisor or human action is required
+    to proceed; report routine results in the turn-end/final report.
     `map` searches this workspace's indexed declarations for code relevant to
     the current task. Ask a specific question, add `anchors` for known symbol
     names, and use `known_paths` when you have already inspected files; then
@@ -338,12 +336,12 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent history search --text 'zed sync highlights' --kind employee --after 2026-10-01".to_owned(),
         ),
         "steer-supervisor" => (
-            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"role":"employee only","description":"Resolve your supervisor automatically. Steer its live turn or start a new turn immediately; never queue. No task id or delivery option."}),
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"description":"Unavailable. Employees use boss report-blocker for actionable blockers or their turn-end/final report for results."}),
             json!({"json":{"ok":"true when the message was accepted"}}),
-            "goddard-agent steer-supervisor --text 'The focused checks passed.'".to_owned(),
+            "goddard-agent boss report-blocker --text 'Human action is required to proceed.'".to_owned(),
         ),
         "prompt" => (
-            json!({"TASK_ID":{"positional":true,"required":true,"type":"UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--delivery":{"enum":["interrupt","queue","steer"],"default":"interrupt"},"description":"Employees use steer-supervisor without a task id. Legacy employee prompts to their supervisor always steer or start a turn immediately, even with queue delivery; other targets are rejected."}),
+            json!({"TASK_ID":{"positional":true,"required":true,"type":"UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--delivery":{"enum":["interrupt","queue","steer"],"default":"interrupt"},"description":"Employees cannot use task prompts. Use boss prompt to control supervised employees; use boss report-blocker for actionable blockers or the turn-end/final report for results."}),
             json!({"json":{"ok":"true when the prompt was accepted"}}),
             "goddard-agent prompt TASK_ID --file followup.md".to_owned(),
         ),

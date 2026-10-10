@@ -511,6 +511,21 @@ impl WakuBackend {
                 )
             }),
             BossOperation::Control { session_id, action } => {
+                if matches!(&action, EmployeeControl::Prompt { .. })
+                    && caller
+                        .and_then(|id| self.boss.employee_including_retired(id))
+                        .is_some_and(|employee| {
+                            self.boss.is_boss(session_id)
+                                || employee.supervisor_id == session_id
+                                || self.boss.report_target(&employee) == Some(session_id)
+                        })
+                {
+                    bail!(
+                        "employees cannot prompt or steer the Boss or supervisor — use \
+                         `goddard-agent boss report-blocker` only when supervisor or human action \
+                         is required to proceed; otherwise report results at turn end"
+                    );
+                }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
                     // Re-tagging is pure bookkeeping — it applies in every

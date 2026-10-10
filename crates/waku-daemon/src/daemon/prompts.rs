@@ -63,87 +63,22 @@ impl WakuBackend {
         if prompt.trim().is_empty() {
             bail!("agent prompts require a prompt");
         }
-        let sender_employee = sender.and_then(|sender| self.boss.employee(sender));
-        let target = if let Some(employee) = &sender_employee {
-            self.boss.require_active(employee.session_id)?;
-            let supervisor = self
-                .boss
-                .report_target(employee)
-                .ok_or_else(|| anyhow!("your supervisor is unavailable"))?;
-            // Validate explicit addresses too: even an unknown task UUID must
-            // explain the employee's channel rather than silently misdeliver.
-            let addressed = if thread_id.is_some() {
-                self.resolve_agent_target(task_id, thread_id, provider)?
-            } else {
-                task_id.unwrap_or(supervisor)
-            };
-            if addressed != supervisor {
-                bail!(
-                    "employees report upward only — use `goddard-agent steer-supervisor --text TEXT`, \
-                       `goddard-agent boss report-blocker` when you cannot proceed, or \
-                       `goddard-agent merge submit` to land work"
-                );
-            }
-            supervisor
-        } else {
-            if task_id.is_none() && thread_id.is_none() {
-                bail!(
-                    "steer-supervisor is employee-only; use `goddard-agent prompt TASK_ID --text TEXT`"
-                );
-            }
-            self.resolve_agent_target(task_id, thread_id, provider)?
-        };
-        if sender_employee.is_some() {
-            if self.boss.is_boss(target) {
-                self.queue_agent_prompt(target, prompt, sender, &events)?;
-                return Ok(ResponsePayload::Ack);
-            }
-            // Employee messages to non-Boss supervisors never enter either prompt queue and never
-            // wait for the sender's turn to settle. Queue/steer flags on the
-            // legacy prompt command cannot change this contract.
-            self.boss.require_active(target)?;
-            if self.session_quarantined(target) {
-                bail!("received files are quarantined until trusted");
-            }
-            if self
-                .boss
-                .employee_lifecycle(target)
-                .is_some_and(|state| state != waku_protocol::boss::EmployeeLifecycle::Working)
-            {
-                bail!("your supervisor is not ready to receive a steer; retry when it is working");
-            }
-            let (runtime_id, driver) = self.ensure_agent_runtime(target, &events)?;
-            if self.agent.has_open_turn(target) {
-                if !driver.supports_steer() {
-                    bail!(
-                        "your supervisor's provider does not support steering; message was not queued"
-                    );
-                }
-                self.send_agent_steer(&driver, target, prompt, sender);
-            } else {
-                deliver_agent_prompt(
-                    target,
-                    &driver,
-                    crate::agent::AgentPrompt {
-                        prompt,
-                        transport: None,
-                        sender,
-                        queued_id: None,
-                        context: None,
-                        hidden: false,
-                        report_trigger: None,
-                    },
-                    &events.for_session(target, runtime_id),
-                    &self.agent,
-                    &self.auto_prompts,
-                    &self.task_state,
-                    &self.task_store,
-                    &self.boss,
-                    &self.automations,
-                )?;
-            }
-            return Ok(ResponsePayload::Ack);
+        // Check the authenticated sender before resolving any supplied address.
+        // Both steer-supervisor and legacy task/thread prompts reach this gate.
+        if sender.is_some_and(|id| self.boss.employee_including_retired(id).is_some()) {
+            bail!(
+                "employees cannot prompt or steer the Boss or supervisor — use \
+                 `goddard-agent boss report-blocker` only when supervisor or human action \
+                 is required to proceed; otherwise report results at turn end"
+            );
         }
+        if task_id.is_none() && thread_id.is_none() {
+            bail!(
+                "steer-supervisor is unavailable; use `goddard-agent boss report-blocker` \
+                 for actionable employee blockers or report results at turn end"
+            );
+        }
+        let target = self.resolve_agent_target(task_id, thread_id, provider)?;
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
             use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;

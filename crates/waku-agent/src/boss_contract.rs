@@ -15,8 +15,14 @@ pub(super) fn availability(path: &str) -> Value {
         "boss open" | "boss plan finalize" | "boss persona keep" | "boss persona adopt" => {
             json!({"roles":["human"],"scopedAgentCallable":false,"humanRoute":if path == "boss plan finalize" {"Approve control in the app"} else if path == "boss open" {"Open Boss in the app"} else {"Settings > Boss > Personas"},"notes":"Every scoped agent credential is rejected; listing this contract grants no authority."})
         }
-        "boss report-blocker" | "steer-supervisor" | "merge submit" => {
+        "boss report-blocker" | "merge submit" => {
             json!({"roles":["employee"],"scopedAgentCallable":true})
+        }
+        "steer-supervisor" => {
+            json!({"roles":[],"scopedAgentCallable":false,"notes":"Unavailable; employees report actionable blockers with boss report-blocker and results at turn end."})
+        }
+        "prompt" => {
+            json!({"roles":["task","boss","planning","human"],"conditions":["Employees cannot use task prompts; boss prompt retains control of supervised employees"]})
         }
         "boss summon" => {
             json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employee requires summonEmployees grant and active supervisor","Employee permissions are clamped to its grants"]})
