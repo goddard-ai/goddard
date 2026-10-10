@@ -1,0 +1,3308 @@
+{
+  "definitions": {
+    "BossOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "view"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "roster"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "context"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "open"
+            },
+            "provider": {
+              "$ref": "#/definitions/ProviderKind"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "$ref": "#/definitions/RuntimeMode"
+            }
+          },
+          "required": [
+            "type",
+            "provider",
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "createPlan"
+            },
+            "title": {
+              "type": "string"
+            },
+            "planFile": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ProviderKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reasoningEffort": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "planFile",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "browse"
+            },
+            "url": {
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "terminal"
+            },
+            "title": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "cwd"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "finalizePlan"
+            },
+            "planFile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "automation"
+            },
+            "action": {
+              "$ref": "#/definitions/AutomationOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "summon"
+            },
+            "personaId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "jobTitle": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ProviderKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reasoningEffort": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "workspace": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AgentWorkspace"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "baseBranch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "adoptWorktree": {
+              "type": "string"
+            },
+            "permissions": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PermissionOverrides"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "workGoal": {
+              "$ref": "#/definitions/EmployeeGoal",
+              "default": "errand"
+            },
+            "icon": {
+              "$ref": "#/definitions/CustomCommandIcon"
+            },
+            "resources": {
+              "$ref": "#/definitions/ResourceSet"
+            },
+            "allowBurst": {
+              "type": "boolean",
+              "default": false
+            },
+            "groupId": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "integer"
+            },
+            "outcomeId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "newOutcome": {
+              "$ref": "#/definitions/NewOutcome"
+            },
+            "afterSuccess": {
+              "type": "string"
+            },
+            "finishesOutcome": {
+              "type": "boolean",
+              "default": false
+            },
+            "prerequisites": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "default": []
+            },
+            "plan": {
+              "type": "string"
+            },
+            "item": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "jobTitle",
+            "prompt",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setResourcePolicy"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "modelLimits": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ModelLimit"
+              }
+            },
+            "host": {
+              "$ref": "#/definitions/ResourcePolicy"
+            }
+          },
+          "required": [
+            "type",
+            "expectedRevision",
+            "modelLimits"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "updatePlanItems"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PlanItemInput"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "plan",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPlanItemState"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "item": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "$ref": "#/definitions/PlanItemState"
+            }
+          },
+          "required": [
+            "type",
+            "plan",
+            "item",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPlanOutcome"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/definitions/PlanOutcome"
+            }
+          },
+          "required": [
+            "type",
+            "plan",
+            "outcome"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "createOutcome"
+            },
+            "outcome": {
+              "type": "string"
+            },
+            "successCriteria": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "required": [
+            "type",
+            "outcome"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setOutcomeState"
+            },
+            "outcome": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "$ref": "#/definitions/OutcomeState"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "outcome",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resolveHandoff"
+            },
+            "outcome": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "handoff": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "decision": {
+              "$ref": "#/definitions/HandoffDecision"
+            }
+          },
+          "required": [
+            "type",
+            "outcome",
+            "handoff",
+            "decision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setOutcomeWaiting"
+            },
+            "outcome": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "waiting": {
+              "$ref": "#/definitions/OutcomeWait"
+            },
+            "snoozedUntil": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "type",
+            "outcome"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "attachPlan"
+            },
+            "outcome": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "plan": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "outcome",
+            "plan"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setProjectSubmissions"
+            },
+            "project": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "project",
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setProjectQaBranch"
+            },
+            "project": {
+              "type": "string"
+            },
+            "branch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "control"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "action": {
+              "$ref": "#/definitions/EmployeeControl"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resume"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reportBlocker"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "transcript"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "turn": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "historySearch"
+            },
+            "query": {
+              "type": "string"
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "person": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "after": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "before": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HistorySourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "rename"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "renameEmployee"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "regenerateAvatar"
+            },
+            "sessionId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setAvatarStyle"
+            },
+            "sessionId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "avatarStyle": {
+              "$ref": "#/definitions/AvatarStyle"
+            }
+          },
+          "required": [
+            "type",
+            "avatarStyle"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "upsertPersona"
+            },
+            "persona": {
+              "$ref": "#/definitions/BossPersonaUpsert"
+            }
+          },
+          "required": [
+            "type",
+            "persona"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "personaDefault"
+            },
+            "action": {
+              "$ref": "#/definitions/PersonaDefaultAction"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setEmployeeIcon"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "icon": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/CustomCommandIcon"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "listFiles"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "readFile"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "writeFile"
+            },
+            "path": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "content"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "createFolder"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "speak"
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "parts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "publishDeliverable"
+            },
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reference": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dismissDeliverable"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory"
+            },
+            "operation": {
+              "$ref": "#/definitions/MemoryOperation"
+            }
+          },
+          "required": [
+            "type",
+            "operation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pinDeliverable"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "pinned"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "sweepDeliverable"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "dormant": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "dormant"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "archiveDeliverable"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "archived": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "archived"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "eval"
+            },
+            "script": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "script"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "markDeliverableViewed"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "markGoalsViewed"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "EmployeeControl": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "prompt"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "delivery": {
+              "$ref": "#/definitions/AgentPromptDelivery"
+            }
+          },
+          "required": [
+            "type",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "steer"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "jobTitle": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setModel"
+            },
+            "provider": {
+              "$ref": "#/definitions/ProviderKind"
+            },
+            "model": {
+              "type": "string"
+            },
+            "reasoningEffort": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "provider",
+            "model"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPermissions"
+            },
+            "permissions": {
+              "$ref": "#/definitions/PermissionOverrides"
+            }
+          },
+          "required": [
+            "type",
+            "permissions"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setWorkspace"
+            },
+            "workspace": {
+              "$ref": "#/definitions/AgentWorkspace"
+            },
+            "baseBranch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "workspace"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setResources"
+            },
+            "resources": {
+              "$ref": "#/definitions/ResourceSet"
+            }
+          },
+          "required": [
+            "type",
+            "resources"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPlan"
+            },
+            "plan": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPersona"
+            },
+            "personaId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "stop"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "MemoryOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "listBuckets"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "createBucket"
+            },
+            "name": {
+              "type": "string"
+            },
+            "purpose": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "overview"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "record"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "$ref": "#/definitions/MemoryNoteKind"
+            },
+            "text": {
+              "type": "string"
+            },
+            "retryKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind",
+            "text",
+            "retryKey"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "submitSummary"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "start",
+            "end",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "scan"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "zoomBucket"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "type",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "migrateLegacy"
+            },
+            "bucket": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "dryRun": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "type",
+            "bucket",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AutomationOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create"
+            },
+            "input": {
+              "$ref": "#/definitions/AutomationInput"
+            }
+          },
+          "required": [
+            "type",
+            "input"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "update"
+            },
+            "input": {
+              "$ref": "#/definitions/AutomationInput"
+            }
+          },
+          "required": [
+            "type",
+            "input"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "delete"
+            },
+            "automationId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "automationId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pause"
+            },
+            "automationId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "automationId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resume"
+            },
+            "automationId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "automationId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PersonaDefaultAction": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "inspect"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reset"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            }
+          },
+          "required": [
+            "type",
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "undo"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            }
+          },
+          "required": [
+            "type",
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "keep"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            }
+          },
+          "required": [
+            "type",
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "propose"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            },
+            "markdown": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "role",
+            "markdown"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "adopt"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            },
+            "markdown": {
+              "type": "string"
+            },
+            "expectedSaved": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "role",
+            "markdown"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dismissProposal"
+            },
+            "role": {
+              "$ref": "#/definitions/PersonaDefaultRole"
+            }
+          },
+          "required": [
+            "type",
+            "role"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chooseEmployeeBase"
+            },
+            "personaId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "personaId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ComputerUseRunRequest": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ComputerUseVerification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxActions": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeoutMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "url",
+        "goal"
+      ],
+      "additionalProperties": false
+    },
+    "AgentPromptDelivery": {
+      "anyOf": [
+        {
+          "const": "interrupt"
+        },
+        {
+          "const": "queue"
+        },
+        {
+          "const": "steer"
+        }
+      ]
+    },
+    "AgentWorkspace": {
+      "anyOf": [
+        {
+          "const": "local"
+        },
+        {
+          "const": "worktree"
+        },
+        {
+          "const": "adopt"
+        }
+      ]
+    },
+    "AutomationInput": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/definitions/ProviderKind"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "workspace": {
+          "$ref": "#/definitions/AutomationWorkspace"
+        },
+        "baseBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationSchedule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "webhook": {
+          "type": "boolean",
+          "default": false
+        },
+        "timezone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "precheck": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationPrecheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missedRunGraceMinutes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reuseSession": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "prompt",
+        "provider",
+        "projectPath"
+      ],
+      "additionalProperties": false
+    },
+    "AutomationPrecheck": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "default": 0
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": true
+    },
+    "AutomationSchedule": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "hourly"
+            },
+            "minute": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "minute"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "daily"
+            },
+            "hour": {
+              "type": "integer"
+            },
+            "minute": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "hour",
+            "minute"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "weekdays"
+            },
+            "hour": {
+              "type": "integer"
+            },
+            "minute": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "hour",
+            "minute"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "weekly"
+            },
+            "dayOfWeek": {
+              "type": "integer"
+            },
+            "hour": {
+              "type": "integer"
+            },
+            "minute": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "dayOfWeek",
+            "hour",
+            "minute"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "cron"
+            },
+            "expression": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AutomationWorkspace": {
+      "anyOf": [
+        {
+          "const": "local"
+        },
+        {
+          "const": "worktree"
+        },
+        {
+          "const": "existing"
+        }
+      ]
+    },
+    "AvatarStyle": {
+      "anyOf": [
+        {
+          "const": "diceBear"
+        },
+        {
+          "const": "gaze"
+        },
+        {
+          "const": "lineFace"
+        },
+        {
+          "const": "agentAvatars"
+        },
+        {
+          "const": "avvvatars"
+        }
+      ]
+    },
+    "BossPersonaUpsert": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "pinnedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "permissions": {
+          "$ref": "#/definitions/PersonaPermissions"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CustomCommandIcon"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "markdown",
+        "permissions"
+      ],
+      "additionalProperties": true
+    },
+    "ComputerUseVerification": {
+      "type": "object",
+      "properties": {
+        "urlContains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "textContains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "CustomCommandIcon": {
+      "anyOf": [
+        {
+          "const": "terminal"
+        },
+        {
+          "const": "command"
+        },
+        {
+          "const": "zap"
+        },
+        {
+          "const": "wrench"
+        },
+        {
+          "const": "gauge"
+        },
+        {
+          "const": "package"
+        },
+        {
+          "const": "git_branch"
+        },
+        {
+          "const": "git_hub"
+        },
+        {
+          "const": "folder"
+        },
+        {
+          "const": "file"
+        },
+        {
+          "const": "search"
+        },
+        {
+          "const": "globe"
+        },
+        {
+          "const": "server"
+        },
+        {
+          "const": "cloud_upload"
+        },
+        {
+          "const": "download"
+        },
+        {
+          "const": "bot"
+        },
+        {
+          "const": "sparkle"
+        },
+        {
+          "const": "star"
+        },
+        {
+          "const": "target"
+        },
+        {
+          "const": "queue"
+        },
+        {
+          "const": "compose"
+        },
+        {
+          "const": "chart"
+        },
+        {
+          "const": "refresh"
+        },
+        {
+          "const": "archive"
+        },
+        {
+          "const": "bug"
+        },
+        {
+          "const": "languages"
+        },
+        {
+          "const": "database"
+        },
+        {
+          "const": "circle_check"
+        },
+        {
+          "const": "beaker"
+        },
+        {
+          "const": "git_merge"
+        },
+        {
+          "const": "eye"
+        },
+        {
+          "const": "pencil"
+        },
+        {
+          "const": "folder_search"
+        },
+        {
+          "const": "file_text"
+        },
+        {
+          "const": "lock"
+        },
+        {
+          "const": "fork"
+        },
+        {
+          "const": "brain"
+        }
+      ]
+    },
+    "EmployeeGoal": {
+      "anyOf": [
+        {
+          "const": "errand"
+        },
+        {
+          "const": "goal"
+        }
+      ]
+    },
+    "HandoffDecision": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "assign"
+            },
+            "assignment": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "assignment"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dismiss"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "completeOutcome"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "HistorySourceKind": {
+      "anyOf": [
+        {
+          "const": "task"
+        },
+        {
+          "const": "employee"
+        },
+        {
+          "const": "boss"
+        },
+        {
+          "const": "plan"
+        }
+      ]
+    },
+    "MemoryNoteKind": {
+      "anyOf": [
+        {
+          "const": "fact"
+        },
+        {
+          "const": "observation"
+        },
+        {
+          "const": "question"
+        }
+      ]
+    },
+    "ModelLimit": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "$ref": "#/definitions/ProviderKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "liveLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "hardCap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "liveLimit",
+        "hardCap"
+      ],
+      "additionalProperties": true
+    },
+    "NewOutcome": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string"
+        },
+        "successCriteria": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "additionalProperties": true
+    },
+    "OutcomeState": {
+      "anyOf": [
+        {
+          "const": "open"
+        },
+        {
+          "const": "completed"
+        },
+        {
+          "const": "cancelled"
+        }
+      ]
+    },
+    "OutcomeWait": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "until"
+            },
+            "at": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "at"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dependency"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "note"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PermissionOverrides": {
+      "type": "object",
+      "properties": {
+        "bucketIds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "integrationIds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summonEmployees": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "computerUse": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "PersonaDefaultRole": {
+      "anyOf": [
+        {
+          "const": "boss"
+        },
+        {
+          "const": "employee"
+        },
+        {
+          "const": "researcher"
+        },
+        {
+          "const": "featureDeveloper"
+        },
+        {
+          "const": "bugInvestigator"
+        },
+        {
+          "const": "verifier"
+        }
+      ]
+    },
+    "PersonaPermissions": {
+      "type": "object",
+      "properties": {
+        "bucketIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "integrationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summonEmployees": {
+          "type": "boolean"
+        },
+        "computerUse": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "integrationIds",
+        "summonEmployees",
+        "computerUse"
+      ],
+      "additionalProperties": true
+    },
+    "PlanItemInput": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "PlanItemState": {
+      "anyOf": [
+        {
+          "const": "toDo"
+        },
+        {
+          "const": "done"
+        },
+        {
+          "const": "dropped"
+        }
+      ]
+    },
+    "PlanOutcome": {
+      "anyOf": [
+        {
+          "const": "approved"
+        },
+        {
+          "const": "completed"
+        },
+        {
+          "const": "abandoned"
+        }
+      ]
+    },
+    "ProviderKind": {
+      "anyOf": [
+        {
+          "const": "antigravity"
+        },
+        {
+          "const": "amp"
+        },
+        {
+          "const": "claude"
+        },
+        {
+          "const": "codex"
+        },
+        {
+          "const": "copilot"
+        },
+        {
+          "const": "cursor"
+        },
+        {
+          "const": "deepSeek"
+        },
+        {
+          "const": "devin"
+        },
+        {
+          "const": "droid"
+        },
+        {
+          "const": "fx"
+        },
+        {
+          "const": "openCode"
+        },
+        {
+          "const": "goose"
+        },
+        {
+          "const": "grok"
+        },
+        {
+          "const": "kimi"
+        },
+        {
+          "const": "muse"
+        },
+        {
+          "const": "ohMyPi"
+        },
+        {
+          "const": "pi"
+        }
+      ]
+    },
+    "ResourcePolicy": {
+      "type": "object",
+      "properties": {
+        "resident_devices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "native_builds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "desktop_input": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "resident_devices",
+        "native_builds",
+        "desktop_input"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceSet": {
+      "type": "object",
+      "properties": {
+        "exclusive": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "resident_devices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "default": 0
+        },
+        "native_builds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "default": 0
+        },
+        "desktop_input": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "default": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "RuntimeMode": {
+      "anyOf": [
+        {
+          "const": "ask"
+        },
+        {
+          "const": "autoAcceptEdits"
+        },
+        {
+          "const": "auto"
+        },
+        {
+          "const": "fullAccess"
+        }
+      ]
+    },
+    "BossResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "state"
+            },
+            "state": {
+              "protocolType": "BossState"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "roster"
+            },
+            "roster": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "roster"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "context"
+            },
+            "context": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "context"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "automations"
+            },
+            "state": {
+              "protocolType": "AutomationsState"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "files"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "protocolType": "BossFile"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "file"
+            },
+            "path": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path",
+            "content"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "saved"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session"
+            },
+            "session": {
+              "protocolType": "AgentSession"
+            },
+            "project": {
+              "protocolType": "Project"
+            }
+          },
+          "required": [
+            "type",
+            "session",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "browse"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "url",
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "planFinalized"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "planFile": {
+              "type": "string"
+            },
+            "finalizedAt": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "planFile",
+            "finalizedAt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "terminalRequested"
+            },
+            "title": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "cwd"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "summoned"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "state": {
+              "protocolType": "EmployeeLifecycle"
+            },
+            "admission": {
+              "protocolType": "SummonAdmission"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resourcePolicySet"
+            },
+            "policy": {
+              "protocolType": "BossResourcePolicy"
+            }
+          },
+          "required": [
+            "type",
+            "policy"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "transcript"
+            },
+            "transcript": {
+              "protocolType": "AgentSessionTranscript"
+            }
+          },
+          "required": [
+            "type",
+            "transcript"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "historySearch"
+            },
+            "result": {
+              "protocolType": "AgentHistorySearchResult"
+            }
+          },
+          "required": [
+            "type",
+            "result"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "personaDefaults"
+            },
+            "defaults": {
+              "type": "array",
+              "items": {
+                "protocolType": "PersonaDefaultInfo"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "defaults"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "speak"
+            },
+            "delivered": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "delivered"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "eval"
+            },
+            "value": {
+              "protocolType": "JsonValue"
+            },
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value",
+            "output"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "memory"
+            },
+            "buckets": {
+              "type": "array",
+              "items": {
+                "protocolType": "JsonValue"
+              }
+            },
+            "overview": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "protocolType": "JsonValue"
+              }
+            },
+            "compression": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recorded": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "migration": {
+              "anyOf": [
+                {
+                  "protocolType": "MemoryMigrationReport"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "buckets",
+            "notes"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

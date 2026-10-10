@@ -18,6 +18,7 @@
 //! write with this task's id so agent-originated changes stay visible to the
 //! user.
 
+mod boss_contract;
 mod resources;
 
 use std::io::IsTerminal;
@@ -225,6 +226,13 @@ fn text_output(value: &str) -> String {
 }
 
 fn discovery(args: &[String]) -> anyhow::Result<bool> {
+    if args == ["boss", "--schema"] {
+        std::println!(
+            "{}",
+            serde_json::to_string_pretty(&boss_contract::aggregate())?
+        );
+        return Ok(true);
+    }
     if args.first().is_some_and(|arg| arg == "schema") {
         match &args[1..] {
             [] => {
@@ -246,7 +254,20 @@ fn discovery(args: &[String]) -> anyhow::Result<bool> {
         }
         return Ok(true);
     }
-    let content_options = ["--text", "--file", "--json", "--json-file"];
+    let content_options = [
+        "--text",
+        "--file",
+        "--json",
+        "--json-file",
+        "--permissions-json",
+        "--permissions-json-file",
+        "--resources-json",
+        "--resources-json-file",
+        "--new-outcome-json",
+        "--new-outcome-json-file",
+        "--prerequisites-json",
+        "--prerequisites-json-file",
+    ];
     let Some((marker, index)) = args.iter().enumerate().find_map(|(i, arg)| {
         let is_content = i > 0 && content_options.contains(&args[i - 1].as_str());
         (!is_content && matches!(arg.as_str(), "--help" | "-h" | "--schema"))
@@ -657,6 +678,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":"Computer Use result object; failures carry isError=true and an error description"}),
             "goddard-agent computer js --stdin".to_owned(),
         ),
+        "computer run" => (
+            json!({"JSON":{"positional":true,"required":true,"or":"--stdin","maxBytes":65536,"object":{"url":{"required":true,"type":"HTTP(S) URL"},"goal":{"required":true,"type":"nonempty string"},"values":{"type":"object of string values","default":{}},"verify":{"optional":true,"object":{"urlContains":{"type":"string","optional":true},"textContains":{"type":"string[]","default":[]},"fields":{"type":"object of string values","default":{}}}},"maxActions":{"type":"integer","minimum":1,"maximum":32,"default":12},"timeoutMs":{"type":"integer","minimum":1,"maximum":120000,"default":60000}}}}),
+            json!({"json":{"status":"verified|not_verified|needs_input|needs_parent|stopped|cancelled|unavailable","reason":"completion or stop reason","actions":"bounded action history","checks":"verification details when requested","fields":"required unsupplied input names for needs_input","page":"redacted page summary or null","cleanup":"ended|incomplete when a browser session was started"}}),
+            "goddard-agent computer run --stdin".to_owned(),
+        ),
         "computer reset" => (
             json!({}),
             json!({"json":{"ok":true}}),
@@ -737,161 +763,10 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         help.push(' ');
         help.push_str(description);
     }
-    json!({"command":path,"help":help,"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]})
-}
-
-#[allow(dead_code)]
-fn legacy_schema() -> serde_json::Value {
-    let icons: Vec<String> = CustomCommandIcon::ALL
-        .iter()
-        .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
-        .collect();
-    let employee_icons: Vec<String> = CustomCommandIcon::EMPLOYEE
-        .iter()
-        .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
-        .collect();
-    json!({
-        "boss": {"description": "Role-scoped Boss operations; payload uses a type tag", "operations": ["view", "summon", "control", "reportBlocker", "transcript", "context", "rename", "renameEmployee", "regenerateAvatar", "upsertPersona", "personaDefault", "setEmployeeIcon", "listFiles", "readFile", "writeFile", "createFolder", "publishDeliverable", "dismissDeliverable", "speak", "eval", "memory", "createPlan", "finalizePlan", "setProjectSubmissions", "setProjectQaBranch", "createOutcome", "setOutcomeState", "resolveHandoff", "setOutcomeWaiting", "attachPlan"], "createPlan": {"title": "the idea the design doc covers — becomes the planning session's title", "planFile": "design doc file name under plans/ in the boss's files root (e.g. \"auth.md\"; accepts plans/<name>.md or workspace/plans/<name>.md spellings)", "prompt": "the user request that prompted planning — seeds the new session's transcript", "provider": "optional provider — defaults to codex", "model": "optional model id — defaults to gpt-6.1-sol when the provider is codex", "reasoningEffort": "optional effort id — defaults to medium", "notes": "boss-only; opens a dedicated boss-attached planning session — a product-design session that drafts a design doc (user experience, flows, edge cases, decisions with rationale; implementation specifics stay out) for the user's approval — once approved, the boss implements the design via employees. Several plans may run at once — reuse an open plan's session instead of starting a second plan on the same idea"}, "finalizePlan": {"planFile": "the plan file to approve", "notes": "user-only — the human finalizes through the app's approve control; agent calls are rejected without creating a request"}, "summon": {"personaId": "optional UUID of an employee role layered on the canonical Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona; omit for the Employee base alone; the Boss persona is rejected", "jobTitle": "purpose-specific job title; Goddard assigns the human name", "prompt": "bounded job", "project": "absolute project path", "workspace": "optional; \"worktree\" runs the employee in a fresh daemon-managed Git worktree, \"adopt\" hands it a finished employee's existing worktree instead of the primary checkout", "baseBranch": "required when workspace is \"worktree\"; ignored for \"adopt\"", "adoptWorktree": "required when workspace is \"adopt\" — absolute path of a daemon-managed worktree whose owning ticket is finished; the employee lands in it with uncommitted state intact", "provider": "optional inherited provider", "model": "optional inherited model", "reasoningEffort": "optional effort id supported by the resolved model — an unsupported id fails the summon", "permissions": "optional per-employee grant overrides — each supplied field (bucketIds, integrationIds, summonEmployees, computerUse) replaces the persona default for this employee, an empty list clears it, omitted fields inherit", "workGoal": "optional; \"errand\" (default) reports the finish to you — use it when the completion feeds your next step; \"goal\" expires silently and lists on the user's Goals page", "icon": format!("optional employee icon enum: {}; overrides the persona icon for this employee only — omit to inherit, and when neither names one the client derives the icon from the job title", employee_icons.join(", ")), "resources": "optional host-resource set reserved for the assignment's lifetime — snake_case keys like resource acquire: {\"exclusive\": [\"ios:<UDID>\"], \"resident_devices\": 1, \"native_builds\": 1, \"desktop_input\": 0}. The employee's own `resource run` calls borrow subsets of it; a contested set queues instead of erroring, and the broker never steals devices the user claimed. Example for a device build: {\"native_builds\": 1}", "allowBurst": "optional boolean; lets the ticket spend burst slots above the model rule's liveLimit — it still cannot pass hardCap. Without it the ticket waits at liveLimit", "groupId": "optional wave id — summons sharing one form a wave: a single notice lands when every member finishes, fails, or is cancelled", "priority": "optional scheduling hint stored on the admission — the FIFO scheduler does not reorder on it yet", "outcomeId": "optional UUID of a daemon-owned outcome (createOutcome) this assignment serves — its success leaves a durable handoff carrying afterSuccess intent, resolved only by an explicit resolveHandoff", "newOutcome": "optional {outcome, successCriteria} — creates the outcome and assigns this assignment to it in one summon; mutually exclusive with outcomeId", "afterSuccess": "optional follow-up intent for an outcome assignment — what you will do with the result; defaults to reviewing it", "finishesOutcome": "optional boolean; designates this assignment the outcome's finisher — its success completes the outcome silently with no report; requires outcomeId or newOutcome, explicit successCriteria on the outcome, and no other live finisher; fails on conflicting afterSuccess", "prerequisites": "optional array of sibling assignment session ids (same outcome) that must finish successfully before this assignment dispatches — it stays queued until they do", "requestId": "optional UUID idempotency key — a retry that lost its response returns the original employee; reusing the id with different fields errors"}, "createOutcome": {"outcome": "the outcome assignments work toward", "successCriteria": "what \"done\" means — a finishesOutcome summon requires it explicit", "notes": "boss/human only; creates a daemon-owned outcome that opens empty and never auto-completes"}, "setOutcomeState": {"outcome": "outcome UUID", "state": "\"open\" | \"completed\" | \"cancelled\"", "evidence": "required for completed — the recorded result evidence; optional reason note otherwise", "notes": "boss/human only; completion requires all handoffs resolved; cancelling stops live assignments; silent — no notification in any direction"}, "resolveHandoff": {"outcome": "outcome UUID", "handoff": "handoff UUID from the assignment report or view", "decision": {"type": "\"assign\" (assignment: new assignment sessionId) | \"dismiss\" | \"completeOutcome\" (evidence)", "notes": "the boss's explicit decision on an assignment's result"}}, "setOutcomeWaiting": {"outcome": "outcome UUID", "waiting": "optional {type:\"until\",at} | {type:\"dependency\",detail} — records why the outcome deliberately waits so unattended reminders leave it alone; null clears", "snoozedUntil": "optional unix seconds — sleeps this outcome's reminders until then; null clears", "notes": "boss/human only"}, "attachPlan": {"outcome": "outcome UUID", "plan": "plan UUID, planning-session id, or plans/<file>.md path — the approved approach the assignments execute against", "notes": "boss/human only; supersedes a previous attachment; changes no execution state"}, "control": {"sessionId": "employee UUID", "action": {"type": "prompt | steer | stop | setModel | setPermissions | setPersona | setWorkspace | setResources", "prompt": "required for prompt and steer", "delivery": "optional for prompt — \"interrupt\" (default) steers into the employee's open turn and queues when none is open, \"queue\" parks behind the current work, \"steer\" requires a live turn", "jobTitle": "optional for steer — retitles the job when the steer redirects the assignment; bookkeeping only, it queues no prompt and writes no transcript entry", "provider": "required for setModel", "model": "catalog model id required for setModel", "reasoningEffort": "optional effort id supported by the selected model", "permissions": "required for setPermissions — same per-field override shape as summon; each supplied field replaces the employee's current grant; MCP and Computer Use changes apply to its next launch", "personaId": "optional for setPersona — an employee role UUID (shipped specialist or custom persona), or null/omitted for the canonical Employee base alone; the Boss persona is rejected", "workspace": "required for setWorkspace — \"local\" returns the employee to the project's primary checkout, \"worktree\" forks a fresh daemon-managed worktree", "baseBranch": "required for setWorkspace when workspace is \"worktree\" — the ref the new worktree detaches at; ignored for \"local\"", "resources": "required for setResources — a host-resource set like summon's; a queued ticket re-enters admission on it, a running employee swaps to it once capacity grants without interrupting its turn", "notes": "setWorkspace is one atomic move: it interrupts the employee's current turn, rebinds the session, and resumes the same transcript in the new workspace — a failure leaves it running in its old workspace. setModel is one atomic reconfigure: an open turn is interrupted — recorded as an intentional stop, not a failure — the selection applies, and the employee resumes its assignment on it; a provider+model change re-enters admission against the new pool while a same-pair change retunes the live runtime, and a queued ticket retickets in place"}}, "reportBlocker": {"message": "what needs supervisor attention (<=1000 chars)", "notes": "employee-only; interrupts the supervisor's running turn when it can and makes the finish deliver a full report — flag blockers, needed decisions, and failures, never routine completions"}, "transcript": {"sessionId": "employee UUID", "turn": "optional turn number; omit for index", "notes": "pull-only; a flagged, errand, or always-report employee's index arrives at finish — never poll it"}, "context": {"type": "context", "result": "snapshot of the human's projects, tasks, and automations"}, "files": "document paths are relative to the boss's persistent files root; writeFile/createFolder are boss-only while employees may read pinned documents — memory is managed through named bucket operations, not files or folders", "speak": {"parts": ["ordered utterance fragments, 1-8; each becomes or reuses a canned voice clip", "several parts chain into a sentence — isolate proper nouns and reusable phrases as their own parts so generated audio is reused", "boss-only; returns {\"type\":\"speak\",\"delivered\":<client connections reached>} — 0 means nobody could hear it"], "example": {"type": "speak", "parts": ["Your build on ", "Goddard", " finished"]}},  "publishDeliverable": {"path": "absolute path of an employee-produced file or folder; shows it in the user's sidebar — employees may publish only paths inside their own assigned workspace; the daemon copies the target into its deliverable store so the entry survives the workspace", "name": "optional display name; defaults to the file name", "reference": "optional boolean; true keeps a live filesystem reference instead of copying — for artifacts too large for the store or meant to stay current — and the entry dies with the path"}, "dismissDeliverable": {"id": "deliverable UUID from view"},  "memory": {"operation": {"type": "listBuckets | createBucket | overview | record | submitSummary | scan | zoomBucket", "notes": "content operations pick a bucket three ways: an explicit `bucket` id, a `project` reference — a registered project name/id or an absolute project root — resolving to that project's shared bucket, or no selector at all for the caller's own project bucket (employees); bucket metadata can be listed without loading contents; Boss-created bucket IDs are explicit grants"}}, "setEmployeeIcon": {"sessionId": "employee UUID", "icon": format!("optional custom icon enum: {} (null clears override)", employee_icons.join(", "))},  "eval": {"script": "Rhai source run inside the daemon with the boss operations bound as functions — one call batches operations and chains their results; variables persist between evals for this boss session. Bindings: view() → state map, context() → digest string, summon(#{personaId,jobTitle,prompt,project,...}) → sessionId, control(sessionId, action-map | \"stop\"), transcript(sessionId[, turn]), readFile(path) → #{path,content}, writeFile(path, content), listFiles([path]), createFolder(path), publishDeliverable(path[, name]), dismissDeliverable(id), speak(parts|string) → delivered, upsertPersona(#{name,markdown,...}) — id/pinnedFiles/permissions optional, setEmployeeIcon(sessionId, icon|null), rename(name), renameEmployee(sessionId, name), regenerateAvatar([sessionId]), memory(#{type,...}) → memory store fields, op(#{type,...}) → whole result for any other operation, help() → binding list. Returns {\"type\":\"eval\",\"value\":<script's last expression as JSON>,\"output\":<captured print/debug text>}. Boss-only, bounded by a wall-clock and operations budget.", "example": "let s = view(); s.employees.len()"},  "examples": [{"type": "view"}, {"type": "readFile", "path": "plans/auth.md"}, {"type": "publishDeliverable", "path": "/abs/path/to/output", "name": "Q3 report"}], "setProjectSubmissions": {"project": "registered project name/id or absolute project root", "enabled": "boolean", "notes": "boss/human only; merge submit is off per project until enabled — a worktree employee's `merge submit` fails with 'submissions not enabled for this project' while it is off"}, "setProjectQaBranch": {"project": "registered project name/id or absolute project root", "branch": "branch name the project's merge submit landings and review train use; omit or pass null to clear the override and inherit the daemon-global qa_branch setting", "notes": "boss/human only; the named branch must be checked out somewhere in the project's repository for submissions to land"}, "persona": {"id": "UUID; nil creates a persona", "name": "string", "markdown": "Markdown personality", "pinnedFiles": "document paths beneath the Boss files root pinned into the agent's context; memory bucket access is controlled by bucketIds", "permissions": {"bucketIds": "Boss-created memory bucket IDs", "integrationIds": "connected integration ids", "summonEmployees": "boolean", "computerUse": "boolean", "alwaysReport": "boolean; finishes report to the supervisor instead of expiring silently"}}},
-        "merge": {"submit": "no payload; submits this employee's daemon-managed worktree to the configured QA branch after serialized rebase and verification"},
-        "computer": {
-            "js": {"code": "string (required)", "timeout_ms": "integer 1..300000 (default 300000)", "title": "string (optional)"},
-            "run": {"url": "http(s) URL (required)", "goal": "string (required)", "values": "optional object mapping accessible field labels to supplied text", "verify": {"urlContains": "optional string", "textContains": "optional string[]", "fields": "optional object mapping accessible field labels to exact expected values; at least one check required"}, "maxActions": "integer 1..32 (default 12)", "timeoutMs": "integer 1..120000 (default 60000)"},
-            "reset": "no payload; resets only this task",
-            "images": "content image blocks return local path and mimeType; open each path with your image-reading tool"
-        },
-        "usage_contract": "`command` manages the user's settings — today their custom commands — and is available whenever changing a setting would help them. `map` searches this workspace's indexed declarations for code relevant to the current task; use a specific question, add symbol names in `anchors`, note already inspected files in `known_paths`, and read the returned source before drawing conclusions. `create` and `prompt` are the cross-task surface: only invoke them when the human you are working for has explicitly asked you to create another task or to send a message to one. `ask` shows the human a structured question and blocks on their answer — use it when their decision must come back before you can proceed, not for questions a reply can carry. `archive` proposes archiving tasks in this task's project — the boss may name tasks in any project on this daemon — each call shows the user the named tasks and your reason on a request card and blocks on their answer; nothing is archived without approval. There is no per-call approval gate for other task/settings writes. Computer Use retains its app/browser/clipboard/desktop approval gates. Computer run uses Jev to select semantic browser actions and returns needs_input or needs_parent when it cannot safely finish. The daemon records this task's id on every accepted write so agent-originated changes stay visibly attributed.",
-        "resource": {
-            "syntax": "resource acquire '<json>' | resource run '<json>' -- COMMAND [ARGS] | resource release/cancel '{\"id\":\"UUID\"}' | resource status",
-            "acquire": {"resources": {"exclusive": ["ios:SIMULATOR-UDID"], "resident_devices": 1, "native_builds": 1, "desktop_input": 0}, "purpose": "iOS smoke test", "wait_seconds": 600},
-            "notes": "FIFO atomic allocation across projects. run inherits standard streams and exit status. Use ios:<UDID>, android:<AVD>, or device:<id> exclusivity; resident_devices must equal ios/android resource count. Nested run inherits subset ownership, cannot expand. Reservations remain while workloads or named devices live. Cooperative enforcement; raw launches bypass scheduling. Boss sessions cannot acquire: the boss delegates waits to employees."
-        },
-        "create": {
-            "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation. The task inherits this task's access mode and run environment — a sandboxed task spawns sandboxed tasks.",
-            "fields": {
-                "provider": {"type": "string", "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "goose", "grok", "kimi", "muse", "ohmypi", "pi"], "notes": "omit to run the new task on this task's provider; run `goddard-agent models` for the usable providers"},
-                "model": {"type": "string", "notes": "explicit provider model id — run `goddard-agent models` for the preference-ordered list of usable ids instead of guessing; \"auto\" routes the first prompt through Jev to pick provider and model (omit `provider`); \"default\" selects the provider's own default; omit to inherit this task's model when it runs the resolved provider"},
-                "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
-                "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
-                "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
-                "prompt": {"type": "string", "required": true},
-                "title": {"type": "string", "notes": "optional explicit task title; when supplied, first-prompt title inference is skipped; when omitted, the title is inferred as usual"},
-                "reasoning_effort": {"type": "string", "notes": "provider-specific effort id; \"default\" selects the provider's own default; omit to inherit this task's effort when it runs the resolved provider (falls back to the model's default when the resolved model does not list it)"},
-                "service_tier": {"type": "string", "notes": "provider-specific tier id; inherits like reasoning_effort"},
-                "context_window": {"type": "string", "notes": "provider-specific window id; inherits like reasoning_effort"}
-            },
-            "example": "{\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\",\"title\":\"Summarize the project diff\"}",
-            "returns": {"task_id": "uuid of the created task"}
-        },
-        "prompt": {
-            "description": "Submit a prompt to an existing task, addressed by Goddard task id or provider-native thread id. Employees use `goddard-agent steer-supervisor --text TEXT` without a task id. Legacy employee prompts may target only their supervisor and always steer or start a turn, regardless of delivery; other targets are rejected.",
-            "fields": {
-                "task_id": {"type": "string", "notes": "Goddard task UUID; exactly one of task_id and thread_id is required"},
-                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
-                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
-                "prompt": {"type": "string", "required": true},
-                "delivery": {"type": "string", "enum": ["interrupt", "queue", "steer"], "default": "interrupt", "notes": "interrupt (default) steers into the running turn when one is open and queues otherwise; queue waits for the target to go idle and preserves submission order; steer injects into the running turn and fails when no turn is running"}
-            },
-            "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"interrupt\"}",
-            "returns": {"ok": true}
-        },
-        "models": {
-            "description": "List the provider/model combinations `create` accepts, in preference order — read it instead of guessing model ids. The \"auto\" entry (Jev routing picks provider and model for the first prompt) leads when the eval backend is configured; the rest are combinations tasks on this machine have actually run, each model's first-party (vendor-native) harness ahead of third-party harnesses, then most recently used. Prefer the earliest entry unless the user specified a model. Each option's fields map straight onto `create` payload fields.",
-            "returns": {"options": [{"provider": "provider id — absent only on the \"auto\" entry", "model": "model id, \"default\", or \"auto\"", "reasoning_effort": "effort id the newest use ran, when known", "service_tier": "tier id, when known", "context_window": "window id, when known", "last_used_at": "unix seconds; 0 on the \"auto\" entry"}]}
-        },
-        "rename": {
-            "description": "Set this task's title. The user approves each request unless the task already granted standing permission. Cannot rename another task.",
-            "fields": { "title": {"type": "string", "required": true} },
-            "example": "{\"title\":\"Investigate session startup\"}",
-            "returns": {"ok": true}
-        },
-        "archive": {
-            "description": "Propose archiving tasks by Goddard task id — siblings in this task's project, or tasks in any project on this daemon for the boss. The user sees the named tasks and your reason on a request card and approves or declines — the call blocks until then and fails on decline. Targets must be started, unarchived, and not side chats; archived tasks' side chats leave with them. Use `search` to find task ids.",
-            "fields": {
-                "task_ids": {"type": "array of strings", "required": true, "notes": "Goddard task UUIDs to archive"},
-                "reason": {"type": "string", "notes": "why these tasks should be archived; shown on the request card"}
-            },
-            "example": "{\"task_ids\":[\"<uuid>\",\"<uuid>\"],\"reason\":\"duplicates of the migration investigation\"}",
-            "returns": {"ok": true}
-        },
-        "read": {
-            "description": "Read a task's transcript: its title, provider, status, and transcript entries — messages and tool activity — in order, each tagged with its 1-based turn number. With no address fields it reads this task's own transcript; a side chat's parent task id is in GODDARD_PARENT_TASK_ID. Entries carry a `turn` number so `turn` can re-read one turn in full.",
-            "fields": {
-                "task_id": {"type": "string", "notes": "Goddard task UUID; omit with thread_id to read this task's own transcript"},
-                "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required for a foreign read"},
-                "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
-                "turn": {"type": "number", "notes": "1-based turn number; restricts the answer to that turn's entries"}
-            },
-            "example": "{\"turn\":3}",
-            "returns": {"task_id": "uuid", "title": "string", "provider": "string", "status": "string", "items": [{"turn": "1-based turn number when the entry belongs to one", "kind": "message|activity", "role": "user|assistant|system on message items", "content": "string"}], "truncated": "true when the size cap dropped the oldest items"}
-        },
-        "search": {
-            "description": "Search the transcripts of every task in this task's project — for the boss, every task on this daemon. `query` is free text — a single case-insensitive substring over user and assistant messages — plus `field:value` filters: `project:<name>` (must name this project; the boss may name any registered project), `status:<idle|connecting|working|waiting|background|failed|busy>` (`busy` unions the working set), `archived:<true|false|any>` (default: active tasks only), `limit:<n>` (default 20). Repeated project:/status: tokens union; different filters intersect; unrecognized tokens stay literal text. A filters-only query lists matching tasks. `last_turns` narrows each task's corpus to its N most recent turns — the units `read` numbers — so a stale hit in an early turn cannot outrank recent work.",
-            "fields": {
-                "query": {"type": "string", "required": true},
-                "last_turns": {"type": "number", "notes": "search only each task's last N turns; omit to scan whole transcripts"}
-            },
-            "example": "{\"query\":\"status:idle retry logic\"}",
-            "returns": {"results": [{"task_id": "uuid", "title": "string", "project": "project name", "provider": "string", "status": "string", "updated_at": "unix seconds", "source": "user|assistant", "message_id": "uuid of the matched message", "snippet": "matched excerpt"}], "session_link_hint": "how to link a task in your reply"}
-        },
-        "map": {
-            "description": "Ask Jev to rank source evidence from this session's indexed workspace, then return relevant declarations and locations. Use for code discovery and query again as you learn more. Requires the Project Map experiment to be enabled.",
-            "fields": {
-                "query": {"type": "string", "required": true, "notes": "a precise natural-language question about code or behavior"},
-                "path": {"type": "string", "notes": "workspace-relative directory or file scope"},
-                "intent": {"type": "string", "enum": ["locate", "understand", "change"], "default": "understand"},
-                "anchors": {"type": "string[]", "notes": "paths or qualified symbols already known to relate to the query"},
-                "known_paths": {"type": "string[]", "notes": "already-read paths; they are deprioritized, never excluded"},
-                "max_tokens": {"type": "number", "default": 1024, "minimum": 64, "maximum": 4096}
-            },
-            "example": "{\"query\":\"What controls how long a login session lasts?\",\"intent\":\"understand\",\"anchors\":[\"src/auth/session.rs\"],\"known_paths\":[\"src/auth/session.rs\"]}",
-            "returns": {"query": "string", "intent": "locate|understand|change", "text": "ranked source context with paths and line numbers", "indexed_files": "number", "candidates_considered": "number", "omitted_candidates": "number", "mapped_files": "number", "estimated_tokens": "number", "truncated": "boolean", "ranking": "jev|localFallback", "fallback_reason": "optional reason Jev ranking was unavailable"}
-        },
-        "ask": {
-            "description": "Ask this task's user a structured question and block until they resolve it. Renders the session's question card in their Goddard client while your turn keeps running — use it when a human decision (a choice between options, or a confirmation) must come back before you can proceed. Do not use it for questions an ordinary reply can carry.",
-            "fields": {
-                "questions": {"type": "array", "required": true, "notes": "one or more questions, presented one card at a time in order", "items": {
-                    "question": {"type": "string", "required": true},
-                    "header": {"type": "string", "notes": "short card label; defaults to \"Question\""},
-                    "id": {"type": "string", "notes": "answer key; defaults to question-<index>"},
-                    "options": {"type": "array", "items": {"label": {"type": "string", "required": true}, "description": {"type": "string"}}, "notes": "omit for a free-form answer"},
-                    "multiSelect": {"type": "boolean", "default": false}
-                }}
-            },
-            "example": "{\"questions\":[{\"header\":\"Deploy\",\"question\":\"Which environment should I deploy to?\",\"options\":[{\"label\":\"Staging\"},{\"label\":\"Production\",\"description\":\"Requires sign-off\"}]}]}",
-            "returns": {"outcome": "{\"type\":\"answers\",\"answers\":[{\"questionId\":\"<id>\",\"answers\":[\"<chosen label or typed text>\"]}]} when the user submits; {\"type\":\"clarified\",\"content\":\"<text>\"} when they explain instead; {\"type\":\"cancelled\"} when they dismiss or the turn ends"}
-        },
-        "command": {
-            "description": "Manage the user's custom commands — shell scripts they can run from the command palette in a terminal. Commands are daemon-owned and shared across the user's clients.",
-            "subcommands": {
-                "list": {
-                    "description": "Print every custom command as a JSON array. Read this first to make writes idempotent.",
-                    "returns": "the custom command list"
-                },
-                "upsert": {
-                    "description": "Add a custom command, or replace the entry carrying `id` — or the one with the same `name` when `id` is absent or unknown. The daemon attributes the write to this task.",
-                    "fields": {
-                        "id": {"type": "string", "notes": "uuid of an existing command; omit to add a new one"},
-                        "name": {"type": "string", "notes": "palette label; omit to show the script itself"},
-                        "icon": {"type": "string", "enum": icons, "default": "terminal"},
-                        "shell": {"type": "string", "notes": "shell the command runs in; omit for the platform default"},
-                        "script": {"type": "string", "required": true, "notes": "runs inside an interactive shell, so pipes, aliases, and interactive programs all work"},
-                        "close_on_success": {"type": "boolean", "default": false, "notes": "close the terminal tab once the script exits successfully"}
-                    },
-                    "example": "{\"name\":\"Deploy staging\",\"script\":\"./scripts/deploy staging\",\"icon\":\"zap\",\"close_on_success\":true}",
-                    "returns": "the custom command list after the write"
-                },
-                "remove": {
-                    "description": "Remove a custom command, addressed by id or by its exact name.",
-                    "fields": {
-                        "id": {"type": "string", "notes": "uuid of the command; one of id and name is required"},
-                        "name": {"type": "string", "notes": "exact name of the command; one of id and name is required"}
-                    },
-                    "example": "{\"name\":\"Deploy staging\"}",
-                    "returns": "the custom command list after the write"
-                }
-            }
-        }
-    })
+    boss_contract::enrich_leaf(
+        path,
+        json!({"command":path,"help":help,"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]}),
+    )
 }
 
 fn schema() -> serde_json::Value {
@@ -920,6 +795,7 @@ fn schema() -> serde_json::Value {
         "boss employee model",
         "boss employee permissions",
         "boss employee plan",
+        "boss employee persona",
         "boss employee workspace",
         "boss employee resources",
         "boss persona list",
@@ -974,6 +850,7 @@ fn schema() -> serde_json::Value {
         "boss report-blocker",
         "boss script",
         "computer js",
+        "computer run",
         "computer reset",
         "resource acquire",
         "resource run",
@@ -991,6 +868,8 @@ fn schema() -> serde_json::Value {
         .collect::<serde_json::Map<_, _>>();
     json!({
         "commands": commands,
+        "contractFormat": "goddard-agent.command-contract",
+        "contractVersion": 1,
         "usage_contract": "Use create or prompt only when the human explicitly asked. There is no per-call approval gate. Every leaf supports local help and schema discovery. Rich configuration stays in command-specific JSON; raw content uses --text or --file."
     })
 }
@@ -1234,6 +1113,18 @@ fn run() -> anyhow::Result<()> {
         "--path",
         "--reason",
         "--url",
+        "--permissions-json",
+        "--permissions-json-file",
+        "--resources-json",
+        "--resources-json-file",
+        "--new-outcome-json",
+        "--new-outcome-json-file",
+        "--prerequisites-json",
+        "--prerequisites-json-file",
+        "--group-id",
+        "--priority",
+        "--outcome-id",
+        "--after-success",
     ];
     while index < raw_args.len() {
         if raw_args[index] == "--output" {
@@ -1302,6 +1193,7 @@ fn run() -> anyhow::Result<()> {
                         | "context"
                         | "view"
                         | "stop"
+                        | "resume"
                 )
             }) =>
         {
@@ -1458,7 +1350,9 @@ fn flags(
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         if let Some(key) = arg.strip_prefix("--") {
-            if matches!(key, "all" | "new" | "clear" | "reference") {
+            if matches!(key, "all" | "new" | "clear" | "reference")
+                || (value_flags.contains(&key) && matches!(key, "allow-burst" | "finishes-outcome"))
+            {
                 if values.insert(key.to_owned(), String::new()).is_some() {
                     bail!("`--{key}` may be supplied only once");
                 }
@@ -1622,21 +1516,17 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
     let operation = args.first().cloned().unwrap_or_default();
     if matches!(
         group,
-        "rename"
-            | "avatar"
-            | "speak"
-            | "report-blocker"
-            | "open"
-            | "browse"
-            | "terminal"
-            | "stop"
-            | "resume"
+        "rename" | "speak" | "report-blocker" | "open" | "browse" | "terminal" | "stop" | "resume"
     ) {
         args.insert(0, group.to_owned());
         return boss_admin_leaf(&args);
     }
     args.remove(0);
     match (group, operation.as_str()) {
+        ("avatar", "regenerate") => {
+            args.insert(0, "regenerate".to_owned());
+            boss_avatar(&args)
+        }
         ("file", "list") => {
             let (pos, _) = flags(args, &[], true)?;
             if pos.len() > 1 {
@@ -2232,16 +2122,6 @@ fn boss_admin_leaf(args: &[String]) -> anyhow::Result<()> {
                 title: None,
             })?)
         }
-        "avatar" => {
-            if args.first().map(String::as_str) != Some("regenerate") || args.len() > 2 {
-                bail!("usage: boss avatar regenerate [EMPLOYEE_ID]");
-            }
-            let session_id = args
-                .get(1)
-                .map(|id| id.parse().context("invalid employee ID"))
-                .transpose()?;
-            print_boss(boss_request(Op::RegenerateAvatar { session_id })?)
-        }
         "open" => {
             let (_, opts) = flags(args[1..].to_vec(), &["provider", "model", "mode"], false)?;
             let provider = opts
@@ -2283,6 +2163,19 @@ fn boss_admin_leaf(args: &[String]) -> anyhow::Result<()> {
         }
         _ => bail!("unsupported Boss command path: {}", args.join(" ")),
     }
+}
+
+fn boss_avatar(args: &[String]) -> anyhow::Result<()> {
+    if args.len() > 2 {
+        bail!("usage: boss avatar regenerate [EMPLOYEE_ID]");
+    }
+    let session_id = args
+        .get(1)
+        .map(|id| id.parse().context("invalid employee ID"))
+        .transpose()?;
+    print_boss(boss_request(
+        waku_protocol::boss::BossOperation::RegenerateAvatar { session_id },
+    )?)
 }
 
 fn json_input(opts: &std::collections::BTreeMap<String, String>) -> anyhow::Result<String> {
@@ -2328,6 +2221,20 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
             "base-branch",
             "adopt-worktree",
             "request-id",
+            "permissions-json",
+            "permissions-json-file",
+            "resources-json",
+            "resources-json-file",
+            "new-outcome-json",
+            "new-outcome-json-file",
+            "prerequisites-json",
+            "prerequisites-json-file",
+            "allow-burst",
+            "finishes-outcome",
+            "group-id",
+            "priority",
+            "outcome-id",
+            "after-success",
             "file",
             "text",
         ],
@@ -2391,12 +2298,56 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
         .get("icon")
         .map(|i| serde_json::from_value(json!(i)).context("invalid employee icon"))
         .transpose()?;
+    let structured = |name: &str| -> anyhow::Result<serde_json::Value> {
+        let inline = opts.get(&format!("{name}-json"));
+        let file = opts.get(&format!("{name}-json-file"));
+        match (inline, file) {
+            (Some(_), Some(_)) => {
+                bail!("choose at most one of --{name}-json or --{name}-json-file")
+            }
+            (Some(value), None) => {
+                serde_json::from_str(value).with_context(|| format!("invalid --{name}-json"))
+            }
+            (None, Some(path)) => serde_json::from_str(&read_content_file(path)?)
+                .with_context(|| format!("invalid --{name}-json-file")),
+            (None, None) => Ok(serde_json::Value::Null),
+        }
+    };
+    let priority = opts
+        .get("priority")
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .context("--priority must be a signed 64-bit integer")
+        })
+        .transpose()?;
+    if opts.contains_key("outcome-id")
+        && (opts.contains_key("new-outcome-json") || opts.contains_key("new-outcome-json-file"))
+    {
+        bail!("--outcome-id and --new-outcome-json[-file] are mutually exclusive");
+    }
+    if opts.contains_key("item") && !opts.contains_key("plan") {
+        bail!("--item requires --plan");
+    }
+    let prerequisites = if opts.contains_key("prerequisites-json")
+        || opts.contains_key("prerequisites-json-file")
+    {
+        structured("prerequisites")?
+    } else {
+        json!([])
+    };
     let operation: BossOperation = serde_json::from_value(json!({
         "type":"summon", "personaId":persona.as_ref().map(|persona| persona.0), "jobTitle":opts["title"], "prompt":prompt,
         "project":project, "provider":opts.get("provider"), "model":opts.get("model"),
         "reasoningEffort":opts.get("effort"), "workspace":workspace, "baseBranch":opts.get("base-branch"),
         "adoptWorktree":opts.get("adopt-worktree"), "workGoal":opts.get("work-goal").map(String::as_str).unwrap_or("errand"),
-        "icon":icon, "plan":opts.get("plan"), "item":opts.get("item"), "requestId":opts.get("request-id")
+        "icon":icon, "plan":opts.get("plan"), "item":opts.get("item"), "requestId":opts.get("request-id"),
+        "permissions":structured("permissions")?, "resources":structured("resources")?,
+        "allowBurst":opts.contains_key("allow-burst"), "groupId":opts.get("group-id"), "priority":priority,
+        "outcomeId":opts.get("outcome-id"), "newOutcome":structured("new-outcome")?,
+        "afterSuccess":opts.get("after-success"), "finishesOutcome":opts.contains_key("finishes-outcome"),
+        "prerequisites":prerequisites
+
     }))?;
     match boss_request(operation)? {
         waku_protocol::boss::BossResult::Summoned {
