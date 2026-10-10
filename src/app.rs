@@ -3761,8 +3761,6 @@ pub struct Waku {
     skills_scanned_at: Option<Instant>,
     /// Filter query over the Skills page's rows.
     skills_search: Entity<TextInput>,
-    /// Filename query over the Boss Brain Memory documents tree.
-    boss_memory_search: Entity<TextInput>,
     /// The Employees → History lookup field — topic or person name over
     /// retained task, employee, Boss-chat and planning records.
     boss_history_search: Entity<TextInput>,
@@ -5646,13 +5644,6 @@ impl Waku {
                 .accessibility_label(tr!("skills.search"))
                 .placeholder(tr!("skills.search"))
         });
-        let boss_memory_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .tab_index(0)
-                .clear_on_escape()
-                .accessibility_label(tr!("boss.search_file_names"))
-                .placeholder(tr!("boss.search_file_names"))
-        });
         let boss_history_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -6751,18 +6742,6 @@ impl Waku {
             })
             .detach();
             cx.subscribe(
-                &boss_memory_search,
-                |this: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Edited) {
-                        cx.notify();
-                        // Searching is asynchronous — all directory
-                        // discovery stays in the Boss request worker.
-                        this.ensure_boss_memory_search(cx);
-                    }
-                },
-            )
-            .detach();
-            cx.subscribe(
                 &boss_history_search,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
                     InputEvent::Submit(_) => this.submit_boss_history_search(cx),
@@ -7592,7 +7571,6 @@ impl Waku {
                 skills_scan_pending: false,
                 skills_scanned_at: None,
                 skills_search,
-                boss_memory_search,
                 boss_history_search,
                 skills_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 skills_scrollbar: ScrollbarState::new(),

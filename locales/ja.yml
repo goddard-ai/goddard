@@ -3118,16 +3118,9 @@ boss.identity: アイデンティティ
 boss.deliverables: 成果物
 boss.phase_later: 今後のフェーズで提供予定です。
 boss.retry: 再試行
-boss.memory_documents: ドキュメント
-boss.memory_records: 記録
-boss.search_file_names: ファイル名を検索
-boss.search_no_matches: 一致するファイルがありません
 boss.ask_correct: ボスに修正を依頼
 boss.correction_request_hint: "チャットでボスに %{path} の修正を依頼します。"
-boss.memory_empty: メモリはボスが管理しています。
 boss.ask_remember: ボスに覚えてもらう
-boss.memory_select: 読み込むメモリファイルを選択してください
-boss.memory_unavailable: "%{path} を読み込めませんでした。"
 boss.bucket_select: バケットを選択
 boss.bucket_unavailable: "%{bucket} を読み込めませんでした。"
 boss.records_empty: このバケットにはまだ記録がありません。

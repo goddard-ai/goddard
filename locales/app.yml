@@ -6168,26 +6168,12 @@ boss.history:
   en: Employees
 boss.memory:
   en: Memory
-boss.memory_documents:
-  en: Documents
-boss.memory_records:
-  en: Records
-boss.search_file_names:
-  en: Search file names
-boss.search_no_matches:
-  en: No matching files
 boss.ask_correct:
   en: Ask Boss to correct
 boss.correction_request_hint:
   en: Ask the Boss to correct %{path} in chat.
-boss.memory_empty:
-  en: The Boss maintains its memory.
 boss.ask_remember:
   en: Ask Boss to remember something
-boss.memory_select:
-  en: Select a memory file to read
-boss.memory_unavailable:
-  en: Could not load %{path}.
 boss.bucket_select:
   en: Select a bucket
 boss.bucket_unavailable:

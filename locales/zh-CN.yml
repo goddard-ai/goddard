@@ -3069,16 +3069,9 @@ boss.identity: 身份
 boss.deliverables: 交付物
 boss.phase_later: 将在后续阶段推出。
 boss.retry: 重试
-boss.memory_documents: 文档
-boss.memory_records: 记录
-boss.search_file_names: 搜索文件名
-boss.search_no_matches: 没有匹配的文件
 boss.ask_correct: 请老板纠正
 boss.correction_request_hint: "请在聊天中让老板纠正 %{path}。"
-boss.memory_empty: 老板维护着自己的记忆。
 boss.ask_remember: 让老板记住一些内容
-boss.memory_select: 选择要阅读的记忆文件
-boss.memory_unavailable: "无法加载 %{path}。"
 boss.bucket_select: 选择存储桶
 boss.bucket_unavailable: "无法加载 %{bucket}。"
 boss.records_empty: 此存储桶还没有记录。
