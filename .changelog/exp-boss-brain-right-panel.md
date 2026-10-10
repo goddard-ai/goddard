@@ -1,0 +1,1 @@
+- **Boss Brain:** Opening a Boss's Brain page now hides the right panel instead of showing the boss chat's strip; the panel returns as it was when you leave the page.

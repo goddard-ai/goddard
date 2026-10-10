@@ -3539,7 +3539,9 @@ impl Waku {
             self.sidebar_visible || self.sidebar_slide.is_some(),
             self.right_panel_content_visible()
                 || self.git_panel_visible
-                || (self.right_panel_slide.is_some() && self.live_deliverable_page().is_none()),
+                || (self.right_panel_slide.is_some()
+                    && self.live_deliverable_page().is_none()
+                    && self.boss_ui.page.is_none()),
             self.sidebar_width,
             self.right_panel_slot_width(),
         )

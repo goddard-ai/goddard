@@ -9719,6 +9719,7 @@ impl Waku {
     /// active or its exit slide is still traveling.
     pub(super) fn panel_fullscreen_active(&self) -> bool {
         self.live_deliverable_page().is_none()
+            && self.boss_ui.page.is_none()
             && (self.fullscreen_surface.is_some() || self.panel_fullscreen_slide.is_some())
     }
 
