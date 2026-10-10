@@ -6544,6 +6544,19 @@ impl Waku {
         prompt: String,
         cx: &mut Context<Self>,
     ) {
+        let employee = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| self.session_is_employee(session))
+            .and_then(|_| {
+                Some((
+                    self.boss_ui.identities.get(&session_id)?.name.as_str(),
+                    self.boss_ui.job_titles.get(&session_id)?.as_str(),
+                ))
+            });
+        let prompt = action_predictions::include_employee_context(prompt, employee);
         self.submit_composer_submission_to_with_canned(
             session_id,
             ComposerSubmission::plain(prompt),

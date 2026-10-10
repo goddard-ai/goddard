@@ -133,6 +133,13 @@ pub(super) fn suggested_prompt(
     Some(template)
 }
 
+pub(super) fn include_employee_context(prompt: String, employee: Option<(&str, &str)>) -> String {
+    let Some((name, job_title)) = employee else {
+        return prompt;
+    };
+    format!("Employee: {name} ({job_title})\n\n{prompt}")
+}
+
 pub(super) fn visible_suggestion_label(label: &str) -> String {
     let display_label: String = label.replace('\n', " ").chars().take(96).collect();
     if label.chars().count() > 96 || label.contains('\n') {
@@ -1871,6 +1878,16 @@ mod tests {
             Some("run-tests")
         );
         assert_eq!(canned_prompt_id("Run the tests", &overrides), None);
+    }
+
+    #[test]
+    fn suggested_action_prompt_includes_only_target_employee_context() {
+        let action = "Run the focused tests".to_owned();
+        assert_eq!(
+            include_employee_context(action.clone(), Some(("Ada", "Reviewer"))),
+            "Employee: Ada (Reviewer)\n\nRun the focused tests"
+        );
+        assert_eq!(include_employee_context(action.clone(), None), action);
     }
 
     #[test]
