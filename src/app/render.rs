@@ -14,6 +14,13 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
+fn main_header_navigation_visible(sidebar_visible: bool, deliverable_page: bool) -> bool {
+    // With the sidebar open, its title bar already owns these controls. A
+    // deliverable page suppresses the main header, except when the sidebar is
+    // hidden and the header is their only remaining home.
+    !sidebar_visible || !deliverable_page
+}
+
 // Floats normally borrow the transcript's bottom padding. An approval card
 // interrupts that adjacency, so reserve their airspace inside the composer lane.
 #[track_caller]
@@ -925,7 +932,10 @@ impl Render for Waku {
                     })
                     .when(
                         self.boss_ui.page.is_none()
-                            && deliverable_page.is_none()
+                            && main_header_navigation_visible(
+                                self.sidebar_visible,
+                                deliverable_page.is_some(),
+                            )
                             && (!self.drafts_page
                                 || self.selected_terminal.is_some_and(|id| {
                                     self.right_panel_terminals.contains_key(&id)
@@ -1295,6 +1305,14 @@ mod tests {
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         assert!(should_render_empty_state(Some(&draft)));
         assert!(should_render_empty_state(None));
+    }
+
+    #[test]
+    fn deliverable_page_keeps_navigation_header_when_sidebar_is_hidden() {
+        assert!(main_header_navigation_visible(false, true));
+        assert!(!main_header_navigation_visible(true, true));
+        assert!(main_header_navigation_visible(false, false));
+        assert!(main_header_navigation_visible(true, false));
     }
 }
 
