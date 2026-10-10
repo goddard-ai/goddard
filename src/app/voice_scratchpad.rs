@@ -388,6 +388,18 @@ pub(super) struct PressToTalkBubbleEdit {
     snapshot: String,
 }
 
+/// The context an open bubble edit belongs to — the bubble's own while
+/// it lives, `Composer` on the edit's owner once the bubble is gone.
+pub(super) fn press_to_talk_bubble_edit_context(
+    edit: &PressToTalkBubbleEdit,
+    bubble: Option<PressToTalkBubble>,
+) -> press_to_talk::PressToTalkContext {
+    bubble
+        .filter(|bubble| bubble.paragraph == edit.paragraph)
+        .map(|bubble| bubble.context)
+        .unwrap_or(press_to_talk::PressToTalkContext::Composer { owner: edit.owner })
+}
+
 /// Which Press to Talk element a context's surface is showing — the
 /// precedence is hold, then bubble, then the outcome the last attempt
 /// left.
@@ -4710,12 +4722,11 @@ impl Waku {
     /// to the composer the hold was captured over.
     pub(super) fn submit_press_to_talk_bubble_edit(&mut self, cx: &mut Context<Self>) {
         let context = self.press_to_talk_bubble_edit.as_ref().map(|edit| {
-            self.voice_scratchpads
+            let bubble = self
+                .voice_scratchpads
                 .get(&edit.owner)
-                .and_then(|scratchpad| scratchpad.press_to_talk_bubble)
-                .filter(|bubble| bubble.paragraph == edit.paragraph)
-                .map(|bubble| bubble.context)
-                .unwrap_or(press_to_talk::PressToTalkContext::Composer { owner: edit.owner })
+                .and_then(|scratchpad| scratchpad.press_to_talk_bubble);
+            press_to_talk_bubble_edit_context(edit, bubble)
         });
         self.commit_press_to_talk_bubble_edit(cx);
         let Some(context) = context else {
@@ -4810,12 +4821,11 @@ impl Waku {
         };
         self.press_to_talk_bubble_input
             .update(cx, |input, cx| input.set_content(&edit.snapshot, cx));
-        let context = self
+        let bubble = self
             .voice_scratchpads
             .get(&edit.owner)
-            .and_then(|scratchpad| scratchpad.press_to_talk_bubble)
-            .map(|bubble| bubble.context)
-            .unwrap_or(press_to_talk::PressToTalkContext::Composer { owner: edit.owner });
+            .and_then(|scratchpad| scratchpad.press_to_talk_bubble);
+        let context = press_to_talk_bubble_edit_context(&edit, bubble);
         let focus = self.press_to_talk_origin_focus(context, cx);
         window.focus(&focus, cx);
         cx.notify();
@@ -7496,6 +7506,45 @@ mod tests {
         transcript.commit_next();
         transcript.append_finalized("three");
         assert_eq!(transcript.line_count(), 2);
+    }
+
+    #[test]
+    fn a_bubble_edit_resolves_to_its_bubbles_context() {
+        let owner = Uuid::new_v4();
+        let edit = PressToTalkBubbleEdit {
+            owner,
+            paragraph: 3,
+            snapshot: "recording".to_owned(),
+        };
+        for context in [
+            press_to_talk::PressToTalkContext::Composer { owner },
+            press_to_talk::PressToTalkContext::Annotation { owner },
+        ] {
+            let bubble = PressToTalkBubble {
+                paragraph: 3,
+                context,
+                dismissed: false,
+            };
+            assert_eq!(
+                press_to_talk_bubble_edit_context(&edit, Some(bubble)),
+                context
+            );
+        }
+        // The bubble gone — or a different paragraph's — falls back to
+        // a composer context on the edit's owner.
+        for bubble in [
+            None,
+            Some(PressToTalkBubble {
+                paragraph: 9,
+                context: press_to_talk::PressToTalkContext::Annotation { owner },
+                dismissed: false,
+            }),
+        ] {
+            assert_eq!(
+                press_to_talk_bubble_edit_context(&edit, bubble),
+                press_to_talk::PressToTalkContext::Composer { owner }
+            );
+        }
     }
 
     #[test]

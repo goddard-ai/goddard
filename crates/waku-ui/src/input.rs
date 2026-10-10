@@ -1508,6 +1508,14 @@ impl TextInput {
         cx.notify();
     }
 
+    /// Splice `text` over the current selection, leaving the caret after it —
+    /// the manual equivalent of a committed `insertText` for a caller that
+    /// delivers text without going through the platform input handler.
+    pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let range = self.selected_range();
+        self.replace_range(range, text, cx);
+    }
+
     /// Replace the painted find-match washes. Ranges must be sorted and
     /// non-overlapping; `active` indexes into `matches`. Purely visual — the
     /// content is untouched, so no [`InputEvent::Edited`] is emitted.
@@ -4584,10 +4592,8 @@ impl ComposerInput {
     /// the manual equivalent of a committed `insertText` for a caller that
     /// delivers text without going through the platform input handler.
     pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.input.update(cx, |input, cx| {
-            let range = input.selected_range();
-            input.replace_range(range, text, cx);
-        });
+        self.input
+            .update(cx, |input, cx| input.insert_text(text, cx));
     }
 
     pub fn preserve_visual_focus_for_context_menu(
@@ -5980,6 +5986,26 @@ mod tests {
         cx.update(|window, cx| input.update(cx, |input, cx| input.paste(&Paste, window, cx)));
         cx.read_entity(&input, |input, _| {
             assert_eq!(input.content(), "say ( loudly");
+            assert_eq!(input.selected_range(), 5..5);
+        });
+    }
+
+    #[gpui::test]
+    fn insert_text_pastes_at_the_caret_over_any_selection(cx: &mut TestAppContext) {
+        let (input, cx) = setup_input(cx, "say foo loudly", px(300.));
+        // Bare caret: the text splices in where the caret sits and the
+        // caret lands after it — the shape of a committed insertText.
+        cx.update(|_, cx| input.update(cx, |input, cx| input.select_range(4..4, cx)));
+        cx.update(|_, cx| input.update(cx, |input, cx| input.insert_text("gently ", cx)));
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "say gently foo loudly");
+            assert_eq!(input.selected_range(), 11..11);
+        });
+        // A standing selection collapses under the insert, like a paste.
+        cx.update(|_, cx| input.update(cx, |input, cx| input.select_range(0..3, cx)));
+        cx.update(|_, cx| input.update(cx, |input, cx| input.insert_text("shout", cx)));
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "shout gently foo loudly");
             assert_eq!(input.selected_range(), 5..5);
         });
     }

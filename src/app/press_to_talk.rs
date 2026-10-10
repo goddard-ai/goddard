@@ -66,7 +66,8 @@ pub(super) enum PressToTalkContext {
     /// A draft composer — the three-word minimum applies.
     Composer { owner: VoicePadOwner },
     /// A transcript-annotation comment field — any non-whitespace final
-    /// text lands, so a one-word answer can sit beside its span.
+    /// text lands, so a one-word answer can sit beside its span. The
+    /// accepted text pastes into the field itself, never a pad.
     Annotation { owner: VoicePadOwner },
 }
 
@@ -568,13 +569,20 @@ fn accepted(context: Option<PressToTalkContext>, text: &str) -> Acceptance {
 
 impl Waku {
     /// The composer the next hold would record for — `None` while nothing
-    /// eligible is on screen. The transcript-annotation comment field is
-    /// always eligible, overlay or not; the draft composer needs its
+    /// eligible is on screen. A focused recording bubble records for its
+    /// own context, the transcript-annotation comment field is always
+    /// eligible, overlay or not, and the draft composer needs its
     /// screen free of pages, overlays, Big Picture, and foreign typing
     /// owners.
     fn press_to_talk_target(&self, window: &Window, cx: &App) -> Option<PressToTalkContext> {
         if !self.state.press_to_talk_enabled || !self.state.voice_scratchpad_enabled {
             return None;
+        }
+        // The bubble's own chrome never disarms the chord — its text,
+        // trash button, or edit field holding focus records for the
+        // context the bubble was captured from.
+        if let Some(context) = self.focused_press_to_talk_bubble_context(window, cx) {
+            return Some(context);
         }
         if let Some(editor) = self.annotation_editor.as_ref() {
             let owner = match &editor.target {
@@ -621,6 +629,40 @@ impl Waku {
             _ => self.surface_voice_pad_owner(),
         }?;
         Some(PressToTalkContext::Composer { owner })
+    }
+
+    /// The context the bubble's chrome records for while it holds focus
+    /// — its text region, its trash button, or the bound edit field.
+    /// Editing the latest recording keeps the chord live for that
+    /// bubble's own context rather than leaking ⌥Space into the field.
+    fn focused_press_to_talk_bubble_context(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> Option<PressToTalkContext> {
+        let focused = window.focused(cx)?;
+        if focused == self.press_to_talk_bubble_input.read(cx).focus() {
+            let edit = self.press_to_talk_bubble_edit.as_ref()?;
+            let bubble = self
+                .voice_scratchpads
+                .get(&edit.owner)
+                .and_then(|scratchpad| scratchpad.press_to_talk_bubble);
+            return Some(voice_scratchpad::press_to_talk_bubble_edit_context(
+                edit, bubble,
+            ));
+        }
+        let focuses = self.transcript_control_focuses.borrow();
+        self.voice_scratchpads.values().find_map(|scratchpad| {
+            let bubble = scratchpad.press_to_talk_bubble?;
+            let owner = bubble.context.owner();
+            (focuses
+                .get(&format!("ptt-bubble-text-{owner}"))
+                .is_some_and(|handle| *handle == focused)
+                || focuses
+                    .get(&format!("ptt-bubble-trash-{owner}"))
+                    .is_some_and(|handle| *handle == focused))
+            .then_some(bubble.context)
+        })
     }
 
     /// Whether the focused typing surface is one of the composer's own —
@@ -670,17 +712,12 @@ impl Waku {
         cx.stop_propagation();
         // A fresh hold dismisses the previous bubble the moment capture
         // is accepted — a failed or too-short attempt never restores it.
+        // An edit open on that bubble commits first: the chord firing
+        // from inside the field must not drop typed text.
         if directives.contains(&PressToTalkDirective::ResolvePermission) {
-            let mut ended_edit = false;
-            for (owner, scratchpad) in &mut self.voice_scratchpads {
-                if let Some(bubble) = scratchpad.press_to_talk_bubble.take() {
-                    ended_edit |= self.press_to_talk_bubble_edit.as_ref().is_some_and(|edit| {
-                        edit.owner == *owner && edit.paragraph == bubble.paragraph
-                    });
-                }
-            }
-            if ended_edit {
-                self.press_to_talk_bubble_edit = None;
+            self.commit_press_to_talk_bubble_edit(cx);
+            for scratchpad in self.voice_scratchpads.values_mut() {
+                scratchpad.press_to_talk_bubble = None;
             }
         }
         self.apply_press_to_talk_directives(directives, cx);
@@ -1155,16 +1192,24 @@ impl Waku {
         self.press_to_talk.audio_rx = audio_rx;
     }
 
-    /// `Commit` — the accepted final lands as one paragraph on the bound
-    /// owner's scratchpad, created muted and hidden when that pad never
-    /// opened, and becomes the pad's bubble. Typed composer drafts are
-    /// untouched.
+    /// `Commit` — the accepted final lands where the hold was bound. An
+    /// annotation hold pastes at the comment field's caret — the field
+    /// the editor is open on is the destination, never the pad. A
+    /// composer hold lands as one paragraph on the bound owner's
+    /// scratchpad, created muted and hidden when that pad never opened,
+    /// and becomes the pad's bubble. Typed drafts are untouched.
     fn commit_press_to_talk(
         &mut self,
         context: PressToTalkContext,
         text: &str,
         cx: &mut Context<Self>,
     ) {
+        if let PressToTalkContext::Annotation { .. } = context {
+            self.annotation_comment_input
+                .update(cx, |input, cx| input.insert_text(text, cx));
+            cx.notify();
+            return;
+        }
         let owner = context.owner();
         let committed = {
             let scratchpad = self.voice_scratchpads.entry(owner).or_insert_with(|| {
