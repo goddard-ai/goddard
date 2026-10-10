@@ -11074,8 +11074,6 @@ impl Waku {
                         vec![
                             (AvatarStyle::Gaze, tr!("boss.avatar_style_gaze")),
                             (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
-                            (AvatarStyle::Dylan, tr!("boss.avatar_style_dylan")),
-                            (AvatarStyle::FunEmoji, tr!("boss.avatar_style_fun_emoji")),
                             (AvatarStyle::LineFace, tr!("boss.avatar_style_line_face")),
                             (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
                             (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),

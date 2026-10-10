@@ -9908,8 +9908,6 @@ mod tests {
     fn only_gaze_avatars_hop_and_never_under_reduce_motion() {
         for style in [
             AvatarStyle::DiceBear,
-            AvatarStyle::Dylan,
-            AvatarStyle::FunEmoji,
             AvatarStyle::LineFace,
             AvatarStyle::AgentAvatars,
             AvatarStyle::Avvvatars,
@@ -9923,10 +9921,10 @@ mod tests {
     #[test]
     fn avatar_style_setting_targets_the_global_boss_preference() {
         assert!(matches!(
-            global_avatar_style_operation(AvatarStyle::Dylan),
+            global_avatar_style_operation(AvatarStyle::LineFace),
             BossOperation::SetAvatarStyle {
                 session_id: None,
-                avatar_style: AvatarStyle::Dylan,
+                avatar_style: AvatarStyle::LineFace,
             }
         ));
     }
@@ -9934,7 +9932,7 @@ mod tests {
     #[test]
     fn failed_avatar_retries_are_bounded_and_stay_deduplicated() {
         let ui = BossUi::default();
-        let key = (("failed".to_string(), AvatarStyle::Dylan), 24);
+        let key = (("failed".to_string(), AvatarStyle::LineFace), 24);
         ui.avatar_requested.borrow_mut().insert(key.clone());
         for attempt in 1..=AVATAR_MAX_ATTEMPTS {
             ui.retry_avatar(key.0.clone(), key.1, attempt);

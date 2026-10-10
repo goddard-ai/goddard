@@ -35,8 +35,6 @@ use waku_protocol::boss::AvatarStyle;
 
 const MOODS_JSON: &str = include_str!("boss_moods.json");
 const GAZE_JSON: &str = include_str!("boss_moods/gaze.json");
-const DYLAN_JSON: &str = include_str!("boss_moods/dylan.json");
-const FUN_EMOJI_JSON: &str = include_str!("boss_moods/fun-emoji.json");
 const LINE_FACE_JSON: &str = include_str!("boss_moods/line-face.json");
 
 /// The `size` the generated SVG is requested at — fixes the intrinsic
@@ -123,14 +121,10 @@ struct ColorPool {
 fn dicebear_style(style: AvatarStyle) -> &'static Style {
     static MOODS: OnceLock<Style> = OnceLock::new();
     static GAZE: OnceLock<Style> = OnceLock::new();
-    static DYLAN: OnceLock<Style> = OnceLock::new();
-    static FUN_EMOJI: OnceLock<Style> = OnceLock::new();
     static LINE_FACE: OnceLock<Style> = OnceLock::new();
     let (lock, json) = match style {
         AvatarStyle::DiceBear => (&MOODS, MOODS_JSON),
         AvatarStyle::Gaze => (&GAZE, GAZE_JSON),
-        AvatarStyle::Dylan => (&DYLAN, DYLAN_JSON),
-        AvatarStyle::FunEmoji => (&FUN_EMOJI, FUN_EMOJI_JSON),
         AvatarStyle::LineFace => (&LINE_FACE, LINE_FACE_JSON),
         AvatarStyle::AgentAvatars | AvatarStyle::Avvvatars => {
             unreachable!("{style:?} is not a schema-driven DiceBear style")
@@ -144,10 +138,7 @@ fn dicebear_style(style: AvatarStyle) -> &'static Style {
 /// Styles that clip to a circle instead of the app's rounded-square frame —
 /// the raster is cropped in the SVG so every surface paints the same shape.
 pub(super) fn circular_frame(style: AvatarStyle) -> bool {
-    matches!(
-        style,
-        AvatarStyle::Dylan | AvatarStyle::FunEmoji | AvatarStyle::LineFace
-    )
+    matches!(style, AvatarStyle::LineFace)
 }
 
 /// FNV-1a over UTF-16 code units, matching DiceBear's `Fnv1a.hash`.
@@ -612,11 +603,9 @@ impl<'a> Renderer<'a> {
 /// Dispatch the human-selected generator at the requested logical bucket.
 pub(super) fn avatar_svg_for_style(seed: &str, style: AvatarStyle, bucket: u32) -> Vec<u8> {
     match style {
-        AvatarStyle::DiceBear
-        | AvatarStyle::Gaze
-        | AvatarStyle::Dylan
-        | AvatarStyle::FunEmoji
-        | AvatarStyle::LineFace => dicebear_svg(style, seed),
+        AvatarStyle::DiceBear | AvatarStyle::Gaze | AvatarStyle::LineFace => {
+            dicebear_svg(style, seed)
+        }
         AvatarStyle::AgentAvatars => agent::avatar_svg(seed),
         AvatarStyle::Avvvatars => avvvatars::avatar_svg(seed, bucket),
     }
@@ -829,11 +818,9 @@ mod tests {
         }
     }
 
-    /// Golden vectors captured from `api.dicebear.com/11.x` for the styles
-    /// added alongside moods — covers the schema features moods never
-    /// exercises: nested component references (gaze), canvas-level elements
-    /// (dylan), `contrastTo` palettes (gaze), stepped rotate (line-face),
-    /// and probability-gated components (dylan's facialHair).
+    /// Golden vectors captured from `api.dicebear.com/11.x` for Gaze and Line
+    /// Face, covering nested components, canvas-level elements, contrast
+    /// palettes, and stepped rotation.
     #[test]
     fn dicebear_styles_match_api() {
         let gaze = dicebear_style(AvatarStyle::Gaze);
@@ -882,74 +869,6 @@ mod tests {
             assert_eq!(picks["eyes"].scale, *eyes_scale, "{seed} eyes scale");
         }
 
-        let dylan = dicebear_style(AvatarStyle::Dylan);
-        // (seed, mood, hair, facial hair shown, skin, hair color)
-        let dylan_cases: &[(&str, &str, &str, bool, &str, &str)] = &[
-            (
-                "test",
-                "confused",
-                "shortCurls",
-                false,
-                "#c26450",
-                "#000000",
-            ),
-            ("", "confused", "parting", true, "#ffd6c0", "#ffffff"),
-            ("petra", "hopeful", "fluffy", true, "#c26450", "#fff500"),
-            ("a", "hopeful", "longCurls", true, "#c26450", "#ff543d"),
-            ("xyz", "happy", "flatTop", false, "#c26450", "#1d5dff"),
-            (
-                "zz top",
-                "superHappy",
-                "fluffy",
-                false,
-                "#ffd6c0",
-                "#fff500",
-            ),
-            (
-                "employee-42",
-                "confused",
-                "parting",
-                false,
-                "#ffd6c0",
-                "#fff500",
-            ),
-            (
-                "0f3d2b1a-1111-4222-8333-abcdefabcdef",
-                "sad",
-                "wavy",
-                false,
-                "#c26450",
-                "#ffffff",
-            ),
-        ];
-        for (seed, mood, hair, facial_hair, skin, hair_color) in dylan_cases {
-            let picks = resolve(dylan, seed);
-            assert_eq!(picks["mood"].variant, Some(*mood), "{seed} mood");
-            assert_eq!(picks["hair"].variant, Some(*hair), "{seed} hair");
-            assert_eq!(
-                picks["facialHair"].variant.is_some(),
-                *facial_hair,
-                "{seed} facialHair"
-            );
-            assert_eq!(color(dylan, seed, "skin"), *skin, "{seed} skin");
-            assert_eq!(color(dylan, seed, "hair"), *hair_color, "{seed} hair color");
-        }
-
-        let fun_emoji = dicebear_style(AvatarStyle::FunEmoji);
-        let fun_emoji_cases: &[(&str, &str, &str)] = &[
-            ("test", "kissHeart", "sleepClose"),
-            ("", "kissHeart", "wink2"),
-            ("petra", "shout", "wink2"),
-            ("xyz", "cute", "crying"),
-            ("employee-42", "drip", "closed2"),
-            ("zz top", "sad", "shades"),
-        ];
-        for (seed, mouth, eyes) in fun_emoji_cases {
-            let picks = resolve(fun_emoji, seed);
-            assert_eq!(picks["mouth"].variant, Some(*mouth), "{seed} mouth");
-            assert_eq!(picks["eyes"].variant, Some(*eyes), "{seed} eyes");
-        }
-
         let line_face = dicebear_style(AvatarStyle::LineFace);
         // (seed, eyes, nose, mouth, ink, mouthRotate — stepped to ±6)
         let line_face_cases: &[(&str, &str, &str, &str, &str, f64)] = &[
@@ -976,8 +895,6 @@ mod tests {
         for (style, expected) in [
             (AvatarStyle::DiceBear, 0x7564c8be),
             (AvatarStyle::Gaze, 0x00eaf0f7),
-            (AvatarStyle::Dylan, 0x66355fee),
-            (AvatarStyle::FunEmoji, 0x07a1774f),
             (AvatarStyle::LineFace, 0xc6990950),
         ] {
             let svg = avatar_svg_for_style("test", style, 16);
@@ -1003,8 +920,6 @@ mod tests {
         for style in [
             AvatarStyle::DiceBear,
             AvatarStyle::Gaze,
-            AvatarStyle::Dylan,
-            AvatarStyle::FunEmoji,
             AvatarStyle::LineFace,
         ] {
             let a = dicebear_svg(style, "test");
@@ -1019,11 +934,7 @@ mod tests {
     /// sidebar, chips, mentions — shows the same round face.
     #[test]
     fn circular_styles_clip_to_a_circle() {
-        for style in [
-            AvatarStyle::Dylan,
-            AvatarStyle::FunEmoji,
-            AvatarStyle::LineFace,
-        ] {
+        for style in [AvatarStyle::LineFace] {
             let svg = String::from_utf8(dicebear_svg(style, "test")).unwrap();
             assert!(svg.contains("<circle"), "{style:?} lacks a circular clip");
             assert!(circular_frame(style));
@@ -1056,8 +967,6 @@ mod tests {
             for style in [
                 AvatarStyle::DiceBear,
                 AvatarStyle::Gaze,
-                AvatarStyle::Dylan,
-                AvatarStyle::FunEmoji,
                 AvatarStyle::LineFace,
                 AvatarStyle::AgentAvatars,
                 AvatarStyle::Avvvatars,

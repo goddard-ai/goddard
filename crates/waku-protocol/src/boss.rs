@@ -11,9 +11,8 @@ use crate::AgentWorkspace;
 use crate::automations::AutomationInput;
 use crate::model::{AgentSession, Project, ProviderKind, RuntimeMode, SessionPlanning};
 
-/// Human-selected avatar generator. `blobby` was removed and remaps to the
-/// `gaze` default; identities written before the field existed deserialize
-/// through [`legacy_avatar_style`] so their faces stay on DiceBear moods.
+/// Human-selected avatar generator. Removed avatar styles deserialize as
+/// Gaze to preserve compatibility with stored Boss identities.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AvatarStyle {
@@ -21,10 +20,8 @@ pub enum AvatarStyle {
     DiceBear,
     /// DiceBear "gaze" — the app's default for new identities.
     #[default]
-    #[serde(alias = "blobby")]
+    #[serde(alias = "blobby", alias = "dylan", alias = "funEmoji")]
     Gaze,
-    Dylan,
-    FunEmoji,
     LineFace,
     AgentAvatars,
     Avvvatars,
@@ -3272,7 +3269,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn old_identity_keeps_moods_and_blobby_maps_to_gaze() {
+    fn old_identity_keeps_moods_and_removed_styles_map_to_gaze() {
         let identity: super::BossIdentity = serde_json::from_value(serde_json::json!({
             "id": Uuid::nil(), "name": "Boss", "avatarSeed": "existing"
         }))
@@ -3282,6 +3279,12 @@ mod tests {
         value["avatarStyle"] = serde_json::json!("blobby");
         let identity: super::BossIdentity = serde_json::from_value(value).unwrap();
         assert_eq!(identity.avatar_style, super::AvatarStyle::Gaze);
+        for removed_style in ["blobby", "dylan", "funEmoji"] {
+            let mut value = serde_json::to_value(&identity).unwrap();
+            value["avatarStyle"] = serde_json::json!(removed_style);
+            let restored: super::BossIdentity = serde_json::from_value(value).unwrap();
+            assert_eq!(restored.avatar_style, super::AvatarStyle::Gaze);
+        }
         assert_eq!(super::AvatarStyle::default(), super::AvatarStyle::Gaze);
     }
 

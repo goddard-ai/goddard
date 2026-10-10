@@ -244,7 +244,6 @@ fi
 # Preserve vendored avatar license notices in binary distributions too.
 mkdir -p "$contents/Resources/licenses"
 cp src/app/boss_moods/agent-LICENSE src/app/boss_moods/avvvatars-LICENSE \
-  src/app/boss_moods/dylan-LICENSE src/app/boss_moods/fun-emoji-LICENSE \
   "$contents/Resources/licenses/"
 sparkle_framework="$contents/Frameworks/Sparkle.framework"
 cp "$cargo_target_dir/$profile/$daemon_name" "$daemon_executable"

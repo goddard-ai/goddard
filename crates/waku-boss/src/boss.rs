@@ -9054,7 +9054,7 @@ mod tests {
             },
             BossOperation::SetAvatarStyle {
                 session_id: Some(session_id),
-                avatar_style: waku_protocol::boss::AvatarStyle::Dylan,
+                avatar_style: waku_protocol::boss::AvatarStyle::LineFace,
             },
         ] {
             assert!(service.handle(Some(session_id), operation).is_err());
@@ -9078,7 +9078,7 @@ mod tests {
                 None,
                 BossOperation::SetAvatarStyle {
                     session_id: Some(session_id),
-                    avatar_style: waku_protocol::boss::AvatarStyle::Dylan,
+                    avatar_style: waku_protocol::boss::AvatarStyle::LineFace,
                 },
             )
             .unwrap();
@@ -9086,7 +9086,7 @@ mod tests {
         let restored = BossService::open(root.clone()).unwrap();
         assert_eq!(
             restored.document().employees[0].identity.avatar_style,
-            waku_protocol::boss::AvatarStyle::Dylan
+            waku_protocol::boss::AvatarStyle::LineFace
         );
         let BossResult::State { state } = service
             .handle(
@@ -9102,7 +9102,7 @@ mod tests {
         assert_ne!(state.employees[0].identity.avatar_seed, seed);
         assert_eq!(
             state.employees[0].identity.avatar_style,
-            waku_protocol::boss::AvatarStyle::Dylan
+            waku_protocol::boss::AvatarStyle::LineFace
         );
         // The style is one global setting: setting it anywhere rewrites
         // every managed identity — boss, live employees, and retirees —
