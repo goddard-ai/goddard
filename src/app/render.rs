@@ -14,11 +14,15 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
-fn main_header_navigation_visible(sidebar_visible: bool, deliverable_page: bool) -> bool {
+fn main_header_navigation_visible(
+    sidebar_visible: bool,
+    boss_brain_page: bool,
+    deliverable_page: bool,
+) -> bool {
     // With the sidebar open, its title bar already owns these controls. A
-    // deliverable page suppresses the main header, except when the sidebar is
-    // hidden and the header is their only remaining home.
-    !sidebar_visible || !deliverable_page
+    // full-page surface suppresses the main header, except when the sidebar
+    // is hidden and the header is their only remaining home.
+    !sidebar_visible || !(boss_brain_page || deliverable_page)
 }
 
 // Floats normally borrow the transcript's bottom padding. An approval card
@@ -931,11 +935,11 @@ impl Render for Waku {
                             ))
                     })
                     .when(
-                        self.boss_ui.page.is_none()
-                            && main_header_navigation_visible(
-                                self.sidebar_visible,
-                                deliverable_page.is_some(),
-                            )
+                        main_header_navigation_visible(
+                            self.sidebar_visible,
+                            self.boss_ui.page.is_some(),
+                            deliverable_page.is_some(),
+                        )
                             && (!self.drafts_page
                                 || self.selected_terminal.is_some_and(|id| {
                                     self.right_panel_terminals.contains_key(&id)
@@ -1309,10 +1313,16 @@ mod tests {
 
     #[test]
     fn deliverable_page_keeps_navigation_header_when_sidebar_is_hidden() {
-        assert!(main_header_navigation_visible(false, true));
-        assert!(!main_header_navigation_visible(true, true));
-        assert!(main_header_navigation_visible(false, false));
-        assert!(main_header_navigation_visible(true, false));
+        assert!(main_header_navigation_visible(false, false, true));
+        assert!(!main_header_navigation_visible(true, false, true));
+        assert!(main_header_navigation_visible(false, false, false));
+    }
+
+    #[test]
+    fn boss_brain_page_keeps_navigation_header_when_sidebar_is_hidden() {
+        assert!(main_header_navigation_visible(false, true, false));
+        assert!(!main_header_navigation_visible(true, true, false));
+        assert!(main_header_navigation_visible(false, false, false));
     }
 }
 
