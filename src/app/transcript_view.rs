@@ -433,25 +433,6 @@ impl Waku {
                     window.focus(&this.transcript_focus, cx);
                 }),
             )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    let bounds = this.active_transcript_rows().viewport_bounds();
-                    let content_width = px(CONTENT_MAX_WIDTH).min(bounds.size.width);
-                    let content_left =
-                        bounds.left() + (bounds.size.width - content_width).max(px(0.0)) / 2.0;
-                    let content_right = content_left + content_width;
-                    if super::voice_scratchpad::voicepad_margin_double_click(
-                        this.state.voice_scratchpad_margin_double_click_enabled,
-                        event.click_count,
-                        event.position.x,
-                        content_left,
-                        content_right,
-                    ) {
-                        this.toggle_voice_scratchpad_visibility(window, cx);
-                    }
-                }),
-            )
             // Painted before any row, so the frame's selection registry holds
             // exactly the text elements this frame put on screen, in order.
             .child(md::render::frame_reset(self.transcript_selection.clone()))
@@ -5687,5 +5668,186 @@ mod summon_card_preview_tests {
         let runs = summon_card_preview_runs("a `b` **c**").unwrap();
         assert!(runs.iter().any(|run| run.text == "b" && run.style.code));
         assert!(runs.iter().any(|run| run.text == "c" && run.style.bold));
+    }
+}
+
+#[cfg(test)]
+mod margin_gesture_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{
+        Context, DispatchPhase, HitboxBehavior, IntoElement, ListAlignment, ListState,
+        MouseButton, MouseDownEvent, Render, TestAppContext, Window, canvas, div, list, point, px,
+    };
+
+    use super::*;
+
+    /// Mirrors the chat column's wiring: one `on_mouse_down` on the column
+    /// above a transcript region and the composer lane below it, under the
+    /// same full-width list and full-area listener canvas the real surface
+    /// paints. A click beside the lane is outside every child's bounds, so
+    /// the gesture only reaches it through the column's own listener.
+    struct MarginGestureHarness {
+        hits: Rc<RefCell<Vec<&'static str>>>,
+        rows: ListState,
+        focus: FocusHandle,
+        sidebar: f32,
+    }
+
+    impl Render for MarginGestureHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let focus_hits = self.hits.clone();
+            div()
+                .flex()
+                .size_full()
+                .child(div().flex_none().w(px(self.sidebar)).h_full())
+                .child(
+                    div()
+                        .flex_1()
+                        .h_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .track_focus(&self.focus)
+                        .on_mouse_down(MouseButton::Left, move |_, window, _| {
+                            window.refresh();
+                            focus_hits.borrow_mut().push("focus");
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, event: &MouseDownEvent, window, _cx| {
+                                let (content_left, content_right) =
+                                    super::voice_scratchpad::voicepad_margin_band(
+                                        this.sidebar,
+                                        f32::from(window.viewport_size().width) - this.sidebar,
+                                        CONTENT_MAX_WIDTH,
+                                    );
+                                if super::voice_scratchpad::voicepad_margin_double_click(
+                                    true,
+                                    event.click_count,
+                                    event.position.x,
+                                    content_left,
+                                    content_right,
+                                ) {
+                                    this.hits.borrow_mut().push("margin");
+                                }
+                            }),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .w_full()
+                                .relative()
+                                .child(
+                                    list(self.rows.clone(), |_, _, _| {
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .justify_center()
+                                            .px(px(20.0))
+                                            .child(
+                                                div()
+                                                    .w_full()
+                                                    .max_w(px(CONTENT_MAX_WIDTH))
+                                                    .child("row"),
+                                            )
+                                            .into_any_element()
+                                    })
+                                    .size_full(),
+                                )
+                                // The selection listener canvas: a full-area
+                                // Normal hitbox plus a bubble-phase window
+                                // listener like `install_selection_input`.
+                                .child(
+                                    canvas(
+                                        |bounds, window, _| {
+                                            window.insert_hitbox(bounds, HitboxBehavior::Normal).id
+                                        },
+                                        |_, region, window, _| {
+                                            window.on_mouse_event(
+                                                move |_: &MouseDownEvent, phase, window, _| {
+                                                    if phase == DispatchPhase::Bubble
+                                                        && region.is_hovered(window)
+                                                    {
+                                                        window.refresh();
+                                                    }
+                                                },
+                                            );
+                                        },
+                                    )
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .size_full(),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w_full()
+                                .h(px(160.0))
+                                .flex()
+                                .justify_center()
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .max_w(px(super::voice_scratchpad::CARD_MAX_WIDTH))
+                                        .h_full()
+                                        .bg(gpui::white()),
+                                ),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn margin_double_click_covers_the_whole_chat_column(cx: &mut TestAppContext) {
+        let hits = Rc::new(RefCell::new(Vec::new()));
+        let sidebar = 200.0;
+        let rows = ListState::new(40, ListAlignment::Top, px(24.0)).with_uniform_item_height(px(24.0));
+        let (harness, cx) = cx.add_window_view({
+            let hits = hits.clone();
+            move |_, cx| MarginGestureHarness {
+                hits,
+                rows,
+                focus: cx.focus_handle(),
+                sidebar,
+            }
+        });
+        let _ = harness;
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let content_left =
+            px(sidebar) + (viewport.width - px(sidebar) - px(CONTENT_MAX_WIDTH)) / 2.0;
+        let margin_x = content_left - px(40.0);
+        let lane_strip_y = viewport.height - px(80.0);
+
+        cx.simulate_event(MouseDownEvent {
+            position: point(margin_x, lane_strip_y),
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        assert!(
+            hits.borrow().contains(&"margin"),
+            "double-click beside the composer lane should reach the gesture; got {:?}",
+            hits.borrow()
+        );
+
+        hits.borrow_mut().clear();
+        cx.simulate_event(MouseDownEvent {
+            position: point(content_left + px(40.0), lane_strip_y),
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        assert!(
+            !hits.borrow().contains(&"margin"),
+            "double-click inside the content band must not toggle; got {:?}",
+            hits.borrow()
+        );
     }
 }

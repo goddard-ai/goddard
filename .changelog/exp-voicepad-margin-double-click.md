@@ -1,0 +1,1 @@
+- **VoicePad:** Double-clicking blank space beside the composer now toggles an open VoicePad too — the margin gesture covers the whole chat column, including empty chats. Enable it in Settings > Experiments > VoicePad.

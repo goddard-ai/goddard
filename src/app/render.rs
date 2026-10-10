@@ -873,6 +873,38 @@ impl Render for Waku {
                             .border_l(hairline())
                             .border_color(theme.sidebar_border)
                     })
+                    // The VoicePad margin gesture lives on the column, not
+                    // the surface inside it: transcript rows end above the
+                    // composer lane, and the scratchpad card underlaps it,
+                    // so a per-surface listener left the strip beside the
+                    // composer — and every empty-state margin — dead.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            if !this.composer_mounted() {
+                                return;
+                            }
+                            let (content_left, content_right) =
+                                voice_scratchpad::voicepad_margin_band(
+                                    this.sidebar_rendered_width,
+                                    this.chat_viewport_width(window),
+                                    if this.voice_scratchpad_visible() {
+                                        voice_scratchpad::CARD_MAX_WIDTH
+                                    } else {
+                                        CONTENT_MAX_WIDTH
+                                    },
+                                );
+                            if voice_scratchpad::voicepad_margin_double_click(
+                                this.state.voice_scratchpad_margin_double_click_enabled,
+                                event.click_count,
+                                event.position.x,
+                                content_left,
+                                content_right,
+                            ) {
+                                this.toggle_voice_scratchpad_visibility(window, cx);
+                            }
+                        }),
+                    )
                     // Files dropped anywhere in the session column stage as
                     // composer attachments. The group marks the column's
                     // hitbox so the composer card can light itself up as the

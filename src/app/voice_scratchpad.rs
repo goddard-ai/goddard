@@ -84,7 +84,7 @@ const HEALTHY_SESSION: Duration = Duration::from_secs(30);
 const DISCARD_CONFIRM_PARAGRAPHS: usize = 2;
 const DISCARD_CONFIRM_CHARS: usize = 280;
 /// The scratchpad card matches the composer card's width.
-const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
+pub(super) const CARD_MAX_WIDTH: f32 = CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0;
 
 pub(super) fn voicepad_margin_double_click(
     enabled: bool,
@@ -94,6 +94,19 @@ pub(super) fn voicepad_margin_double_click(
     content_right: Pixels,
 ) -> bool {
     enabled && click_count == 2 && (click_x < content_left || click_x > content_right)
+}
+
+/// The chat column's content band in window x: the centered card edge the
+/// margin gesture measures blank space against.
+pub(super) fn voicepad_margin_band(
+    sidebar_width: f32,
+    viewport_width: f32,
+    content_max: f32,
+) -> (Pixels, Pixels) {
+    let viewport = px(viewport_width);
+    let content = px(content_max).min(viewport);
+    let left = px(sidebar_width) + (viewport - content).max(px(0.0)) / 2.0;
+    (left, left + content)
 }
 const CARD_RADIUS: f32 = 24.0;
 /// The gradient cover's rise above the composer card's top edge — the
@@ -5762,25 +5775,6 @@ impl Waku {
             .min_h_0()
             .w_full()
             .px(px(20.0 - COMPOSER_OVERHANG))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    let viewport_width = px(this.chat_viewport_width(window));
-                    let content_width = px(CARD_MAX_WIDTH).min(viewport_width);
-                    let content_left =
-                        px(this.sidebar_rendered_width) + (viewport_width - content_width) / 2.0;
-                    let content_right = content_left + content_width;
-                    if voicepad_margin_double_click(
-                        this.state.voice_scratchpad_margin_double_click_enabled,
-                        event.click_count,
-                        event.position.x,
-                        content_left,
-                        content_right,
-                    ) {
-                        this.toggle_voice_scratchpad_visibility(window, cx);
-                    }
-                }),
-            )
             // The card runs through the composer lane: the negative margin
             // pulls the slot's height over the lane's, and the lane —
             // painted after — sits on top of the card's bottom edge.
