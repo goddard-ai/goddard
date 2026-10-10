@@ -3072,13 +3072,6 @@ boss.retry: 重试
 boss.ask_correct: 请老板纠正
 boss.correction_request_hint: "请在聊天中让老板纠正 %{path}。"
 boss.ask_remember: 让老板记住一些内容
-boss.bucket_select: 选择存储桶
-boss.bucket_unavailable: "无法加载 %{bucket}。"
-boss.records_empty: 此存储桶还没有记录。
-boss.record_fact: 事实
-boss.record_observation: 观察
-boss.record_question: 问题
-boss.record_summary: 摘要
 boss.goals_in_progress: 进行中
 boss.goals_completed: 已完成
 boss.goals_empty: 暂无任务

@@ -121,6 +121,53 @@ fn resolve_memory_bucket(
     }
 }
 
+/// One decorated note in the `Feed` result — the original record plus the
+/// provenance a unified feed needs: bucket label and project association.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryFeedRecord<'a> {
+    id: &'a str,
+    bucket_id: &'a str,
+    bucket: &'a str,
+    sequence: u64,
+    kind: waku_protocol::boss::MemoryNoteKind,
+    text: &'a str,
+    created_at: u64,
+    /// `None` when the bucket is confirmed to have no project association —
+    /// the feed's "No project" grouping, distinct from an unresolved one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<MemoryFeedProject<'a>>,
+}
+
+/// A record's repository association, keyed by the project bucket id so
+/// worktrees of one repository collapse to a single feed filter entry.
+/// `id`/`name` stay `None` when no catalog project resolves — the feed's
+/// "Unknown project" grouping.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryFeedProject<'a> {
+    key: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// A note kind as the protocol labels it.
+fn memory_feed_note_kind(kind: waku_memory_engine::buckets::NoteKind) -> waku_protocol::boss::MemoryNoteKind {
+    match kind {
+        waku_memory_engine::buckets::NoteKind::Fact => {
+            waku_protocol::boss::MemoryNoteKind::Fact
+        }
+        waku_memory_engine::buckets::NoteKind::Observation => {
+            waku_protocol::boss::MemoryNoteKind::Observation
+        }
+        waku_memory_engine::buckets::NoteKind::Question => {
+            waku_protocol::boss::MemoryNoteKind::Question
+        }
+    }
+}
+
 /// The `(bucket, project)` selectors of the bucket-addressed memory ops.
 fn memory_bucket_ref(
     operation: &waku_protocol::boss::MemoryOperation,
@@ -144,6 +191,7 @@ fn memory_bucket_ref(
         } => Some((bucket, project)),
         MemoryOperation::ListBuckets
         | MemoryOperation::CreateBucket { .. }
+        | MemoryOperation::Feed
         | MemoryOperation::MigrateLegacy { .. } => None,
     }
 }
@@ -4628,6 +4676,7 @@ impl BossService {
         let mut bucket = None;
         let mut recorded = None;
         let mut migration = None;
+        let mut feed = None;
         match operation {
             MemoryOperation::ListBuckets => {
                 bucket_list = visible_buckets
@@ -4733,6 +4782,87 @@ impl BossService {
                     .map(serde_json::to_value)
                     .collect::<std::result::Result<Vec<_>, _>>()?;
             }
+            MemoryOperation::Feed => {
+                // Associate each project bucket with the catalog projects
+                // whose repository minted it: `project_bucket_id` keys on the
+                // repository's git common dir, so worktrees of one checkout
+                // land on the same bucket — and the same feed filter entry.
+                let mut catalog = self
+                    .project_catalog
+                    .lock()
+                    .as_ref()
+                    .map(|get| get())
+                    .unwrap_or_default();
+                waku_protocol::model::Project::resolve_display_names(&mut catalog);
+                let mut catalog_by_bucket: std::collections::HashMap<
+                    String,
+                    Vec<&waku_protocol::model::Project>,
+                > = std::collections::HashMap::new();
+                for project in &catalog {
+                    catalog_by_bucket
+                        .entry(project_bucket_id(&project.path))
+                        .or_default()
+                        .push(project);
+                }
+                let mut decorated: Vec<(
+                    &waku_memory_engine::buckets::Bucket,
+                    waku_memory_engine::buckets::BucketNote,
+                )> = Vec::new();
+                for bucket in &visible_buckets {
+                    for note in buckets.notes(&bucket_access, &principal, &bucket.id)? {
+                        decorated.push((bucket, note));
+                    }
+                }
+                // Newest first; equal stamps order deterministically so a
+                // resend renders identically and rows never reshuffle.
+                decorated.sort_by(|(a_bucket, a), (b_bucket, b)| {
+                    b.created_at
+                        .cmp(&a.created_at)
+                        .then(a_bucket.id.cmp(&b_bucket.id))
+                        .then(b.sequence.cmp(&a.sequence))
+                });
+                let records = decorated
+                    .iter()
+                    .map(|(bucket, note)| {
+                        let project = bucket.project_id.as_deref().map(|key| {
+                            catalog_by_bucket
+                                .get(key)
+                                .and_then(|members| {
+                                    // The representative project label — the
+                                    // earliest registered member reads as the
+                                    // repository's ordinary checkout.
+                                    members
+                                        .iter()
+                                        .min_by(|a, b| {
+                                            (a.created_at, &a.name, &a.path)
+                                                .cmp(&(b.created_at, &b.name, &b.path))
+                                        })
+                                        .map(|rep| MemoryFeedProject {
+                                            key,
+                                            id: Some(rep.id),
+                                            name: Some(rep.display_name()),
+                                        })
+                                })
+                                .unwrap_or(MemoryFeedProject {
+                                    key,
+                                    id: None,
+                                    name: None,
+                                })
+                        });
+                        MemoryFeedRecord {
+                            id: &note.id,
+                            bucket_id: &bucket.id,
+                            bucket: &bucket.name,
+                            sequence: note.sequence,
+                            kind: memory_feed_note_kind(note.kind),
+                            text: &note.text,
+                            created_at: note.created_at,
+                            project,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                feed = Some(serde_json::json!({ "records": records }));
+            }
             MemoryOperation::MigrateLegacy {
                 bucket: bucket_id,
                 source,
@@ -4786,6 +4916,7 @@ impl BossService {
             recorded,
             bucket,
             migration,
+            feed,
         })
     }
 

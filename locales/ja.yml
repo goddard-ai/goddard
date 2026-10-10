@@ -3121,13 +3121,6 @@ boss.retry: 再試行
 boss.ask_correct: ボスに修正を依頼
 boss.correction_request_hint: "チャットでボスに %{path} の修正を依頼します。"
 boss.ask_remember: ボスに覚えてもらう
-boss.bucket_select: バケットを選択
-boss.bucket_unavailable: "%{bucket} を読み込めませんでした。"
-boss.records_empty: このバケットにはまだ記録がありません。
-boss.record_fact: 事実
-boss.record_observation: 観察
-boss.record_question: 質問
-boss.record_summary: 要約
 boss.goals_in_progress: 進行中
 boss.goals_completed: 完了
 boss.goals_empty: タスクはまだありません

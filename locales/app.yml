@@ -6170,26 +6170,54 @@ boss.history:
   en: Employees
 boss.memory:
   en: Memory
+boss.memory_search:
+  en: Search memories
+boss.memory_search_placeholder:
+  en: Search memories…
+boss.memory_all_projects:
+  en: All projects
+boss.memory_recent:
+  en: Recent memories
+boss.memory_newest_first:
+  en: Newest first
+boss.memory_now:
+  en: now
+boss.memory_loading:
+  en: Loading memories…
+boss.memory_searching:
+  en: Searching…
+boss.memory_empty:
+  en: No memories yet.
+boss.memory_empty_hint:
+  en: Records appear here when Boss records them.
+boss.memory_no_match:
+  en: No memories match your search.
+boss.memory_clear_search:
+  en: Clear search
+boss.memory_no_project_records:
+  en: No memories for this project.
+boss.memory_show_more:
+  en: Show more (%{count} remaining)
+boss.memory_new_available:
+  en: New memories available.
+boss.memory_refresh:
+  en: Refresh
+boss.memory_filter_cleared:
+  en: That project is no longer available — showing all projects.
+boss.memory_stale_results:
+  en: Couldn't refresh — showing earlier results.
+boss.memory_expand:
+  en: Show more
+boss.memory_collapse:
+  en: Show less
+boss.memory_record_label:
+  en: "%{bucket} memory, recorded %{when}"
 boss.ask_correct:
   en: Ask Boss to correct
 boss.correction_request_hint:
   en: Ask the Boss to correct %{path} in chat.
 boss.ask_remember:
   en: Ask Boss to remember something
-boss.bucket_select:
-  en: Select a bucket
-boss.bucket_unavailable:
-  en: Could not load %{bucket}.
-boss.records_empty:
-  en: This bucket has no records yet.
-boss.record_fact:
-  en: Fact
-boss.record_observation:
-  en: Observation
-boss.record_question:
-  en: Question
-boss.record_summary:
-  en: Summary
 boss.personas:
   en: Personas
 boss.history_hint:

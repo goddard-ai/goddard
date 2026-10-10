@@ -81,20 +81,6 @@ impl Waku {
                     .left(px(5.0))
                     .w(px(2.0))
                     .h_full())),
-            // The Memory tree's divider is the pane's right edge — the
-            // detail pane fills what remains beside it.
-            PanelResizeTarget::BossMemoryTree => strip
-                .top_0()
-                .right(px(-5.0))
-                .w(px(10.0))
-                .h_full()
-                .cursor_col_resize()
-                .child(bar(div()
-                    .absolute()
-                    .top_0()
-                    .right(px(4.0))
-                    .w(px(2.0))
-                    .h_full())),
             PanelResizeTarget::GitPanelTop => strip
                 .left_0()
                 .right_0()

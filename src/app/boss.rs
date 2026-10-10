@@ -229,83 +229,195 @@ pub(super) enum BossTab {
     Deliverables,
 }
 
-/// A named memory bucket the Boss's files-canonical engine lists — parsed
-/// off the `memory` operation's loose JSON so the app crate does not take a
-/// `waku-memory-engine` dependency.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct MemoryBucket {
-    id: String,
-    name: String,
-    purpose: String,
-}
-
-/// One readable record inside a named bucket's overview: an original note
-/// or a stored chronological summary covering a note range.
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum MemoryRecord {
-    Note {
-        sequence: u64,
-        kind: waku_client::boss::MemoryNoteKind,
-        text: String,
-        created_at: u64,
-    },
-    Summary {
-        start: u64,
-        end: u64,
-        text: String,
-    },
-}
-
-/// The overview item as the daemon serializes it — `{"type":"note"|"summary"}`.
-#[derive(serde::Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-enum MemoryOverviewItemWire {
-    Note { note: MemoryNoteWire },
-    Summary { summary: MemorySummaryWire },
-}
-
-#[derive(serde::Deserialize)]
+/// One original note in the unified Memory Records feed — the daemon's
+/// `Feed` record carries the note's stable identity and text plus its
+/// provenance: bucket label and resolved project association. Summaries
+/// never appear; the feed lists originals only.
+#[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MemoryNoteWire {
+struct MemoryFeedRecord {
+    /// The note's bucket-local stable id — `"{sequence}-{digest}"`.
+    id: String,
+    bucket_id: String,
+    /// The owning bucket's display name — a provenance label, not a filter.
+    bucket: String,
     sequence: u64,
-    kind: waku_client::boss::MemoryNoteKind,
     text: String,
     created_at: u64,
+    /// `None` — the bucket is confirmed to have no project association, the
+    /// feed's "No project" grouping.
+    project: Option<MemoryFeedProject>,
 }
 
-#[derive(serde::Deserialize)]
-struct MemorySummaryWire {
-    start: u64,
-    end: u64,
-    text: String,
+/// The record's repository association, keyed on the project bucket id so
+/// every worktree of one repository collapses to a single project choice.
+/// `name` resolves through the project catalog — `None` when nothing does,
+/// the feed's "Unknown project" grouping.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryFeedProject {
+    key: String,
+    name: Option<String>,
 }
 
-fn memory_bucket_from_json(value: &serde_json::Value) -> Option<MemoryBucket> {
-    Some(MemoryBucket {
-        id: value.get("id")?.as_str()?.to_owned(),
-        name: value.get("name")?.as_str()?.to_owned(),
-        purpose: value
-            .get("purpose")
-            .and_then(|purpose| purpose.as_str())
-            .unwrap_or_default()
-            .to_owned(),
-    })
-}
-
-fn memory_record_from_json(value: &serde_json::Value) -> Option<MemoryRecord> {
-    match serde_json::from_value::<MemoryOverviewItemWire>(value.clone()).ok()? {
-        MemoryOverviewItemWire::Note { note } => Some(MemoryRecord::Note {
-            sequence: note.sequence,
-            kind: note.kind,
-            text: note.text,
-            created_at: note.created_at,
-        }),
-        MemoryOverviewItemWire::Summary { summary } => Some(MemoryRecord::Summary {
-            start: summary.start,
-            end: summary.end,
-            text: summary.text,
-        }),
+impl MemoryFeedRecord {
+    /// The row's stable identity — note ids are only unique inside their
+    /// bucket.
+    fn key(&self) -> String {
+        format!("{}/{}", self.bucket_id, self.id)
     }
+}
+
+/// The Memory section's project choice — `All` is the default. The rest
+/// match the plan's association groups; `Bucket` keys on the repository's
+/// shared bucket id so one repository's worktrees stay a single choice.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum MemoryProjectFilter {
+    #[default]
+    All,
+    /// Records in buckets confirmed to have no project association.
+    NoProject,
+    /// Records in project buckets no catalog project resolves to.
+    Unknown,
+    /// One repository's shared bucket — its resolved project label shows.
+    Bucket(String),
+}
+
+/// How many filtered records a fresh feed view reveals — the "show more"
+/// footer pages the rest in this many at a time.
+const MEMORY_FEED_PAGE: usize = 50;
+
+/// Text longer than this — or spanning more lines than the clamp shows —
+/// gets the accessible expansion control rather than rendering in full.
+const MEMORY_EXPAND_CHARS: usize = 480;
+const MEMORY_EXPAND_LINES: usize = 6;
+
+/// One host's unified Memory Records feed — the whole accessible corpus
+/// plus its browse state. `records` keep the daemon's newest-first order;
+/// filtering and paging never reorder them.
+struct MemoryFeed {
+    records: Vec<MemoryFeedRecord>,
+    /// A response has landed — distinguishes "loading" from "failed before
+    /// anything arrived".
+    loaded: bool,
+    /// A request is in flight or parked behind another boss operation.
+    loading: bool,
+    /// The last failure — records already on screen stay beside it.
+    error: Option<String>,
+    /// How many filtered rows the list reveals — "show more" grows it.
+    visible: usize,
+    /// Record keys whose full text is expanded.
+    expanded: HashSet<String>,
+    /// A refresh that found only newer records, held until the user
+    /// activates "New memories available" — applying it directly would
+    /// shift whatever row is being read.
+    pending_refresh: Vec<MemoryFeedRecord>,
+    /// The project filter cleared itself because its choice left the feed —
+    /// surfaced until the next browse action.
+    filter_notice: Option<String>,
+}
+
+impl Default for MemoryFeed {
+    fn default() -> Self {
+        Self {
+            records: Vec::new(),
+            loaded: false,
+            loading: false,
+            error: None,
+            visible: MEMORY_FEED_PAGE,
+            expanded: HashSet::new(),
+            pending_refresh: Vec::new(),
+            filter_notice: None,
+        }
+    }
+}
+
+/// Whether a record survives the feed's combined search and project
+/// filtering — the trimmed lowercase query matches text, bucket label, and
+/// resolved project name.
+fn memory_record_matches(
+    record: &MemoryFeedRecord,
+    query: &str,
+    filter: &MemoryProjectFilter,
+) -> bool {
+    let in_project = match filter {
+        MemoryProjectFilter::All => true,
+        MemoryProjectFilter::NoProject => record.project.is_none(),
+        MemoryProjectFilter::Unknown => record
+            .project
+            .as_ref()
+            .is_some_and(|project| project.name.is_none()),
+        MemoryProjectFilter::Bucket(key) => record
+            .project
+            .as_ref()
+            .is_some_and(|project| project.key == *key),
+    };
+    if !in_project || query.is_empty() {
+        return in_project;
+    }
+    record.text.to_lowercase().contains(query)
+        || record.bucket.to_lowercase().contains(query)
+        || record
+            .project
+            .as_ref()
+            .and_then(|project| project.name.as_deref())
+            .is_some_and(|name| name.to_lowercase().contains(query))
+}
+
+/// The project filter's choices — alphabetical resolved projects first,
+/// then the two pseudo-entries, each offered only while records represent
+/// it. `All projects` itself is rendered by the caller.
+fn memory_project_options(records: &[MemoryFeedRecord]) -> Vec<(MemoryProjectFilter, String)> {
+    let mut options: Vec<(MemoryProjectFilter, String)> = Vec::new();
+    let mut has_none = false;
+    let mut has_unknown = false;
+    for record in records {
+        match &record.project {
+            None => has_none = true,
+            Some(project) if project.name.is_none() => has_unknown = true,
+            Some(project) => {
+                let name = project.name.clone().unwrap_or_default();
+                if !options.iter().any(|(filter, _)| {
+                    matches!(filter, MemoryProjectFilter::Bucket(key) if *key == project.key)
+                }) {
+                    options.push((MemoryProjectFilter::Bucket(project.key.clone()), name));
+                }
+            }
+        }
+    }
+    options.sort_by(|(_, a), (_, b)| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    });
+    if has_none {
+        options.push((MemoryProjectFilter::NoProject, tr!("project.no_project_name")));
+    }
+    if has_unknown {
+        options.push((MemoryProjectFilter::Unknown, tr!("sidebar.unknown_project")));
+    }
+    options
+}
+
+/// The feed row's compact creation age — `now`, `5m`, `2h`, `3d`.
+fn memory_record_age(seconds: u64) -> String {
+    match seconds {
+        0..=59 => tr!("boss.memory_now"),
+        60..=3_599 => tr!("sidebar.minutes_ago", count = seconds / 60),
+        3_600..=86_399 => tr!("sidebar.hours_ago", count = seconds / 3_600),
+        _ => tr!("sidebar.days_ago", count = seconds / 86_400),
+    }
+}
+
+/// The feed row's exact creation time for the timestamp tooltip.
+fn memory_record_exact_time(at: u64) -> String {
+    chrono::DateTime::from_timestamp(at as i64, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%b %-d, %Y, %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 /// The Employees section's roster views — active work is running and
@@ -570,19 +682,18 @@ pub(super) struct BossUi {
     /// The shipped↔saved diff text for an expanded comparison, keyed to
     /// the markdown fingerprint it was computed from.
     persona_diff: RefCell<Option<(Uuid, u64, String)>>,
-    /// The Memory bucket list pane's width.
-    pub(super) memory_tree_width: f32,
-    /// Named buckets the memory engine reports for a host — the Memory
-    /// section's collections.
-    memory_buckets: HashMap<DaemonKey, Vec<MemoryBucket>>,
-    memory_buckets_loading: HashSet<DaemonKey>,
-    memory_buckets_error: HashMap<DaemonKey, String>,
-    /// The Memory section's selected bucket id per host.
-    memory_bucket_selected: HashMap<DaemonKey, String>,
-    /// Cached overview records per (host, bucket) — populated on select.
-    memory_records: HashMap<(DaemonKey, String), Vec<MemoryRecord>>,
-    memory_records_loading: Option<(DaemonKey, String)>,
-    memory_records_error: HashMap<(DaemonKey, String), String>,
+    /// The unified Memory Records feed per host — records, browse state,
+    /// and the pending refresh a visit re-checks for.
+    memory_feed: HashMap<DaemonKey, MemoryFeed>,
+    /// The feed's project choice per host — absent means All projects.
+    memory_project: HashMap<DaemonKey, MemoryProjectFilter>,
+    /// The `boss_memory_search` field's current text, mirrored on Edited so
+    /// row building never touches the input entity.
+    pub(super) memory_query: String,
+    /// A `Feed` operation parked while another request held the pipe — a
+    /// refresh issued mid-flight replaces it rather than dropping. Last
+    /// submission wins.
+    queued_memory_feed: Option<(DaemonKey, BossOperation)>,
     editor: Option<BossEditor>,
     generation: u64,
     pending: bool,
@@ -681,14 +792,10 @@ impl Default for BossUi {
             persona_scrollbar: ScrollbarState::new(),
             persona_default_pane: HashMap::new(),
             persona_diff: RefCell::new(None),
-            memory_tree_width: 280.0,
-            memory_buckets: HashMap::new(),
-            memory_buckets_loading: HashSet::new(),
-            memory_buckets_error: HashMap::new(),
-            memory_bucket_selected: HashMap::new(),
-            memory_records: HashMap::new(),
-            memory_records_loading: None,
-            memory_records_error: HashMap::new(),
+            memory_feed: HashMap::new(),
+            memory_project: HashMap::new(),
+            memory_query: String::new(),
+            queued_memory_feed: None,
             editor: None,
             generation: 0,
             pending: false,
@@ -916,8 +1023,6 @@ fn boss_deliverable_rows(state: &BossState, filter: BossDeliverablesFilter) -> V
 enum BossItem {
     Employee(Uuid),
     Persona(Uuid),
-    /// A named bucket's engine id — a Memory section collection row.
-    Bucket(String),
     /// A `BossState.planning` record's session — Plans tab rows.
     Plan(Uuid),
     /// A `BossState.deliverables` record — the library rows.
@@ -928,6 +1033,12 @@ enum BossItem {
     /// The History lookup's coverage row — scope, caveats, and the
     /// continuation affordance, drawn after the hits.
     HistoryFooter,
+    /// A unified Memory Records row — the index into the host feed's
+    /// `records`, stable across search and project filtering.
+    MemoryRecord(usize),
+    /// The feed's "show more" affordance, drawn after the revealed records
+    /// with the filtered count still hidden behind it.
+    MemoryFooter { remaining: usize },
 }
 
 /// An armed composer command: the boss chat that answers the next
@@ -978,10 +1089,8 @@ struct BossEditor {
 pub(super) enum BossReply {
     Open,
     List,
-    /// `memory` bucket listing for the Memory section.
-    Buckets,
-    /// A bucket's overview records for the Memory section.
-    Records,
+    /// The unified `Feed` page for the Memory section's record list.
+    MemoryFeed,
     Saved,
     /// A `finalizePlan` dispatch for the planning session it names — the
     /// id marks the press's in-flight window so the chip hides and the
@@ -1518,18 +1627,44 @@ impl Waku {
     /// Personnel rows follow `recent`'s newest-summon-first order; plans and
     /// deliverables sort newest first inside each filter.
     fn boss_page_rows(&self, key: DaemonKey, tab: BossTab) -> Vec<BossItem> {
+        if tab == BossTab::Memory {
+            let Some(feed) = self.boss_ui.memory_feed.get(&key) else {
+                return Vec::new();
+            };
+            if !feed.loaded {
+                return Vec::new();
+            }
+            let query = self.boss_ui.memory_query.trim().to_lowercase();
+            let filter = self
+                .boss_ui
+                .memory_project
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            let mut shown = 0_usize;
+            let mut remaining = 0_usize;
+            let mut rows = Vec::new();
+            for (index, record) in feed.records.iter().enumerate() {
+                if !memory_record_matches(record, &query, &filter) {
+                    continue;
+                }
+                if shown < feed.visible {
+                    rows.push(BossItem::MemoryRecord(index));
+                    shown += 1;
+                } else {
+                    remaining += 1;
+                }
+            }
+            if remaining > 0 {
+                rows.push(BossItem::MemoryFooter { remaining });
+            }
+            return rows;
+        }
         let Some(state) = self.boss_ui.states.get(&key) else {
             return Vec::new();
         };
         match tab {
-            BossTab::Memory => self
-                .boss_ui
-                .memory_buckets
-                .get(&key)
-                .into_iter()
-                .flatten()
-                .map(|bucket| BossItem::Bucket(bucket.id.clone()))
-                .collect(),
+            BossTab::Memory => unreachable!(),
             BossTab::Employees => {
                 let history = self
                     .boss_ui
@@ -1723,7 +1858,7 @@ impl Waku {
         self.sync_right_panel_owner(cx);
         self.sync_boss_page_rows();
         if tab == BossTab::Memory {
-            self.ensure_boss_memory_buckets(key, cx);
+            self.ensure_boss_memory_feed(key, cx);
         }
         if tab == BossTab::Employees {
             // Land on History with a live query or filters and no result —
@@ -1781,19 +1916,25 @@ impl Waku {
                 // A lookup submitted mid-flight parks instead of dropping —
                 // the next completion re-issues the freshest one.
                 self.boss_ui.queued_history_search = Some((key, operation));
+            } else if matches!(
+                &operation,
+                BossOperation::Memory {
+                    operation: MemoryOperation::Feed
+                }
+            ) && reply == BossReply::MemoryFeed
+            {
+                // A feed refresh behind another request parks the same way —
+                // the completion re-issues the freshest one.
+                self.boss_ui.queued_memory_feed = Some((key, operation));
             }
             return;
         }
-        let records_bucket = match &operation {
+        let feed_request = matches!(
+            &operation,
             BossOperation::Memory {
-                operation:
-                    waku_client::boss::MemoryOperation::Overview {
-                        bucket: Some(bucket),
-                        ..
-                    },
-            } if reply == BossReply::Records => Some(bucket.clone()),
-            _ => None,
-        };
+                operation: MemoryOperation::Feed
+            } if reply == BossReply::MemoryFeed
+        );
         let Some(client) = self
             .daemons
             .supervisor(key)
@@ -1801,17 +1942,10 @@ impl Waku {
         else {
             let unreachable = tr!("boss.unreachable").to_string();
             match reply {
-                BossReply::Buckets => {
-                    self.boss_ui.memory_buckets_loading.remove(&key);
-                    self.boss_ui.memory_buckets_error.insert(key, unreachable);
-                }
-                BossReply::Records => {
-                    self.boss_ui.memory_records_loading = None;
-                    if let Some(bucket) = records_bucket {
-                        self.boss_ui
-                            .memory_records_error
-                            .insert((key, bucket), unreachable);
-                    }
+                BossReply::MemoryFeed => {
+                    let feed = self.boss_ui.memory_feed.entry(key).or_default();
+                    feed.loading = false;
+                    feed.error = Some(unreachable);
                 }
                 BossReply::HistorySearch => {
                     let search = self.boss_ui.history_search.entry(key).or_default();
@@ -1850,15 +1984,14 @@ impl Waku {
         if let BossReply::Finalize(session_id) = reply {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
-        if reply == BossReply::Buckets {
-            self.boss_ui.memory_buckets_loading.insert(key);
-            self.boss_ui.memory_buckets_error.remove(&key);
-        }
-        if let Some(bucket) = records_bucket.as_ref() {
-            self.boss_ui.memory_records_loading = Some((key, bucket.clone()));
-            self.boss_ui
-                .memory_records_error
-                .remove(&(key, bucket.clone()));
+        if feed_request {
+            let feed = self
+                .boss_ui
+                .memory_feed
+                .entry(key)
+                .or_default();
+            feed.loading = true;
+            feed.error = None;
         }
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -1880,11 +2013,10 @@ impl Waku {
                 }
                 this.boss_ui.pending = false;
                 this.boss_ui.pending_reply = None;
-                if reply == BossReply::Buckets {
-                    this.boss_ui.memory_buckets_loading.remove(&key);
-                }
-                if reply == BossReply::Records {
-                    this.boss_ui.memory_records_loading = None;
+                if reply == BossReply::MemoryFeed
+                    && let Some(feed) = this.boss_ui.memory_feed.get_mut(&key)
+                {
+                    feed.loading = false;
                 }
                 // A failed or unexpected Finalize reply restores the
                 // session's chip and composer so the user can retry.
@@ -1977,42 +2109,22 @@ impl Waku {
                                 search.error = None;
                                 this.sync_boss_page_rows();
                             }
-                            BossResult::Memory {
-                                buckets, overview, ..
-                            } => match reply {
-                                BossReply::Buckets => {
-                                    this.boss_ui.memory_buckets_error.remove(&key);
-                                    this.boss_ui.memory_buckets.insert(
-                                        key,
-                                        buckets
-                                            .iter()
-                                            .filter_map(memory_bucket_from_json)
-                                            .collect(),
-                                    );
-                                    this.sync_boss_page_rows();
-                                }
-                                BossReply::Records => {
-                                    if let Some(bucket) = records_bucket.as_ref() {
-                                        let items = overview
-                                            .as_ref()
-                                            .and_then(|overview| overview.get("items"))
-                                            .and_then(|items| items.as_array())
-                                            .cloned()
-                                            .unwrap_or_default();
-                                        this.boss_ui.memory_records.insert(
-                                            (key, bucket.clone()),
-                                            items
-                                                .iter()
-                                                .filter_map(memory_record_from_json)
-                                                .collect(),
-                                        );
-                                        this.boss_ui
-                                            .memory_records_error
-                                            .remove(&(key, bucket.clone()));
-                                    }
-                                }
-                                _ => {}
-                            },
+                            BossResult::Memory { feed, .. }
+                                if reply == BossReply::MemoryFeed =>
+                            {
+                                let records = feed
+                                    .as_ref()
+                                    .and_then(|feed| feed.get("records"))
+                                    .and_then(|records| records.as_array())
+                                    .cloned()
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .filter_map(|value| {
+                                        serde_json::from_value::<MemoryFeedRecord>(value).ok()
+                                    })
+                                    .collect::<Vec<_>>();
+                                this.apply_boss_memory_feed(key, records, cx);
+                            }
                             _ => {}
                         }
                         if matches!(reply, BossReply::Saved) {
@@ -2050,14 +2162,14 @@ impl Waku {
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
                     Err(error) => {
                         let error = error.to_string();
-                        if reply == BossReply::Buckets {
-                            this.boss_ui.memory_buckets_error.insert(key, error);
-                        } else if reply == BossReply::Records {
-                            if let Some(bucket) = records_bucket.as_ref() {
-                                this.boss_ui
-                                    .memory_records_error
-                                    .insert((key, bucket.clone()), error);
-                            }
+                        if reply == BossReply::MemoryFeed {
+                            let feed = this
+                                .boss_ui
+                                .memory_feed
+                                .entry(key)
+                                .or_default();
+                            feed.loading = false;
+                            feed.error = Some(error);
                         } else if reply == BossReply::HistorySearch {
                             // Keep any hits already on screen — a failed
                             // lookup reports beside them, not instead of.
@@ -2085,6 +2197,12 @@ impl Waku {
                         this.boss_ui.queued_history_search.take()
                 {
                     this.boss_request(queued_key, operation, BossReply::HistorySearch, cx);
+                }
+                if !this.boss_ui.pending
+                    && let Some((queued_key, operation)) =
+                        this.boss_ui.queued_memory_feed.take()
+                {
+                    this.boss_request(queued_key, operation, BossReply::MemoryFeed, cx);
                 }
                 cx.notify();
             });
@@ -2250,55 +2368,135 @@ impl Waku {
         self.request_session_activation(task_id, SessionActivationTransition::Inspect, cx);
     }
 
-    /// The Memory section's bucket list — loaded once per host on demand.
-    fn ensure_boss_memory_buckets(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
-        if self.boss_ui.memory_buckets.contains_key(&key)
-            || self.boss_ui.memory_buckets_loading.contains(&key)
-            || self.boss_ui.pending
+    /// The unified Memory Records feed — issued on every Memory visit so
+    /// the page re-checks for newer notes. The merge decides whether the
+    /// fresh page applies now or waits behind "New memories available".
+    fn ensure_boss_memory_feed(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        if !self.state.boss_experiment_enabled
+            || self
+                .boss_ui
+                .memory_feed
+                .get(&key)
+                .is_some_and(|feed| feed.loading)
         {
             return;
         }
+        self.boss_ui
+            .memory_feed
+            .entry(key)
+            .or_default()
+            .loading = true;
         self.boss_request(
             key,
             BossOperation::Memory {
-                operation: waku_client::boss::MemoryOperation::ListBuckets,
+                operation: MemoryOperation::Feed,
             },
-            BossReply::Buckets,
+            BossReply::MemoryFeed,
             cx,
         );
     }
 
-    /// A bucket's overview — loaded on first selection, cached per bucket.
-    fn ensure_boss_memory_overview(
+    /// Merge one `Feed` reply into the host's browse state. Pure additions
+    /// park behind "New memories available" so a row being read never
+    /// shifts; removals and rewrites apply immediately — a record the user
+    /// lost access to must not linger.
+    fn apply_boss_memory_feed(
         &mut self,
         key: DaemonKey,
-        bucket: String,
+        fresh: Vec<MemoryFeedRecord>,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .boss_ui
-            .memory_records
-            .contains_key(&(key, bucket.clone()))
-            || self
-                .boss_ui
-                .memory_records_loading
-                .as_ref()
-                .is_some_and(|(loading_key, loading)| *loading_key == key && loading == &bucket)
-            || self.boss_ui.pending
         {
+            let feed = self.boss_ui.memory_feed.entry(key).or_default();
+            feed.loading = false;
+            feed.error = None;
+            if !feed.loaded {
+                feed.records = fresh;
+                feed.loaded = true;
+            } else {
+                let fresh_keys: HashSet<String> =
+                    fresh.iter().map(MemoryFeedRecord::key).collect();
+                let current_keys: HashSet<String> =
+                    feed.records.iter().map(MemoryFeedRecord::key).collect();
+                if fresh_keys == current_keys {
+                    // Identical corpus — nothing to do beyond clearing a
+                    // stale "new memories" marker.
+                    feed.pending_refresh.clear();
+                } else if current_keys.is_subset(&fresh_keys) {
+                    feed.pending_refresh = fresh;
+                } else {
+                    feed.records = fresh;
+                    feed.pending_refresh.clear();
+                    feed.expanded.retain(|key| fresh_keys.contains(key));
+                }
+            }
+            // A project choice the fresh corpus no longer represents clears
+            // to All projects — surfaced, never silent.
+            let filter = self
+                .boss_ui
+                .memory_project
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            if filter != MemoryProjectFilter::All
+                && !memory_project_options(&feed.records)
+                    .iter()
+                    .any(|(option, _)| *option == filter)
+            {
+                self.boss_ui.memory_project.remove(&key);
+                feed.filter_notice = Some(tr!("boss.memory_filter_cleared"));
+            }
+        }
+        self.sync_boss_page_rows();
+        cx.notify();
+    }
+
+    /// Swap in the parked refresh — the "New memories available" action —
+    /// and return the list to the beginning.
+    fn apply_pending_memory_feed(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
+        {
+            let Some(feed) = self.boss_ui.memory_feed.get_mut(&key) else {
+                return;
+            };
+            if feed.pending_refresh.is_empty() {
+                return;
+            }
+            feed.records = std::mem::take(&mut feed.pending_refresh);
+            feed.visible = MEMORY_FEED_PAGE;
+            let keys: HashSet<String> = feed.records.iter().map(MemoryFeedRecord::key).collect();
+            feed.expanded.retain(|key| keys.contains(key));
+        }
+        self.sync_boss_page_rows();
+        self.boss_ui
+            .list
+            .scroll_to(gpui::ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.0),
+            });
+        cx.notify();
+    }
+
+    /// A search or project change restarts the browse — first page, top of
+    /// the list, and any stale cleared-filter notice dismissed.
+    pub(super) fn reset_boss_memory_view(&mut self, cx: &mut Context<Self>) {
+        let Some((key, tab)) = self.boss_ui.page else {
+            return;
+        };
+        if tab != BossTab::Memory {
             return;
         }
-        self.boss_request(
-            key,
-            BossOperation::Memory {
-                operation: waku_client::boss::MemoryOperation::Overview {
-                    bucket: Some(bucket),
-                    project: None,
-                },
-            },
-            BossReply::Records,
-            cx,
-        );
+        if let Some(feed) = self.boss_ui.memory_feed.get_mut(&key) {
+            feed.visible = MEMORY_FEED_PAGE;
+            feed.filter_notice = None;
+        }
+        self.sync_boss_page_rows();
+        self.boss_ui
+            .list
+            .scroll_to(gpui::ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.0),
+            });
+        cx.notify();
     }
 
     pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
@@ -4808,9 +5006,9 @@ impl Waku {
 
     // ── Memory ───────────────────────────────────────────────────────────
 
-    /// The Memory section: the named bucket engine's collections over the
-    /// same resizable list/detail split as the other sections, with
-    /// pane-local loading and error states.
+    /// The Memory section: one unified feed of original notes across every
+    /// accessible bucket — archive-style search and project filter on top,
+    /// newest-first rows beneath. Buckets survive as row labels only.
     fn render_boss_memory_section(
         &mut self,
         key: DaemonKey,
@@ -4818,81 +5016,357 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let visible_rows: Vec<BossItem> = self.boss_ui.rows.clone();
-        self.boss_ui
-            .list
-            .reset_with_uniform_height(visible_rows.len(), px(42.0));
+        let feed = self.boss_ui.memory_feed.get(&key);
+        let filter = self
+            .boss_ui
+            .memory_project
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+        let options = feed
+            .map(|feed| memory_project_options(&feed.records))
+            .unwrap_or_default();
+        let selected_label = options
+            .iter()
+            .find(|(option, _)| *option == filter)
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| tr!("boss.memory_all_projects"));
         let weak = cx.entity().downgrade();
-        let list = div()
-            .flex_1()
-            .min_h_0()
-            .relative()
+        let project_handle = self.menu_handle("boss-memory-project", cx);
+        let project_menu = dropdown_menu(
+            MenuChip::new("boss-memory-project")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(selected_label)
+                .outlined()
+                .height(px(24.0))
+                .selected(project_handle.is_open())
+                .max_w(px(200.0))
+                .flex_none(),
+            "boss-memory-project-menu",
+            &project_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::with_capacity(options.len() + 1);
+                items.push(
+                    MenuItem::new(tr!("boss.memory_all_projects"), {
+                        let weak = weak.clone();
+                        move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.boss_ui.memory_project.remove(&key);
+                                this.reset_boss_memory_view(cx);
+                            });
+                        }
+                    })
+                    .selected(filter == MemoryProjectFilter::All),
+                );
+                items.extend(options.iter().map(|(option, name)| {
+                    let option = option.clone();
+                    let picked = option == filter;
+                    let weak = weak.clone();
+                    MenuItem::new(name.clone(), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.boss_ui
+                                .memory_project
+                                .insert(key, option.clone());
+                            this.reset_boss_memory_view(cx);
+                        });
+                    })
+                    .selected(picked)
+                }));
+                items
+            },
+        );
+        let toolbar = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .py(px(8.0))
+            .border_b_1()
+            .border_color(theme.separator)
             .child(
-                list(self.boss_ui.list.clone(), move |visible_index, _, cx| {
-                    let Some(item) = visible_rows.get(visible_index).cloned() else {
-                        return div().into_any_element();
-                    };
-                    weak.upgrade()
-                        .map(|entity| entity.update(cx, |this, cx| this.render_boss_item(item, cx)))
-                        .unwrap_or_else(|| div().into_any_element())
-                })
-                .size_full(),
+                TextField::new("boss-memory-search", self.boss_memory_search.clone())
+                    .icon("icons/search.svg", 13.0)
+                    .flex_1()
+                    .min_w_0(),
             )
-            .child(scrollbar::vertical(
-                &self.boss_ui.list,
-                &self.boss_ui.scrollbar,
-            ));
-        let pane_center = |theme: &Theme| {
-            div()
+            .child(project_menu);
+
+        let mut notices = div().flex_none().flex().flex_col();
+        if let Some(notice) = feed.and_then(|feed| feed.filter_notice.clone()) {
+            notices = notices.child(
+                div()
+                    .px(px(16.0))
+                    .py(px(4.0))
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(notice),
+            );
+        }
+        if feed.is_some_and(|feed| !feed.pending_refresh.is_empty()) {
+            notices = notices.child(
+                div()
+                    .mx(px(16.0))
+                    .my(px(4.0))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("boss.memory_new_available")),
+                    )
+                    .child(
+                        boss_button(
+                            "boss-memory-refresh",
+                            tr!("boss.memory_refresh"),
+                            &theme,
+                        )
+                        .child(icon("icons/rotate-cw.svg", 12.0, theme.text_secondary))
+                        .child(tr!("boss.memory_refresh"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.apply_pending_memory_feed(key, cx);
+                        }),
+                    ),
+            );
+        }
+        if let Some(error) = feed.and_then(|feed| {
+            (!feed.records.is_empty()).then(|| feed.error.clone()).flatten()
+        }) {
+            notices = notices.child(
+                div()
+                    .mx(px(16.0))
+                    .mb(px(4.0))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(format!(
+                                "{}{}",
+                                tr!("boss.memory_stale_results"),
+                                error
+                            )),
+                    )
+                    .child(
+                        boss_button("boss-memory-retry-inline", tr!("boss.retry"), &theme)
+                            .child(tr!("boss.retry"))
+                            .on_activation(cx, move |this, _, cx| {
+                                if let Some(feed) = this.boss_ui.memory_feed.get_mut(&key) {
+                                    feed.loading = false;
+                                }
+                                this.ensure_boss_memory_feed(key, cx);
+                            }),
+                    ),
+            );
+        }
+
+        let header = div()
+            .flex_none()
+            .flex()
+            .items_baseline()
+            .px(px(16.0))
+            .pt(px(10.0))
+            .pb(px(4.0))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("boss.memory_recent")),
+            )
+            .child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.memory_newest_first")),
+            );
+
+        let query = self.boss_ui.memory_query.trim().to_lowercase();
+        let body: AnyElement = match feed {
+            _ if feed.is_none_or(|feed| !feed.loaded && feed.error.is_none()) => {
+                let mut loading = div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("boss.memory_loading")),
+                    );
+                // Placeholder rows keep the layout stable while the first
+                // page is in flight.
+                for index in 0..3 {
+                    loading = loading.child(
+                        div()
+                            .w(px(280.0 + (index as f32) * 40.0))
+                            .max_w(px(420.0))
+                            .h(px(14.0))
+                            .rounded(px(4.0))
+                            .bg(theme.inset),
+                    );
+                }
+                loading.into_any_element()
+            }
+            Some(feed) if !feed.records.is_empty() => {
+                if self.boss_ui.rows.is_empty() {
+                    // Loaded but filtered empty — the state table's
+                    // project/search misses.
+                    let mut empty = div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(10.0))
+                        .px(px(40.0));
+                    if feed.loading && !query.is_empty() {
+                        empty = empty.child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("boss.memory_searching")),
+                        );
+                    } else if !query.is_empty() {
+                        empty = empty
+                            .child(
+                                div()
+                                    .text_size(sp(13.0))
+                                    .text_color(theme.text_secondary)
+                                    .text_center()
+                                    .child(tr!("boss.memory_no_match")),
+                            )
+                            .child(
+                                boss_button(
+                                    "boss-memory-clear-search",
+                                    tr!("boss.memory_clear_search"),
+                                    &theme,
+                                )
+                                .child(tr!("boss.memory_clear_search"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_memory_search.update(cx, |input, cx| {
+                                        input.set_content(String::new(), cx);
+                                    });
+                                }),
+                            );
+                    } else {
+                        empty = empty
+                            .child(
+                                div()
+                                    .text_size(sp(13.0))
+                                    .text_color(theme.text_secondary)
+                                    .text_center()
+                                    .child(tr!("boss.memory_no_project_records")),
+                            )
+                            .child(
+                                boss_button(
+                                    "boss-memory-all-projects",
+                                    tr!("boss.memory_all_projects"),
+                                    &theme,
+                                )
+                                .child(tr!("boss.memory_all_projects"))
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.boss_ui.memory_project.remove(&key);
+                                    this.reset_boss_memory_view(cx);
+                                }),
+                            );
+                    }
+                    empty.into_any_element()
+                } else {
+                    self.boss_item_list(cx).into_any_element()
+                }
+            }
+            Some(feed) if feed.error.is_some() => div()
                 .flex_1()
+                .min_h_0()
                 .flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .text_color(theme.text_secondary)
-        };
-        let list_pane: AnyElement = if let Some(error) = self.boss_ui.memory_buckets_error.get(&key)
-        {
-            pane_center(&theme)
                 .gap(px(8.0))
-                .child(div().text_color(theme.text_secondary).child(error.clone()))
+                .px(px(40.0))
                 .child(
-                    boss_button("boss-memory-buckets-retry", tr!("boss.retry"), &theme)
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .text_center()
+                        .child(feed.error.clone().unwrap_or_default()),
+                )
+                .child(
+                    boss_button("boss-memory-retry", tr!("boss.retry"), &theme)
                         .child(tr!("boss.retry"))
                         .on_activation(cx, move |this, _, cx| {
-                            this.boss_ui.memory_buckets.remove(&key);
-                            this.ensure_boss_memory_buckets(key, cx);
+                            if let Some(feed) = this.boss_ui.memory_feed.get_mut(&key) {
+                                feed.loading = false;
+                            }
+                            this.ensure_boss_memory_feed(key, cx);
                         }),
                 )
-                .into_any_element()
-        } else if self.boss_ui.memory_buckets_loading.contains(&key) {
-            pane_center(&theme)
-                .child(tr!("boss.loading"))
-                .into_any_element()
-        } else {
-            list.into_any_element()
+                .into_any_element(),
+            Some(_) => div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(10.0))
+                .px(px(40.0))
+                .child(
+                    div()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text)
+                        .child(tr!("boss.memory_empty")),
+                )
+                .child(
+                    div()
+                        .max_w(px(420.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .text_center()
+                        .child(tr!("boss.memory_empty_hint")),
+                )
+                .child(
+                    boss_button("boss-memory-remember", tr!("boss.ask_remember"), &theme)
+                        .child(tr!("boss.ask_remember"))
+                        .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
+                )
+                .into_any_element(),
+            None => div().flex_1().into_any_element(),
         };
-        let list_column = div()
-            .w(px(self.boss_ui.memory_tree_width))
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .relative()
-            .border_r_1()
-            .border_color(theme.separator)
-            .child(list_pane)
-            .child(self.render_panel_resize_handle(
-                "boss-memory-tree-resize",
-                PanelResizeTarget::BossMemoryTree,
-                cx,
-            ));
         div()
             .flex_1()
             .min_h_0()
             .w_full()
             .flex()
-            .child(list_column)
-            .child(self.render_boss_records_detail(key, cx))
+            .flex_col()
+            .child(toolbar)
+            .child(header)
+            .child(notices)
+            .child(body)
             .into_any_element()
     }
 
@@ -7919,54 +8393,32 @@ impl Waku {
             BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
             BossItem::HistoryHit(index) => self.render_boss_history_hit(key, index, cx),
             BossItem::HistoryFooter => self.render_boss_history_footer(key, cx),
-            BossItem::Bucket(bucket_id) => {
-                let Some(bucket) = self
-                    .boss_ui
-                    .memory_buckets
-                    .get(&key)
-                    .and_then(|buckets| buckets.iter().find(|bucket| bucket.id == bucket_id))
-                    .cloned()
-                else {
-                    return div().into_any_element();
-                };
-                let selected = self
-                    .boss_ui
-                    .memory_bucket_selected
-                    .get(&key)
-                    .is_some_and(|selected| *selected == bucket_id);
-                boss_button(
-                    format!("boss-bucket-{bucket_id}"),
-                    bucket.name.clone(),
-                    &theme,
-                )
-                .h(px(42.0))
-                .w_full()
-                .when(selected, |button| button.bg(theme.overlay))
-                .child(icon("icons/database.svg", 15.0, theme.text_secondary))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .min_w_0()
-                        .child(div().truncate().child(bucket.name.clone()))
-                        .when(!bucket.purpose.is_empty(), |element| {
-                            element.child(
-                                div()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_tertiary)
-                                    .truncate()
-                                    .child(bucket.purpose.clone()),
-                            )
+            BossItem::MemoryRecord(index) => self.render_boss_memory_record(key, index, cx),
+            BossItem::MemoryFooter { remaining } => {
+                // Reveal the next filtered page in place — a tail splice, so
+                // the rows above it keep their scroll position.
+                div()
+                    .id("boss-memory-footer")
+                    .px(px(16.0))
+                    .py(px(10.0))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        boss_button(
+                            "boss-memory-show-more",
+                            tr!("boss.memory_show_more", count = remaining),
+                            &theme,
+                        )
+                        .child(tr!("boss.memory_show_more", count = remaining))
+                        .on_activation(cx, move |this, _, cx| {
+                            if let Some(feed) = this.boss_ui.memory_feed.get_mut(&key) {
+                                feed.visible = feed.visible.saturating_add(MEMORY_FEED_PAGE);
+                            }
+                            this.sync_boss_page_rows();
+                            cx.notify();
                         }),
-                )
-                .on_activation(cx, move |this, _, cx| {
-                    this.boss_ui
-                        .memory_bucket_selected
-                        .insert(key, bucket_id.clone());
-                    this.ensure_boss_memory_overview(key, bucket_id.clone(), cx);
-                    cx.notify();
-                })
-                .into_any_element()
+                    )
+                    .into_any_element()
             }
             BossItem::Plan(session_id) => {
                 let Some(plan) = self
@@ -8064,211 +8516,165 @@ impl Waku {
         }
     }
 
-    /// The Memory section's detail: the selected named bucket's overview —
-    /// original notes and stored summaries as readable entries, corrected
-    /// through Boss chat rather than edited. Read-only.
-    fn render_boss_records_detail(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+    /// One Memory Records row — bucket label and muted relative creation
+    /// time on one line (the exact timestamp rides the tooltip), the note's
+    /// text beneath, and the correction affordance at the row's right edge.
+    /// Read-only; corrections still arm Boss chat rather than editing.
+    fn render_boss_memory_record(
+        &self,
+        key: DaemonKey,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let center = |label: String| {
-            div()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(div().text_color(theme.text_secondary).child(label))
-                .into_any_element()
+        let Some(feed) = self.boss_ui.memory_feed.get(&key) else {
+            return div().into_any_element();
         };
-        let Some(bucket_id) = self.boss_ui.memory_bucket_selected.get(&key).cloned() else {
-            return center(tr!("boss.bucket_select"));
+        let Some(record) = feed.records.get(index).cloned() else {
+            return div().into_any_element();
         };
-        let Some(bucket) = self
-            .boss_ui
-            .memory_buckets
-            .get(&key)
-            .and_then(|buckets| buckets.iter().find(|bucket| bucket.id == bucket_id))
-            .cloned()
-        else {
-            return center(tr!("boss.bucket_select"));
-        };
-        self.ensure_boss_memory_overview(key, bucket_id.clone(), cx);
-        if let Some(error) = self
-            .boss_ui
-            .memory_records_error
-            .get(&(key, bucket_id.clone()))
+        let record_key = record.key();
+        let expanded = feed.expanded.contains(&record_key);
+        let group = SharedString::from(format!("boss-memory-row-{record_key}"));
+        let age = memory_record_age(unix_time().saturating_sub(record.created_at));
+        let exact = memory_record_exact_time(record.created_at);
+        let mut provenance = format!("{} · {}", record.bucket, age);
+        if let Some(project_name) = record
+            .project
+            .as_ref()
+            .and_then(|project| project.name.as_deref())
+            .filter(|name| !name.eq_ignore_ascii_case(&record.bucket))
         {
-            let error = error.clone();
-            let retry_bucket = bucket_id.clone();
-            return div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .child(div().text_color(theme.text_secondary).child(format!(
-                    "{}\n{error}",
-                    tr!("boss.bucket_unavailable", bucket = bucket.name.clone())
-                )))
-                .child(
-                    boss_button("boss-memory-records-retry", tr!("boss.retry"), &theme)
-                        .child(tr!("boss.retry"))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.boss_request(
-                                key,
-                                BossOperation::Memory {
-                                    operation: waku_client::boss::MemoryOperation::Overview {
-                                        bucket: Some(retry_bucket.clone()),
-                                        project: None,
-                                    },
-                                },
-                                BossReply::Records,
-                                cx,
-                            );
-                        }),
-                )
-                .into_any_element();
+            provenance.push_str(" · ");
+            provenance.push_str(project_name);
         }
-        let Some(records) = self
-            .boss_ui
-            .memory_records
-            .get(&(key, bucket_id.clone()))
-            .cloned()
-        else {
-            return center(tr!("boss.loading"));
-        };
-        if records.is_empty() {
-            return div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_color(theme.text_secondary)
-                        .child(tr!("boss.records_empty")),
-                )
-                .child(
-                    boss_button("boss-records-remember", tr!("boss.ask_remember"), &theme)
-                        .child(tr!("boss.ask_remember"))
-                        .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
-                )
-                .into_any_element();
-        }
-        let bucket_name = bucket.name.clone();
-        let rows = records
-            .iter()
-            .enumerate()
-            .map(|(index, record)| {
-                let (label, reference, text) = match record {
-                    MemoryRecord::Note {
-                        sequence,
-                        kind,
-                        text,
-                        ..
-                    } => {
-                        let kind_label = match kind {
-                            waku_client::boss::MemoryNoteKind::Fact => tr!("boss.record_fact"),
-                            waku_client::boss::MemoryNoteKind::Observation => {
-                                tr!("boss.record_observation")
-                            }
-                            waku_client::boss::MemoryNoteKind::Question => {
-                                tr!("boss.record_question")
-                            }
-                        };
-                        (
-                            format!("#{sequence} · {kind_label}"),
-                            format!("note-{sequence}"),
-                            text.clone(),
-                        )
-                    }
-                    MemoryRecord::Summary { start, end, text } => (
-                        format!("#{}–{} · {}", start, end, tr!("boss.record_summary")),
-                        format!("summary-{start}-{end}"),
-                        text.clone(),
-                    ),
-                };
-                let correct_label = format!("buckets/{}/{reference}", bucket.name);
-                let correct_content = text.clone();
-                div()
-                    .py(px(8.0))
-                    .border_b_1()
-                    .border_color(theme.separator)
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(label),
-                            )
-                            .child(
-                                boss_button(
-                                    format!("boss-record-correct-{index}"),
-                                    tr!("boss.ask_correct"),
-                                    &theme,
-                                )
-                                .child(tr!("boss.ask_correct"))
-                                .on_activation(
-                                    cx,
-                                    move |this, _, cx| {
-                                        this.chat_with_boss(key, cx);
-                                        this.boss_ui.command_memory_correction = Some((
-                                            key,
-                                            correct_label.clone(),
-                                            correct_content.clone(),
-                                        ));
-                                        this.sync_composer_placeholder(cx);
-                                    },
-                                ),
-                            ),
-                    )
-                    .child(div().text_size(sp(13.0)).child(text))
-            })
-            .collect::<Vec<_>>();
-        div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
+        let correct_label = format!("buckets/{}/note-{}", record.bucket, record.sequence);
+        let correct_content = record.text.clone();
+        let correct_name = format!(
+            "{} — {}",
+            tr!("boss.ask_correct"),
+            record.text.chars().take(80).collect::<String>()
+        );
+        let long_text = record.text.len() > MEMORY_EXPAND_CHARS
+            || record.text.lines().nth(MEMORY_EXPAND_LINES).is_some();
+        let mut row = div()
+            .id(SharedString::from(format!("boss-memory-{record_key}")))
+            .tab_index(0)
+            .group(group.clone())
+            .w_full()
+            .px(px(16.0))
+            .py(px(12.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .aria_label(tr!(
+                "boss.memory_record_label",
+                bucket = record.bucket.clone(),
+                when = exact.clone()
+            ))
             .child(
                 div()
-                    .h(px(38.0))
-                    .px(px(18.0))
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
-                    .border_b_1()
-                    .border_color(theme.separator)
-                    .child(icon("icons/database.svg", 14.0, theme.text_tertiary))
+                    .gap(px(6.0))
                     .child(
                         div()
+                            .id(SharedString::from(format!(
+                                "boss-memory-time-{record_key}"
+                            )))
                             .flex_1()
+                            .min_w_0()
                             .truncate()
-                            .text_color(theme.text_secondary)
-                            .child(format!("buckets/{bucket_name}")),
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .tooltip(Tooltip::text(exact.clone()))
+                            .child(provenance),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "boss-memory-correct-{record_key}"
+                            )))
+                            .tab_index(0)
+                            .flex_none()
+                            .p(px(4.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .opacity(0.45)
+                            .group_hover(group.clone(), |style| style.opacity(1.0))
+                            .hover(|style| style.bg(theme.overlay))
+                            .focus_visible(|style| {
+                                style.bg(theme.focus_highlight()).opacity(1.0)
+                            })
+                            .tooltip(Tooltip::text(tr!("boss.ask_correct")))
+                            .aria_label(correct_name)
+                            .child(icon("icons/message-square.svg", 13.0, theme.text_secondary))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.chat_with_boss(key, cx);
+                                this.boss_ui.command_memory_correction = Some((
+                                    key,
+                                    correct_label.clone(),
+                                    correct_content.clone(),
+                                ));
+                                this.sync_composer_placeholder(cx);
+                            }),
                     ),
             )
             .child(
                 div()
-                    .id("boss-memory-records")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .px(px(28.0))
-                    .py(px(12.0))
-                    .children(rows),
-            )
-            .into_any_element()
+                    .pt(px(4.0))
+                    .text_size(sp(13.0))
+                    .line_height(sp(19.0))
+                    .when(!expanded, |element| {
+                        element.line_clamp(MEMORY_EXPAND_LINES)
+                    })
+                    .child(record.text.clone()),
+            );
+        if long_text {
+            let expanding = !expanded;
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "boss-memory-expand-{record_key}"
+                    )))
+                    .tab_index(0)
+                    .pt(px(4.0))
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .cursor_pointer()
+                    .hover(|style| style.text_color(theme.text))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .aria_label(if expanded {
+                        tr!("boss.memory_collapse")
+                    } else {
+                        tr!("boss.memory_expand")
+                    })
+                    .child(if expanded {
+                        tr!("boss.memory_collapse")
+                    } else {
+                        tr!("boss.memory_expand")
+                    })
+                    .on_activation(cx, move |this, _, cx| {
+                        if let Some(feed) = this.boss_ui.memory_feed.get_mut(&key) {
+                            if expanding {
+                                feed.expanded.insert(record_key.clone());
+                            } else {
+                                feed.expanded.remove(&record_key);
+                            }
+                        }
+                        if let Some(row_index) = this
+                            .boss_ui
+                            .rows
+                            .iter()
+                            .position(|item| *item == BossItem::MemoryRecord(index))
+                        {
+                            this.boss_ui.list.remeasure_items(row_index..row_index + 1);
+                        }
+                        cx.notify();
+                    }),
+            );
+        }
+        row.into_any_element()
     }
 
     /// The persona form behind the detail pane's Edit action. Saving names
@@ -9194,47 +9600,6 @@ mod tests {
         assert_eq!(
             boss_deliverable_rows(&state, BossDeliverablesFilter::Archived),
             vec![BossItem::Deliverable(ordinary_archived.id)]
-        );
-    }
-
-    #[test]
-    fn memory_overview_items_parse_notes_and_summaries() {
-        let note = serde_json::json!({
-            "type": "note",
-            "note": {
-                "id": "1-abc",
-                "bucketId": "project-x",
-                "sequence": 3,
-                "kind": "observation",
-                "text": "watch the queue",
-                "retryKey": "k",
-                "createdAt": 99
-            }
-        });
-        let summary = serde_json::json!({
-            "type": "summary",
-            "summary": { "bucketId": "project-x", "start": 1, "end": 2, "text": "early notes" }
-        });
-        assert_eq!(
-            memory_record_from_json(&note),
-            Some(MemoryRecord::Note {
-                sequence: 3,
-                kind: waku_client::boss::MemoryNoteKind::Observation,
-                text: "watch the queue".into(),
-                created_at: 99,
-            })
-        );
-        assert_eq!(
-            memory_record_from_json(&summary),
-            Some(MemoryRecord::Summary {
-                start: 1,
-                end: 2,
-                text: "early notes".into(),
-            })
-        );
-        assert_eq!(
-            memory_record_from_json(&serde_json::json!({"type": "other"})),
-            None
         );
     }
 

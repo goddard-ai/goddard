@@ -244,6 +244,20 @@ impl BucketStore {
         })
     }
 
+    /// Every original note in the bucket, in log order. Summaries live in
+    /// separate files and never appear here.
+    pub fn notes(
+        &self,
+        access: &BucketAccess,
+        principal: &str,
+        bucket_id: &str,
+    ) -> Result<Vec<BucketNote>> {
+        self.require(access, principal, bucket_id, false)?;
+        self.with_bucket_lock(bucket_id, || {
+            read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))
+        })
+    }
+
     pub fn zoom(
         &self,
         access: &BucketAccess,

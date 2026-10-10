@@ -3013,6 +3013,12 @@ pub enum MemoryOperation {
         start: u64,
         end: u64,
     },
+    /// Every original note across the caller's visible buckets, newest
+    /// first, decorated with its bucket label and resolved project
+    /// association — the unified Memory Records feed. Read-only: it
+    /// materializes nothing beyond the caller's own project bucket, which
+    /// every memory operation already does.
+    Feed,
     /// Inspect or append old memory files into an explicit named bucket.
     /// `source` is `boss` or an absolute project root. This operation is
     /// Boss-only; dry runs return every candidate without changing storage.
@@ -3161,6 +3167,10 @@ pub enum BossResult {
         bucket: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         migration: Option<MemoryMigrationReport>,
+        /// The `Feed` operation's page — `{"records": [...]}` of decorated
+        /// notes. `None` for every other memory operation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feed: Option<serde_json::Value>,
     },
 }
 

@@ -379,8 +379,6 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
-    /// The Boss Brain Memory section's documents/records tree pane.
-    BossMemoryTree,
     /// The horizontal divider between the Git panel's top region and its
     /// commit log — the one drag that moves on the y axis.
     GitPanelTop,
@@ -3784,6 +3782,9 @@ pub struct Waku {
     /// The Employees → History lookup field — topic or person name over
     /// retained task, employee, Boss-chat and planning records.
     boss_history_search: Entity<TextInput>,
+    /// The Memory Records feed's search field — text, project name, and
+    /// bucket label over every accessible record.
+    boss_memory_search: Entity<TextInput>,
     /// Virtualized list over the filtered skill rows.
     skills_list_state: ListState,
     skills_scrollbar: Rc<ScrollbarState>,
@@ -5671,6 +5672,13 @@ impl Waku {
                 .accessibility_label(tr!("boss.history_search"))
                 .placeholder(tr!("boss.history_search_placeholder"))
         });
+        let boss_memory_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("boss.memory_search"))
+                .placeholder(tr!("boss.memory_search_placeholder"))
+        });
         let drafts_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -6777,6 +6785,19 @@ impl Waku {
                 },
             )
             .detach();
+            cx.subscribe(
+                &boss_memory_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        // Keep the mirror current — row building reads it
+                        // without leasing the input.
+                        this.boss_ui.memory_query =
+                            this.boss_memory_search.read(cx).content().to_owned();
+                        this.reset_boss_memory_view(cx);
+                    }
+                },
+            )
+            .detach();
             cx.subscribe(&drafts_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
@@ -7594,6 +7615,7 @@ impl Waku {
                 skills_scanned_at: None,
                 skills_search,
                 boss_history_search,
+                boss_memory_search,
                 skills_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 skills_scrollbar: ScrollbarState::new(),
                 skills_rows: RefCell::new(Vec::new()),
