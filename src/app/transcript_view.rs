@@ -4810,7 +4810,7 @@ impl Waku {
                     .child(
                         identity
                             .as_ref()
-                            .map(|identity| self.boss_avatar(identity, 28.0, cx))
+                            .map(|identity| self.boss_avatar_animated(identity, 28.0, cx))
                             .unwrap_or_else(|| div().size(px(28.0)).into_any_element()),
                     )
                     .child(

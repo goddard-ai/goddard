@@ -83,37 +83,141 @@ fn avatar_scale(bucket: u32) -> f32 {
     bucket as f32 / AVATAR_SOURCE_SIZE
 }
 
-/// One hop-and-settle per period: long enough between hops that a mounted
-/// avatar reads as occasionally alive rather than bouncing.
-const GAZE_HOP_PERIOD: Duration = Duration::from_millis(4_800);
+/// The Gaze style's `look` track — the schema's 6.4s drift between seated
+/// glances, evaluated by hand since the app rasterizes a single frame.
+const GAZE_LOOK_PERIOD: f32 = 6.4;
 
-/// Share of the period spent airborne — a ~650ms lift inside an otherwise
-/// still cycle.
-const GAZE_HOP_IN_FLIGHT: f32 = 0.135;
+/// The style's `blink` track — one close per 4.4s cycle.
+const GAZE_BLINK_PERIOD: f32 = 4.4;
 
-/// Peak lift as a share of the avatar's rendered size.
-const GAZE_HOP_LIFT: f32 = 0.16;
+/// `blink` squashes the eyes between 94% and 97% of its cycle. Swapping the
+/// raster across that whole window keeps at least one closed frame on the
+/// 15fps pulse while reading as the same ~130ms flick.
+const GAZE_BLINK_CLOSED: (f32, f32) = (0.94, 0.97);
 
-/// Whether a sidebar avatar rides the pulse clock: Gaze rasters only, and
-/// never under reduce-motion, which keeps the exact static element.
-fn gaze_hops(style: AvatarStyle, reduce_motion: bool) -> bool {
+/// The `look` track's translateX keyframes — schema percentages as phase,
+/// values in spacing units (hundredths of the canvas).
+const GAZE_LOOK_X: &[(f32, f32)] = &[
+    (0.00, 0.0),
+    (0.16, 0.0),
+    (0.24, -3.6),
+    (0.38, -3.6),
+    (0.46, 3.4),
+    (0.60, 3.4),
+    (0.68, 0.7),
+    (0.82, 0.7),
+    (0.90, 0.0),
+    (1.00, 0.0),
+];
+
+/// The `look` track's translateY keyframes.
+const GAZE_LOOK_Y: &[(f32, f32)] = &[
+    (0.00, 0.0),
+    (0.16, 0.0),
+    (0.24, 0.9),
+    (0.38, 0.9),
+    (0.46, -0.7),
+    (0.60, -0.7),
+    (0.68, 1.7),
+    (0.82, 1.7),
+    (0.90, 0.0),
+    (1.00, 0.0),
+];
+
+/// Whether a surface leases the pulse clock for this avatar: Gaze faces
+/// only, and never under reduce-motion, which keeps the exact static
+/// element.
+fn gaze_animates(style: AvatarStyle, reduce_motion: bool) -> bool {
     style == AvatarStyle::Gaze && !reduce_motion
 }
 
-/// Lift in pixels at `phase` of the hop period — a parabola peaking mid-hop
-/// inside the airborne window, zero (the static pose) everywhere else.
-fn gaze_hop_lift(phase: f32, size: f32) -> f32 {
-    let t = phase.fract() / GAZE_HOP_IN_FLIGHT;
-    if t >= 1.0 {
-        return 0.0;
+/// Piecewise smoothstep interpolation over `(phase, value)` keyframes —
+/// the schema's `easeInOut` timing without its CSS runtime.
+fn gaze_track(phase: f32, keys: &[(f32, f32)]) -> f32 {
+    let phase = phase.fract();
+    let mut previous = keys[0];
+    for &key in &keys[1..] {
+        if phase < key.0 {
+            let t = ((phase - previous.0) / (key.0 - previous.0)).clamp(0.0, 1.0);
+            let t = t * t * (3.0 - 2.0 * t);
+            return previous.1 + (key.1 - previous.1) * t;
+        }
+        previous = key;
     }
-    size * GAZE_HOP_LIFT * 4.0 * t * (1.0 - t)
+    keys.last().map_or(0.0, |key| key.1)
 }
 
-/// Per-seed phase offset in `[0, 1)` so neighboring Gaze avatars on a roster
-/// do not hop in sync.
-fn gaze_hop_shift(seed: &str) -> f32 {
-    (sidebar::mix_str(0, seed) % 1024) as f32 / 1024.0
+/// The `look` offset in rendered pixels at `phase` of the drift cycle.
+/// Values are spacing units — hundredths of the avatar canvas — with the
+/// eye group's ~1× scale and ±11° tilt inside the body approximated away:
+/// the drift tops out under a pixel, where that error is invisible.
+fn gaze_look_offset(phase: f32, size: f32) -> (f32, f32) {
+    let unit = size / 100.0;
+    (
+        gaze_track(phase, GAZE_LOOK_X) * unit,
+        gaze_track(phase, GAZE_LOOK_Y) * unit,
+    )
+}
+
+/// The `blink` swap window — raster-level truth for a ~130ms close.
+fn gaze_blink_closed(phase: f32) -> bool {
+    let phase = phase.fract();
+    (GAZE_BLINK_CLOSED.0..=GAZE_BLINK_CLOSED.1).contains(&phase)
+}
+
+/// Per-seed `(look, blink)` phase offsets in `[0, 1)` so neighboring Gaze
+/// faces neither glance nor blink in sync.
+fn gaze_eye_shift(seed: &str) -> (f32, f32) {
+    (
+        (sidebar::mix_str(0, seed) % 1024) as f32 / 1024.0,
+        (sidebar::mix_str(1, seed) % 1024) as f32 / 1024.0,
+    )
+}
+
+/// The eye-group rasters a Gaze avatar splits into — the body without eyes,
+/// the eye pair at its seated spot, and the pair mid-blink — each a
+/// full-canvas raster that overlays at the avatar's rendered size.
+struct GazeFaces {
+    body: Arc<gpui::RenderImage>,
+    eyes: Arc<gpui::RenderImage>,
+    eyes_closed: Arc<gpui::RenderImage>,
+}
+
+/// The rasters one (seed, style, bucket) render job caches — the still every
+/// surface paints, plus the split layers only the animated Gaze path reads.
+struct AvatarFaces {
+    still: Arc<gpui::RenderImage>,
+    gaze: Option<Arc<GazeFaces>>,
+}
+
+/// One frame of the animated Gaze face — the body raster with the eye-group
+/// raster over it, drifted by the `look` phase and swapped to its mid-blink
+/// frame inside the `blink` window. Resting phases paint the same pixels
+/// the still does.
+fn gaze_eye_frame(faces: &GazeFaces, size: f32, elapsed: f32, shift: (f32, f32)) -> AnyElement {
+    let (dx, dy) = gaze_look_offset(elapsed / GAZE_LOOK_PERIOD + shift.0, size);
+    let eyes = if gaze_blink_closed(elapsed / GAZE_BLINK_PERIOD + shift.1) {
+        &faces.eyes_closed
+    } else {
+        &faces.eyes
+    };
+    div()
+        .size(px(size))
+        .overflow_hidden()
+        .child(
+            gpui::img(faces.body.clone())
+                .size(px(size))
+                .rounded(px(6.0)),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(dx))
+                .top(px(dy))
+                .size(px(size))
+                .child(gpui::img(eyes.clone()).size(px(size)).rounded(px(6.0))),
+        )
+        .into_any_element()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -512,7 +616,7 @@ pub(super) struct BossUi {
     // duplicates; exhausted failures stay marked to bound retry churn.
     // Eviction clears the mark — a face on screen may be asked for again.
     avatar_requested: RefCell<HashSet<((String, AvatarStyle), u32)>>,
-    avatars: HashMap<(String, AvatarStyle), HashMap<u32, Arc<gpui::RenderImage>>>,
+    avatars: HashMap<(String, AvatarStyle), HashMap<u32, AvatarFaces>>,
     avatar_active: usize,
     focus: Option<FocusHandle>,
 }
@@ -619,8 +723,8 @@ impl BossUi {
         &mut self,
         seed: (String, AvatarStyle),
         bucket: u32,
-        image: Arc<gpui::RenderImage>,
-    ) -> Option<Arc<gpui::RenderImage>> {
+        faces: AvatarFaces,
+    ) -> Option<AvatarFaces> {
         let cached: usize = self.avatars.values().map(|buckets| buckets.len()).sum();
         let evicted = if cached >= AVATAR_CACHE_LIMIT {
             let key = self.avatars.iter().find_map(|(seed, buckets)| {
@@ -644,7 +748,7 @@ impl BossUi {
         } else {
             None
         };
-        self.avatars.entry(seed).or_default().insert(bucket, image);
+        self.avatars.entry(seed).or_default().insert(bucket, faces);
         evicted
     }
 
@@ -3109,7 +3213,17 @@ impl Waku {
             .avatars
             .get(&(identity.avatar_seed.clone(), identity.avatar_style))
             .and_then(|buckets| buckets.get(&avatar_bucket(size)))
-            .cloned()
+            .map(|faces| faces.still.clone())
+    }
+
+    /// The Gaze layer rasters cached for `(seed, size bucket)` — `None` for
+    /// other styles, for a missing still, and while the render is in flight.
+    fn gaze_faces(&self, identity: &BossIdentity, size: f32) -> Option<Arc<GazeFaces>> {
+        self.boss_ui
+            .avatars
+            .get(&(identity.avatar_seed.clone(), identity.avatar_style))
+            .and_then(|buckets| buckets.get(&avatar_bucket(size)))
+            .and_then(|faces| faces.gaze.clone())
     }
 
     /// The raster cached for `(seed, style, size bucket)`, queueing a render when
@@ -3168,44 +3282,32 @@ impl Waku {
     }
 
     /// `boss_avatar` for surfaces that can afford a recurring pulse lease —
-    /// sidebar rows, whose subtree already rebuilds for `spin_slow` loaders.
-    /// A Gaze raster hops once per period; every other style, and every style
-    /// under reduce-motion, returns the static element untouched.
-    pub(super) fn boss_avatar_hopping(
+    /// sidebar rows and employee cards, whose host view already rebuilds for
+    /// `spin_slow` loaders. A Gaze face keeps its body still while its eyes
+    /// drift through the style's `look` track and blink on its `blink` clock;
+    /// every other style, and every style under reduce-motion, returns the
+    /// static element untouched.
+    pub(super) fn boss_avatar_animated(
         &self,
         identity: &BossIdentity,
         size: f32,
         cx: &App,
     ) -> AnyElement {
-        let avatar = self.boss_avatar(identity, size, cx);
-        if !gaze_hops(identity.avatar_style, cx.reduce_motion()) {
-            return avatar;
+        if !gaze_animates(identity.avatar_style, cx.reduce_motion()) {
+            return self.boss_avatar(identity, size, cx);
         }
-        let shift = gaze_hop_shift(&identity.avatar_seed);
-        // A fixed-size wrapper holds the row slot while the inner element's
-        // absolute offset carries the lift — only `Svg` takes a
-        // `Transformation`, so the raster moves by position, not transform.
-        // Resting frames return the avatar element itself, identical to the
-        // static path.
-        motion::pulse(GAZE_HOP_PERIOD, move |phase| {
-            let lift = gaze_hop_lift(phase + shift, size);
-            if lift == 0.0 {
-                return avatar;
-            }
-            div()
-                .size(px(size))
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top(px(-lift))
-                        .size(px(size))
-                        .child(avatar),
-                )
-                .into_any_element()
-        })
-        .every(2)
-        .into_any_element()
+        let Some(faces) = self.gaze_faces(identity, size) else {
+            // Layers render in the same job as the still, so a miss means the
+            // render is in flight — the still or placeholder covers the wait.
+            return self.boss_avatar(identity, size, cx);
+        };
+        let shift = gaze_eye_shift(&identity.avatar_seed);
+        // The eye group rides the shared clock as an overlaid raster — `img`
+        // takes no `Transformation`, so the drift moves an absolute wrapper
+        // and the blink swaps which eyes raster is mounted.
+        motion::pulse_elapsed(move |elapsed| gaze_eye_frame(&faces, size, elapsed, shift))
+            .every(2)
+            .into_any_element()
     }
 
     fn pump_boss_avatars(&mut self, cx: &mut Context<Self>) {
@@ -3221,10 +3323,32 @@ impl Waku {
             cx.spawn(async move |this, cx| {
                 let image = cx.background_executor().spawn(async move {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let scale = avatar_scale(bucket);
                         let svg = boss_moods::avatar_svg_for_style(&avatar_seed, style, bucket);
-                        renderer
-                            .render_single_frame(&svg, avatar_scale(bucket))
-                            .map_err(anyhow::Error::from)
+                        let still = renderer
+                            .render_single_frame(&svg, scale)
+                            .map_err(anyhow::Error::from)?;
+                        // Gaze faces split off their eye group so the
+                        // animated path can drift and blink it while the body
+                        // stays put — three extra rasters on the same
+                        // background render job.
+                        let gaze = (style == AvatarStyle::Gaze)
+                            .then(|| {
+                                let layers = boss_moods::gaze_layers(&avatar_seed);
+                                Ok::<_, anyhow::Error>(Arc::new(GazeFaces {
+                                    body: renderer
+                                        .render_single_frame(&layers.body, scale)
+                                        .map_err(anyhow::Error::from)?,
+                                    eyes: renderer
+                                        .render_single_frame(&layers.eyes, scale)
+                                        .map_err(anyhow::Error::from)?,
+                                    eyes_closed: renderer
+                                        .render_single_frame(&layers.eyes_closed, scale)
+                                        .map_err(anyhow::Error::from)?,
+                                }))
+                            })
+                            .transpose()?;
+                        Ok::<_, anyhow::Error>(AvatarFaces { still, gaze })
                     }))
                     .unwrap_or_else(|panic| {
                         let message = panic
@@ -3248,9 +3372,14 @@ impl Waku {
                 let _ = this.update(cx, |this, cx| {
                     this.boss_ui.avatar_active -= 1;
                     match image {
-                        Ok(image) => {
-                            if let Some(evicted) = this.boss_ui.cache_avatar((seed, style), bucket, image) {
-                                cx.drop_image(evicted, None);
+                        Ok(faces) => {
+                            if let Some(evicted) = this.boss_ui.cache_avatar((seed, style), bucket, faces) {
+                                cx.drop_image(evicted.still, None);
+                                if let Some(gaze) = evicted.gaze {
+                                    cx.drop_image(gaze.body.clone(), None);
+                                    cx.drop_image(gaze.eyes.clone(), None);
+                                    cx.drop_image(gaze.eyes_closed.clone(), None);
+                                }
                             }
                         }
                         Err(_) => this.boss_ui.retry_avatar((seed, style), bucket, attempt),
@@ -3330,7 +3459,7 @@ impl Waku {
             .hover(|style| style.bg(theme.overlay))
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx))
-            .child(self.boss_avatar_hopping(&state.identity, 24.0, cx))
+            .child(self.boss_avatar_animated(&state.identity, 24.0, cx))
             .child(boss_sidebar_label(
                 state.identity.name.clone(),
                 subtitle,
@@ -3526,7 +3655,7 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
-            .child(self.boss_avatar_hopping(identity, 24.0, cx))
+            .child(self.boss_avatar_animated(identity, 24.0, cx))
             .child(boss_sidebar_label(
                 identity.name.clone(),
                 detail.unwrap_or_default(),
@@ -4439,7 +4568,7 @@ impl Waku {
             .border_color(theme.border)
             .when_some(
                 state.map(|state| state.identity.clone()),
-                |row, identity| row.child(self.boss_avatar(&identity, 24.0, cx)),
+                |row, identity| row.child(self.boss_avatar_animated(&identity, 24.0, cx)),
             )
             .child(
                 div()
@@ -5493,7 +5622,7 @@ impl Waku {
             .on_activation(cx, move |this, _, cx| {
                 this.request_session_activation(id, SessionActivationTransition::Visit, cx)
             })
-            .child(self.boss_avatar(&identity, 24.0, cx))
+            .child(self.boss_avatar_animated(&identity, 24.0, cx))
             .child(
                 div()
                     .flex_1()
@@ -9154,51 +9283,77 @@ mod tests {
     }
 
     #[test]
-    fn gaze_hop_sits_at_rest_outside_its_airborne_window() {
+    fn gaze_eyes_sit_at_rest_outside_the_look_window() {
         // Phase 0 is the rest pose — the frame a reduce-motion render and a
         // non-leasing tick both have to match.
-        for phase in [0.0, GAZE_HOP_IN_FLIGHT, 0.5, 0.999, 1.0, 7.3] {
-            assert_eq!(gaze_hop_lift(phase, 24.0), 0.0, "phase {phase}");
+        for phase in [0.0, 0.08, 0.15, 0.95, 0.999, 1.0, 7.05] {
+            assert_eq!(
+                gaze_look_offset(phase, 24.0),
+                (0.0, 0.0),
+                "phase {phase}"
+            );
         }
     }
 
     #[test]
-    fn gaze_hop_lifts_and_settles_inside_its_window() {
-        let apex = gaze_hop_lift(GAZE_HOP_IN_FLIGHT / 2.0, 24.0);
+    fn gaze_eyes_drift_and_settle_inside_the_look_window() {
+        // Mid-glance holds the track's keyframed extremes; the ease between
+        // holds stays inside them.
+        let left = gaze_look_offset(0.3, 24.0);
         assert!(
-            (apex - 24.0 * GAZE_HOP_LIFT).abs() < 0.01,
-            "mid-hop is the peak lift, got {apex}"
+            (left.0 - -3.6 * 0.24).abs() < 0.001,
+            "phase 0.3 holds the left glance, got {left:?}"
         );
-        let rising = gaze_hop_lift(GAZE_HOP_IN_FLIGHT / 4.0, 24.0);
-        let settling = gaze_hop_lift(GAZE_HOP_IN_FLIGHT * 0.75, 24.0);
-        assert!(rising > 0.0 && rising < apex);
+        let right = gaze_look_offset(0.5, 24.0);
         assert!(
-            (rising - settling).abs() < 0.01,
-            "the parabola is symmetric about mid-hop: {rising} vs {settling}"
+            (right.0 - 3.4 * 0.24).abs() < 0.001,
+            "phase 0.5 holds the right glance, got {right:?}"
         );
+        for step in 0..100 {
+            let phase = step as f32 / 100.0;
+            let (dx, dy) = gaze_look_offset(phase, 24.0);
+            assert!(
+                dx.abs() <= 3.6 * 0.24 + f32::EPSILON && dy.abs() <= 1.7 * 0.24 + f32::EPSILON,
+                "phase {phase} stays inside the glances, got ({dx}, {dy})"
+            );
+        }
     }
 
     #[test]
-    fn gaze_hop_shift_stays_in_phase_and_is_deterministic() {
+    fn gaze_blink_closes_only_inside_its_window() {
+        // Phase 0 is the open pose — the frame a reduce-motion render has to
+        // match.
+        assert!(!gaze_blink_closed(0.0));
+        assert!(!gaze_blink_closed(0.939));
+        assert!(gaze_blink_closed(0.94));
+        assert!(gaze_blink_closed(0.955));
+        assert!(gaze_blink_closed(0.97));
+        assert!(!gaze_blink_closed(0.971));
+        assert!(!gaze_blink_closed(4.3));
+    }
+
+    #[test]
+    fn gaze_eye_shift_stays_in_phase_and_is_deterministic() {
         for seed in ["boss", "zadie", "", "existing"] {
-            let shift = gaze_hop_shift(seed);
-            assert!((0.0..1.0).contains(&shift), "{seed} shifted to {shift}");
-            assert_eq!(shift, gaze_hop_shift(seed));
+            let shift = gaze_eye_shift(seed);
+            assert!((0.0..1.0).contains(&shift.0), "{seed} look at {}", shift.0);
+            assert!((0.0..1.0).contains(&shift.1), "{seed} blink at {}", shift.1);
+            assert_eq!(shift, gaze_eye_shift(seed));
         }
     }
 
     #[test]
-    fn only_gaze_avatars_hop_and_never_under_reduce_motion() {
+    fn only_gaze_avatars_animate_and_never_under_reduce_motion() {
         for style in [
             AvatarStyle::DiceBear,
             AvatarStyle::LineFace,
             AvatarStyle::AgentAvatars,
             AvatarStyle::Avvvatars,
         ] {
-            assert!(!gaze_hops(style, false), "{style:?} keeps its static raster");
+            assert!(!gaze_animates(style, false), "{style:?} keeps its static raster");
         }
-        assert!(gaze_hops(AvatarStyle::Gaze, false));
-        assert!(!gaze_hops(AvatarStyle::Gaze, true));
+        assert!(gaze_animates(AvatarStyle::Gaze, false));
+        assert!(!gaze_animates(AvatarStyle::Gaze, true));
     }
 
     #[test]
@@ -9241,7 +9396,14 @@ mod tests {
         for id in 0..(AVATAR_CACHE_LIMIT + 64) {
             let seed = (id.to_string(), AvatarStyle::DiceBear);
             ui.avatar_requested.borrow_mut().insert((seed.clone(), 24));
-            let _ = ui.cache_avatar(seed, 24, image.clone());
+            let _ = ui.cache_avatar(
+                seed,
+                24,
+                AvatarFaces {
+                    still: image.clone(),
+                    gaze: None,
+                },
+            );
         }
         assert_eq!(
             ui.avatars.values().map(HashMap::len).sum::<usize>(),
@@ -9256,7 +9418,7 @@ mod tests {
         for id in 0..(AVATAR_CACHE_LIMIT + 64) {
             let seed = (id.to_string(), AvatarStyle::DiceBear);
             if let Some(cached) = ui.avatars.get(&seed).and_then(|buckets| buckets.get(&24)) {
-                assert!(Arc::ptr_eq(cached, &image));
+                assert!(Arc::ptr_eq(&cached.still, &image));
                 assert!(!ui.avatar_requested.borrow_mut().insert((seed, 24)));
             } else {
                 assert!(ui.avatar_requested.borrow_mut().insert((seed, 24)));

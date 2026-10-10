@@ -1,0 +1,1 @@
+- **Boss:** Gaze-style avatars no longer hop. The face stays put while its eyes glance around and blink — on sidebar rows, employee cards, and the employees page — and everything stays still when Reduce Motion is on.

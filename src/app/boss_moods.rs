@@ -434,6 +434,23 @@ fn resolve<'a>(style: &'a Style, seed: &str) -> HashMap<&'a str, Pick<'a>> {
         .collect()
 }
 
+/// How much of a Gaze face one render emits. The style's canvas is a single
+/// `shape` component whose variants pair the body element with the `spacing`
+/// component that seats the eye pair, so the animatable eye group splits off
+/// at the element/`component` boundary inside `shape`. Non-Gaze renders
+/// always use [`GazeSplit::Full`].
+#[derive(Clone, Copy, PartialEq)]
+enum GazeSplit {
+    /// The whole face — the cached still.
+    Full,
+    /// The body without its eye group.
+    Body,
+    /// The eye group alone, kept at its seated spot inside the body's
+    /// transform chain. `squash` flattens each eye to the `blink` track's
+    /// mid-close scaleY so the app can swap this raster in for blink frames.
+    Eyes { squash: bool },
+}
+
 /// Assembles one SVG document. Component bodies land in `<defs>` once and
 /// every reference emits a `<use>`; `defs` elements nested in variants hoist
 /// their children (gradients) into the shared section keyed by `id`.
@@ -441,16 +458,18 @@ struct Renderer<'a> {
     style: &'a Style,
     picks: HashMap<&'a str, Pick<'a>>,
     palette: Palette<'a>,
+    split: GazeSplit,
     defs: Vec<String>,
     defined: HashSet<&'a str>,
 }
 
 impl<'a> Renderer<'a> {
-    fn new(style: &'a Style, seed: &'a str) -> Self {
+    fn new(style: &'a Style, seed: &'a str, split: GazeSplit) -> Self {
         Self {
             style,
             picks: resolve(style, seed),
             palette: Palette::new(style, seed),
+            split,
             defs: Vec::new(),
             defined: HashSet::new(),
         }
@@ -538,7 +557,36 @@ impl<'a> Renderer<'a> {
         if self.defined.insert(name) {
             let mut body = String::new();
             if let Some(variant) = component.variants.get(variant) {
-                self.write_elements(&mut body, &variant.elements);
+                let elements: Vec<&Element> = variant
+                    .elements
+                    .iter()
+                    .filter(|element| {
+                        // Only the canvas-level `shape` body splits: `Body`
+                        // keeps its literal elements, `Eyes` keeps the nested
+                        // `spacing` component that seats the eye pair.
+                        name != "shape"
+                            || match self.split {
+                                GazeSplit::Full => true,
+                                GazeSplit::Body => {
+                                    element.kind.as_deref() != Some("component")
+                                }
+                                GazeSplit::Eyes { .. } => {
+                                    element.kind.as_deref() == Some("component")
+                                }
+                            }
+                    })
+                    .collect();
+                for element in elements {
+                    self.write_element(&mut body, element);
+                }
+            }
+            // `blink` scales each eye about its own center; every eye variant
+            // is drawn in the shared 16×16 box, so wrapping the def body once
+            // squashes both placed eyes around (8, 8).
+            if name == "eyes" && self.split == (GazeSplit::Eyes { squash: true }) {
+                body = format!(
+                    "<g transform=\"translate(8 8) scale(1 0.06) translate(-8 -8)\">{body}</g>"
+                );
             }
             self.defs.push(format!("<g id=\"{name}\">{body}</g>"));
         }
@@ -611,10 +659,36 @@ pub(super) fn avatar_svg_for_style(seed: &str, style: AvatarStyle, bucket: u32) 
     }
 }
 
+/// A Gaze face split into the layers the animated composition needs: the
+/// body alone, the eye group at its seated spot, and the eye group mid-blink.
+/// Every layer is a full-canvas document, so the app overlays them at the
+/// avatar's rendered size with no coordinate mapping.
+pub(super) struct GazeLayers {
+    pub body: Vec<u8>,
+    pub eyes: Vec<u8>,
+    pub eyes_closed: Vec<u8>,
+}
+
+pub(super) fn gaze_layers(seed: &str) -> GazeLayers {
+    GazeLayers {
+        body: dicebear_svg_split(AvatarStyle::Gaze, seed, GazeSplit::Body),
+        eyes: dicebear_svg_split(AvatarStyle::Gaze, seed, GazeSplit::Eyes { squash: false }),
+        eyes_closed: dicebear_svg_split(
+            AvatarStyle::Gaze,
+            seed,
+            GazeSplit::Eyes { squash: true },
+        ),
+    }
+}
+
 /// The same face DiceBear's API returns, generated without network or I/O.
 fn dicebear_svg(style: AvatarStyle, seed: &str) -> Vec<u8> {
+    dicebear_svg_split(style, seed, GazeSplit::Full)
+}
+
+fn dicebear_svg_split(style: AvatarStyle, seed: &str, split: GazeSplit) -> Vec<u8> {
     let style_def = dicebear_style(style);
-    let mut renderer = Renderer::new(style_def, seed);
+    let mut renderer = Renderer::new(style_def, seed, split);
     let mut body = String::with_capacity(4096);
     for element in &style_def.canvas.elements {
         renderer.write_element(&mut body, element);
