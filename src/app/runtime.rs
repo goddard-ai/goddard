@@ -6463,21 +6463,10 @@ impl Waku {
         if !submission.hidden
             && let Some(command) = self.composer_boss_command()
         {
-            // Submission clears the deliverable page, so capture its routing
-            // before extracting the boss command's attachment.
-            let queue_background = self.live_deliverable_page().is_some();
             if let Some(owner) = self.composer_voice_pad_owner() {
                 self.retire_press_to_talk_bubble(owner, cx);
             }
-            let (session_id, submission) =
-                self.boss_command_submission_parts(command, submission, cx);
-            self.submit_composer_submission_to_with_canned(
-                session_id,
-                submission,
-                None,
-                queue_background,
-                cx,
-            );
+            self.submit_boss_composer_command(command, submission, false, cx);
             return;
         }
         let Some(session) = self.selected_session() else {
@@ -6576,7 +6565,7 @@ impl Waku {
         );
     }
 
-    fn submit_composer_submission_to_with_canned(
+    pub(super) fn submit_composer_submission_to_with_canned(
         &mut self,
         session_id: Uuid,
         submission: ComposerSubmission,
@@ -6646,9 +6635,7 @@ impl Waku {
         if !submission.hidden
             && let Some(command) = self.composer_boss_command()
         {
-            let (session_id, submission) =
-                self.boss_command_submission_parts(command, submission, cx);
-            self.steer_session_submission(session_id, submission, cx);
+            self.submit_boss_composer_command(command, submission, true, cx);
             return;
         }
         let Some(session_id) = self.state.selected_session else {

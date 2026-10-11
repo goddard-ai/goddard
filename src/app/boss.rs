@@ -1061,6 +1061,49 @@ pub(super) enum BossCommandContext {
     },
 }
 
+/// Keep the accepted draft and its armed context together while asking the
+/// owning daemon for the current chat. Pushes are only a cache hint here.
+struct BossComposerSend {
+    command: BossCommand,
+    submission: ComposerSubmission,
+}
+
+impl BossCommand {
+    fn resolve(
+        &mut self,
+        operation: BossOperation,
+        mut request: impl FnMut(waku_client::Command) -> anyhow::Result<waku_client::ResponsePayload>,
+    ) -> anyhow::Result<(AgentSession, Project)> {
+        let waku_client::ResponsePayload::Boss {
+            result: BossResult::Session { session, project },
+        } = request(waku_client::Command::Boss { operation })?
+        else {
+            anyhow::bail!("invalid Boss chat response");
+        };
+        anyhow::ensure!(project.id == self.identity.id, "Boss identity changed");
+        // Open returns a list projection. Hydrate before preparing a runtime
+        // so the new chat keeps its permissions, model options and handoff.
+        let waku_client::ResponsePayload::Session {
+            session: Some(hydrated),
+        } = request(waku_client::Command::HydrateSession {
+            session_id: session.id,
+        })?
+        else {
+            anyhow::bail!("the active Boss chat is unavailable");
+        };
+        anyhow::ensure!(
+            hydrated.id == session.id
+                && hydrated.project_id == project.id
+                && hydrated.boss_managed
+                && hydrated.planning.is_none()
+                && hydrated.archived_at.is_none(),
+            "the active Boss chat changed while opening"
+        );
+        self.session_id = hydrated.id;
+        Ok((hydrated, *project))
+    }
+}
+
 /// The persona form behind the detail pane's deliberate Edit mode —
 /// `persona` is `Uuid::nil()` while a new role is being drafted.
 struct BossEditor {
@@ -2768,6 +2811,112 @@ impl Waku {
             // Drained ahead of the attachment read — unreachable here.
             BossCommandContext::MemoryFeedback(_) => return None,
         })
+    }
+
+    /// Resolve an armed send on its owning daemon before any runtime-scoped
+    /// send or queue decision. Neither Boss nor catalog pushes need to arrive.
+    pub(super) fn submit_boss_composer_command(
+        &mut self,
+        command: BossCommand,
+        submission: ComposerSubmission,
+        steer: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let restore_session = self.state.selected_session.unwrap_or(command.session_id);
+        let Some(key) =
+            self.boss_ui.states.iter().find_map(|(key, state)| {
+                (state.identity.id == command.identity.id).then_some(*key)
+            })
+        else {
+            self.restore_composer_submission(restore_session, submission, cx);
+            return;
+        };
+        let Some(client) = self.daemons.supervisor(key).map(|daemon| daemon.client()) else {
+            self.restore_composer_submission(restore_session, submission, cx);
+            self.show_toast(tr!("boss.unreachable"));
+            return;
+        };
+        let cached = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == command.session_id);
+        let operation = BossOperation::Open {
+            provider: cached
+                .map(|session| session.provider)
+                .unwrap_or(ProviderKind::Codex),
+            model: cached.and_then(|session| session.model.clone()),
+            mode: cached
+                .map(|session| session.runtime_mode)
+                .unwrap_or_default(),
+        };
+        let queue_background = self.live_deliverable_page().is_some();
+        let old = command.session_id;
+        let mut command = command;
+        cx.spawn(async move |this, cx| {
+            let (command, result) = cx
+                .background_executor()
+                .spawn(async move {
+                    let result = command.resolve(operation, |command| {
+                        client.request(Uuid::nil(), Uuid::nil(), command)
+                    });
+                    (command, result)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let send = BossComposerSend {
+                    command,
+                    submission,
+                };
+                let (session, project) = match result {
+                    Ok(opened) => opened,
+                    Err(error) => {
+                        // No context was drained or disarmed yet: restore the
+                        // original draft on its employee/deliverable surface.
+                        this.restore_composer_submission(restore_session, send.submission, cx);
+                        this.show_toast(tr!("boss.failed", error = error));
+                        cx.notify();
+                        return;
+                    }
+                };
+                let id = session.id;
+                this.daemons.claim_project(project.id, key);
+                this.boss_ui.projects.insert(project.id, project);
+                this.daemons.claim_session(id, key);
+                if let Some(existing) = this.state.sessions.iter_mut().find(|entry| entry.id == id)
+                {
+                    // Keep newer live events if an attach beat this snapshot.
+                    if !existing.detail_loaded {
+                        *existing = session;
+                    }
+                } else {
+                    this.state.sessions.push(session);
+                }
+                if old != id {
+                    this.migrate_voice_scratchpad(old, id);
+                    this.migrate_boss_composer_draft(old, id, cx);
+                }
+                if let Some(state) = this.boss_ui.states.get_mut(&key)
+                    && state.session_id == Some(old)
+                {
+                    state.session_id = Some(id);
+                }
+                let (id, submission) =
+                    this.boss_command_submission_parts(send.command, send.submission, cx);
+                if steer && !queue_background {
+                    this.steer_session_submission(id, submission, cx);
+                } else {
+                    this.submit_composer_submission_to_with_canned(
+                        id,
+                        submission,
+                        None,
+                        queue_background,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
     }
 
     /// The armed boss command's shared landing: the context attachment
@@ -10557,6 +10706,174 @@ mod tests {
         session.boss_managed = true;
         session.archived_at = archived.then_some(1);
         session
+    }
+
+    fn resolve_composer_without_rotation_pushes(context: BossCommandContext) -> BossComposerSend {
+        let identity = boss_state_for_queue_test().identity;
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        // Both app caches still describe the pre-rotation chat. The old
+        // resolver cannot discover the replacement from this snapshot.
+        let cached = vec![boss_chat_session(identity.id, old, false)];
+        assert_eq!(
+            live_boss_chat_session(&cached, &HashSet::from([identity.id]), &HashMap::new(), old),
+            old
+        );
+        let mut active = boss_chat_session(identity.id, next, false);
+        active.reasoning_effort = Some("high".into());
+        active.pending_provider_context = Some("rotation handoff".into());
+        let mut project = Project::from_path(std::env::temp_dir());
+        project.id = identity.id;
+        let mut submission = ComposerSubmission::plain("keep this draft".into());
+        submission.display_content = Some("visible draft".into());
+        submission.human_content = Some("user draft".into());
+        let mut send = BossComposerSend {
+            command: BossCommand {
+                session_id: old,
+                identity,
+                context,
+            },
+            submission,
+        };
+        let mut requests = 0;
+        let (resolved, _) = send
+            .command
+            .resolve(
+                BossOperation::Open {
+                    provider: ProviderKind::Codex,
+                    model: None,
+                    mode: Default::default(),
+                },
+                |command| {
+                    requests += 1;
+                    match command {
+                        waku_client::Command::Boss {
+                            operation: BossOperation::Open { .. },
+                        } => {
+                            assert_eq!(requests, 1);
+                            Ok(waku_client::ResponsePayload::Boss {
+                                result: BossResult::Session {
+                                    session: Box::new(active.list_projection()),
+                                    project: Box::new(project.clone()),
+                                },
+                            })
+                        }
+                        waku_client::Command::HydrateSession { session_id } => {
+                            assert_eq!(requests, 2);
+                            assert_eq!(session_id, next);
+                            Ok(waku_client::ResponsePayload::Session {
+                                session: Some(active.clone()),
+                            })
+                        }
+                        _ => panic!("resolve before sending any runtime-scoped command"),
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(requests, 2);
+        assert_eq!(send.command.session_id, next);
+        assert_eq!(resolved.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            resolved.pending_provider_context.as_deref(),
+            Some("rotation handoff")
+        );
+        assert_eq!(send.submission.prompt, "keep this draft");
+        assert_eq!(
+            send.submission.display_content.as_deref(),
+            Some("visible draft")
+        );
+        assert_eq!(send.submission.human_content.as_deref(), Some("user draft"));
+        send
+    }
+
+    #[test]
+    fn employee_composer_rotation_without_pushes_resolves_active_chat_and_keeps_context() {
+        let employee = Uuid::new_v4();
+        let send = resolve_composer_without_rotation_pushes(BossCommandContext::Employee(employee));
+        assert!(matches!(send.command.context, BossCommandContext::Employee(id) if id == employee));
+    }
+
+    #[test]
+    fn deliverable_composer_rotation_without_pushes_resolves_active_chat_and_keeps_context() {
+        let path = PathBuf::from("/boss/reports/summary.md");
+        let send = resolve_composer_without_rotation_pushes(BossCommandContext::Deliverable {
+            path: path.clone(),
+            name: "Summary".into(),
+            directory: false,
+        });
+        assert!(
+            matches!(send.command.context, BossCommandContext::Deliverable {
+            path: actual, name, directory: false,
+        } if actual == path && name == "Summary")
+        );
+    }
+
+    #[test]
+    fn composer_rotation_lookup_failure_keeps_draft_and_armed_context() {
+        let employee = Uuid::new_v4();
+        let old = Uuid::new_v4();
+        let mut send = BossComposerSend {
+            command: BossCommand {
+                session_id: old,
+                identity: boss_state_for_queue_test().identity,
+                context: BossCommandContext::Employee(employee),
+            },
+            submission: ComposerSubmission::plain("keep this draft".into()),
+        };
+        assert!(
+            send.command
+                .resolve(
+                    BossOperation::Open {
+                        provider: ProviderKind::Codex,
+                        model: None,
+                        mode: Default::default()
+                    },
+                    |_| anyhow::bail!("offline"),
+                )
+                .is_err()
+        );
+        assert_eq!(send.command.session_id, old);
+        assert_eq!(send.submission.prompt, "keep this draft");
+        assert!(matches!(send.command.context, BossCommandContext::Employee(id) if id == employee));
+    }
+
+    #[test]
+    fn composer_rotation_rejects_a_chat_archived_during_lookup() {
+        let identity = boss_state_for_queue_test().identity;
+        let old = Uuid::new_v4();
+        let next = boss_chat_session(identity.id, Uuid::new_v4(), false);
+        let mut project = Project::from_path(std::env::temp_dir());
+        project.id = identity.id;
+        let mut command = BossCommand {
+            session_id: old,
+            identity,
+            context: BossCommandContext::Employee(Uuid::new_v4()),
+        };
+        let result = command.resolve(
+            BossOperation::Open {
+                provider: ProviderKind::Codex,
+                model: None,
+                mode: Default::default(),
+            },
+            |request| match request {
+                waku_client::Command::Boss { .. } => Ok(waku_client::ResponsePayload::Boss {
+                    result: BossResult::Session {
+                        session: Box::new(next.list_projection()),
+                        project: Box::new(project.clone()),
+                    },
+                }),
+                waku_client::Command::HydrateSession { .. } => {
+                    let mut archived = next.clone();
+                    archived.archived_at = Some(1);
+                    Ok(waku_client::ResponsePayload::Session {
+                        session: Some(archived),
+                    })
+                }
+                _ => panic!("no runtime redirect"),
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(command.session_id, old);
     }
 
     #[test]
