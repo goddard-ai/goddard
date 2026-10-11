@@ -241,13 +241,42 @@ impl WakuBackend {
         } else {
             None
         };
-        let prepared_plan = self.prepare_plan_delivery(
-            session_id,
-            runtime_id,
-            provider,
-            &options,
-            employee_snapshot.as_ref(),
-        )?;
+        let prepared_plan = self
+            .prepare_plan_delivery(
+                session_id,
+                runtime_id,
+                provider,
+                &options,
+                employee_snapshot.as_ref(),
+            )
+            .map_err(|error| {
+                if let Some(binding) = employee_snapshot
+                    .as_ref()
+                    .filter(|employee| {
+                        employee.assignment_kind
+                            == waku_protocol::boss::PlanAssignmentKind::Implementation
+                    })
+                    .and_then(|employee| employee.plan_binding.clone())
+                {
+                    let failure = super::plan_delivery::classify_plan_failure(&error);
+                    if let Err(record) = self.boss.record_plan_readiness(
+                        session_id,
+                        waku_protocol::boss::PlanReadiness {
+                            binding,
+                            attempt: runtime_id,
+                            runtime_generation: runtime_id,
+                            phase: waku_protocol::boss::PlanReadinessPhase::Blocked,
+                            delivered: false,
+                            acknowledged: false,
+                            failure: Some(failure),
+                        },
+                        true,
+                    ) {
+                        eprintln!("could not record required-plan preparation blocker: {record:#}");
+                    }
+                }
+                error
+            })?;
         // A sandboxed session runs its provider inside a shuru VM — never on
         // the host. Every setup failure fails the task rather than silently
         // falling back to a local process.

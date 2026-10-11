@@ -16054,3 +16054,103 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
+    use waku_protocol::boss::{
+        PlanContractError, PlanFailureKind, PlanReadiness, PlanReadinessPhase,
+    };
+    let root = std::env::temp_dir().join(format!("plan-blocker-receipt-{}", Uuid::new_v4()));
+    let (backend, supervisor, session, _, _) = employee_finish_fixture(&root);
+    let plan = boss_plan("plans/blocker-receipt.md", &[]);
+    backend.boss.add_plan(plan.clone()).unwrap();
+    let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+    backend
+        .boss
+        .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+        .unwrap();
+    backend
+        .boss
+        .set_employee_plan(session, Some(Some(plan.plan_file)), None)
+        .unwrap();
+    let binding = backend
+        .boss
+        .employee(session)
+        .unwrap()
+        .plan_binding
+        .unwrap();
+    let notice = Uuid::new_v4();
+    let readiness = PlanReadiness {
+        binding: binding.clone(),
+        attempt: notice,
+        runtime_generation: Uuid::new_v4(),
+        phase: PlanReadinessPhase::Blocked,
+        delivered: false,
+        acknowledged: false,
+        failure: Some(PlanContractError {
+            kind: PlanFailureKind::RuntimeAuthentication,
+            detail: "Runtime authentication failed; location and permissions unknown".into(),
+        }),
+    };
+    backend
+        .boss
+        .record_plan_readiness(session, readiness.clone(), true)
+        .unwrap();
+    backend.agent.revoke_session(session);
+    backend.deliver_plan_blocker_notifications();
+    backend.deliver_plan_blocker_notifications();
+    let employee = backend.boss.employee(session).unwrap();
+    assert_eq!(employee.plan_blockers.len(), 1);
+    assert!(employee.plan_blockers[0].supervisor_notified_at.is_some());
+    assert_eq!(employee.plan_readiness.unwrap(), readiness);
+    let mut state = backend.task_state.lock();
+    let target = state.session_mut(supervisor).unwrap();
+    backend.task_store.hydrate(target).unwrap();
+    assert_eq!(
+        target
+            .queued_messages
+            .iter()
+            .filter(|m| m.id == notice)
+            .count()
+            + target.messages.iter().filter(|m| m.id == notice).count(),
+        1
+    );
+    drop(state);
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let retry = waku_protocol::boss::BossOperation::RetryPlanReview {
+        session_id: session,
+    };
+    assert!(
+        backend
+            .handle_boss_operation(Some(Uuid::new_v4()), retry.clone(), &EventSink::detached())
+            .is_err()
+    );
+    assert_eq!(
+        backend
+            .boss
+            .employee(session)
+            .unwrap()
+            .plan_readiness
+            .as_ref()
+            .unwrap()
+            .attempt,
+        notice
+    );
+    backend
+        .handle_boss_operation(None, retry, &EventSink::detached())
+        .unwrap();
+    let retried = backend.boss.employee(session).unwrap();
+    assert_eq!(
+        retried.lifecycle(),
+        waku_protocol::boss::EmployeeLifecycle::Queued
+    );
+    assert_eq!(retried.plan_binding.as_ref(), Some(&binding));
+    assert!(retried.plan_readiness.is_none());
+    assert_eq!(retried.plan_blockers.len(), 1);
+    assert!(!retried.ticket.unwrap().pending_prompts.is_empty());
+    backend.shutdown();
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

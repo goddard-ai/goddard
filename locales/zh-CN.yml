@@ -3482,3 +3482,45 @@ composer.dictation_retry: 激活麦克风以重试已保存的录音。
 press_to_talk.retry_recording: 再次按住并松开以重试已保存的录音。
 voice_scratchpad.recording_retained: 转写失败 — 录音已保存，可重试
 composer.dictation_return_to_retry: 返回原聊天并激活麦克风，以重试已保存的录音。
+
+boss.plan_research_only: "Draft — research only"
+
+boss.plan_blocked: "Blocked"
+
+boss.plan_reviewing: "Reviewing"
+
+boss.plan_ready: "Ready"
+
+boss.plan_preparing: "Preparing"
+
+boss.plan_readiness_summary: "Plan readiness: %{phase} · approved revision %{revision}"
+
+boss.plan_revision_unverified: "unverified"
+
+boss.plan_readiness: "Plan readiness"
+
+boss.plan_binding: "Bound owner / plan / SHA-256"
+
+boss.plan_delivery: "Delivery and acknowledgement"
+
+boss.plan_delivery_detail: "Complete delivery: %{delivered} · Revision acknowledged: %{acknowledged}"
+
+boss.plan_attempt: "Attempt / runtime generation"
+
+boss.plan_recovery: "Recovery required"
+
+boss.plan_blocker_receipt: "Blocker receipt visible here"
+
+boss.plan_blocker_notified: "Recorded · Supervisor notified (not human-read)"
+
+boss.plan_blocker_recorded: "Recorded · Supervisor notification pending"
+
+boss.plan_admission: "Admission"
+
+boss.plan_open_bound: "Open plan"
+
+boss.plan_retry: "Retry plan review"
+
+boss.plan_retry_hint: "Repair the cause first. Start a fresh review of the same approved revision; preserve the brief and existing work."
+
+boss.plan_admission_not_evaluated: Admission not evaluated while the required plan is blocked

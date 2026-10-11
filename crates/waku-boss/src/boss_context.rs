@@ -696,6 +696,8 @@ mod tests {
         BossEmployee {
             assignment_kind: Default::default(),
             plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
             session_id,
             supervisor_id,
             identity: BossIdentity {

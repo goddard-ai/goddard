@@ -1,8 +1,8 @@
 //! Exact approved content and assignment authority; runtime adapters own delivery.
 use super::*;
 use waku_protocol::boss::{
-    ApprovedPlanRevision, PlanAssignmentKind, PlanBinding, PlanContractError, PlanFailureKind,
-    PlanReview,
+    ApprovedPlanRevision, PlanAssignmentKind, PlanBinding, PlanBlockerNotice, PlanContractError,
+    PlanFailureKind, PlanReadiness, PlanReadinessPhase, PlanReview,
 };
 
 type ContractResult<T> = Result<T, PlanContractError>;
@@ -19,6 +19,130 @@ fn digest(content: &str) -> String {
 }
 
 impl BossService {
+    /// Trusted controller projection, never exposed as an employee operation.
+    /// Replacement starts are explicit; late events cannot alter current readiness.
+    pub fn record_plan_readiness(
+        &self,
+        session: Uuid,
+        readiness: PlanReadiness,
+        start: bool,
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            let employee = state
+                .employees
+                .iter_mut()
+                .find(|e| e.session_id == session)
+                .ok_or_else(|| anyhow!("required-plan employee missing"))?;
+            anyhow::ensure!(
+                !employee.expired && employee.assignment_kind == PlanAssignmentKind::Implementation,
+                "required-plan principal is no longer active"
+            );
+            anyhow::ensure!(
+                employee.plan_binding.is_some(),
+                "required-plan binding missing"
+            );
+            let binding = readiness.binding.clone();
+            if start {
+                anyhow::ensure!(
+                    employee.plan_binding.as_ref() == Some(&binding),
+                    "required-plan start binding changed"
+                );
+            }
+            if !start {
+                anyhow::ensure!(
+                    employee
+                        .plan_readiness
+                        .as_ref()
+                        .is_some_and(|current| current.attempt == readiness.attempt
+                            && current.runtime_generation == readiness.runtime_generation),
+                    "required-plan report belongs to a retired attempt"
+                );
+            }
+            if !start {
+                anyhow::ensure!(
+                    !employee
+                        .plan_readiness
+                        .as_ref()
+                        .is_some_and(|r| r.phase == PlanReadinessPhase::Blocked)
+                        || readiness.phase == PlanReadinessPhase::Blocked,
+                    "blocked attempt requires fresh review"
+                );
+            }
+            if readiness.phase == PlanReadinessPhase::Blocked {
+                let error = readiness
+                    .failure
+                    .clone()
+                    .ok_or_else(|| anyhow!("plan blocker requires a failure"))?;
+                if !employee
+                    .plan_blockers
+                    .iter()
+                    .any(|notice| notice.id == readiness.attempt)
+                {
+                    employee.plan_blockers.push(PlanBlockerNotice {
+                        id: readiness.attempt,
+                        attempt: readiness.attempt,
+                        runtime_generation: readiness.runtime_generation,
+                        binding,
+                        error: error.clone(),
+                        recorded_at: waku_protocol::model::unix_time(),
+                        supervisor_notified_at: None,
+                    });
+                }
+                employee.blocker = Some(error.detail);
+            } else if start
+                && employee
+                    .plan_readiness
+                    .as_ref()
+                    .is_some_and(|r| r.phase == PlanReadinessPhase::Blocked)
+            {
+                employee.blocker = None;
+            }
+            employee.plan_readiness = Some(readiness);
+            Ok(())
+        })
+    }
+
+    /// Replay a controller's durable notice without replacing current readiness.
+    pub fn retain_plan_blocker(
+        &self,
+        session: Uuid,
+        notice: PlanBlockerNotice,
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            anyhow::ensure!(
+                notice.binding.owner_id == state.identity.id,
+                "foreign plan blocker owner"
+            );
+            let employee = state
+                .employees
+                .iter_mut()
+                .chain(state.retired_employees.iter_mut())
+                .find(|e| e.session_id == session)
+                .ok_or_else(|| anyhow!("plan blocker employee missing"))?;
+            if !employee.plan_blockers.iter().any(|n| n.id == notice.id) {
+                employee.plan_blockers.push(notice);
+            }
+            Ok(())
+        })
+    }
+
+    pub fn plan_blocker_notified(&self, session: Uuid, id: Uuid) -> anyhow::Result<()> {
+        self.update(|state| {
+            if let Some(notice) = state
+                .employees
+                .iter_mut()
+                .chain(state.retired_employees.iter_mut())
+                .find(|e| e.session_id == session)
+                .and_then(|e| e.plan_blockers.iter_mut().find(|n| n.id == id))
+            {
+                notice
+                    .supervisor_notified_at
+                    .get_or_insert(waku_protocol::model::unix_time());
+            }
+            Ok(())
+        })
+    }
+
     /// Preview and approval both read through the same validated Boss-file path.
     pub fn preview_plan(&self, reference: &str) -> anyhow::Result<(PlanReview, String)> {
         let state = self.state.lock();
@@ -489,6 +613,95 @@ mod tests {
 
     fn kind(error: anyhow::Error) -> PlanFailureKind {
         error.downcast::<PlanContractError>().unwrap().kind
+    }
+
+    #[test]
+    fn plan_readiness_blocker_is_durable_deduplicated_and_attempt_scoped() {
+        let fixture = Fixture::new();
+        let plan = fixture.plan("blocker", "approved bytes");
+        let plan = fixture.approve(&plan, 1);
+        let employee = fixture.employee(&plan, PlanAssignmentKind::Implementation);
+        let session = employee.session_id;
+        let binding = employee.plan_binding.clone().unwrap();
+        fixture.service.add_employee(employee).unwrap();
+        let mut readiness = PlanReadiness {
+            binding,
+            attempt: Uuid::new_v4(),
+            runtime_generation: Uuid::new_v4(),
+            phase: PlanReadinessPhase::Reviewing,
+            delivered: true,
+            acknowledged: false,
+            failure: None,
+        };
+        fixture
+            .service
+            .record_plan_readiness(session, readiness.clone(), true)
+            .unwrap();
+        readiness.phase = PlanReadinessPhase::Blocked;
+        readiness.failure = Some(failure(
+            PlanFailureKind::RuntimeAuthentication,
+            "Runtime authentication failed; retry the binding",
+        ));
+        fixture
+            .service
+            .record_plan_readiness(session, readiness.clone(), false)
+            .unwrap();
+        fixture
+            .service
+            .record_plan_readiness(session, readiness.clone(), false)
+            .unwrap();
+        let restored = BossService::open(fixture.root.clone()).unwrap();
+        let blocked = restored.employee(session).unwrap();
+        assert_eq!(blocked.plan_blockers.len(), 1);
+        assert_eq!(blocked.plan_readiness.as_ref().unwrap(), &readiness);
+        assert!(blocked.plan_blockers[0].supervisor_notified_at.is_none());
+        let mut forged_success = readiness.clone();
+        forged_success.phase = PlanReadinessPhase::Ready;
+        forged_success.failure = None;
+        assert!(
+            restored
+                .record_plan_readiness(session, forged_success, false)
+                .is_err()
+        );
+        restored
+            .plan_blocker_notified(session, readiness.attempt)
+            .unwrap();
+        let historical = restored.employee(session).unwrap().plan_blockers[0].clone();
+        let mut replacement = readiness.clone();
+        replacement.attempt = Uuid::new_v4();
+        replacement.runtime_generation = Uuid::new_v4();
+        replacement.phase = PlanReadinessPhase::Preparing;
+        replacement.failure = None;
+        restored
+            .record_plan_readiness(session, replacement.clone(), true)
+            .unwrap();
+        assert!(
+            restored
+                .record_plan_readiness(session, readiness, false)
+                .is_err()
+        );
+        restored.retain_plan_blocker(session, historical).unwrap();
+        let current = restored.employee(session).unwrap();
+        assert_eq!(current.plan_readiness.as_ref().unwrap(), &replacement);
+        assert!(current.blocker.is_none());
+        assert_eq!(current.plan_blockers.len(), 1);
+        assert!(current.plan_blockers[0].supervisor_notified_at.is_some());
+        let mut blocked_again = current.plan_readiness.unwrap_or(replacement);
+        blocked_again.phase = PlanReadinessPhase::Blocked;
+        blocked_again.failure = Some(failure(
+            PlanFailureKind::RuntimeUnavailable,
+            "Runtime unavailable",
+        ));
+        restored
+            .record_plan_readiness(session, blocked_again, false)
+            .unwrap();
+        restored.clear_employee_blocker(session).unwrap();
+        let finished = restored
+            .begin_finishing(session, false, true, ExpiryCause::Finished)
+            .unwrap()
+            .unwrap();
+        assert_eq!(finished.expiry.unwrap().cause, ExpiryCause::Failed);
+        assert!(finished.blocker.is_some());
     }
 
     #[test]

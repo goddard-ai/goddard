@@ -910,6 +910,23 @@ impl WakuBackend {
                     Ok(BossResult::Saved)
                 })
             }
+            BossOperation::RetryPlanReview { session_id } => {
+                self.boss.with_operation_lock(|| {
+                    self.boss.require_control(caller, session_id)?;
+                    let employee = self.boss.employee(session_id).ok_or_else(|| anyhow!("employee missing"))?;
+                    anyhow::ensure!(employee.plan_readiness.as_ref().is_some_and(|r|
+                        r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked), "required-plan attempt is not blocked");
+                    if employee.expired {
+                        self.resume_employee(session_id)?;
+                    } else {
+                        self.retire_plan_runtime(session_id, events)?;
+                        self.requeue_employee(session_id, |ticket, _| {
+                            ticket.pending_prompts.push("Retry the same required-plan binding. Preserve existing work and complete fresh plan review before implementation.".into());
+                        })?;
+                    }
+                    Ok(BossResult::Saved)
+                })
+            }
             BossOperation::ReportBlocker { message } => {
                 let caller =
                     caller.ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;

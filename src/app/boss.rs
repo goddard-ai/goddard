@@ -3445,6 +3445,9 @@ impl Waku {
                     .child(SharedString::from(job_title.to_owned())),
             )
             .children(self.employee_assignment_popover(session_id, &theme, cx))
+            .children(self.boss_employee_record(session_id).and_then(|(key, employee)| {
+                self.employee_plan_recovery_controls(key, employee, "header", &theme, cx)
+            }))
             .children(
                 self.boss_employee_record(session_id)
                     .and_then(|(key, employee)| {
@@ -6464,6 +6467,7 @@ impl Waku {
             };
         }
         let blocker = employee.and_then(|employee| employee.blocker.clone());
+        let readiness = employee.and_then(boss_plan_readiness_label);
         let model_detail = if let Some((model_key, provider, model, effort)) =
             self.boss_ui.queued_model_targets.get(&id)
         {
@@ -6565,6 +6569,19 @@ impl Waku {
                             }),
                     ),
             )
+            .when_some(readiness, |row, readiness| {
+                row.child(
+                    div()
+                        .max_w(px(280.0))
+                        .truncate()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(readiness),
+                )
+            })
+            .children(employee.and_then(|employee| {
+                self.employee_plan_recovery_controls(key, employee, "row", &theme, cx)
+            }))
             .when_some(model_detail, |row, model| {
                 row.child(
                     div()
@@ -6765,6 +6782,91 @@ impl Waku {
                 .opacity(0.55)
         };
         Some(button.into_any_element())
+    }
+
+    #[track_caller]
+    fn employee_plan_recovery_controls(
+        &self,
+        key: DaemonKey,
+        employee: &waku_protocol::boss::BossEmployee,
+        slot: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let binding = employee.plan_binding.as_ref()?;
+        let blocked = employee
+            .plan_readiness
+            .as_ref()
+            .is_some_and(|r| r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked);
+        let plan_session = self.boss_ui.states.get(&key).and_then(|state| {
+            state
+                .planning
+                .iter()
+                .find(|plan| plan.id == binding.plan_id)
+                .map(|plan| plan.session_id)
+        });
+        let id = employee.session_id;
+        let mut controls = div().flex().gap(px(4.0));
+        if let Some(plan_session) = plan_session {
+            controls = controls.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "required-plan-open-{slot}-{id}"
+                    )))
+                    .tab_index(0)
+                    .px(px(7.0))
+                    .h(px(22.0))
+                    .rounded(px(8.0))
+                    .bg(theme.overlay)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .cursor_pointer()
+                    .focus_visible(|s| s.bg(theme.focus_highlight()))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_activation(cx, move |this, _, cx| {
+                        this.request_session_activation(
+                            plan_session,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        )
+                    })
+                    .child(tr!("boss.plan_open_bound")),
+            );
+        }
+        if blocked {
+            controls = controls.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "required-plan-retry-{slot}-{id}"
+                    )))
+                    .tab_index(0)
+                    .px(px(7.0))
+                    .h(px(22.0))
+                    .rounded(px(8.0))
+                    .bg(theme.overlay)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .cursor_pointer()
+                    .focus_visible(|s| s.bg(theme.focus_highlight()))
+                    .tooltip(Tooltip::text(tr!("boss.plan_retry_hint")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_activation(cx, move |this, _, cx| {
+                        if this.boss_ui.pending {
+                            this.show_toast(tr!("boss.loading"));
+                            cx.notify();
+                            return;
+                        }
+                        this.boss_request(
+                            key,
+                            BossOperation::RetryPlanReview { session_id: id },
+                            BossReply::Resume,
+                            cx,
+                        )
+                    })
+                    .child(tr!("boss.plan_retry")),
+            );
+        }
+        Some(controls.into_any_element())
     }
 
     /// The ellipsis popover an employee's top bar carries after its job
@@ -6994,7 +7096,7 @@ impl Waku {
             .map(|ticket| ticket.prompt.trim().to_owned())
             .filter(|prompt| !prompt.is_empty());
         let model = self.session_sidebar_model_detail(session);
-        [
+        let mut rows: Vec<(String, String)> = [
             brief.map(|brief| (tr!("boss.assignment_brief"), brief)),
             persona_name.map(|name| (tr!("boss.assignment_persona"), name)),
             Some((tr!("boss.assignment_model"), model)),
@@ -7011,7 +7113,57 @@ impl Waku {
         ]
         .into_iter()
         .flatten()
-        .collect()
+        .collect();
+        if let Some(label) = boss_plan_readiness_label(employee) {
+            rows.push((tr!("boss.plan_readiness"), label));
+        }
+        if let Some(binding) = &employee.plan_binding {
+            rows.push((
+                tr!("boss.plan_binding"),
+                format!(
+                    "{} / {} / {}",
+                    binding.owner_id,
+                    binding.plan_id,
+                    binding.content_digest.as_deref().unwrap_or("—")
+                ),
+            ));
+        }
+        if let Some(readiness) = &employee.plan_readiness {
+            rows.push((
+                tr!("boss.plan_delivery"),
+                tr!(
+                    "boss.plan_delivery_detail",
+                    delivered = readiness.delivered,
+                    acknowledged = readiness.acknowledged
+                ),
+            ));
+            rows.push((
+                tr!("boss.plan_attempt"),
+                format!("{} / {}", readiness.attempt, readiness.runtime_generation),
+            ));
+            if let Some(error) = &readiness.failure {
+                rows.push((tr!("boss.plan_recovery"), error.detail.clone()));
+            }
+            if let Some(notice) = employee
+                .plan_blockers
+                .iter()
+                .rev()
+                .find(|n| n.attempt == readiness.attempt)
+            {
+                rows.push((
+                    tr!("boss.plan_blocker_receipt"),
+                    if notice.supervisor_notified_at.is_some() {
+                        tr!("boss.plan_blocker_notified")
+                    } else {
+                        tr!("boss.plan_blocker_recorded")
+                    },
+                ));
+            }
+        }
+        if let Some(admission) = boss_queue_detail(employee, None) {
+            rows.push((tr!("boss.plan_admission"), admission));
+        }
+        rows
     }
 
     // ── Personas ─────────────────────────────────────────────────────────
@@ -9472,6 +9624,45 @@ fn employee_resume_action(employee: &waku_protocol::boss::BossEmployee) -> Emplo
     }
 }
 
+/// Keep required-plan progression separate from admission and never reuse a
+/// previous attempt's acknowledgement while a fresh ticket waits.
+pub(super) fn boss_plan_readiness_label(
+    employee: &waku_protocol::boss::BossEmployee,
+) -> Option<String> {
+    use waku_protocol::boss::{PlanAssignmentKind, PlanReadinessPhase};
+    if employee.assignment_kind == PlanAssignmentKind::Research && employee.plan_id.is_some() {
+        return Some(tr!("boss.plan_research_only"));
+    }
+    if employee.plan_binding.is_none() && employee.plan_id.is_none() {
+        return None;
+    }
+    let phase = if employee.ticket.as_ref().is_some_and(|ticket| {
+        ticket
+            .blocked_by
+            .iter()
+            .any(|b| matches!(b, waku_protocol::boss::AdmissionBlocker::Plan { .. }))
+    }) {
+        tr!("boss.plan_blocked")
+    } else {
+        match employee.plan_readiness.as_ref().map(|r| r.phase) {
+            Some(PlanReadinessPhase::Blocked) => tr!("boss.plan_blocked"),
+            Some(PlanReadinessPhase::Reviewing) => tr!("boss.plan_reviewing"),
+            Some(PlanReadinessPhase::Ready) => tr!("boss.plan_ready"),
+            _ => tr!("boss.plan_preparing"),
+        }
+    };
+    Some(tr!(
+        "boss.plan_readiness_summary",
+        phase = phase,
+        revision = employee
+            .plan_binding
+            .as_ref()
+            .and_then(|binding| binding.revision_id)
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| tr!("boss.plan_revision_unverified"))
+    ))
+}
+
 /// A queued employee's wait reason for the sidebar row tooltip and the
 /// Goals Pending row — the ticket's admission blocker when the scheduler
 /// recorded one, else a neutral admission label. `rank` is the employee's
@@ -9483,11 +9674,12 @@ fn boss_queue_detail(
     if employee.lifecycle() != waku_protocol::boss::EmployeeLifecycle::Queued {
         return None;
     }
-    let detail = match employee
-        .ticket
-        .as_ref()
-        .and_then(|ticket| ticket.blocked_by.first())
-    {
+    let detail = match employee.ticket.as_ref().and_then(|ticket| {
+        ticket
+            .blocked_by
+            .iter()
+            .find(|blocker| !matches!(blocker, waku_protocol::boss::AdmissionBlocker::Plan { .. }))
+    }) {
         Some(waku_protocol::boss::AdmissionBlocker::ModelLimit { used, limit }) => tr!(
             "boss.goals_queue_model",
             model = employee
@@ -9503,7 +9695,14 @@ fn boss_queue_detail(
         | Some(waku_protocol::boss::AdmissionBlocker::OutcomeWait { detail })
         | Some(waku_protocol::boss::AdmissionBlocker::EmployeeBase { detail }) => detail.clone(),
         None => {
-            if rank == Some(1) {
+            if employee.ticket.as_ref().is_some_and(|ticket| {
+                ticket
+                    .blocked_by
+                    .iter()
+                    .any(|b| matches!(b, waku_protocol::boss::AdmissionBlocker::Plan { .. }))
+            }) {
+                tr!("boss.plan_admission_not_evaluated")
+            } else if rank == Some(1) {
                 tr!("boss.goals_queue_admission")
             } else {
                 tr!("boss.goals_queue_earlier")
@@ -10058,6 +10257,8 @@ mod tests {
         waku_protocol::boss::BossEmployee {
             assignment_kind: Default::default(),
             plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
             session_id: Uuid::new_v4(),
             supervisor_id: Uuid::new_v4(),
             identity: BossIdentity {
@@ -10376,6 +10577,8 @@ mod tests {
         waku_protocol::boss::BossEmployee {
             assignment_kind: Default::default(),
             plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
             session_id,
             supervisor_id: Uuid::from_u128(u128::MAX),
             identity: BossIdentity {

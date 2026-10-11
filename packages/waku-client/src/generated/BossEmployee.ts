@@ -8,6 +8,8 @@ import type { EmployeeLifecycle } from "./EmployeeLifecycle";
 import type { PersonaPermissions } from "./PersonaPermissions";
 import type { PlanAssignmentKind } from "./PlanAssignmentKind";
 import type { PlanBinding } from "./PlanBinding";
+import type { PlanBlockerNotice } from "./PlanBlockerNotice";
+import type { PlanReadiness } from "./PlanReadiness";
 import type { SummonTicket } from "./SummonTicket";
 
 export type BossEmployee = { sessionId: string, supervisorId: string, identity: BossIdentity, jobTitle: string, personaId: string,
@@ -106,6 +108,14 @@ assignmentKind: PlanAssignmentKind,
  * Exact authority selected at acceptance; never upgraded by dispatch.
  */
 planBinding?: PlanBinding,
+/**
+ * Required-plan progression, independent of resource/outcome admission.
+ */
+planReadiness?: PlanReadiness,
+/**
+ * Durable attempt-attributed notices retained across runtime replacement.
+ */
+planBlockers?: Array<PlanBlockerNotice>,
 /**
  * The `PlanItem::id` inside `plan_id` the assignment serves — `None`
  * leaves the employee unallocated at the bottom of its plan group.

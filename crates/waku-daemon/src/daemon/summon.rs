@@ -270,6 +270,7 @@ impl WakuBackend {
         self.deliver_pending_agent_prompts();
         self.retire_dispatch_notifications();
         self.deliver_wave_notifications();
+        self.deliver_plan_blocker_notifications();
         loop {
             let heads = self.boss.queued_heads();
             let updates = self.boss.pending_resource_updates();
@@ -425,6 +426,7 @@ impl WakuBackend {
         };
         let session_id = employee.session_id;
         if let Err(error) = self.boss.validate_plan_binding(employee) {
+            self.record_queued_plan_failure(employee, error.clone())?;
             self.boss.record_blocked(
                 session_id,
                 vec![waku_protocol::boss::AdmissionBlocker::Plan { error }],
@@ -508,6 +510,7 @@ impl WakuBackend {
                 }
                 if let Some(error) = error.downcast_ref::<waku_protocol::boss::PlanContractError>()
                 {
+                    self.record_queued_plan_failure(employee, error.clone())?;
                     self.boss.record_blocked(
                         session_id,
                         vec![waku_protocol::boss::AdmissionBlocker::Plan {
@@ -980,6 +983,111 @@ impl WakuBackend {
                 .is_ok()
             {
                 let _ = self.boss.wave_outbox_mark_delivered(note.id);
+            }
+        }
+    }
+
+    fn record_queued_plan_failure(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        error: waku_protocol::boss::PlanContractError,
+    ) -> anyhow::Result<()> {
+        use waku_protocol::boss::{PlanReadiness, PlanReadinessPhase};
+        let Some(binding) = employee.plan_binding.clone() else {
+            return Ok(());
+        };
+        let attempt = employee
+            .plan_readiness
+            .as_ref()
+            .filter(|r| r.phase == PlanReadinessPhase::Blocked)
+            .map(|r| r.attempt)
+            .unwrap_or_else(Uuid::new_v4);
+        self.boss.record_plan_readiness(
+            employee.session_id,
+            PlanReadiness {
+                binding,
+                attempt,
+                runtime_generation: attempt,
+                phase: PlanReadinessPhase::Blocked,
+                delivered: false,
+                acknowledged: false,
+                failure: Some(error),
+            },
+            true,
+        )
+    }
+
+    /// Replay trusted controller notices independently of employee CLI credentials.
+    /// The notice id is also the durable supervisor message id.
+    pub(super) fn deliver_plan_blocker_notifications(&self) {
+        let document = self.boss.document();
+        let events = self.event_source.lock().clone();
+        for employee in document
+            .employees
+            .iter()
+            .chain(document.retired_employees.iter())
+        {
+            for notice in employee
+                .plan_blockers
+                .iter()
+                .filter(|n| n.supervisor_notified_at.is_none())
+            {
+                let Some(target) = self.boss.report_target_for(employee.supervisor_id) else {
+                    continue;
+                };
+                let already = {
+                    let mut state = self.task_state.lock();
+                    state
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.id == target)
+                        .is_some_and(|session| {
+                            self.task_store.hydrate(session).is_ok()
+                                && (session.queued_messages.iter().any(|m| m.id == notice.id)
+                                    || session.messages.iter().any(|m| m.id == notice.id))
+                        })
+                };
+                if already {
+                    let _ = self
+                        .boss
+                        .plan_blocker_notified(employee.session_id, notice.id);
+                    continue;
+                }
+                let prompt = format!(
+                    "Required-plan blocker {} recorded for employee {} ({}), attempt {}, runtime {}, plan {}, approved revision {:?}: {}. This notice belongs to that attempt; it does not change a replacement attempt's readiness.",
+                    notice.id,
+                    employee.identity.name,
+                    employee.session_id,
+                    notice.attempt,
+                    notice.runtime_generation,
+                    notice.binding.plan_id,
+                    notice.binding.revision_id,
+                    notice.error.detail
+                );
+                let trigger = crate::model::ReportTrigger::new(
+                    employee,
+                    crate::model::ReportTriggerKind::Blocker,
+                );
+                // A failed durable mirror may have left an in-memory enqueue.
+                // Only retry after removing that same id; persisted messages
+                // were already detected above.
+                self.agent.remove_queued(target, notice.id);
+                if self
+                    .queue_agent_prompt_with_id(
+                        target,
+                        prompt,
+                        Some(employee.session_id),
+                        true,
+                        Some(notice.id),
+                        Some(trigger),
+                        &events,
+                    )
+                    .is_ok()
+                {
+                    let _ = self
+                        .boss
+                        .plan_blocker_notified(employee.session_id, notice.id);
+                }
             }
         }
     }

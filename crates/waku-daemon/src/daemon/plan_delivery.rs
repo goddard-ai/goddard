@@ -3,22 +3,16 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
-use waku_protocol::boss::{ApprovedPlanRevision, PlanAssignmentKind};
+use waku_protocol::boss::{
+    ApprovedPlanRevision, PlanAssignmentKind, PlanContractError, PlanFailureKind, PlanReadiness,
+    PlanReadinessPhase as Phase,
+};
 
 const INLINE_BYTES: usize = 32 * 1024;
 const SECTION_BYTES: usize = 8 * 1024;
 
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
-}
-
-#[derive(Clone, Copy, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-enum Phase {
-    Preparing,
-    Reviewing,
-    Ready,
-    Blocked,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -36,6 +30,120 @@ struct Receipt {
     phase: Phase,
     failure: Option<String>,
     acknowledged: bool,
+    #[serde(default)]
+    delivered: bool,
+}
+
+impl Receipt {
+    fn blocker_instruction(&self) -> String {
+        format!(
+            "If required-plan access or CLI blocker reporting fails, report through this owned runtime by emitting a standalone line: PLAN-BLOCKER {} {} runtimeAuthentication (or runtimeUnavailable, artifactInaccessible, integrity, accessDenied). Never include secrets or private paths. This controller records and retries supervisor delivery independently of the CLI bearer.",
+            self.attempt, self.runtime_generation
+        )
+    }
+
+    fn reported_failure(&self, response: &str) -> Option<anyhow::Error> {
+        let prefix = format!("PLAN-BLOCKER {} {} ", self.attempt, self.runtime_generation);
+        response
+            .lines()
+            .find_map(|line| match line.trim().strip_prefix(&prefix)? {
+                "runtimeAuthentication" => Some(anyhow!(
+                    "plan runtime authentication failed: employee report"
+                )),
+                "runtimeUnavailable" => Some(anyhow!("plan runtime unavailable: employee report")),
+                "artifactInaccessible" => {
+                    Some(anyhow!("plan artifact inaccessible: employee report"))
+                }
+                "integrity" => Some(anyhow!("plan integrity failure: employee report")),
+                "accessDenied" => Some(anyhow!("plan access denied: employee report")),
+                _ => None,
+            })
+    }
+
+    fn readiness(&self) -> PlanReadiness {
+        PlanReadiness {
+            binding: waku_protocol::boss::PlanBinding {
+                owner_id: self.revision.review.owner_id,
+                plan_id: self.revision.review.plan_id,
+                revision_id: Some(self.revision.id),
+                content_digest: Some(self.revision.review.content_digest.clone()),
+            },
+            attempt: self.attempt,
+            runtime_generation: self.runtime_generation,
+            phase: self.phase,
+            delivered: self.delivered,
+            acknowledged: self.acknowledged,
+            failure: self
+                .failure
+                .as_ref()
+                .map(|error| classify_plan_failure(&anyhow!(error.clone()))),
+        }
+    }
+}
+
+/// Publish body-free diagnostics; raw I/O errors may contain private host paths.
+pub(super) fn classify_plan_failure(error: &anyhow::Error) -> PlanContractError {
+    if let Some(contract) = error.downcast_ref::<PlanContractError>() {
+        return contract.clone();
+    }
+    let text = format!("{error:#}");
+    let io_kind = error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind)
+    });
+    let (kind, detail) = if text.contains("authentication") {
+        (
+            PlanFailureKind::RuntimeAuthentication,
+            "Runtime authentication failed. Plan location and permission were not evaluated. Recover the runtime, then retry this binding.",
+        )
+    } else if text.contains("access denied")
+        || io_kind == Some(std::io::ErrorKind::PermissionDenied)
+    {
+        (
+            PlanFailureKind::AccessDenied,
+            "Required material access denied after authentication. Restore legitimate access or explicitly share the material, then retry.",
+        )
+    } else if io_kind == Some(std::io::ErrorKind::NotFound) {
+        (
+            PlanFailureKind::MissingPlan,
+            "Exact approved artifact is missing. Restore the approved copy or explicitly correct the binding, then retry.",
+        )
+    } else if text.contains("unsupported") {
+        (
+            PlanFailureKind::DeliveryUnsupported,
+            "Plan delivery unsupported. Select a supported local Codex CLI or Devin CLI runtime, then retry this binding.",
+        )
+    } else if text.contains("acknowledgement") {
+        (
+            PlanFailureKind::Acknowledgement,
+            "Complete matching revision acknowledgement was not received. Retry plan review; the implementation brief is retained.",
+        )
+    } else if text.contains("integrity") || text.contains("differs") {
+        (
+            PlanFailureKind::Integrity,
+            "Approved artifact differs from the bound revision. Restore the exact approved copy, then retry.",
+        )
+    } else if text.contains("authority changed") || text.contains("identity changed") {
+        (
+            PlanFailureKind::BindingChanged,
+            "Assignment authority changed. Resolve the binding or grants, then retry with fresh review.",
+        )
+    } else if text.contains("runtime") {
+        (
+            PlanFailureKind::RuntimeUnavailable,
+            "Runtime unavailable. Recover the runtime, then retry the same binding.",
+        )
+    } else {
+        (
+            PlanFailureKind::ArtifactInaccessible,
+            "Complete approved artifact could not be delivered or recorded. Repair delivery, then retry the same binding.",
+        )
+    };
+    PlanContractError {
+        kind,
+        detail: detail.into(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -64,6 +172,7 @@ pub(super) struct PlanGate {
     review: Mutex<Review>,
     validate: Box<dyn Fn() -> anyhow::Result<()> + Send + Sync>,
     dispatch: AuthorizedDispatch,
+    publish: Box<dyn Fn(&Receipt, bool) -> anyhow::Result<()> + Send + Sync>,
     driver: DriverHandle,
     events: EventSink,
     lifecycle: Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>,
@@ -97,6 +206,7 @@ impl Review {
 
     fn review_prompt(&self) -> String {
         let revision = &self.receipt.revision;
+        let reporting = self.receipt.blocker_instruction();
         let inline = if revision.content.len() <= INLINE_BYTES {
             format!(
                 "\nComplete approved text (identical to artifact):\n{}",
@@ -106,7 +216,7 @@ impl Review {
             String::new()
         };
         format!(
-            "Required approved-plan review only. The implementation brief is withheld. Read the COMPLETE read-only artifact at {}. Do no implementation work. This is a read-before-work obligation; native tool restrictions are not claimed.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\nRead every {}-byte section (last may be shorter); section SHA-256 values in order: {}. Acknowledge all sections only after reading them. Finish this review turn with exactly the following line, without other text:\n{}\nThe artifact remains the exact-version reread surface after compaction. Never substitute a source path, summary or newer revision.{}",
+            "Required approved-plan review only. The implementation brief is withheld. {reporting} Read the COMPLETE read-only artifact at {}. Do no implementation work. This is a read-before-work obligation; native tool restrictions are not claimed.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\nRead every {}-byte section (last may be shorter); section SHA-256 values in order: {}. Acknowledge all sections only after reading them. Finish this review turn with exactly the following line, without other text:\n{}\nThe artifact remains the exact-version reread surface after compaction. Never substitute a source path, summary or newer revision.{}",
             self.receipt.artifact.display(),
             revision.review.owner_id,
             revision.review.plan_id,
@@ -183,11 +293,16 @@ impl PlanGate {
         review.check_artifact()
     }
 
+    fn save(&self, review: &Review) -> anyhow::Result<()> {
+        review.save()?;
+        (self.publish)(&review.receipt, false)
+    }
+
     fn block(&self, review: &mut Review, error: anyhow::Error) {
         review.receipt.phase = Phase::Blocked;
         review.receipt.failure = Some(format!("{error:#}"));
         self.driver.cancel();
-        let persisted = review.save();
+        let persisted = self.save(review);
         let detail = match persisted {
             Ok(()) => format!(
                 "required-plan execution withheld: {error:#}; restart this attempt after repairing the cause"
@@ -208,7 +323,7 @@ impl PlanGate {
         // Persist each withheld command before checking authority, so failures
         // retain the brief and attachments rather than consuming user work.
         review.pending.push((prompt, attachments));
-        if let Err(error) = review.save() {
+        if let Err(error) = self.save(&review) {
             self.block(&mut review, error);
             return;
         }
@@ -225,7 +340,8 @@ impl PlanGate {
                 let sent = (self.dispatch)(
                     &self.driver,
                     format!(
-                        "Approved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
+                        "{}\nApproved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
+                        review.receipt.blocker_instruction(),
                         review.receipt.artifact.display(),
                         review.receipt.revision.id,
                         review.receipt.revision.review.content_digest,
@@ -241,12 +357,17 @@ impl PlanGate {
             review.pending.clear();
         } else if review.receipt.phase == Phase::Preparing {
             review.receipt.phase = Phase::Reviewing;
-            if let Err(error) = review.save() {
+            if let Err(error) = self.save(&review) {
                 self.block(&mut review, error);
                 return;
             }
             if let Err(error) = (self.dispatch)(&self.driver, review.review_prompt(), Vec::new()) {
                 self.block(&mut review, error);
+            } else {
+                review.receipt.delivered = true;
+                if let Err(error) = self.save(&review) {
+                    self.block(&mut review, error);
+                }
             }
         }
     }
@@ -282,21 +403,54 @@ impl PlanGate {
     /// drain follow-ups as though implementation had completed.
     pub(super) fn observe(&self, event: &DriverEvent) -> bool {
         let mut review = self.review.lock();
+        if let DriverEvent::TextDelta(text) = event {
+            if review.receipt.phase == Phase::Ready {
+                // Implementation reports can be long; retain a bounded tail
+                // so their final control notice remains observable.
+                review.response.push_str(text);
+                if review.response.len() > 64 * 1024 {
+                    let mut cut = review.response.len() - 64 * 1024;
+                    while !review.response.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    review.response.drain(..cut);
+                }
+            } else if review.response.len().saturating_add(text.len()) <= 64 * 1024 {
+                review.response.push_str(text);
+            } else {
+                review.response_complete = false;
+            }
+            if review.response.ends_with('\n') {
+                if let Some(error) = review.receipt.reported_failure(&review.response) {
+                    self.block(&mut review, error);
+                }
+            }
+        }
+        if matches!(event, DriverEvent::TurnFinished { .. }) {
+            if let Some(error) = review.receipt.reported_failure(&review.response) {
+                self.block(&mut review, error);
+            }
+        }
+        if review.receipt.phase == Phase::Ready && matches!(event, DriverEvent::ProcessExited) {
+            self.block(
+                &mut review,
+                anyhow!("plan runtime unavailable: owned runtime exited"),
+            );
+        }
         if review.receipt.phase == Phase::Ready {
+            if matches!(
+                event,
+                DriverEvent::TurnFinished { .. } | DriverEvent::TurnStarted
+            ) {
+                review.response.clear();
+                review.response_complete = true;
+            }
             return false;
         }
         if review.receipt.phase == Phase::Blocked {
             return matches!(event, DriverEvent::TurnFinished { .. });
         }
         match event {
-            DriverEvent::TextDelta(text) if review.receipt.phase == Phase::Reviewing => {
-                // A malformed/unbounded acknowledgement never becomes readiness.
-                if review.response.len().saturating_add(text.len()) <= 64 * 1024 {
-                    review.response.push_str(text);
-                } else {
-                    review.response_complete = false;
-                }
-            }
             DriverEvent::Error(_)
             | DriverEvent::LocalizedError { .. }
             | DriverEvent::ProcessExited => {
@@ -320,7 +474,7 @@ impl PlanGate {
                 }
                 review.receipt.acknowledged = true;
                 review.receipt.phase = Phase::Ready;
-                if let Err(error) = review.save() {
+                if let Err(error) = self.save(&review) {
                     self.block(&mut review, error);
                     return true;
                 }
@@ -339,7 +493,8 @@ impl PlanGate {
                 let sent = (self.dispatch)(
                     &self.driver,
                     format!(
-                        "Approved plan acknowledged. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\n\nImplementation assignment:\n{}",
+                        "{}\nApproved plan acknowledged. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\n\nImplementation assignment:\n{}",
+                        review.receipt.blocker_instruction(),
                         review.receipt.artifact.display(),
                         review.receipt.execution_workspace.display(),
                         prompt
@@ -351,6 +506,8 @@ impl PlanGate {
                     return true;
                 }
                 review.pending.clear();
+                review.response.clear();
+                review.response_complete = true;
                 return true;
             }
             _ => {}
@@ -643,6 +800,23 @@ impl WakuBackend {
             let stored: StoredDelivery = serde_json::from_slice(&bytes).context(
                 "plan recovery failed: delivery record is corrupt; preserve the prior attempt",
             )?;
+            if stored.receipt.assignment == session_id && stored.receipt.phase == Phase::Blocked {
+                let readiness = stored.receipt.readiness();
+                if let Some(error) = readiness.failure {
+                    self.boss.retain_plan_blocker(
+                        session_id,
+                        waku_protocol::boss::PlanBlockerNotice {
+                            id: readiness.attempt,
+                            attempt: readiness.attempt,
+                            runtime_generation: readiness.runtime_generation,
+                            binding: readiness.binding,
+                            error,
+                            recorded_at: crate::model::unix_time(),
+                            supervisor_notified_at: None,
+                        },
+                    )?;
+                }
+            }
             if stored.receipt.assignment == session_id
                 && stored.receipt.execution_project == execution_project
                 && stored.receipt.revision.id == revision.id
@@ -708,6 +882,7 @@ impl WakuBackend {
                 phase: Phase::Preparing,
                 failure: None,
                 acknowledged: false,
+                delivered: false,
             },
             pending,
             response: String::new(),
@@ -715,6 +890,12 @@ impl WakuBackend {
         };
         review.check_artifact()?;
         review.save()?;
+        let projection_boss = self.boss.clone();
+        let publish: Box<dyn Fn(&Receipt, bool) -> anyhow::Result<()> + Send + Sync> =
+            Box::new(move |receipt, start| {
+                projection_boss.record_plan_readiness(session_id, receipt.readiness(), start)
+            });
+        publish(&review.receipt, true)?;
         let pointer = previous.with_extension(format!("{}.tmp", Uuid::new_v4()));
         private_write(&pointer, attempt.to_string().as_bytes())?;
         fs::rename(pointer, previous)
@@ -723,6 +904,7 @@ impl WakuBackend {
             review,
             validate,
             dispatch,
+            publish,
         }))
     }
 }
@@ -731,6 +913,7 @@ pub(super) struct PreparedPlan {
     review: Review,
     validate: Box<dyn Fn() -> anyhow::Result<()> + Send + Sync>,
     dispatch: AuthorizedDispatch,
+    publish: Box<dyn Fn(&Receipt, bool) -> anyhow::Result<()> + Send + Sync>,
 }
 
 impl PreparedPlan {
@@ -745,6 +928,7 @@ impl PreparedPlan {
             review: Mutex::new(self.review),
             validate: self.validate,
             dispatch: self.dispatch,
+            publish: self.publish,
             driver,
             events,
             lifecycle,
@@ -901,6 +1085,7 @@ mod tests {
                 phase: Phase::Preparing,
                 failure: None,
                 acknowledged: false,
+                delivered: false,
             };
             let authorized = Arc::new(AtomicBool::new(true));
             let current = authorized.clone();
@@ -912,6 +1097,7 @@ mod tests {
                     response: String::new(),
                     response_complete: true,
                 },
+                publish: Box::new(|_, _| Ok(())),
                 dispatch: Box::new(|driver, prompt, attachments| {
                     driver.prompt_with_attachments(prompt, attachments);
                     Ok(())
@@ -954,6 +1140,69 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn plan_blocker_runtime_report_survives_cli_auth_failure_and_rejects_old_provenance() {
+        let fixture = Fixture::new("approved bytes");
+        fixture.gate.submit("implementation".into(), Vec::new());
+        let acknowledgement = fixture.acknowledgement();
+        fixture.finish(&acknowledgement);
+        assert!(fixture.gate.ready());
+        fixture.gate.observe(&DriverEvent::TextDelta(format!(
+            "PLAN-BLOCKER {} {} runtimeAuthentication",
+            Uuid::new_v4(),
+            Uuid::new_v4()
+        )));
+        assert!(fixture.gate.ready());
+        fixture.gate.observe(&DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        });
+        let (attempt, runtime) = {
+            let review = fixture.gate.review.lock();
+            (review.receipt.attempt, review.receipt.runtime_generation)
+        };
+        fixture.authorized.store(false, Ordering::Release);
+        fixture.gate.observe(&DriverEvent::TextDelta(format!(
+            "{}\n",
+            "長".repeat(30_000)
+        )));
+        fixture.gate.observe(&DriverEvent::TextDelta(format!(
+            "PLAN-BLOCKER {attempt} {runtime} runtimeAuthentication\n"
+        )));
+        assert!(!fixture.gate.ready());
+        assert!(fixture.gate.observe(&DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None
+        }));
+        let stored: StoredDelivery =
+            serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
+        assert_eq!(stored.receipt.phase, Phase::Blocked);
+        assert_eq!(
+            stored.receipt.readiness().failure.unwrap().kind,
+            PlanFailureKind::RuntimeAuthentication
+        );
+        fixture.gate.submit("followup".into(), Vec::new());
+        assert_eq!(fixture.capture.0.lock().len(), 2);
+    }
+
+    #[test]
+    fn plan_delivery_runtime_loss_cannot_keep_ready_receipt() {
+        let fixture = Fixture::new("approved bytes");
+        fixture.gate.submit("implementation".into(), Vec::new());
+        fixture.finish(&fixture.acknowledgement());
+        assert!(fixture.gate.ready());
+        fixture.gate.observe(&DriverEvent::ProcessExited);
+        assert!(!fixture.gate.ready());
+        let stored: StoredDelivery =
+            serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
+        assert_eq!(
+            stored.receipt.readiness().failure.unwrap().kind,
+            PlanFailureKind::RuntimeUnavailable
+        );
     }
 
     #[test]

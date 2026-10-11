@@ -3646,6 +3646,8 @@ mod tests {
         waku_protocol::boss::BossEmployee {
             assignment_kind: Default::default(),
             plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
             session_id: Uuid::new_v4(),
             supervisor_id: Uuid::new_v4(),
             identity: waku_protocol::boss::BossIdentity {
@@ -11644,6 +11646,11 @@ fn boss_outcome_goal_entries(
                 .unwrap_or_else(|| tr!("boss.goals_entry_unavailable")),
         };
         let mut meta = vec![status.label()];
+        if let Some(readiness) =
+            member.and_then(|member| super::boss::boss_plan_readiness_label(&member.employee))
+        {
+            meta.push(readiness);
+        }
         if assignment.generation > 1 {
             meta.push(tr!(
                 "boss.goals_entry_attempt",
@@ -11681,10 +11688,8 @@ fn boss_outcome_goal_entries(
             meta.push(cause);
         }
         if assignment.settled.is_none() {
-            if let Some(wait) =
-                member.and_then(|member| queued.get(&member.employee.session_id))
-            {
-                meta.push(wait.clone());
+            if let Some(wait) = member.and_then(|member| queued.get(&member.employee.session_id)) {
+                meta.push(format!("{}: {wait}", tr!("boss.plan_admission")));
             }
             if boss_outcome_prerequisite_failed(row, assignment) {
                 meta.push(tr!("boss.goals_prereq_failed"));

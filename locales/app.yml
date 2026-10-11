@@ -6995,3 +6995,66 @@ boss.persona_delete:
   en: Delete persona
 boss.persona_delete_confirm:
   en: Confirm deletion
+
+boss.plan_research_only:
+  en: "Draft — research only"
+
+boss.plan_blocked:
+  en: "Blocked"
+
+boss.plan_reviewing:
+  en: "Reviewing"
+
+boss.plan_ready:
+  en: "Ready"
+
+boss.plan_preparing:
+  en: "Preparing"
+
+boss.plan_readiness_summary:
+  en: "Plan readiness: %{phase} · approved revision %{revision}"
+
+boss.plan_revision_unverified:
+  en: "unverified"
+
+boss.plan_readiness:
+  en: "Plan readiness"
+
+boss.plan_binding:
+  en: "Bound owner / plan / SHA-256"
+
+boss.plan_delivery:
+  en: "Delivery and acknowledgement"
+
+boss.plan_delivery_detail:
+  en: "Complete delivery: %{delivered} · Revision acknowledged: %{acknowledged}"
+
+boss.plan_attempt:
+  en: "Attempt / runtime generation"
+
+boss.plan_recovery:
+  en: "Recovery required"
+
+boss.plan_blocker_receipt:
+  en: "Blocker receipt visible here"
+
+boss.plan_blocker_notified:
+  en: "Recorded · Supervisor notified (not human-read)"
+
+boss.plan_blocker_recorded:
+  en: "Recorded · Supervisor notification pending"
+
+boss.plan_admission:
+  en: "Admission"
+
+boss.plan_open_bound:
+  en: "Open plan"
+
+boss.plan_retry:
+  en: "Retry plan review"
+
+boss.plan_retry_hint:
+  en: "Repair the cause first. Start a fresh review of the same approved revision; preserve the brief and existing work."
+
+boss.plan_admission_not_evaluated:
+  en: Admission not evaluated while the required plan is blocked

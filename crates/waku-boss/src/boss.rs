@@ -2220,6 +2220,8 @@ impl BossService {
         Ok(BossEmployee {
             assignment_kind: Default::default(),
             plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
             session_id: id,
             supervisor_id: caller,
             identity: BossIdentity {
@@ -2995,6 +2997,12 @@ impl BossService {
                             | EmployeeLifecycle::Working
                     )
             }) {
+                let plan_blocked = entry.plan_readiness.as_ref().is_some_and(|r|
+                    r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked);
+                if plan_blocked {
+                    entry.blocker = entry.plan_readiness.as_ref().and_then(|r| r.failure.as_ref())
+                        .map(|error| error.detail.clone());
+                }
                 let lifecycle = entry.lifecycle();
                 // A queued ticket never owns an open turn, so the probe is
                 // false for it anyway; a ticket-less `queued` record is a
@@ -3018,6 +3026,8 @@ impl BossService {
                 // settle signal arrived — the record stays terminal.
                 let cause = if entry.cancelled {
                     ExpiryCause::Stopped
+                } else if plan_blocked && cause == ExpiryCause::Finished {
+                    ExpiryCause::Failed
                 } else {
                     cause
                 };
@@ -3585,6 +3595,7 @@ impl BossService {
             employee.set_lifecycle(EmployeeLifecycle::Queued, now);
             employee.expired_at = None;
             employee.blocker = None;
+            employee.plan_readiness = None;
             employee.cancelled = false;
             employee.expiry = None;
             employee.queued_at = Some(now);
@@ -4118,6 +4129,7 @@ impl BossService {
             | BossOperation::Summon { .. }
             | BossOperation::Control { .. }
             | BossOperation::Resume { .. }
+            | BossOperation::RetryPlanReview { .. }
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::HistorySearch { .. }
@@ -7744,6 +7756,8 @@ mod tests {
                 state.employees.push(BossEmployee {
                     assignment_kind: Default::default(),
                     plan_binding: None,
+                    plan_readiness: None,
+                    plan_blockers: Vec::new(),
                     session_id: supervisor_id,
                     supervisor_id: boss,
                     identity: BossIdentity {
@@ -7819,6 +7833,8 @@ mod tests {
                 state.employees.push(BossEmployee {
                     assignment_kind: Default::default(),
                     plan_binding: None,
+                    plan_readiness: None,
+                    plan_blockers: Vec::new(),
                     session_id,
                     supervisor_id: state.identity.id,
                     identity: BossIdentity {
@@ -8198,6 +8214,8 @@ mod tests {
                 state.employees.push(BossEmployee {
                     assignment_kind: Default::default(),
                     plan_binding: None,
+                    plan_readiness: None,
+                    plan_blockers: Vec::new(),
                     session_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {
@@ -8343,6 +8361,8 @@ mod tests {
                     state.employees.push(BossEmployee {
                         assignment_kind: Default::default(),
                         plan_binding: None,
+                        plan_readiness: None,
+                        plan_blockers: Vec::new(),
                         session_id,
                         supervisor_id: Uuid::new_v4(),
                         identity: BossIdentity {
@@ -8833,6 +8853,8 @@ mod tests {
                 state.employees.push(BossEmployee {
                     assignment_kind: Default::default(),
                     plan_binding: None,
+                    plan_readiness: None,
+                    plan_blockers: Vec::new(),
                     session_id: employee_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {
@@ -9550,6 +9572,8 @@ mod tests {
                 state.employees.push(BossEmployee {
                     assignment_kind: Default::default(),
                     plan_binding: None,
+                    plan_readiness: None,
+                    plan_blockers: Vec::new(),
                     session_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {

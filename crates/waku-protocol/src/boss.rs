@@ -1342,6 +1342,13 @@ pub struct BossEmployee {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub plan_binding: Option<PlanBinding>,
+    /// Required-plan progression, independent of resource/outcome admission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_readiness: Option<PlanReadiness>,
+    /// Durable attempt-attributed notices retained across runtime replacement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plan_blockers: Vec<PlanBlockerNotice>,
     /// The `PlanItem::id` inside `plan_id` the assignment serves — `None`
     /// leaves the employee unallocated at the bottom of its plan group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1675,6 +1682,47 @@ pub enum PlanFailureKind {
     BindingChanged,
     Item,
     Lifecycle,
+    AccessDenied,
+    RuntimeAuthentication,
+    RuntimeUnavailable,
+    DeliveryUnsupported,
+    ArtifactInaccessible,
+    Acknowledgement,
+}
+
+/// A daemon-owned review phase; it makes no native-tool restriction claim.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanReadinessPhase {
+    Preparing,
+    Reviewing,
+    Ready,
+    Blocked,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanReadiness {
+    pub binding: PlanBinding,
+    pub attempt: Uuid,
+    pub runtime_generation: Uuid,
+    pub phase: PlanReadinessPhase,
+    pub delivered: bool,
+    pub acknowledged: bool,
+    pub failure: Option<PlanContractError>,
+}
+
+/// Recorded and supervisor-notified are distinct; neither means human-read.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanBlockerNotice {
+    pub id: Uuid,
+    pub attempt: Uuid,
+    pub runtime_generation: Uuid,
+    pub binding: PlanBinding,
+    pub error: PlanContractError,
+    pub recorded_at: u64,
+    pub supervisor_notified_at: Option<u64>,
 }
 
 /// Machine-readable failure with an actionable, body-free explanation.
@@ -2935,6 +2983,10 @@ pub enum BossOperation {
     /// Same caller gate as `control`: the human, the boss, or the
     /// employee's supervisor. A record that is not expired refuses.
     Resume {
+        session_id: Uuid,
+    },
+    /// Revalidate the same required-plan binding in a fresh runtime attempt.
+    RetryPlanReview {
         session_id: Uuid,
     },
     /// An employee flags that its job needs supervisor attention — a
