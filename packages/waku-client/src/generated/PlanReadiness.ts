@@ -3,4 +3,13 @@ import type { PlanBinding } from "./PlanBinding";
 import type { PlanContractError } from "./PlanContractError";
 import type { PlanReadinessPhase } from "./PlanReadinessPhase";
 
-export type PlanReadiness = { binding: PlanBinding, attempt: string, runtimeGeneration: string, phase: PlanReadinessPhase, delivered: boolean, acknowledged: boolean, failure: PlanContractError | null, };
+export type PlanReadiness = { binding: PlanBinding, attempt: string, runtimeGeneration: string, phase: PlanReadinessPhase,
+/**
+ * The adapter contract accepted the complete execution input.
+ */
+delivered: boolean,
+/**
+ * Historical acknowledgement-contract evidence; new deliveries never
+ * set it and a stray ack line has no effect.
+ */
+acknowledged: boolean, failure: PlanContractError | null, };

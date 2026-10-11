@@ -17055,7 +17055,7 @@ fn plan_approval_rejects_missing_review_and_changed_review_before_freezing() {
 /// Exercise the real preflight, durable recovery and provider event pump while
 /// substituting only the external provider process.
 #[test]
-fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() {
+fn plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision() {
     use waku_protocol::boss::{BossOperation, EmployeeControl};
     let root = std::env::temp_dir().join(format!("plan-delivery-runtime-{}", Uuid::new_v4()));
     let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
@@ -17082,13 +17082,12 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
     let source = EventSink::detached();
     let (generation, driver) = backend.ensure_agent_runtime(session_id, &source).unwrap();
     driver.prompt("IMPLEMENT_SENTINEL".into());
+    // One verified delivery boundary: the complete approved bytes and the
+    // brief reach provider input together — no review turn, no ack line.
     let first = capture.prompts.lock()[0].clone();
-    assert!(!first.contains("IMPLEMENT_SENTINEL"));
-    let old_ack = first
-        .lines()
-        .find(|line| line.starts_with("PLAN-ACK "))
-        .unwrap()
-        .to_owned();
+    assert!(first.contains("# Reviewed fixture\n"));
+    assert!(first.contains("IMPLEMENT_SENTINEL"));
+    assert!(!first.contains("PLAN-ACK "));
     // A mutable path can change without changing what this attempt receives.
     std::fs::write(
         backend.boss.plan_document_path(&plan.plan_file).unwrap(),
@@ -17099,45 +17098,57 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
         .plan_gate
         .clone()
         .unwrap();
-    gate.observe(&DriverEvent::TextDelta("wrong revision".into()));
-    gate.observe(&DriverEvent::TurnFinished {
-        success: true,
-        summary: None,
-        summary_i18n: None,
-    });
-    assert!(!gate.ready());
+    // Submission alone is not verified delivery.
+    assert!(!gate.delivered());
+    // Rewrite the durable receipt as a legacy acknowledgement-era record: a
+    // reviewing-phase attempt still recovers its withheld brief through the
+    // delivery contract — no fresh approval is required while the original
+    // approved binding is valid.
+    let storage_root = dunce::canonicalize(backend.task_store.path().parent().unwrap()).unwrap();
+    let attempt_dir = storage_root.join("plan-delivery").join(session_id.to_string());
+    let attempt: Uuid = std::fs::read_to_string(attempt_dir.join("current-attempt"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let record = attempt_dir.join(attempt.to_string()).join("delivery.json");
+    let mut stored: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    stored["receipt"]["phase"] = "reviewing".into();
+    std::fs::write(&record, serde_json::to_vec(&stored).unwrap()).unwrap();
     drop_detached(backend.remove_runtime(session_id, Some(generation), false));
     let (fresh_generation, fresh) = backend.ensure_agent_runtime(session_id, &source).unwrap();
     assert_ne!(generation, fresh_generation);
-    fresh.prompt("resume review".into());
-    let review = capture.prompts.lock()[1].clone();
-    assert!(review.contains("# Reviewed fixture\n"));
-    assert!(!review.contains("mutable lookalike"));
-    assert!(!review.contains("IMPLEMENT_SENTINEL"));
-    let acknowledgement = review
-        .lines()
-        .find(|line| line.starts_with("PLAN-ACK "))
-        .unwrap()
-        .to_owned();
-    assert_ne!(old_ack, acknowledgement);
+    // Recovered withheld briefs deliver immediately — no waiting prompt —
+    // and still carry the bound revision, never the mutated source file.
+    let recovered = capture.prompts.lock()[1].clone();
+    assert!(recovered.contains("# Reviewed fixture\n"));
+    assert!(!recovered.contains("mutable lookalike"));
+    assert!(recovered.contains("IMPLEMENT_SENTINEL"));
+    fresh.prompt("FOLLOWUP_SENTINEL".into());
+    assert_eq!(capture.prompts.lock().len(), 2);
     let events = transport.lock().as_ref().unwrap().clone();
     events.send(DriverEvent::TurnStarted).unwrap();
-    events
-        .send(DriverEvent::TextDelta(acknowledgement))
-        .unwrap();
-    events
-        .send(DriverEvent::TurnFinished {
-            success: true,
-            summary: None,
-            summary_i18n: None,
-        })
-        .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while capture.prompts.lock().len() < 3 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     assert_eq!(capture.prompts.lock().len(), 3);
-    assert!(capture.prompts.lock()[2].contains("IMPLEMENT_SENTINEL"));
+    // Briefs queued during unconfirmed delivery drain as follow-ups, never
+    // as a second copy of the complete input.
+    assert!(capture.prompts.lock()[2].contains("FOLLOWUP_SENTINEL"));
+    assert!(!capture.prompts.lock()[2].contains("# Reviewed fixture\n"));
+    let readiness = backend
+        .boss
+        .employee(session_id)
+        .unwrap()
+        .plan_readiness
+        .unwrap();
+    assert_eq!(
+        readiness.phase,
+        waku_protocol::boss::PlanReadinessPhase::Delivered
+    );
+    assert!(readiness.delivered);
     assert!(!backend.boss.employee(session_id).unwrap().expired);
     // A grant update retires this generation instead of reusing its receipt.
     let permissions = waku_protocol::boss::PermissionOverrides {

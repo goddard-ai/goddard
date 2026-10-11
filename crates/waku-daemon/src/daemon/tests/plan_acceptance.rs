@@ -35,7 +35,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
         for workspace in ["direct", "worktree", "cross-project"] {
             for fault in [
                 "none",
-                "missing-ack",
+                "unconfirmed",
                 "launch",
                 "auth-after-launch",
                 "provider-switch",
@@ -133,67 +133,98 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                 if fault == "launch" {
                     assert!(runtime.is_err());
                 } else if let Ok((_, driver)) = runtime {
-                    driver.prompt(MUTATE.into());
-                    if fault != "auth-after-launch" {
-                        let prompts = script.prompts.lock();
-                        assert_eq!(prompts.len(), 1);
-                        assert!(!prompts[0].contains(MUTATE));
-                        assert!(prompts[0].contains("# Reviewed fixture\n"));
-                        assert!(!prompts[0].contains("PROJECT_LOOKALIKE_SENTINEL"));
-                        let ack = prompts[0]
-                            .lines()
-                            .find(|line| line.starts_with("PLAN-ACK "))
-                            .unwrap()
-                            .to_owned();
-                        drop(prompts);
-                        assert!(!script.target.exists());
-                        match fault {
-                            "provider-switch" | "workspace-switch" => {
-                                let mut state = backend.task_state.lock();
-                                let target = state.session_mut(session).unwrap();
-                                if fault == "provider-switch" {
-                                    target.provider = if provider == ProviderKind::Codex {
-                                        ProviderKind::Devin
-                                    } else {
-                                        ProviderKind::Codex
-                                    };
+                    // Identity changes land before the first submission so no
+                    // execution input is authorized for the stale attempt.
+                    match fault {
+                        "provider-switch" | "workspace-switch" => {
+                            let mut state = backend.task_state.lock();
+                            let target = state.session_mut(session).unwrap();
+                            if fault == "provider-switch" {
+                                target.provider = if provider == ProviderKind::Codex {
+                                    ProviderKind::Devin
                                 } else {
-                                    let moved = root.join("replacement-workspace");
-                                    std::fs::create_dir_all(&moved).unwrap();
-                                    target.workspace = SessionWorkspace::Worktree {
-                                        path: moved,
-                                        name: "replacement".into(),
-                                        branch: None,
-                                        base_branch: None,
-                                        adopted_by: None,
-                                    };
-                                }
-                                state.mark_session_dirty(session);
-                                backend.task_store.save(&mut state).unwrap();
+                                    ProviderKind::Codex
+                                };
+                            } else {
+                                let moved = root.join("replacement-workspace");
+                                std::fs::create_dir_all(&moved).unwrap();
+                                target.workspace = SessionWorkspace::Worktree {
+                                    path: moved,
+                                    name: "replacement".into(),
+                                    branch: None,
+                                    base_branch: None,
+                                    adopted_by: None,
+                                };
                             }
-                            _ => {}
+                            state.mark_session_dirty(session);
+                            backend.task_store.save(&mut state).unwrap();
                         }
-                        let gate = backend.sessions.lock()[&session].plan_gate.clone().unwrap();
-                        gate.observe(&DriverEvent::TextDelta(if fault == "missing-ack" {
-                            String::new()
-                        } else {
-                            ack
-                        }));
-                        gate.observe(&DriverEvent::TurnFinished {
-                            success: true,
-                            summary: None,
-                            summary_i18n: None,
-                        });
+                        _ => {}
                     }
-                } else {
-                    assert_eq!(fault, "auth-after-launch");
+                    driver.prompt(MUTATE.into());
+                    let gate = backend.sessions.lock()[&session]
+                        .plan_gate
+                        .clone()
+                        .unwrap();
+                    match fault {
+                        "none" | "unconfirmed" => {
+                            // The complete input carries exact approved bytes
+                            // and the brief together — no review turn, no
+                            // ack line, no lookalike content.
+                            let prompts = script.prompts.lock();
+                            assert_eq!(prompts.len(), 1);
+                            assert!(prompts[0].contains("# Reviewed fixture\n"));
+                            assert!(prompts[0].contains(MUTATE));
+                            assert!(!prompts[0].contains("PLAN-ACK "));
+                            assert!(!prompts[0].contains("PROJECT_LOOKALIKE_SENTINEL"));
+                            drop(prompts);
+                            assert!(!gate.delivered());
+                            if fault == "none" {
+                                gate.observe(&DriverEvent::TurnStarted);
+                                assert!(gate.delivered());
+                                // Delivered follow-ups revalidate but resend
+                                // only the prompt, not the approved bytes.
+                                driver.prompt(MUTATE.into());
+                                let prompts = script.prompts.lock();
+                                assert_eq!(prompts.len(), 2);
+                                assert!(!prompts[1].contains("# Reviewed fixture\n"));
+                            }
+                        }
+                        _ => {
+                            // Blocked before submission: the gate held the
+                            // brief and the provider saw nothing.
+                            assert!(script.prompts.lock().is_empty(), "{fault}");
+                            assert!(!gate.delivered(), "{fault}");
+                            let failure = backend
+                                .boss
+                                .employee(session)
+                                .unwrap()
+                                .plan_readiness
+                                .and_then(|r| r.failure)
+                                .unwrap();
+                            assert!(
+                                matches!(
+                                    failure.kind,
+                                    waku_protocol::boss::PlanFailureKind::RuntimeAuthentication
+                                        | waku_protocol::boss::PlanFailureKind::BindingChanged
+                                ),
+                                "{fault}: {failure:?}"
+                            );
+                        }
+                    }
                 }
+                // Physical mutation evidence is separate from authorization:
+                // only submissions the adapter actually received can mutate.
+                let expected = match fault {
+                    "none" => 2,
+                    "unconfirmed" => 1,
+                    _ => 0,
+                };
                 assert_eq!(
                     script.mutations.lock().len(),
-                    usize::from(fault == "none"),
+                    expected,
                     "{provider:?}/{workspace}/{fault}"
                 );
-                assert_eq!(script.target.exists(), fault == "none");
                 backend.shutdown();
                 drop(backend);
                 std::fs::remove_dir_all(root).unwrap();
@@ -203,7 +234,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
     }
     assert_eq!(cases, 36);
     eprintln!(
-        "plan acceptance runtime matrix: {cases} passed; Codex/Devin x direct/worktree/cross-project x success/missing ack/launch failure/auth revoked/provider switch/workspace switch"
+        "plan acceptance runtime matrix: {cases} passed; Codex/Devin x direct/worktree/cross-project x success/unconfirmed delivery/launch failure/auth revoked/provider switch/workspace switch"
     );
 }
 

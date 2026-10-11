@@ -997,7 +997,7 @@ impl WakuBackend {
                     } else {
                         self.retire_plan_runtime(session_id, events)?;
                         self.requeue_employee(session_id, |ticket, _| {
-                            ticket.pending_prompts.push("Retry the same required-plan binding. Preserve existing work and complete fresh plan review before implementation.".into());
+                            ticket.pending_prompts.push("Retry the same required-plan binding. Preserve existing work; the daemon redelivers the complete approved revision before implementation.".into());
                         })?;
                     }
                     Ok(BossResult::Saved)

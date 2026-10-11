@@ -1,9 +1,11 @@
 //! Deterministic provider contract probes. These prove dispatch progression,
-//! not that a real provider disables its native tools during review.
+//! not that a real provider disables its native tools during execution.
 use super::*;
 
 const BRIEF: &str = "TASK_MUTATION_SENTINEL";
 
+/// Recorded provider inputs carrying the brief — a physical submission, which
+/// stays observable separately from the daemon's delivery authorization.
 fn mutations(fixture: &Fixture) -> usize {
     fixture
         .capture
@@ -15,113 +17,143 @@ fn mutations(fixture: &Fixture) -> usize {
 }
 
 #[test]
-fn plan_acceptance_every_ack_identity_and_section_is_required() {
-    // All eight identity/coverage fields must match, not just the digest.
-    for field in 1..=8 {
-        let fixture = Fixture::new(&"approved section\n".repeat(2500));
-        fixture.gate.submit(BRIEF.into(), Vec::new());
-        let ack = fixture.acknowledgement();
-        let mut fields: Vec<_> = ack.split_whitespace().collect();
-        fields[field] = "wrong-or-stale";
-        fixture.finish(&fields.join(" "));
-        assert!(!fixture.gate.ready(), "field {field}");
-        assert_eq!(mutations(&fixture), 0, "field {field}");
-        assert_eq!(fixture.gate.review.lock().pending[0].0, BRIEF);
+fn plan_acceptance_execution_input_carries_exact_bytes_identity_and_brief() {
+    let fixture = Fixture::new("# Approved\n\nsection α\n");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    let capture = fixture.capture.0.lock();
+    assert_eq!(capture.len(), 1);
+    let input = &capture[0];
+    // The exact approved bytes — not a summary or locator — are in the input.
+    assert!(input.contains("# Approved\n\nsection α\n"));
+    let review = fixture.gate.review.lock();
+    for field in [
+        review.receipt.assignment.to_string(),
+        review.receipt.attempt.to_string(),
+        review.receipt.runtime_generation.to_string(),
+        review.receipt.revision.review.owner_id.to_string(),
+        review.receipt.revision.review.plan_id.to_string(),
+        review.receipt.revision.id.to_string(),
+        review.receipt.revision.review.content_digest.clone(),
+        review.receipt.artifact.display().to_string(),
+        review.receipt.execution_workspace.display().to_string(),
+    ] {
+        assert!(input.contains(&field), "input missing {field}");
     }
-    for coverage in ["repeated", "reversed", "extra-text", "overflow"] {
-        let fixture = Fixture::new(&format!(
-            "{}{}",
-            "a".repeat(SECTION_BYTES),
-            "b".repeat(SECTION_BYTES)
-        ));
-        fixture.gate.submit(BRIEF.into(), Vec::new());
-        let ack = fixture.acknowledgement();
-        let (prefix, sections) = ack.rsplit_once(' ').unwrap();
-        let section: Vec<_> = sections.split(',').collect();
-        let response = match coverage {
-            "repeated" => format!("{prefix} {},{}", section[0], section[0]),
-            "reversed" => format!("{prefix} {},{}", section[1], section[0]),
-            "extra-text" => format!("{ack}\nExtra trailing text."),
-            "overflow" => format!("{}\n{ack}", "x".repeat(64 * 1024)),
-            _ => unreachable!(),
-        };
-        fixture.finish(&response);
-        assert_eq!(mutations(&fixture), 0, "{coverage}");
-        assert!(!fixture.gate.ready(), "{coverage}");
-    }
+    assert!(input.contains(BRIEF));
+    drop(review);
+    drop(capture);
+    // Briefs queued while acceptance is in flight withhold — the input is
+    // never duplicated to chase a pending acknowledgment.
+    fixture.gate.submit("FOLLOWUP_SENTINEL".into(), Vec::new());
+    assert_eq!(fixture.capture.0.lock().len(), 1);
+    fixture.accept();
+    assert!(fixture.gate.delivered());
+    let capture = fixture.capture.0.lock();
+    assert_eq!(capture.len(), 2);
+    assert!(capture[1].contains("FOLLOWUP_SENTINEL"));
+    assert!(!capture[1].contains(BRIEF));
 }
 
 #[test]
-fn plan_acceptance_revocation_after_durable_ack_before_dispatch() {
-    let mut fixture = Fixture::new("approved bytes");
-    let authorized = fixture.authorized.clone();
-    Arc::get_mut(&mut fixture.gate).unwrap().publish = Box::new(move |receipt, _| {
-        if receipt.phase == Phase::Ready {
-            authorized.store(false, Ordering::Release);
-        }
-        Ok(())
-    });
+fn plan_acceptance_revocation_between_submission_and_acceptance_fences_release() {
+    // Authority revoked after the input physically submitted but before the
+    // adapter confirmed acceptance: delivery is held, never marked delivered,
+    // and nothing redispatches against the stale attempt.
+    let fixture = Fixture::new("approved bytes");
     fixture.gate.submit(BRIEF.into(), Vec::new());
-    fixture.finish(&fixture.acknowledgement());
-    assert_eq!(mutations(&fixture), 0);
-    let stored: StoredDelivery =
-        serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
-    assert!(stored.receipt.acknowledged);
+    fixture.authorized.store(false, Ordering::Release);
+    fixture.accept();
+    assert!(!fixture.gate.delivered());
+    assert_eq!(mutations(&fixture), 1);
+    let stored = fixture.stored();
     assert_eq!(stored.receipt.phase, Phase::Blocked);
-    assert_eq!(stored.withheld[0].0, BRIEF);
+    assert!(!stored.receipt.delivered);
+    fixture.gate.submit("RETRY_SENTINEL".into(), Vec::new());
+    assert_eq!(mutations(&fixture), 1);
 }
 
 #[test]
 fn plan_acceptance_dispatch_and_projection_failures_preserve_work() {
-    for fault in ["review-dispatch", "implementation-dispatch", "projection"] {
+    for fault in ["reject-before-send", "accept-then-uncertain", "projection"] {
         let mut fixture = Fixture::new("approved bytes");
         if fault == "projection" {
             Arc::get_mut(&mut fixture.gate).unwrap().publish = Box::new(|receipt, _| {
                 anyhow::ensure!(
-                    receipt.phase != Phase::Ready,
+                    receipt.phase != Phase::Delivered,
                     "supervisor transport unavailable"
                 );
                 Ok(())
             });
         } else {
+            let accepted_first = fault == "accept-then-uncertain";
+            let sent = AtomicBool::new(false);
             Arc::get_mut(&mut fixture.gate).unwrap().dispatch =
                 Box::new(move |driver, prompt, files| {
-                    let implementation = prompt.contains(BRIEF);
-                    anyhow::ensure!(
-                        !(fault == "review-dispatch" || implementation),
-                        "plan runtime unavailable: injected dispatch failure"
-                    );
+                    // Fail the first complete-input submission only; the
+                    // uncertain leg hands the bytes to the provider first so
+                    // physical effects record separately from authorization.
+                    if !sent.swap(true, Ordering::AcqRel) {
+                        if accepted_first {
+                            driver.prompt_with_attachments(prompt, files);
+                        }
+                        anyhow::bail!("plan delivery unconfirmed: injected runtime submission failure");
+                    }
                     driver.prompt_with_attachments(prompt, files);
                     Ok(())
                 });
         }
         fixture.gate.submit(BRIEF.into(), Vec::new());
-        fixture.finish(&fixture.acknowledgement());
-        assert_eq!(mutations(&fixture), 0, "{fault}");
-        assert!(!fixture.gate.ready(), "{fault}");
-        let stored: StoredDelivery =
-            serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
-        assert_eq!(stored.receipt.phase, Phase::Blocked);
-        assert_eq!(stored.withheld[0].0, BRIEF);
+        if fault == "reject-before-send" || fault == "projection" {
+            fixture.accept();
+        }
+        assert!(!fixture.gate.delivered(), "{fault}");
+        // Only a pre-send rejection guarantees zero physical submission; the
+        // uncertain legs record the input the provider may already hold.
+        assert_eq!(
+            mutations(&fixture),
+            usize::from(fault != "reject-before-send"),
+            "{fault}"
+        );
+        assert_eq!(
+            fixture.gate.review.lock().receipt.phase,
+            Phase::Blocked,
+            "{fault}"
+        );
+        // The withheld brief is retained exactly once — no follow-up or
+        // recovery path may release it repeatedly.
+        fixture.gate.submit("RETRY_SENTINEL".into(), Vec::new());
+        assert_eq!(
+            mutations(&fixture),
+            usize::from(fault != "reject-before-send"),
+            "{fault}"
+        );
     }
 }
 
 #[test]
 fn plan_acceptance_size_boundary_and_exact_reread_after_compaction() {
-    for bytes in [INLINE_BYTES, INLINE_BYTES + 1, 256 * 1024, 256 * 1024 + 2] {
+    // The qualified inline mode delivers the complete bundle; over the bound
+    // blocks predictably as unsupported — never truncated or summarized.
+    for (bytes, supported) in [(INLINE_BYTES, true), (INLINE_BYTES + 1, false)] {
         let text = "x".repeat(bytes);
         let fixture = Fixture::new(&text);
         fixture.gate.submit(BRIEF.into(), Vec::new());
-        if bytes > 256 * 1024 + 1 {
+        if !supported {
             assert!(fixture.capture.0.lock().is_empty());
-            assert_eq!(mutations(&fixture), 0);
+            assert!(!fixture.gate.delivered());
+            assert_eq!(
+                fixture.stored().receipt.readiness().failure.unwrap().kind,
+                PlanFailureKind::DeliveryUnsupported
+            );
             continue;
         }
-        fixture.finish(&fixture.acknowledgement());
-        assert!(fixture.gate.ready());
         assert_eq!(mutations(&fixture), 1);
-        // Review response is discarded; the immutable reread surface survives.
-        assert!(fixture.gate.review.lock().response.is_empty());
+        let input = &fixture.capture.0.lock()[0];
+        assert!(input.contains(&text));
+        fixture.accept();
+        assert!(fixture.gate.delivered());
+        // The immutable reread surface survives compaction of any response.
+        fixture.gate.review.lock().response.clear();
         let artifact = fixture.gate.review.lock().receipt.artifact.clone();
         let reread = fs::read(artifact).unwrap();
         assert_eq!(reread, text.as_bytes());
@@ -149,9 +181,12 @@ fn plan_acceptance_symlink_substitution_never_releases_private_bytes() {
     let artifact = fixture.root.join("approved-plan.md");
     fs::remove_file(&artifact).unwrap();
     std::os::unix::fs::symlink(&private, artifact).unwrap();
-    fixture.finish(&fixture.acknowledgement());
-    assert_eq!(mutations(&fixture), 0);
-    assert!(!fixture.gate.ready());
+    fixture.accept();
+    assert!(!fixture.gate.delivered());
+    assert_eq!(
+        fixture.gate.review.lock().receipt.phase,
+        Phase::Blocked
+    );
     assert!(
         !fixture
             .capture
@@ -164,21 +199,27 @@ fn plan_acceptance_symlink_substitution_never_releases_private_bytes() {
 }
 
 #[test]
-fn plan_acceptance_concurrent_retirement_fences_old_acknowledgement() {
+fn plan_acceptance_concurrent_retirement_fences_stale_attempt() {
     let fixture = Fixture::new("approved bytes");
     fixture.gate.submit(BRIEF.into(), Vec::new());
     let gate = fixture.gate.clone();
-    // Join makes the race boundary deterministic: retirement wins before ack.
+    // Join makes the race boundary deterministic: retirement wins before the
+    // adapter's acceptance signal lands.
     std::thread::spawn(move || gate.lifecycle.lock().set(None))
         .join()
         .unwrap();
-    fixture.finish(&fixture.acknowledgement());
-    assert_eq!(mutations(&fixture), 0);
-    assert!(!fixture.gate.ready());
+    fixture.accept();
+    assert!(!fixture.gate.delivered());
+    assert_eq!(
+        fixture.gate.review.lock().receipt.phase,
+        Phase::Blocked
+    );
+    fixture.gate.submit("RETRY_SENTINEL".into(), Vec::new());
+    assert_eq!(mutations(&fixture), 1);
 }
 
 #[test]
-fn plan_acceptance_withheld_attachments_only_reach_implementation() {
+fn plan_acceptance_attachments_reach_the_execution_input_exactly_once() {
     #[derive(Default)]
     struct Attachments(Mutex<Vec<Vec<crate::model::MessageAttachment>>>);
     impl driver::DriverControl for Attachments {
@@ -205,12 +246,45 @@ fn plan_acceptance_withheld_attachments_only_reach_implementation() {
         pasted_text_preview: None,
         session_id: None,
     };
-    fixture.gate.submit(BRIEF.into(), vec![attachment.clone()]);
-    assert!(files.0.lock()[0].is_empty());
-    let stored: StoredDelivery =
-        serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
-    assert_eq!(stored.withheld[0].1[0].path, attachment.path);
-    fixture.finish(&fixture.acknowledgement());
+    fixture
+        .gate
+        .submit(BRIEF.into(), vec![attachment.clone()]);
+    assert_eq!(files.0.lock().len(), 1);
+    assert_eq!(files.0.lock()[0][0].path, attachment.path);
+    fixture.accept();
+    assert!(fixture.gate.delivered());
+    // Withheld state cleared — a recovered attempt cannot replay the files.
+    assert!(fixture.stored().withheld.is_empty());
+    let followup = crate::model::MessageAttachment {
+        name: "task-input-2".into(),
+        path: fixture.root.join("task-input-2"),
+        ..attachment
+    };
+    fixture.gate.submit("followup".into(), vec![followup.clone()]);
     assert_eq!(files.0.lock().len(), 2);
-    assert_eq!(files.0.lock()[1][0].path, attachment.path);
+    assert_eq!(files.0.lock()[1][0].path, followup.path);
+}
+
+#[test]
+fn plan_acceptance_settled_input_turn_also_counts_as_acceptance() {
+    // An adapter that settles the submitted turn without a start signal still
+    // delivered the input; a failed settle is uncertainty and holds.
+    let fixture = Fixture::new("approved bytes");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    fixture.gate.observe(&DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    });
+    assert!(fixture.gate.delivered());
+    let fixture = Fixture::new("approved bytes");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    fixture.gate.observe(&DriverEvent::TurnFinished {
+        success: false,
+        summary: None,
+        summary_i18n: None,
+    });
+    assert!(!fixture.gate.delivered());
+    assert_eq!(fixture.stored().receipt.phase, Phase::Blocked);
+    assert_eq!(fixture.stored().withheld[0].0, BRIEF);
 }

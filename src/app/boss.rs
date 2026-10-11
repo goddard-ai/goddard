@@ -7141,8 +7141,7 @@ impl Waku {
                 tr!("boss.plan_delivery"),
                 tr!(
                     "boss.plan_delivery_detail",
-                    delivered = readiness.delivered,
-                    acknowledged = readiness.acknowledged
+                    delivered = readiness.delivered
                 ),
             ));
             rows.push((
@@ -10004,7 +10003,7 @@ pub(super) fn employee_resume_action(
 }
 
 /// Keep required-plan progression separate from admission and never reuse a
-/// previous attempt's acknowledgement while a fresh ticket waits.
+/// previous attempt's delivery evidence while a fresh ticket waits.
 pub(super) fn boss_plan_readiness_label(
     employee: &waku_protocol::boss::BossEmployee,
 ) -> Option<String> {
@@ -10025,8 +10024,9 @@ pub(super) fn boss_plan_readiness_label(
     } else {
         match employee.plan_readiness.as_ref().map(|r| r.phase) {
             Some(PlanReadinessPhase::Blocked) => tr!("boss.plan_blocked"),
-            Some(PlanReadinessPhase::Reviewing) => tr!("boss.plan_reviewing"),
-            Some(PlanReadinessPhase::Ready) => tr!("boss.plan_ready"),
+            Some(PlanReadinessPhase::Delivered) | Some(PlanReadinessPhase::Ready) => {
+                tr!("boss.plan_delivered")
+            }
             _ => tr!("boss.plan_preparing"),
         }
     };

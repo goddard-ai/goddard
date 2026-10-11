@@ -3537,9 +3537,7 @@ boss.plan_research_only: "Draft — research only"
 
 boss.plan_blocked: "Blocked"
 
-boss.plan_reviewing: "Reviewing"
-
-boss.plan_ready: "Ready"
+boss.plan_delivered: "Delivered"
 
 boss.plan_preparing: "Preparing"
 
@@ -3551,9 +3549,9 @@ boss.plan_readiness: "Plan readiness"
 
 boss.plan_binding: "Bound owner / plan / SHA-256"
 
-boss.plan_delivery: "Delivery and acknowledgement"
+boss.plan_delivery: "Delivery"
 
-boss.plan_delivery_detail: "Complete delivery: %{delivered} · Revision acknowledged: %{acknowledged}"
+boss.plan_delivery_detail: "Complete execution input accepted: %{delivered}"
 
 boss.plan_attempt: "Attempt / runtime generation"
 
@@ -3569,8 +3567,8 @@ boss.plan_admission: "Admission"
 
 boss.plan_open_bound: "Open plan"
 
-boss.plan_retry: "Retry plan review"
+boss.plan_retry: "Retry plan delivery"
 
-boss.plan_retry_hint: "Repair the cause first. Start a fresh review of the same approved revision; preserve the brief and existing work."
+boss.plan_retry_hint: "Repair the cause first. The same approved revision redelivers on retry; preserve the brief and existing work."
 
 boss.plan_admission_not_evaluated: Admission not evaluated while the required plan is blocked

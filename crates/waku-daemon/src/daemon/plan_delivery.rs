@@ -1,4 +1,6 @@
-//! Daemon-owned review progression. This withholds briefs, not native tools.
+//! Daemon-owned verified plan delivery. The exact approved revision and the
+//! withheld briefs reach provider input together; the adapter's turn boundary
+//! is the acceptance evidence. This withholds briefs, not native tools.
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -95,49 +97,58 @@ pub(super) fn classify_plan_failure(error: &anyhow::Error) -> PlanContractError 
     let (kind, detail) = if text.contains("authentication") {
         (
             PlanFailureKind::RuntimeAuthentication,
-            "Runtime authentication failed. Plan location and permission were not evaluated. Recover the runtime, then retry this binding.",
+            "Implementation blocked: runtime authentication failed; plan location and permission were not evaluated. Recover the runtime, then retry this binding.",
         )
     } else if text.contains("access denied")
         || io_kind == Some(std::io::ErrorKind::PermissionDenied)
     {
         (
             PlanFailureKind::AccessDenied,
-            "Required material access denied after authentication. Restore legitimate access or explicitly share the material, then retry.",
+            "Implementation blocked: required material access denied after authentication. Restore legitimate access or explicitly share the material, then retry.",
         )
     } else if io_kind == Some(std::io::ErrorKind::NotFound) {
         (
             PlanFailureKind::MissingPlan,
-            "Exact approved artifact is missing. Restore the approved copy or explicitly correct the binding, then retry.",
+            "Implementation blocked: the exact approved artifact is missing. Restore the approved copy or explicitly correct the binding, then retry.",
         )
     } else if text.contains("unsupported") {
-        (
-            PlanFailureKind::DeliveryUnsupported,
-            "Plan delivery unsupported. Select a supported local Codex CLI or Devin CLI runtime, then retry this binding.",
-        )
+        if text.contains("exceeds the qualified inline delivery bound") {
+            (
+                PlanFailureKind::DeliveryUnsupported,
+                "Implementation blocked: the complete approved plan exceeds the qualified delivery bound. Reduce the approved content or split the assignment, then retry.",
+            )
+        } else {
+            (
+                PlanFailureKind::DeliveryUnsupported,
+                "Implementation blocked: this runtime cannot accept the complete approved plan. Choose a supported runtime, then retry.",
+            )
+        }
     } else if text.contains("acknowledgement") {
+        // Historical acknowledgement-contract failure; new deliveries never
+        // produce it. Keep the evidence readable on old receipts.
         (
             PlanFailureKind::Acknowledgement,
-            "Complete matching revision acknowledgement was not received. Retry plan review; the implementation brief is retained.",
+            "Implementation blocked: a complete matching revision acknowledgement was not received. Retry; the implementation brief is retained.",
         )
     } else if text.contains("integrity") || text.contains("differs") {
         (
             PlanFailureKind::Integrity,
-            "Approved artifact differs from the bound revision. Restore the exact approved copy, then retry.",
+            "Implementation blocked: the approved revision could not be verified. Restore the approved copy, then retry.",
         )
     } else if text.contains("authority changed") || text.contains("identity changed") {
         (
             PlanFailureKind::BindingChanged,
-            "Assignment authority changed. Resolve the binding or grants, then retry with fresh review.",
+            "Implementation blocked: assignment authority changed. Resolve the binding or grants, then retry.",
         )
     } else if text.contains("runtime") {
         (
             PlanFailureKind::RuntimeUnavailable,
-            "Runtime unavailable. Recover the runtime, then retry the same binding.",
+            "Implementation blocked: plan delivery could not be confirmed. Recover the runtime, then retry.",
         )
     } else {
         (
             PlanFailureKind::ArtifactInaccessible,
-            "Complete approved artifact could not be delivered or recorded. Repair delivery, then retry the same binding.",
+            "Implementation blocked: the complete approved content could not be delivered or recorded. Repair delivery, then retry the same binding.",
         )
     };
     PlanContractError {
@@ -156,8 +167,11 @@ struct Review {
     record_path: PathBuf,
     receipt: Receipt,
     pending: Vec<(String, Vec<crate::model::MessageAttachment>)>,
+    /// How many `pending` entries the in-flight complete input carries. The
+    /// input was submitted through the adapter but acceptance is unconfirmed
+    /// while this is nonzero — retry must not resend those briefs.
+    submitted: usize,
     response: String,
-    response_complete: bool,
 }
 
 type AuthorizedDispatch = Box<
@@ -190,34 +204,17 @@ impl Review {
         fs::rename(temp, path).context("could not persist plan delivery state")
     }
 
-    fn acknowledgement(&self) -> String {
-        format!(
-            "PLAN-ACK {} {} {} {} {} {} {} {}",
-            self.receipt.assignment,
-            self.receipt.attempt,
-            self.receipt.runtime_generation,
-            self.receipt.revision.review.owner_id,
-            self.receipt.revision.review.plan_id,
-            self.receipt.revision.id,
-            self.receipt.revision.review.content_digest,
-            self.receipt.section_digests.join(",")
-        )
-    }
-
-    fn review_prompt(&self) -> String {
+    /// The one verified delivery boundary: the exact approved bytes and the
+    /// withheld briefs reach provider input together. A locator or hash alone
+    /// is never delivery, and the immutable artifact stays the exact-version
+    /// reread surface after compaction.
+    fn execution_input(&self, brief: &str) -> String {
         let revision = &self.receipt.revision;
-        let reporting = self.receipt.blocker_instruction();
-        let inline = if revision.content.len() <= INLINE_BYTES {
-            format!(
-                "\nComplete approved text (identical to artifact):\n{}",
-                revision.content
-            )
-        } else {
-            String::new()
-        };
         format!(
-            "Required approved-plan review only. The implementation brief is withheld. {reporting} Read the COMPLETE read-only artifact at {}. Do no implementation work. This is a read-before-work obligation; native tool restrictions are not claimed.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\nRead every {}-byte section (last may be shorter); section SHA-256 values in order: {}. Acknowledge all sections only after reading them. Finish this review turn with exactly the following line, without other text:\n{}\nThe artifact remains the exact-version reread surface after compaction. Never substitute a source path, summary or newer revision.{}",
+            "{}\nApproved plan delivery — the complete approved revision is the authoritative specification for this assignment. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\n\nComplete approved text (authoritative; identical to the bound artifact):\n{}\n\nImplementation assignment:\n{}",
+            self.receipt.blocker_instruction(),
             self.receipt.artifact.display(),
+            self.receipt.execution_workspace.display(),
             revision.review.owner_id,
             revision.review.plan_id,
             revision.id,
@@ -227,14 +224,32 @@ impl Review {
             self.receipt.assignment,
             self.receipt.attempt,
             self.receipt.runtime_generation,
-            SECTION_BYTES,
-            self.receipt.section_digests.join(","),
-            self.acknowledgement(),
-            inline
+            revision.content,
+            brief
+        )
+    }
+
+    /// A follow-up inside an already-delivered attempt keeps the reread
+    /// surface addressable without resending the approved bytes.
+    fn followup_input(&self, prompt: &str) -> String {
+        format!(
+            "{}\nApproved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
+            self.receipt.blocker_instruction(),
+            self.receipt.artifact.display(),
+            self.receipt.revision.id,
+            self.receipt.revision.review.content_digest,
+            prompt
         )
     }
 
     fn check_artifact(&self) -> anyhow::Result<()> {
+        // The qualified inline delivery mode carries the complete approved
+        // bundle; larger bundles block predictably — no summary, truncation
+        // or omitted-section fallback exists.
+        anyhow::ensure!(
+            self.receipt.revision.content.len() <= INLINE_BYTES,
+            "plan delivery unsupported: the complete approved plan exceeds the qualified inline delivery bound"
+        );
         for ancestor in self.receipt.artifact.ancestors() {
             anyhow::ensure!(
                 !fs::symlink_metadata(ancestor)?.file_type().is_symlink(),
@@ -317,6 +332,89 @@ impl PlanGate {
         );
     }
 
+    /// The adapter contract reports input acceptance as a real turn boundary:
+    /// `TurnStarted` (or a settling turn) for the submitted complete input.
+    /// `Ready` stays accepted so receipts written by the acknowledgement
+    /// contract keep their delivered meaning on recovery.
+    fn delivered_phase(phase: Phase) -> bool {
+        matches!(phase, Phase::Delivered | Phase::Ready)
+    }
+
+    /// Submit the withheld briefs as the single complete execution input, or
+    /// as ordinary follow-ups once this attempt's input is already delivered.
+    /// Returns early when a submission is in flight — its acceptance lands
+    /// through `observe`, and late briefs drain as follow-ups at that point.
+    fn drive(&self, review: &mut Review) {
+        if review.receipt.phase == Phase::Blocked || review.submitted != 0 {
+            return;
+        }
+        if let Err(error) = self.check(review) {
+            self.block(review, error);
+            return;
+        }
+        if Self::delivered_phase(review.receipt.phase) {
+            let pending = review.pending.clone();
+            for (prompt, attachments) in pending {
+                let sent = (self.dispatch)(
+                    &self.driver,
+                    review.followup_input(&prompt),
+                    attachments,
+                );
+                if let Err(error) = sent {
+                    self.block(review, error);
+                    return;
+                }
+            }
+            review.pending.clear();
+            if let Err(error) = self.save(review) {
+                self.block(review, error);
+            }
+            return;
+        }
+        let brief = review
+            .pending
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let attachments = review
+            .pending
+            .iter()
+            .flat_map(|(_, files)| files.clone())
+            .collect();
+        let input = review.execution_input(&brief);
+        if let Err(error) = (self.dispatch)(&self.driver, input, attachments) {
+            // Acceptance is uncertain — the provider may hold the input.
+            // Hold the withheld briefs; retry excludes overlap through a
+            // fresh attempt on a runtime that cannot keep executing.
+            self.block(
+                review,
+                anyhow!("plan delivery unconfirmed: execution input submission failed through the runtime: {error:#}"),
+            );
+            return;
+        }
+        review.submitted = review.pending.len();
+    }
+
+    /// Acceptance confirmed for the submitted complete input: mark delivery
+    /// durably, then drain later-arriving briefs as ordinary follow-ups.
+    fn confirm(&self, review: &mut Review) {
+        // Revalidate authority at the execution boundary, not just dispatch.
+        if let Err(error) = self.check(review) {
+            self.block(review, error);
+            return;
+        }
+        review.receipt.delivered = true;
+        review.receipt.phase = Phase::Delivered;
+        review.pending.drain(..review.submitted);
+        review.submitted = 0;
+        if let Err(error) = self.save(review) {
+            self.block(review, error);
+            return;
+        }
+        self.drive(review);
+    }
+
     fn submit(&self, prompt: String, attachments: Vec<crate::model::MessageAttachment>) {
         let _owner = self.lifecycle.lock();
         let mut review = self.review.lock();
@@ -330,66 +428,43 @@ impl PlanGate {
         if review.receipt.phase == Phase::Blocked {
             return;
         }
-        if let Err(error) = self.check(&review) {
-            self.block(&mut review, error);
-            return;
-        }
-        if review.receipt.phase == Phase::Ready {
-            let pending = review.pending.clone();
-            for (prompt, attachments) in pending {
-                let sent = (self.dispatch)(
-                    &self.driver,
-                    format!(
-                        "{}\nApproved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
-                        review.receipt.blocker_instruction(),
-                        review.receipt.artifact.display(),
-                        review.receipt.revision.id,
-                        review.receipt.revision.review.content_digest,
-                        prompt
-                    ),
-                    attachments,
-                );
-                if let Err(error) = sent {
-                    self.block(&mut review, error);
-                    return;
-                }
-            }
-            review.pending.clear();
-        } else if review.receipt.phase == Phase::Preparing {
-            review.receipt.phase = Phase::Reviewing;
-            if let Err(error) = self.save(&review) {
-                self.block(&mut review, error);
-                return;
-            }
-            if let Err(error) = (self.dispatch)(&self.driver, review.review_prompt(), Vec::new()) {
-                self.block(&mut review, error);
-            } else {
-                review.receipt.delivered = true;
-                if let Err(error) = self.save(&review) {
-                    self.block(&mut review, error);
-                }
-            }
-        }
+        self.drive(&mut review);
     }
 
-    pub(super) fn interrupt_review(&self) {
+    /// A recovered attempt keeps withheld briefs durable; release them through
+    /// the same verified boundary without waiting on another prompt.
+    pub(super) fn resume_pending(&self) {
+        let _owner = self.lifecycle.lock();
         let mut review = self.review.lock();
-        if review.receipt.phase == Phase::Reviewing {
+        if review.pending.is_empty() {
+            return;
+        }
+        self.drive(&mut review);
+    }
+
+    /// An intentional interrupt mid-submission leaves acceptance uncertain —
+    /// hold rather than risk an overlapping redispatch of the same brief.
+    pub(super) fn interrupt_delivery(&self) {
+        let mut review = self.review.lock();
+        if review.submitted != 0 && !Self::delivered_phase(review.receipt.phase) {
             self.block(
                 &mut review,
-                anyhow!("plan review interrupted: fresh runtime review required"),
+                anyhow!(
+                    "plan delivery unconfirmed: interrupted while acceptance was uncertain; restart this attempt's runtime"
+                ),
             );
         }
     }
 
-    pub(super) fn ready(&self) -> bool {
-        self.review.lock().receipt.phase == Phase::Ready
+    #[cfg(test)]
+    pub(super) fn delivered(&self) -> bool {
+        Self::delivered_phase(self.review.lock().receipt.phase)
     }
 
     fn authorized_control(&self, action: impl FnOnce(&DriverHandle)) {
         let _owner = self.lifecycle.lock();
         let mut review = self.review.lock();
-        if review.receipt.phase != Phase::Ready {
+        if !Self::delivered_phase(review.receipt.phase) {
             return;
         }
         if let Err(error) = self.check(&review) {
@@ -399,51 +474,45 @@ impl PlanGate {
         action(&self.driver);
     }
 
-    /// True consumes a review settlement: it must never expire the employee or
+    /// True consumes an event the delivery contract owns — a settle from a
+    /// blocked attempt's cancelled turn must never expire the employee or
     /// drain follow-ups as though implementation had completed.
     pub(super) fn observe(&self, event: &DriverEvent) -> bool {
         let mut review = self.review.lock();
         if let DriverEvent::TextDelta(text) = event {
-            if review.receipt.phase == Phase::Ready {
-                // Implementation reports can be long; retain a bounded tail
-                // so their final control notice remains observable.
-                review.response.push_str(text);
-                if review.response.len() > 64 * 1024 {
-                    let mut cut = review.response.len() - 64 * 1024;
-                    while !review.response.is_char_boundary(cut) {
-                        cut += 1;
-                    }
-                    review.response.drain(..cut);
+            // Reports can be long; retain a bounded tail so a trailing
+            // control notice stays observable in every phase.
+            review.response.push_str(text);
+            if review.response.len() > 64 * 1024 {
+                let mut cut = review.response.len() - 64 * 1024;
+                while !review.response.is_char_boundary(cut) {
+                    cut += 1;
                 }
-            } else if review.response.len().saturating_add(text.len()) <= 64 * 1024 {
-                review.response.push_str(text);
-            } else {
-                review.response_complete = false;
+                review.response.drain(..cut);
             }
-            if review.response.ends_with('\n') {
-                if let Some(error) = review.receipt.reported_failure(&review.response) {
-                    self.block(&mut review, error);
-                }
-            }
-        }
-        if matches!(event, DriverEvent::TurnFinished { .. }) {
-            if let Some(error) = review.receipt.reported_failure(&review.response) {
+            if review.response.ends_with('\n')
+                && let Some(error) = review.receipt.reported_failure(&review.response)
+            {
                 self.block(&mut review, error);
             }
         }
-        if review.receipt.phase == Phase::Ready && matches!(event, DriverEvent::ProcessExited) {
-            self.block(
-                &mut review,
-                anyhow!("plan runtime unavailable: owned runtime exited"),
-            );
+        if matches!(event, DriverEvent::TurnFinished { .. } | DriverEvent::TurnStarted)
+            && let Some(error) = review.receipt.reported_failure(&review.response)
+        {
+            self.block(&mut review, error);
         }
-        if review.receipt.phase == Phase::Ready {
+        if Self::delivered_phase(review.receipt.phase) {
+            if matches!(event, DriverEvent::ProcessExited) {
+                self.block(
+                    &mut review,
+                    anyhow!("plan runtime unavailable: owned runtime exited"),
+                );
+            }
             if matches!(
                 event,
                 DriverEvent::TurnFinished { .. } | DriverEvent::TurnStarted
             ) {
                 review.response.clear();
-                review.response_complete = true;
             }
             return false;
         }
@@ -456,68 +525,29 @@ impl PlanGate {
             | DriverEvent::ProcessExited => {
                 self.block(
                     &mut review,
-                    anyhow!("plan runtime unavailable: review transport failed"),
+                    anyhow!(
+                        "plan delivery unconfirmed: runtime transport failed before acceptance"
+                    ),
                 );
             }
-            DriverEvent::TurnFinished { success, .. } => {
-                // Providers stream interim agent messages throughout the
-                // review turn, so the whole response can never equal the
-                // acknowledgement; the contract is that it finishes the turn.
-                let acknowledged = review
-                    .response
-                    .trim_end()
-                    .lines()
-                    .next_back()
-                    .is_some_and(|line| line.trim() == review.acknowledgement());
-                if review.receipt.phase != Phase::Reviewing
-                    || !review.response_complete
-                    || !success
-                    || !acknowledged
-                {
-                    self.block(&mut review, anyhow!("plan acknowledgement failure: complete matching revision and section acknowledgement required"));
-                    return true;
+            // The adapter began the submitted input's turn — its contract
+            // establishes complete input acceptance for this attempt.
+            DriverEvent::TurnStarted if review.submitted != 0 => {
+                self.confirm(&mut review);
+            }
+            DriverEvent::TurnFinished { success, .. } if review.submitted != 0 => {
+                if *success {
+                    // A settled turn on the submitted input is acceptance
+                    // evidence even when the adapter skips TurnStarted.
+                    self.confirm(&mut review);
+                } else {
+                    self.block(
+                        &mut review,
+                        anyhow!(
+                            "plan delivery unconfirmed: the submitted input's turn failed before acceptance could be verified"
+                        ),
+                    );
                 }
-                if let Err(error) = self.check(&review) {
-                    self.block(&mut review, error);
-                    return true;
-                }
-                review.receipt.acknowledged = true;
-                review.receipt.phase = Phase::Ready;
-                if let Err(error) = self.save(&review) {
-                    self.block(&mut review, error);
-                    return true;
-                }
-                // Recheck after durable acknowledgement, immediately before release.
-                if let Err(error) = self.check(&review) {
-                    self.block(&mut review, error);
-                    return true;
-                }
-                let pending = review.pending.clone();
-                let prompt = pending
-                    .iter()
-                    .map(|(text, _)| text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                let attachments = pending.into_iter().flat_map(|(_, files)| files).collect();
-                let sent = (self.dispatch)(
-                    &self.driver,
-                    format!(
-                        "{}\nApproved plan acknowledged. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\n\nImplementation assignment:\n{}",
-                        review.receipt.blocker_instruction(),
-                        review.receipt.artifact.display(),
-                        review.receipt.execution_workspace.display(),
-                        prompt
-                    ),
-                    attachments,
-                );
-                if let Err(error) = sent {
-                    self.block(&mut review, error);
-                    return true;
-                }
-                review.pending.clear();
-                review.response.clear();
-                review.response_complete = true;
-                return true;
             }
             _ => {}
         }
@@ -604,12 +634,16 @@ impl WakuBackend {
             .and_then(|entry| entry.plan_gate.clone());
         if let Some(gate) = gate {
             let mut review = gate.review.lock();
-            gate.block(
-                &mut review,
-                anyhow!(
-                    "plan authority changed: restart and acknowledge the current bound attempt"
-                ),
-            );
+            // An already-blocked receipt keeps its original failure — the
+            // recorded cause, not the retirement, is the actionable blocker.
+            if review.receipt.phase != Phase::Blocked {
+                gate.block(
+                    &mut review,
+                    anyhow!(
+                        "plan authority changed: restart with fresh verified delivery of the bound revision"
+                    ),
+                );
+            }
         }
         if let Some(entry) = self.remove_runtime(session_id, None, false) {
             entry.driver.cancel();
@@ -625,7 +659,7 @@ impl WakuBackend {
                 &self.task_store,
                 session_id,
                 Some(
-                    "Required-plan authority changed; existing work is retained. The next attempt requires fresh review.",
+                    "Required-plan authority changed; existing work is retained. The next attempt redelivers the complete approved revision.",
                 ),
             )?;
         }
@@ -651,7 +685,7 @@ impl WakuBackend {
         }
         anyhow::ensure!(
             matches!(provider, ProviderKind::Codex | ProviderKind::Devin),
-            "plan delivery unsupported: this adapter has no verified staged review contract"
+            "plan delivery unsupported: this adapter has no verified complete-input delivery contract"
         );
         let environment = self
             .task_state
@@ -826,12 +860,15 @@ impl WakuBackend {
                     )?;
                 }
             }
+            // Withheld briefs recover only while the prior attempt never
+            // reached verified delivery — Ready and Delivered both mark the
+            // input accepted, so their leftovers must not redispatch.
             if stored.receipt.assignment == session_id
                 && stored.receipt.execution_project == execution_project
                 && stored.receipt.revision.id == revision.id
                 && stored.receipt.revision.review == revision.review
                 && stored.receipt.grants == grant_snapshot
-                && stored.receipt.phase != Phase::Ready
+                && !PlanGate::delivered_phase(stored.receipt.phase)
             {
                 pending = stored.withheld;
             }
@@ -860,12 +897,13 @@ impl WakuBackend {
         let mut permissions = fs::metadata(&artifact)?.permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&artifact, permissions)?;
-        let delivery_mode = if revision.content.len() <= INLINE_BYTES {
-            "inline-and-artifact"
-        } else {
-            "sectioned-artifact"
-        }
-        .into();
+        // The complete bundle must fit the qualified inline delivery mode;
+        // oversized plans block here rather than falling back to a locator.
+        anyhow::ensure!(
+            revision.content.len() <= INLINE_BYTES,
+            "plan delivery unsupported: the complete approved plan exceeds the qualified inline delivery bound"
+        );
+        let delivery_mode = "complete-input-inline".to_owned();
         let mut section_digests: Vec<String> = revision
             .content
             .as_bytes()
@@ -894,8 +932,8 @@ impl WakuBackend {
                 delivered: false,
             },
             pending,
+            submitted: 0,
             response: String::new(),
-            response_complete: true,
         };
         review.check_artifact()?;
         review.save()?;
@@ -957,14 +995,14 @@ impl driver::DriverControl for PlanGate {
     ) {
         self.submit(prompt, attachments);
     }
-    // Queue follow-ups throughout required-plan execution. Hidden context steers
-    // must not carry the withheld assignment into the review turn.
+    // Queue follow-ups throughout required-plan execution. Hidden context
+    // steers must not bypass the verified delivery boundary.
     fn supports_steer(&self) -> bool {
         false
     }
     fn steer(&self, prompt: String) {
         let event = DriverEvent::SteerRejected {
-            message: prompt, reason: "Required-plan assignments queue follow-ups; steering is unavailable during staged execution.".into(),
+            message: prompt, reason: "Required-plan assignments queue follow-ups; steering is unavailable during verified plan delivery.".into(),
             reason_i18n: None, hidden: false,
         };
         if let Ok(wire) = event_to_wire(event) {
@@ -1103,8 +1141,8 @@ mod tests {
                     record_path: root.join("delivery.json"),
                     receipt,
                     pending: Vec::new(),
+                    submitted: 0,
                     response: String::new(),
-                    response_complete: true,
                 },
                 publish: Box::new(|_, _| Ok(())),
                 dispatch: Box::new(|driver, prompt, attachments| {
@@ -1133,16 +1171,13 @@ mod tests {
                 authorized,
             }
         }
-        fn finish(&self, text: &str) {
-            self.gate.observe(&DriverEvent::TextDelta(text.into()));
-            assert!(self.gate.observe(&DriverEvent::TurnFinished {
-                success: true,
-                summary: None,
-                summary_i18n: None
-            }));
+        /// The adapter contract's acceptance signal for the submitted
+        /// complete input — a real turn boundary, never a returned receipt.
+        fn accept(&self) {
+            self.gate.observe(&DriverEvent::TurnStarted);
         }
-        fn acknowledgement(&self) -> String {
-            self.gate.review.lock().acknowledgement()
+        fn stored(&self) -> StoredDelivery {
+            serde_json::from_slice(&fs::read(self.root.join("delivery.json")).unwrap()).unwrap()
         }
     }
     impl Drop for Fixture {
@@ -1157,15 +1192,14 @@ mod tests {
     fn plan_blocker_runtime_report_survives_cli_auth_failure_and_rejects_old_provenance() {
         let fixture = Fixture::new("approved bytes");
         fixture.gate.submit("implementation".into(), Vec::new());
-        let acknowledgement = fixture.acknowledgement();
-        fixture.finish(&acknowledgement);
-        assert!(fixture.gate.ready());
+        fixture.accept();
+        assert!(fixture.gate.delivered());
         fixture.gate.observe(&DriverEvent::TextDelta(format!(
             "PLAN-BLOCKER {} {} runtimeAuthentication",
             Uuid::new_v4(),
             Uuid::new_v4()
         )));
-        assert!(fixture.gate.ready());
+        assert!(fixture.gate.delivered());
         fixture.gate.observe(&DriverEvent::TurnFinished {
             success: true,
             summary: None,
@@ -1183,33 +1217,31 @@ mod tests {
         fixture.gate.observe(&DriverEvent::TextDelta(format!(
             "PLAN-BLOCKER {attempt} {runtime} runtimeAuthentication\n"
         )));
-        assert!(!fixture.gate.ready());
+        assert!(!fixture.gate.delivered());
         assert!(fixture.gate.observe(&DriverEvent::TurnFinished {
             success: true,
             summary: None,
             summary_i18n: None
         }));
-        let stored: StoredDelivery =
-            serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
+        let stored = fixture.stored();
         assert_eq!(stored.receipt.phase, Phase::Blocked);
         assert_eq!(
             stored.receipt.readiness().failure.unwrap().kind,
             PlanFailureKind::RuntimeAuthentication
         );
         fixture.gate.submit("followup".into(), Vec::new());
-        assert_eq!(fixture.capture.0.lock().len(), 2);
+        assert_eq!(fixture.capture.0.lock().len(), 1);
     }
 
     #[test]
-    fn plan_delivery_runtime_loss_cannot_keep_ready_receipt() {
+    fn plan_delivery_runtime_loss_cannot_keep_delivered_receipt() {
         let fixture = Fixture::new("approved bytes");
         fixture.gate.submit("implementation".into(), Vec::new());
-        fixture.finish(&fixture.acknowledgement());
-        assert!(fixture.gate.ready());
+        fixture.accept();
+        assert!(fixture.gate.delivered());
         fixture.gate.observe(&DriverEvent::ProcessExited);
-        assert!(!fixture.gate.ready());
-        let stored: StoredDelivery =
-            serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
+        assert!(!fixture.gate.delivered());
+        let stored = fixture.stored();
         assert_eq!(
             stored.receipt.readiness().failure.unwrap().kind,
             PlanFailureKind::RuntimeUnavailable
@@ -1217,89 +1249,74 @@ mod tests {
     }
 
     #[test]
-    fn plan_delivery_releases_only_after_complete_exact_acknowledgement() {
+    fn plan_delivery_releases_exact_approved_bytes_with_the_brief() {
         let fixture = Fixture::new("# Exact approved text\nα\n");
         fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
+        // One verified delivery boundary: the complete approved bytes and the
+        // brief reach provider input together — no review turn, no locator.
         assert_eq!(fixture.capture.0.lock().len(), 1);
-        assert!(!fixture.capture.0.lock()[0].contains("IMPLEMENT_SENTINEL"));
-        assert!(fixture.capture.0.lock()[0].contains("# Exact approved text\nα\n"));
+        let input = fixture.capture.0.lock()[0].clone();
+        assert!(input.contains("# Exact approved text\nα\n"));
+        assert!(input.contains("IMPLEMENT_SENTINEL"));
+        assert!(!input.contains("PLAN-ACK"));
         assert_eq!(
             fs::read(fixture.root.join("approved-plan.md")).unwrap(),
             "# Exact approved text\nα\n".as_bytes()
         );
-        fixture.finish(&fixture.acknowledgement());
-        assert!(fixture.gate.ready());
-        assert_eq!(fixture.capture.0.lock().len(), 2);
-        assert!(fixture.capture.0.lock()[1].contains("IMPLEMENT_SENTINEL"));
+        // Submission is not acceptance: withheld work stays durable until the
+        // adapter reports the input's turn.
+        assert!(!fixture.gate.delivered());
+        let stored = fixture.stored();
+        assert_eq!(stored.receipt.phase, Phase::Preparing);
+        assert_eq!(stored.withheld[0].0, "IMPLEMENT_SENTINEL");
+        fixture.accept();
+        assert!(fixture.gate.delivered());
         let receipt: Value =
             serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
-        assert_eq!(receipt["receipt"]["acknowledged"], true);
-        assert_eq!(receipt["receipt"]["phase"], "ready");
+        assert_eq!(receipt["receipt"]["phase"], "delivered");
+        assert_eq!(receipt["receipt"]["delivered"], true);
+        assert_eq!(receipt["receipt"]["acknowledged"], false);
+        assert!(receipt["withheld"].as_array().unwrap().is_empty());
     }
 
     #[test]
-    fn plan_delivery_accepts_exact_acknowledgement_after_review_commentary() {
+    fn plan_delivery_commentary_streaming_and_stray_ack_have_no_effect() {
+        // Interim provider messages and even a forged PLAN-ACK line neither
+        // confirm nor disturb delivery — acceptance is the adapter's turn.
         let fixture = Fixture::new("approved bytes");
         fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
-        // Providers emit every interim agent message as a text delta; the
-        // acknowledgement still settles the turn as its final line.
-        let acknowledgement = fixture.acknowledgement();
         for delta in [
-            "I will read the artifact and verify its section hashes.",
-            "\n\nAll three section hashes match.\n\n",
-            acknowledgement.as_str(),
-            "\n",
+            "I will read the plan and start work.",
+            "\n\nPLAN-ACK 1 2 3 4 5 6 7 8\n\n",
+            "Progress update.\n",
         ] {
             fixture
                 .gate
                 .observe(&DriverEvent::TextDelta(delta.to_owned()));
         }
-        assert!(fixture.gate.observe(&DriverEvent::TurnFinished {
-            success: true,
-            summary: None,
-            summary_i18n: None
-        }));
-        assert!(fixture.gate.ready());
-        assert_eq!(fixture.capture.0.lock().len(), 2);
-        assert!(fixture.capture.0.lock()[1].contains("IMPLEMENT_SENTINEL"));
+        assert!(!fixture.gate.delivered());
+        fixture.accept();
+        assert!(fixture.gate.delivered());
+        assert_eq!(fixture.capture.0.lock().len(), 1);
     }
 
     #[test]
-    fn plan_delivery_rejects_acknowledgement_that_is_not_the_final_line() {
-        for tail in ["trailing commentary", "PLAN-ACK lookalike suffix"] {
-            let fixture = Fixture::new("approved bytes");
-            fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
-            fixture.finish(&format!("{}\n{tail}", fixture.acknowledgement()));
-            assert!(!fixture.gate.ready(), "{tail}");
-            assert_eq!(fixture.capture.0.lock().len(), 1, "{tail}");
-            assert_eq!(
-                fixture.gate.review.lock().pending[0].0,
-                "IMPLEMENT_SENTINEL",
-                "{tail}"
-            );
-        }
-    }
-
-    #[test]
-    fn plan_delivery_rejects_partial_stale_and_failed_review_without_losing_brief() {
+    fn plan_delivery_holds_briefs_and_blocks_on_delivery_failures() {
         for fault in [
-            "missing",
-            "partial",
             "generation",
             "auth",
             "tamper",
             "persistence",
             "transport",
+            "dispatch",
+            "turn-failure",
         ] {
-            let fixture = Fixture::new(&"section text\n".repeat(4000));
-            fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
-            assert!(!fixture.capture.0.lock()[0].contains(&"section text\n".repeat(4000)));
-            let mut acknowledgement = fixture.acknowledgement();
+            let fixture = Fixture::new(&"section text\n".repeat(2000));
             match fault {
-                "missing" => acknowledgement.clear(),
-                "partial" => {
-                    acknowledgement = acknowledgement.rsplit_once(',').unwrap().0.into();
-                }
+                "generation" | "auth" | "tamper" => {}
+                _ => fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new()),
+            }
+            match fault {
                 "generation" => fixture.gate.lifecycle.lock().set(Some(Uuid::new_v4())),
                 "auth" => fixture.authorized.store(false, Ordering::Release),
                 "tamper" => {
@@ -1313,38 +1330,76 @@ mod tests {
                 "persistence" => {
                     fs::remove_file(fixture.root.join("delivery.json")).unwrap();
                     fs::create_dir(fixture.root.join("delivery.json")).unwrap();
+                    fixture.accept();
                 }
                 "transport" => {
                     fixture
                         .gate
                         .observe(&DriverEvent::Error("connection lost".into()));
                 }
+                "dispatch" => {
+                    // Authority revoked between submission and acceptance.
+                    fixture.authorized.store(false, Ordering::Release);
+                    fixture.accept();
+                }
+                "turn-failure" => {
+                    fixture.gate.observe(&DriverEvent::TurnFinished {
+                        success: false,
+                        summary: None,
+                        summary_i18n: None,
+                    });
+                }
                 _ => unreachable!(),
             }
-            fixture.finish(&acknowledgement);
-            assert!(!fixture.gate.ready(), "{fault}");
-            assert_eq!(fixture.capture.0.lock().len(), 1, "{fault}");
+            if matches!(fault, "generation" | "auth" | "tamper") {
+                fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
+            }
+            assert!(!fixture.gate.delivered(), "{fault}");
+            match fault {
+                // Authority/integrity faults block before any submission.
+                "generation" | "auth" | "tamper" => {
+                    assert_eq!(fixture.capture.0.lock().len(), 0, "{fault}");
+                }
+                _ => {
+                    assert_eq!(fixture.capture.0.lock().len(), 1, "{fault}");
+                }
+            }
             assert_eq!(
-                fixture.gate.review.lock().pending[0].0,
-                "IMPLEMENT_SENTINEL",
+                fixture.gate.review.lock().receipt.phase,
+                Phase::Blocked,
                 "{fault}"
             );
+            if fault != "persistence" {
+                // The withheld brief survives every failure durably —
+                // the persistence fault holds it in the last durable save.
+                assert_eq!(
+                    fixture.stored().receipt.phase,
+                    Phase::Blocked,
+                    "{fault}"
+                );
+                assert_eq!(
+                    fixture.gate.review.lock().pending[0].0,
+                    "IMPLEMENT_SENTINEL",
+                    "{fault}"
+                );
+            }
             fixture.gate.submit("FOLLOWUP_SENTINEL".into(), Vec::new());
-            assert_eq!(fixture.capture.0.lock().len(), 1, "{fault}");
+            assert!(!fixture.gate.delivered(), "{fault}");
         }
     }
 
     #[test]
-    fn plan_delivery_revalidates_ready_runtime_before_each_followup() {
+    fn plan_delivery_revalidates_delivered_runtime_before_each_followup() {
         let fixture = Fixture::new("approved");
         fixture
             .gate
             .submit("initial implementation".into(), Vec::new());
-        fixture.finish(&fixture.acknowledgement());
+        fixture.accept();
+        assert!(fixture.gate.delivered());
         fixture.authorized.store(false, Ordering::Release);
         fixture.gate.submit("FOLLOWUP_SENTINEL".into(), Vec::new());
-        assert_eq!(fixture.capture.0.lock().len(), 2);
-        assert!(!fixture.gate.ready());
+        assert_eq!(fixture.capture.0.lock().len(), 1);
+        assert!(!fixture.gate.delivered());
         let state: Value =
             serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
         assert_eq!(state["withheld"][0][0], "FOLLOWUP_SENTINEL");

@@ -351,6 +351,11 @@ impl WakuBackend {
                 runtime_id,
             )
         });
+        // A recovered attempt's withheld briefs deliver through the verified
+        // boundary immediately — they must not wait behind a fresh prompt.
+        if let Some(gate) = &plan_gate {
+            gate.resume_pending();
+        }
         let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
             DriverHandle::from_control(gate.clone())
         });

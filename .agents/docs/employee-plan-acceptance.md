@@ -22,9 +22,11 @@ passing an empty platform filter.
 
 The scripted provider records launch requests and delivered prompts, and writes
 an actual task-result file when it receives the synthetic implementation command.
-Blocked matrix rows assert both zero mutation records and absence of that file.
-This establishes the daemon's review/dispatch contract. It cannot prove that
-native provider tools are disabled or that a model follows review instructions.
+Blocked matrix rows assert zero mutation records for faults that block before
+submission; submitted-but-unconfirmed rows record the physical input separately
+from the daemon's delivery authorization. This establishes the daemon's
+delivery/dispatch contract. It cannot prove that native provider tools are
+disabled or that a model follows the delivered instructions.
 
 ## Coverage matrix
 
@@ -35,17 +37,18 @@ native provider tools are disabled or that a model follows review instructions.
 | Same document path under foreign owner; wrong revision/digest | `plan_acceptance_same_path_foreign_owner_cannot_reuse_revision` |
 | Broad shared draft discovery, existing pins, private files/memory, invalid principal, traversal | Shared-plan, pin and normalization suites |
 | Private linked document stays private in selected revision response | `plan_acceptance_selected_delivery_does_not_expand_private_links` |
-| Read before implementation, missing/partial/stale ack, authentication, artifact/persistence/transport faults | Existing `plan_delivery_*` gate tests |
-| Every acknowledgement identity field; repeated/reversed sections, extra response text, response overflow | 12 rows in `plan_acceptance_every_ack_identity_and_section_is_required` |
-| Revocation after durable ack, before implementation dispatch | `plan_acceptance_revocation_after_durable_ack_before_dispatch` |
-| Review dispatch, implementation dispatch, readiness projection failure | 3 rows in `plan_acceptance_dispatch_and_projection_failures_preserve_work` |
-| Inline threshold, sectioned plan, 256 KiB limit, oversized artifact; exact reread after response disposal | 4 rows in `plan_acceptance_size_boundary_and_exact_reread_after_compaction` |
+| Exact approved bytes with the brief before execution, stray ack and commentary independence, generation/auth/integrity/persistence/transport/dispatch/turn faults | Existing `plan_delivery_*` gate tests |
+| Complete input carries exact bytes, assignment/attempt/binding identity and artifact/workspace locators; in-flight briefs withhold, then drain as follow-ups | `plan_acceptance_execution_input_carries_exact_bytes_identity_and_brief` |
+| Revocation between submission and adapter acceptance fences release | `plan_acceptance_revocation_between_submission_and_acceptance_fences_release` |
+| Rejected submission, accepted-then-unconfirmed submission, readiness projection failure | 3 rows in `plan_acceptance_dispatch_and_projection_failures_preserve_work` |
+| 32 KiB complete-bundle bound, oversized plan blocks unsupported; exact reread after response disposal | 2 rows in `plan_acceptance_size_boundary_and_exact_reread_after_compaction` |
 | Artifact symlink substitution; private bytes remain undisclosed | Unix `plan_acceptance_symlink_substitution_never_releases_private_bytes` |
-| Old acknowledgement after retirement on another thread | `plan_acceptance_concurrent_retirement_fences_old_acknowledgement` |
-| Implementation attachments withheld, persisted, released after ack | `plan_acceptance_withheld_attachments_only_reach_implementation` |
-| Codex/Devin × direct/worktree-path/cross-project × success/missing ack/launch failure/auth revoked during launch/provider switch/workspace switch | 36 rows in `plan_acceptance_provider_workspace_and_launch_fault_matrix` |
+| Stale attempt fenced when retirement wins on another thread | `plan_acceptance_concurrent_retirement_fences_stale_attempt` |
+| Implementation attachments withheld, persisted, delivered exactly once | `plan_acceptance_attachments_reach_the_execution_input_exactly_once` |
+| Settled input turn counts as acceptance; failed settle holds as unconfirmed | 2 rows in `plan_acceptance_settled_input_turn_also_counts_as_acceptance` |
+| Codex/Devin × direct/worktree-path/cross-project × success/unconfirmed delivery/launch failure/auth revoked during launch/provider switch/workspace switch | 36 rows in `plan_acceptance_provider_workspace_and_launch_fault_matrix` |
 | Ordinary no-plan Codex/Devin, employee/unmanaged | 4 rows in `plan_acceptance_ordinary_no_plan_work_keeps_unstaged_dispatch` |
-| Real daemon restart/review recovery, grant retirement, provider event pump | `plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision` |
+| Real daemon restart redelivers recovered briefs, legacy reviewing-phase records recover without fresh approval, grant retirement, provider event pump | `plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision` |
 | Unsupported adapters and guest modes before provider start | `plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes` |
 | Durable blocker, stale/forged provenance, replacement attempt, unresolved blocker cannot become ready | Existing controller/runtime blocker tests |
 | Pending notice reopens; repeated notification ack remains one logical notice | `plan_acceptance_pending_notice_reopens_and_ack_replay_is_idempotent` |
@@ -57,9 +60,10 @@ one with `supervisor_notified_at`. The daemon replay test also counts exactly on
 supervisor queued/transcript message. None of these checks means a human read the
 notice or validates rendered UI visibility.
 
-The initial verified run on macOS reported 45 Rust tests passed, zero failed and
-zero ignored, including 36 required-plan runtime matrix rows and four ordinary
-work rows. These totals include the existing A/B/C tests.
+The verified run on macOS after the verified-delivery contract reported 47 Rust
+tests passed, zero failed and zero ignored, including 36 required-plan runtime
+matrix rows and four ordinary work rows. These totals include the existing A/B/C
+tests.
 
 ## Runtime support and exclusions
 
@@ -72,8 +76,8 @@ use another registered execution project under the same daemon. They do not
 establish a general filesystem sandbox.
 
 Guest/remapped and cloud required-plan execution are currently unsupported and
-must block. Claude and other adapters lack the supported staged-review contract.
-The harness verifies rejection; it does not enable these combinations.
+must block. Claude and other adapters lack the verified complete-input delivery
+contract. The harness verifies rejection; it does not enable these combinations.
 
 Remaining release evidence:
 
@@ -86,7 +90,8 @@ Remaining release evidence:
   notification boundary. Reopening stores and launch/dispatch fault hooks cover
   narrower deterministic boundaries.
 - Overlapping rebinding/withdrawal during in-flight execution. Ordered retirement
-  and post-ack revocation probes cover deterministic winning interleavings only.
+  and post-submission revocation probes cover deterministic winning interleavings
+  only.
 - Actual provider context compaction; response disposal plus artifact reread tests
   the durable surface without invoking a provider's compaction engine.
 - Persisted `outcomeWait` reevaluation through the daemon scheduler, keyboard/focus

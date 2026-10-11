@@ -65,7 +65,7 @@ impl BossService {
                         .as_ref()
                         .is_some_and(|r| r.phase == PlanReadinessPhase::Blocked)
                         || readiness.phase == PlanReadinessPhase::Blocked,
-                    "blocked attempt requires fresh review"
+                    "blocked attempt requires fresh verified delivery"
                 );
             }
             if readiness.phase == PlanReadinessPhase::Blocked {

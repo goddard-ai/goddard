@@ -1722,13 +1722,24 @@ pub enum PlanFailureKind {
     Acknowledgement,
 }
 
-/// A daemon-owned review phase; it makes no native-tool restriction claim.
+/// A daemon-owned delivery phase; it makes no native-tool restriction claim.
+/// `Reviewing` and `Ready` are historical acknowledgement-contract phases kept
+/// so stored records still deserialize — new deliveries only produce
+/// `Preparing`, `Delivered`, or `Blocked`.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PlanReadinessPhase {
+    /// Binding, bytes and delivery support are being checked, or the complete
+    /// execution input was submitted and acceptance is not yet confirmed.
     Preparing,
+    /// Historical: a review turn was waiting on employee acknowledgement.
     Reviewing,
+    /// Historical: the acknowledgement contract had released the brief.
     Ready,
+    /// The qualified adapter accepted the complete execution input for this
+    /// attempt — the exact approved bytes plus the brief reached provider input.
+    Delivered,
+    /// Content, authority, capability or delivery failed or is uncertain.
     Blocked,
 }
 
@@ -1739,7 +1750,10 @@ pub struct PlanReadiness {
     pub attempt: Uuid,
     pub runtime_generation: Uuid,
     pub phase: PlanReadinessPhase,
+    /// The adapter contract accepted the complete execution input.
     pub delivered: bool,
+    /// Historical acknowledgement-contract evidence; new deliveries never
+    /// set it and a stray ack line has no effect.
     pub acknowledged: bool,
     pub failure: Option<PlanContractError>,
 }
