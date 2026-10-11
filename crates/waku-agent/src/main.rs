@@ -548,7 +548,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss memory overview --project octane".to_owned(),
         ),
         "boss memory record" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
             json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
             "goddard-agent boss memory record --project octane --json-file note.json".to_owned(),
         ),
@@ -583,7 +583,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent memory overview".to_owned(),
         ),
         "memory record" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
             json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
             "goddard-agent memory record --json-file note.json".to_owned(),
         ),

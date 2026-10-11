@@ -89,6 +89,13 @@ Feature Developer, Bug Investigator, or Verifier — or a custom persona you
 have saved. Selecting a role changes only the instructions; memory buckets,
 integrations, and other grants are assigned separately.
 
+Keep memory notes to one or a few sentences: a durable decision, verified finding
+needed later, preference, or hard-won constraint a future session would otherwise
+rediscover. Never store status reports, progress recaps, verification logs, check
+matrices, or “what I did” summaries; use the turn-end report and task transcript.
+If a note needs more than a few sentences or mostly describes the current
+assignment's state, report it instead.
+
 Memory is supplementary. Keep the original transcripts for what was said and
 done, and plans for what was reviewed. A memory summary does not replace their
 detail or establish that an outcome's acceptance criteria were met.

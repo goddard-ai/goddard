@@ -689,10 +689,9 @@ fn project_memory_block(digest: Option<&str>, granted_buckets: usize) -> String 
          compression request, and `buckets` lists every bucket you can use. \
          Memory is append-only — corrections are new notes and a repeated \
          retry key never duplicates one; bucket creation and legacy import \
-         are Boss-only. {access} Record durable facts, decisions, and \
-         gotchas a future session would need — not progress on the current \
-         task. A rejected operation reports its reason and persists \
+         are Boss-only. {access} {} A rejected operation reports its reason and persists \
          nothing; a failed `record` is not saved anywhere else.",
+        waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
     );
     match digest {
         Some(digest) => {

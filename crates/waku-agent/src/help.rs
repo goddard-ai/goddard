@@ -240,6 +240,7 @@ fn purpose(path: &str) -> &str {
         p if p.starts_with("boss persona ") => {
             "Inspect or maintain role instructions and shipped-default state."
         }
+        "memory record" | "boss memory record" => waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
         p if p.contains(" memory ") || p.starts_with("memory ") => {
             "Read or maintain durable notes in an explicitly accessible bucket."
         }

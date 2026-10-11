@@ -155,8 +155,14 @@ being denied a Boss-derived passage in that same turn. Do not summarize denied
 content into a session cue. Revocation cannot retract text already delivered to
 a reader, but prevents subsequent retrieval and rendering.
 
-Employees remain read-only for durable memory. They submit findings as completion
-sources; the authorized Boss/project writer decides whether to insert facts.
+Employees and ordinary task agents can read and record in their assigned project
+bucket and any explicitly granted buckets. Notes should be one or a few sentences
+capturing a durable decision, verified finding needed later, preference, or
+hard-won constraint a future session would otherwise rediscover. Never store
+status reports, progress recaps, verification logs, check matrices, or “what I
+did” summaries; use the turn-end report and task transcript instead. Report any
+note that needs more than a few sentences or mostly describes assignment state.
+
 Incognito uses an ephemeral session store and creates no durable chunks, indexes,
 handoffs, or evaluator payloads from its content by default.
 

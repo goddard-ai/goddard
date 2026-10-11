@@ -1,0 +1,1 @@
+- Agents are instructed to keep memory notes brief and durable, leaving status reports and verification logs in task transcripts.
