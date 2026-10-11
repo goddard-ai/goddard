@@ -41,7 +41,7 @@ fn plan_acceptance_every_ack_identity_and_section_is_required() {
         let response = match coverage {
             "repeated" => format!("{prefix} {},{}", section[0], section[0]),
             "reversed" => format!("{prefix} {},{}", section[1], section[0]),
-            "extra-text" => format!("Read it.\n{ack}"),
+            "extra-text" => format!("{ack}\nExtra trailing text."),
             "overflow" => format!("{}\n{ack}", "x".repeat(64 * 1024)),
             _ => unreachable!(),
         };

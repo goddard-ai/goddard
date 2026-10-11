@@ -460,10 +460,19 @@ impl PlanGate {
                 );
             }
             DriverEvent::TurnFinished { success, .. } => {
+                // Providers stream interim agent messages throughout the
+                // review turn, so the whole response can never equal the
+                // acknowledgement; the contract is that it finishes the turn.
+                let acknowledged = review
+                    .response
+                    .trim_end()
+                    .lines()
+                    .next_back()
+                    .is_some_and(|line| line.trim() == review.acknowledgement());
                 if review.receipt.phase != Phase::Reviewing
                     || !review.response_complete
                     || !success
-                    || review.response.trim() != review.acknowledgement()
+                    || !acknowledged
                 {
                     self.block(&mut review, anyhow!("plan acknowledgement failure: complete matching revision and section acknowledgement required"));
                     return true;
@@ -1226,6 +1235,49 @@ mod tests {
             serde_json::from_slice(&fs::read(fixture.root.join("delivery.json")).unwrap()).unwrap();
         assert_eq!(receipt["receipt"]["acknowledged"], true);
         assert_eq!(receipt["receipt"]["phase"], "ready");
+    }
+
+    #[test]
+    fn plan_delivery_accepts_exact_acknowledgement_after_review_commentary() {
+        let fixture = Fixture::new("approved bytes");
+        fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
+        // Providers emit every interim agent message as a text delta; the
+        // acknowledgement still settles the turn as its final line.
+        let acknowledgement = fixture.acknowledgement();
+        for delta in [
+            "I will read the artifact and verify its section hashes.",
+            "\n\nAll three section hashes match.\n\n",
+            acknowledgement.as_str(),
+            "\n",
+        ] {
+            fixture
+                .gate
+                .observe(&DriverEvent::TextDelta(delta.to_owned()));
+        }
+        assert!(fixture.gate.observe(&DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None
+        }));
+        assert!(fixture.gate.ready());
+        assert_eq!(fixture.capture.0.lock().len(), 2);
+        assert!(fixture.capture.0.lock()[1].contains("IMPLEMENT_SENTINEL"));
+    }
+
+    #[test]
+    fn plan_delivery_rejects_acknowledgement_that_is_not_the_final_line() {
+        for tail in ["trailing commentary", "PLAN-ACK lookalike suffix"] {
+            let fixture = Fixture::new("approved bytes");
+            fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
+            fixture.finish(&format!("{}\n{tail}", fixture.acknowledgement()));
+            assert!(!fixture.gate.ready(), "{tail}");
+            assert_eq!(fixture.capture.0.lock().len(), 1, "{tail}");
+            assert_eq!(
+                fixture.gate.review.lock().pending[0].0,
+                "IMPLEMENT_SENTINEL",
+                "{tail}"
+            );
+        }
     }
 
     #[test]

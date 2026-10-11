@@ -1,0 +1,1 @@
+- **Boss plan review:** Employees bound to an approved plan no longer fail the required review when their review turn includes progress updates. The acknowledgement is accepted when it is the final line of the turn; text after it still rejects the review.
