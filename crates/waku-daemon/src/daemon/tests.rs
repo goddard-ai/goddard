@@ -1894,6 +1894,7 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -1984,6 +1985,7 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2225,6 +2227,7 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2293,6 +2296,7 @@ fn a_declined_agent_rename_leaves_the_title_alone() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2341,6 +2345,7 @@ fn an_agent_rename_unparks_when_the_runtime_dies() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2485,6 +2490,7 @@ fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2588,6 +2594,7 @@ fn a_declined_archive_proposal_archives_nothing() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -2649,6 +2656,7 @@ fn a_boss_archive_proposal_reaches_other_projects() {
     backend.sessions.lock().insert(
         boss_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: boss_runtime,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -3091,6 +3099,7 @@ fn an_exited_runtime_releases_its_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id,
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -3314,6 +3323,7 @@ fn runtime_generation_entry(
     cwd: &Path,
 ) -> RuntimeEntry {
     RuntimeEntry {
+        plan_gate: None,
         runtime_id,
         driver: DriverHandle::from_control(capture),
         last_active: std::time::Instant::now(),
@@ -4264,6 +4274,7 @@ fn startup_runtime_events_are_forwarded_after_registration() {
         .register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -4309,6 +4320,7 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id,
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -4377,6 +4389,7 @@ fn closing_a_session_begins_driver_shutdown_while_a_handle_is_held() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -4558,6 +4571,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
                 (
                     id,
                     RuntimeEntry {
+                        plan_gate: None,
                         runtime_id: Uuid::new_v4(),
                         driver: driver.clone(),
                         last_active: std::time::Instant::now()
@@ -4593,6 +4607,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -4643,6 +4658,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -5203,6 +5219,7 @@ fn boss_terminal_op_owes_the_prompting_client() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -5310,6 +5327,7 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -5401,6 +5419,7 @@ fn employee_finish_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -5438,6 +5457,7 @@ fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
     backend.sessions.lock().insert(
         decoy_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -6746,6 +6766,7 @@ fn an_expiring_employee_notifies_attached_clients() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -6848,6 +6869,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(parent_capture),
             last_active: std::time::Instant::now(),
@@ -6872,6 +6894,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -6990,6 +7013,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -7934,6 +7958,7 @@ fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -8083,6 +8108,7 @@ fn summon_response_waits_for_completed_dispatch() {
         backend.sessions.lock().insert(
             employee.session_id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture.clone()),
                 last_active: std::time::Instant::now(),
@@ -8336,6 +8362,7 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(supervisor_capture.clone()),
             last_active: std::time::Instant::now(),
@@ -9416,6 +9443,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -9557,6 +9585,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -9771,6 +9800,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -9818,6 +9848,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -9958,6 +9989,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
             last_active: std::time::Instant::now(),
@@ -9993,6 +10025,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -10245,6 +10278,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11293,6 +11327,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11358,6 +11393,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -11419,6 +11455,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(resumed_capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11503,6 +11540,7 @@ fn a_wave_reports_once_when_every_member_settles() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11593,6 +11631,7 @@ fn an_all_cancelled_wave_reports_as_cancelled() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11715,6 +11754,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(first_capture.clone()),
             last_active: std::time::Instant::now(),
@@ -11833,6 +11873,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(second_capture.clone()),
             last_active: std::time::Instant::now(),
@@ -12864,6 +12905,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
             last_active: std::time::Instant::now(),
@@ -13204,6 +13246,7 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(child.clone()),
             last_active: std::time::Instant::now(),
@@ -13260,6 +13303,7 @@ fn a_revived_employee_prompt_reaches_session_subscribers() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: employee_runtime,
             driver: DriverHandle::from_control(child.clone()),
             last_active: std::time::Instant::now(),
@@ -13680,6 +13724,7 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
     backend.sessions.lock().insert(
         old,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: old_runtime,
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -13825,6 +13870,7 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
     backend.sessions.lock().insert(
         next,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id: next_runtime,
             driver,
             last_active: std::time::Instant::now(),
@@ -14302,6 +14348,7 @@ fn outcome_employee_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
                 last_active: std::time::Instant::now(),
@@ -15557,6 +15604,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            plan_gate: None,
             runtime_id,
             driver: driver.clone(),
             last_active: std::time::Instant::now(),
@@ -15882,4 +15930,127 @@ fn plan_approval_rejects_missing_review_and_changed_review_before_freezing() {
     assert_eq!(captured.approved_revisions.len(), 1);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Exercise the real preflight, durable recovery and provider event pump while
+/// substituting only the external provider process.
+#[test]
+fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() {
+    use waku_protocol::boss::{BossOperation, EmployeeControl};
+    let root = std::env::temp_dir().join(format!("plan-delivery-runtime-{}", Uuid::new_v4()));
+    let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let plan = boss_plan("plans/runtime-bound.md", &[]);
+    backend.boss.add_plan(plan.clone()).unwrap();
+    let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+    backend.boss.finalize_plan(&plan.plan_file, None, 1, &reviewed).unwrap();
+    backend.boss.set_employee_plan(session_id, Some(Some(plan.plan_file.clone())), None).unwrap();
+    let capture = Arc::new(CaptureDriver::default());
+    let raw = capture.clone();
+    let transport = Arc::new(Mutex::new(None::<driver::DriverEventSender>));
+    let sender = transport.clone();
+    backend.runtime_test_start = Some(Arc::new(move |_, _, events| {
+        *sender.lock() = Some(events);
+        Ok(DriverHandle::from_control(raw.clone()))
+    }));
+    let source = EventSink::detached();
+    let (generation, driver) = backend.ensure_agent_runtime(session_id, &source).unwrap();
+    driver.prompt("IMPLEMENT_SENTINEL".into());
+    let first = capture.prompts.lock()[0].clone();
+    assert!(!first.contains("IMPLEMENT_SENTINEL"));
+    let old_ack = first.lines().find(|line| line.starts_with("PLAN-ACK ")).unwrap().to_owned();
+    // A mutable path can change without changing what this attempt receives.
+    std::fs::write(backend.boss.plan_document_path(&plan.plan_file).unwrap(), "mutable lookalike").unwrap();
+    let gate = backend.sessions.lock()[&session_id].plan_gate.clone().unwrap();
+    gate.observe(&DriverEvent::TextDelta("wrong revision".into()));
+    gate.observe(&DriverEvent::TurnFinished { success: true, summary: None, summary_i18n: None });
+    assert!(!gate.ready());
+    drop_detached(backend.remove_runtime(session_id, Some(generation), false));
+    let (fresh_generation, fresh) = backend.ensure_agent_runtime(session_id, &source).unwrap();
+    assert_ne!(generation, fresh_generation);
+    fresh.prompt("resume review".into());
+    let review = capture.prompts.lock()[1].clone();
+    assert!(review.contains("# Reviewed fixture\n"));
+    assert!(!review.contains("mutable lookalike"));
+    assert!(!review.contains("IMPLEMENT_SENTINEL"));
+    let acknowledgement = review.lines().find(|line| line.starts_with("PLAN-ACK ")).unwrap().to_owned();
+    assert_ne!(old_ack, acknowledgement);
+    let events = transport.lock().as_ref().unwrap().clone();
+    events.send(DriverEvent::TurnStarted).unwrap();
+    events.send(DriverEvent::TextDelta(acknowledgement)).unwrap();
+    events.send(DriverEvent::TurnFinished { success: true, summary: None, summary_i18n: None }).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while capture.prompts.lock().len() < 3 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(capture.prompts.lock().len(), 3);
+    assert!(capture.prompts.lock()[2].contains("IMPLEMENT_SENTINEL"));
+    assert!(!backend.boss.employee(session_id).unwrap().expired);
+    // A grant update retires this generation instead of reusing its receipt.
+    let permissions = waku_protocol::boss::PermissionOverrides {
+        computer_use: Some(!backend.boss.employee(session_id).unwrap().permissions.computer_use),
+        ..Default::default()
+    };
+    backend.handle_boss_operation(None, BossOperation::Control { session_id,
+        action: EmployeeControl::SetPermissions { permissions } }, &source).unwrap();
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    fresh.prompt("STALE_BRIEF_SENTINEL".into());
+    assert_eq!(capture.prompts.lock().len(), 3);
+    backend.shutdown();
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for (provider, environment, supported) in [
+        (ProviderKind::Codex, crate::model::SessionEnvironment::Local, true),
+        (ProviderKind::Devin, crate::model::SessionEnvironment::Local, true),
+        (ProviderKind::Claude, crate::model::SessionEnvironment::Local, false),
+        (ProviderKind::Codex, crate::model::SessionEnvironment::Sandbox, false),
+    ] {
+        let root = std::env::temp_dir().join(format!("plan-delivery-preflight-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let plan = boss_plan("plans/preflight.md", &[]);
+        backend.boss.add_plan(plan.clone()).unwrap();
+        let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+        backend.boss.finalize_plan(&plan.plan_file, None, 1, &reviewed).unwrap();
+        backend.boss.set_employee_plan(session_id, Some(Some(plan.plan_file)), None).unwrap();
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(session_id).unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.provider = provider;
+            session.environment = environment;
+            state.mark_session_dirty(session_id);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let mut settings = backend.settings.get();
+        settings.provider_binary_overrides.insert(provider, root.join("controlled-provider").display().to_string());
+        backend.settings.replace(settings).unwrap();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let launched = starts.clone();
+        let transport = Arc::new(Mutex::new(None::<driver::DriverEventSender>));
+        let sender = transport.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, _, events| {
+            launched.fetch_add(1, Ordering::SeqCst);
+            *sender.lock() = Some(events);
+            Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+        }));
+        let result = backend.ensure_agent_runtime(session_id, &EventSink::detached());
+        if supported {
+            assert!(result.is_ok(), "{provider:?}: {:?}", result.as_ref().err());
+            assert!(backend.sessions.lock()[&session_id].plan_gate.is_some());
+            assert_eq!(starts.load(Ordering::SeqCst), 1);
+        } else {
+            assert!(result.err().unwrap().to_string().contains("plan delivery unsupported"));
+            assert_eq!(starts.load(Ordering::SeqCst), 0);
+            assert!(!backend.sessions.lock().contains_key(&session_id));
+        }
+        backend.shutdown();
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

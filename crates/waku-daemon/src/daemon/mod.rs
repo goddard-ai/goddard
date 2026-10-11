@@ -380,6 +380,7 @@ struct TerminalEntry {
 /// reads both stamps. `provider`/`cwd` exist for the stats sampler, which
 /// claims a descendant subtree by the directory its members run in.
 struct RuntimeEntry {
+    plan_gate: Option<Arc<plan_delivery::PlanGate>>,
     runtime_id: Uuid,
     driver: DriverHandle,
     last_active: std::time::Instant,
@@ -689,6 +690,7 @@ mod response;
 mod response_ops;
 mod rpc;
 mod runtime;
+mod plan_delivery;
 mod summon;
 mod task_creation;
 mod transfer;

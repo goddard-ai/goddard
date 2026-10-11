@@ -1,4 +1,4 @@
-//! Exact approved content and assignment authority. No runtime delivery policy.
+//! Exact approved content and assignment authority; runtime adapters own delivery.
 use super::*;
 use waku_protocol::boss::{
     ApprovedPlanRevision, PlanAssignmentKind, PlanBinding, PlanContractError, PlanFailureKind,
@@ -127,6 +127,65 @@ impl BossService {
 
     pub fn validate_plan_binding(&self, employee: &BossEmployee) -> ContractResult<()> {
         validate_binding(&self.state.lock(), employee)
+    }
+
+    /// Keep authority validation and a nonblocking runtime dispatch in one
+    /// state lease. Revocation/rebinding cannot win a check/send race. The
+    /// callback must only enqueue provider input and must not call Boss APIs.
+    pub fn with_validated_plan_dispatch<T>(
+        &self,
+        expected: &BossEmployee,
+        dispatch: impl FnOnce() -> T,
+    ) -> ContractResult<T> {
+        let state = self.state.lock();
+        let current = state
+            .employees
+            .iter()
+            .find(|employee| employee.session_id == expected.session_id)
+            .ok_or_else(|| {
+                failure(
+                    PlanFailureKind::Lifecycle,
+                    "plan principal is no longer active",
+                )
+            })?;
+        if current.expired
+            || (current.state == EmployeeLifecycle::Queued && current.ticket.is_some())
+            || current.workspace_transition
+            || matches!(
+                current.state,
+                EmployeeLifecycle::Finishing | EmployeeLifecycle::Expired
+            )
+        {
+            return Err(failure(
+                PlanFailureKind::Lifecycle,
+                "plan principal cannot execute in its current lifecycle",
+            ));
+        }
+        let fingerprint = |employee: &BossEmployee| {
+            serde_json::to_value((
+                &employee.plan_binding,
+                employee.assignment_kind,
+                employee.item_id,
+                employee.supervisor_id,
+                employee.persona_id,
+                &employee.permissions,
+                &employee.assignment,
+            ))
+            .map_err(|_| {
+                failure(
+                    PlanFailureKind::BindingChanged,
+                    "could not validate runtime assignment authority",
+                )
+            })
+        };
+        if fingerprint(current)? != fingerprint(expected)? {
+            return Err(failure(
+                PlanFailureKind::BindingChanged,
+                "runtime assignment authority changed; review a fresh attempt",
+            ));
+        }
+        validate_binding(&state, current)?;
+        Ok(dispatch())
     }
 
     /// Exact-version recovery for later delivery packages; never reads live text.
@@ -484,6 +543,52 @@ mod tests {
             restored.approved_plan_revision(&binding).unwrap_err().kind,
             PlanFailureKind::Integrity
         );
+    }
+
+    #[test]
+    fn runtime_dispatch_rejects_changed_grants_and_withdrawn_approval() {
+        let fixture = Fixture::new();
+        let plan = fixture.plan("runtime", "approved bytes");
+        let plan = fixture.approve(&plan, 1);
+        let employee = fixture.employee(&plan, PlanAssignmentKind::Implementation);
+        fixture.service.add_employee(employee.clone()).unwrap();
+        let mut starts = 0;
+        fixture
+            .service
+            .with_validated_plan_dispatch(&employee, || starts += 1)
+            .unwrap();
+        fixture
+            .service
+            .update(|state| {
+                state.employees[0].permissions.computer_use = !employee.permissions.computer_use;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .with_validated_plan_dispatch(&employee, || starts += 1)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::BindingChanged
+        );
+        fixture
+            .service
+            .update(|state| {
+                state.employees[0].permissions = employee.permissions.clone();
+                state.planning[0].finalized_at = None;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .with_validated_plan_dispatch(&employee, || starts += 1)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::Unapproved
+        );
+        assert_eq!(starts, 1);
     }
 
     #[test]

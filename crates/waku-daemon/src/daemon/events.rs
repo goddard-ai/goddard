@@ -409,6 +409,14 @@ pub(super) fn forward_driver_events(
                 eprintln!("could not record task settlement {session_id}: {error:#}");
             }
         }
+        let plan_gate = sessions
+            .lock()
+            .get(&session_id)
+            .and_then(|entry| entry.plan_gate.clone());
+        if intentional && let Some(gate) = &plan_gate {
+            gate.interrupt_review();
+        }
+        let review_settled = plan_gate.as_ref().is_some_and(|gate| gate.observe(&event));
         let rejected_steer = if stale {
             None
         } else {
@@ -577,6 +585,16 @@ pub(super) fn forward_driver_events(
         };
         if delivered.is_err() {
             break;
+        }
+        if review_settled {
+            if plan_gate.as_ref().is_some_and(|gate| gate.ready()) {
+                // The released implementation prompt owns the next turn before
+                // its asynchronous TurnStarted arrives; queue drains must wait.
+                agent.note_driver_event(session_id, &DriverEvent::TurnStarted);
+            }
+            // Review completion is not employee completion. The gate either
+            // released the stored brief or retained it with a recoverable failure.
+            continue;
         }
         // A parked prompt is unfinished work — an employee whose queue is
         // still full drains it into new turns instead of expiring, and the

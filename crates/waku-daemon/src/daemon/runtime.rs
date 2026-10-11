@@ -58,6 +58,7 @@ impl WakuBackend {
         let mut options = options;
         self.boss.require_active(session_id)?;
         let managed = self.boss.is_managed(session_id);
+        let employee_snapshot = self.boss.employee(session_id);
         let environment = self
             .task_state
             .lock()
@@ -79,9 +80,8 @@ impl WakuBackend {
             }
             self.boss.reset_context(session_id);
             options.read_own_transcript = true;
-            options.computer_use_enabled &= self
-                .boss
-                .employee(session_id)
+            options.computer_use_enabled &= employee_snapshot
+                .as_ref()
                 .is_some_and(|employee| employee.permissions.computer_use);
         }
         // A projectless workspace is daemon-owned scratch state: its
@@ -204,10 +204,9 @@ impl WakuBackend {
         // Connected integrations keep their provider-neutral MCP descriptions.
         // Computer Use is owned separately by the task-scoped CLI service.
         options.mcp_servers = if managed {
-            let grants = self
-                .boss
-                .employee(session_id)
-                .map(|employee| employee.permissions.integration_ids)
+            let grants = employee_snapshot
+                .as_ref()
+                .map(|employee| employee.permissions.integration_ids.clone())
                 .unwrap_or_default();
             if crate::integrations::deliver::uses_acp(provider)
                 && !self.integrations.http_mcp_supported(provider)
@@ -242,6 +241,13 @@ impl WakuBackend {
         } else {
             None
         };
+        let prepared_plan = self.prepare_plan_delivery(
+            session_id,
+            runtime_id,
+            provider,
+            &options,
+            employee_snapshot.as_ref(),
+        )?;
         // A sandboxed session runs its provider inside a shuru VM — never on
         // the host. Every setup failure fails the task rather than silently
         // falling back to a local process.
@@ -298,6 +304,23 @@ impl WakuBackend {
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
         let handle = self.start_runtime_driver(provider, options, event_sender, cloud_launch)?;
+        if prepared_plan.is_some()
+            && handle.agent_surface_delivery() == driver::AgentSurfaceDelivery::Absent
+        {
+            handle.begin_shutdown();
+            bail!("plan delivery unsupported: adapter omitted scoped control transport");
+        }
+        let plan_gate = prepared_plan.map(|prepared| {
+            prepared.attach(
+                handle.clone(),
+                events.clone(),
+                self.runtime_lifecycles.session(session_id),
+                runtime_id,
+            )
+        });
+        let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
+            DriverHandle::from_control(gate.clone())
+        });
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");
@@ -318,6 +341,7 @@ impl WakuBackend {
         self.register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                plan_gate,
                 runtime_id,
                 driver: handle.clone(),
                 last_active: std::time::Instant::now(),

@@ -1,0 +1,1 @@
+- Boss employees assigned an approved plan receive its exact text in a rereadable artifact and must acknowledge that revision before receiving the implementation brief. Required-plan sandbox execution and unverified adapters remain blocked.

@@ -649,8 +649,21 @@ impl WakuBackend {
                     // Retags validate plan authority. A live assignment
                     // keeps its accepted revision rather than switching plans.
                     if let EmployeeControl::SetPlan { plan, item } = &action {
+                        let previous = self.boss.employee(session_id);
                         self.boss
                             .set_employee_plan(session_id, plan.clone(), *item)?;
+                        let current = self.boss.employee(session_id);
+                        if current.as_ref().is_some_and(|current| {
+                            current.assignment_kind
+                                == waku_protocol::boss::PlanAssignmentKind::Implementation
+                                && current.plan_binding.is_some()
+                                && previous.as_ref().is_none_or(|previous| {
+                                    previous.plan_binding != current.plan_binding
+                                        || previous.item_id != current.item_id
+                                })
+                        }) {
+                            self.retire_plan_runtime(session_id, events)?;
+                        }
                         return Ok(BossResult::Saved);
                     }
                     use waku_protocol::boss::EmployeeLifecycle;
@@ -720,11 +733,22 @@ impl WakuBackend {
                         );
                     }
                     if let EmployeeControl::SetPermissions { permissions } = &action {
+                        let previous = self.boss.employee(session_id);
                         self.boss.set_employee_permissions(
                             caller,
                             session_id,
                             permissions.clone(),
                         )?;
+                        if let Some(previous) = previous
+                            && previous.assignment_kind
+                                == waku_protocol::boss::PlanAssignmentKind::Implementation
+                            && previous.plan_binding.is_some()
+                            && serde_json::to_value(previous.permissions)?
+                                != serde_json::to_value(self.boss.employee(session_id)
+                                    .ok_or_else(|| anyhow!("employee disappeared after grant update"))?.permissions)?
+                        {
+                            self.retire_plan_runtime(session_id, events)?;
+                        }
                         // The employee's next prompt re-injects its persona
                         // block so the revised grants reach it — and its
                         // memory block re-delivers with the new access line.

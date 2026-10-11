@@ -153,6 +153,7 @@ impl WakuBackend {
             }
         }
         backend.purge_expired_archived_sessions();
+        backend.sweep_retired_plan_delivery();
         backend.start_archive_detail_prune();
         backend.install_link_handlers();
         {
@@ -730,6 +731,7 @@ impl WakuBackend {
             .filter_map(|id| self.remove_runtime(*id, None, true))
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
+        self.cleanup_plan_delivery(&removed_ids);
         Ok(())
     }
 
@@ -808,6 +810,7 @@ impl WakuBackend {
             .filter_map(|id| self.remove_runtime(*id, None, true))
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
+        self.cleanup_plan_delivery(&removed_ids);
         Ok(())
     }
 
