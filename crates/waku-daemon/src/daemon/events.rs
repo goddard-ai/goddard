@@ -289,6 +289,39 @@ pub(super) fn forward_driver_events(
         {
             entry.last_active = std::time::Instant::now();
         }
+        let managed = boss.is_managed(session_id);
+        // Events from a runtime the session no longer owns — torn down by
+        // a requeue, a stop, or a replacement — must not rewrite the
+        // transcript or settle the employee's admission. A queued ticket
+        // owns no live runtime either: anything arriving for it is the
+        // previous generation dying.
+        let stale = managed
+            && (boss.employee_lifecycle(session_id)
+                == Some(waku_protocol::boss::EmployeeLifecycle::Queued)
+                || !sessions
+                    .lock()
+                    .get(&session_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id));
+        if stale {
+            if matches!(&event, DriverEvent::ProcessExited) {
+                // A queued employee can still own the dying entry. Retire
+                // that runtime, while preserving the queued session's state.
+                let removed = {
+                    let mut sessions = sessions.lock();
+                    sessions
+                        .get(&session_id)
+                        .is_some_and(|entry| entry.runtime_id == runtime_id)
+                        .then(|| sessions.remove(&session_id))
+                        .flatten()
+                };
+                events
+                    .for_session(session_id, runtime_id)
+                    .end_session_runtime();
+                drop_detached(removed);
+                break;
+            }
+            continue;
+        }
         // A provider exit that kills an open turn classifies the
         // employee's settle as an interruption — capture the flag before
         // either recorder retires the turn.
@@ -307,19 +340,6 @@ pub(super) fn forward_driver_events(
                     })
                     .is_some()
             });
-        let managed = boss.is_managed(session_id);
-        // Events from a runtime the session no longer owns — torn down by
-        // a requeue, a stop, or a replacement — must not rewrite the
-        // transcript or settle the employee's admission. A queued ticket
-        // owns no live runtime either: anything arriving for it is the
-        // previous generation dying.
-        let stale = managed
-            && (boss.employee_lifecycle(session_id)
-                == Some(waku_protocol::boss::EmployeeLifecycle::Queued)
-                || !sessions
-                    .lock()
-                    .get(&session_id)
-                    .is_some_and(|entry| entry.runtime_id == runtime_id));
         // A settle the daemon itself ordered — a supervisor stop's
         // transcript write or a reconfigure's cancel — records the turn as
         // an intentional interruption, never a failure, and never settles
@@ -608,27 +628,25 @@ pub(super) fn forward_driver_events(
             }
         }
         if process_exited {
-            agent.clear_session(session_id);
-            {
-                let mut maps = repo_maps.0.lock();
-                maps.sessions.remove(&session_id);
-            }
-            // The hub retires a runtime on the request path — CloseSession,
-            // a failed Start — but a provider that exits on its own never
-            // produces one. Without this the dead runtime's replay journal,
-            // sequence counter, and active-runtime entry sit in the hub for
-            // the rest of the daemon's life.
+            // Remove and clear under the registration lock: a replacement
+            // cannot register between the ownership check and cleanup.
+            let removed = {
+                let mut sessions = sessions.lock();
+                if sessions
+                    .get(&session_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id)
+                {
+                    let removed = sessions.remove(&session_id);
+                    agent.clear_session(session_id);
+                    repo_maps.0.lock().sessions.remove(&session_id);
+                    removed
+                } else {
+                    None
+                }
+            };
             events
                 .for_session(session_id, runtime_id)
                 .end_session_runtime();
-            let removed = {
-                let mut sessions = sessions.lock();
-                sessions
-                    .get(&session_id)
-                    .is_some_and(|entry| entry.runtime_id == runtime_id)
-                    .then(|| sessions.remove(&session_id))
-                    .flatten()
-            };
             drop_detached(removed);
             break;
         }

@@ -1,0 +1,1 @@
+- Fixed Boss employees losing queued follow-ups or access to task tools when an old provider exits after a model change, and missing events from providers that start or exit immediately.

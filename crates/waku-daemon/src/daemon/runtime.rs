@@ -18,6 +18,8 @@ impl WakuBackend {
     ) -> anyhow::Result<(DriverHandle, bool)> {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
+        let resumable = options.provider_cursor.is_some();
+        let cwd = options.cwd.clone();
         let mut options = options;
         self.boss.require_active(session_id)?;
         let managed = self.boss.is_managed(session_id);
@@ -282,7 +284,33 @@ impl WakuBackend {
                 let _ = events.send_ephemeral(wire);
             }
         }
-        let forwarder_handle = handle.clone();
+        self.register_runtime_forwarder(
+            session_id,
+            RuntimeEntry {
+                runtime_id,
+                driver: handle.clone(),
+                last_active: std::time::Instant::now(),
+                resumable,
+                computer_use_available,
+                provider,
+                cwd,
+            },
+            event_receiver,
+            events,
+        )?;
+        Ok((handle, computer_use_available))
+    }
+
+    /// Publish the runtime before any buffered driver event can be consumed.
+    pub(super) fn register_runtime_forwarder(
+        &self,
+        session_id: Uuid,
+        entry: RuntimeEntry,
+        event_receiver: crossbeam_channel::Receiver<DriverEvent>,
+        events: EventSink,
+    ) -> anyhow::Result<std::thread::JoinHandle<()>> {
+        let runtime_id = entry.runtime_id;
+        let forwarder_handle = entry.driver.clone();
         let agent = self.agent.clone();
         let task_state = self.task_state.clone();
         let task_store = self.task_store.clone();
@@ -291,7 +319,13 @@ impl WakuBackend {
         let boss = self.boss.clone();
         let auto_prompts = self.auto_prompts.clone();
         let repo_maps = self.repo_maps.clone();
-        std::thread::Builder::new()
+        let retirement_events = events.clone();
+        // Hold registration through thread creation. The forwarder's first
+        // sessions lock cannot succeed until its entry is visible, even when
+        // the provider has already buffered Connected or ProcessExited.
+        let mut registered = self.sessions.lock();
+        registered.insert(session_id, entry);
+        let forwarding = std::thread::Builder::new()
             .name(format!("goddard-daemon-events-{session_id}"))
             .spawn(move || {
                 forward_driver_events(
@@ -310,8 +344,19 @@ impl WakuBackend {
                     repo_maps,
                 );
             })
-            .context("could not start daemon event forwarding thread")?;
-        Ok((handle, computer_use_available))
+            .context("could not start daemon event forwarding thread");
+        if forwarding.is_err() {
+            let removed = registered.remove(&session_id);
+            self.agent.clear_session(session_id);
+            self.repo_maps.0.lock().sessions.remove(&session_id);
+            drop(registered);
+            if let Some(entry) = &removed {
+                entry.driver.begin_shutdown();
+            }
+            drop_detached(removed);
+            retirement_events.end_session_runtime();
+        }
+        forwarding
     }
 
     /// Mint the runtime's scoped credential and assemble the environment the
@@ -452,9 +497,7 @@ impl WakuBackend {
         };
         let runtime_id = Uuid::new_v4();
         let sink = events.begin_session_runtime(session_id, runtime_id);
-        let resumable = options.provider_cursor.is_some();
-        let cwd = options.cwd.clone();
-        let (handle, computer_use_available) =
+        let (handle, _) =
             match self.spawn_runtime(session_id, runtime_id, provider, options, sink.clone()) {
                 Ok(launch) => launch,
                 Err(error) => {
@@ -462,19 +505,6 @@ impl WakuBackend {
                     return Err(error);
                 }
             };
-        let driver = handle.clone();
-        self.sessions.lock().insert(
-            session_id,
-            RuntimeEntry {
-                runtime_id,
-                driver: handle,
-                last_active: std::time::Instant::now(),
-                resumable,
-                computer_use_available,
-                provider,
-                cwd,
-            },
-        );
-        Ok((runtime_id, driver))
+        Ok((runtime_id, handle))
     }
 }

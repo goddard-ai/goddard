@@ -3128,6 +3128,167 @@ fn an_exited_runtime_releases_its_replay_journal() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+/// A replaced employee's buffered events belong to its retired runtime,
+/// never to the replacement's credential, prompt queue, cursor or transcript.
+#[test]
+fn stale_runtime_events_preserve_the_replacement() {
+    let root = std::env::temp_dir().join(format!("waku-stale-runtime-{}", Uuid::new_v4()));
+    let (mut backend, _, session_id, _, capture) = employee_finish_fixture(&root);
+    let runtime_id = backend.sessions.lock()[&session_id].runtime_id;
+    let old_runtime_id = Uuid::new_v4();
+    let events = EventSink::detached().begin_session_runtime(session_id, old_runtime_id);
+    events
+        .send(WireDriverEvent::new("old-runtime", Value::Null))
+        .unwrap();
+    let replacement_events = events.begin_session_runtime(session_id, runtime_id);
+    replacement_events
+        .send(WireDriverEvent::new("replacement", Value::Null))
+        .unwrap();
+    let token = backend.agent.mint(session_id);
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    backend.agent.enqueue(
+        session_id,
+        crate::agent::AgentPrompt {
+            prompt: "replacement follow-up".into(),
+            transport: None,
+            sender: None,
+            queued_id: Some(Uuid::new_v4()),
+            context: None,
+            hidden: false,
+            report_trigger: None,
+        },
+    );
+    backend
+        .repo_maps
+        .0
+        .lock()
+        .sessions
+        .insert(session_id, root.clone());
+    // A live automation run belongs to the replacement too; an old settle
+    // must neither complete it nor mark it failed.
+    let automation_path = root.join("replacement-automation.json");
+    std::fs::write(
+        &automation_path,
+        serde_json::to_vec(&serde_json::json!({
+            "runs": [{
+                "id": Uuid::new_v4(), "automationId": Uuid::new_v4(),
+                "trigger": "manual", "status": "running", "scheduledFor": 1,
+                "sessionId": session_id, "createdAt": 1, "updatedAt": 1
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    backend.automations = Arc::new(AutomationService::open(automation_path).unwrap());
+    let automation_before = backend.automations.document();
+    assert_eq!(automation_before.runs.len(), 1);
+    let before = serde_json::to_value(&backend.task_state.lock().sessions).unwrap();
+    let employee_before = serde_json::to_value(backend.boss.employee(session_id)).unwrap();
+    let (sender, receiver) = driver::test_event_channel();
+    for event in [
+        DriverEvent::Connected {
+            provider_cursor: Some(ProviderResumeCursor::Codex {
+                thread_id: "stale-thread".into(),
+            }),
+        },
+        DriverEvent::TurnStarted,
+        DriverEvent::TextDelta("stale answer".into()),
+        DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+        DriverEvent::ProcessExited,
+    ] {
+        sender.send(event).unwrap();
+    }
+    forward_driver_events(
+        session_id,
+        old_runtime_id,
+        receiver,
+        events.clone(),
+        DriverHandle::from_control(capture),
+        backend.agent.clone(),
+        backend.task_state.clone(),
+        backend.task_store.clone(),
+        backend.sessions.clone(),
+        backend.automations.clone(),
+        backend.boss.clone(),
+        backend.auto_prompts.clone(),
+        backend.repo_maps.clone(),
+    );
+    assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    assert!(backend.agent.has_queued(session_id));
+    assert!(backend.agent.has_open_turn(session_id));
+    assert_eq!(backend.sessions.lock()[&session_id].runtime_id, runtime_id);
+    assert_eq!(backend.repo_maps.0.lock().sessions[&session_id], root);
+    assert_eq!(
+        serde_json::to_value(&backend.task_state.lock().sessions).unwrap(),
+        before
+    );
+    assert_eq!(
+        serde_json::to_value(backend.boss.employee(session_id)).unwrap(),
+        employee_before
+    );
+    assert_eq!(backend.automations.document(), automation_before);
+    assert_eq!(events.journaled_event_count(session_id), 1);
+    std::fs::remove_dir_all(root).ok();
+}
+
+/// A provider may emit its entire lifetime before launch returns. Register
+/// before forwarding so its cursor is recorded and its exit retires the entry.
+#[test]
+fn startup_runtime_events_are_forwarded_after_registration() {
+    let root = std::env::temp_dir().join(format!("waku-startup-runtime-{}", Uuid::new_v4()));
+    let (backend, _, session_id, _, capture) = employee_finish_fixture(&root);
+    backend.sessions.lock().remove(&session_id);
+    let runtime_id = Uuid::new_v4();
+    let events = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+    let (sender, receiver) = driver::test_event_channel();
+    let cursor = ProviderResumeCursor::Codex {
+        thread_id: "fast-thread".into(),
+    };
+    sender
+        .send(DriverEvent::Connected {
+            provider_cursor: Some(cursor.clone()),
+        })
+        .unwrap();
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    drop(sender);
+    backend
+        .register_runtime_forwarder(
+            session_id,
+            RuntimeEntry {
+                runtime_id,
+                driver: DriverHandle::from_control(capture),
+                last_active: std::time::Instant::now(),
+                resumable: false,
+                computer_use_available: false,
+                provider: ProviderKind::Codex,
+                cwd: root.clone(),
+            },
+            receiver,
+            events.clone(),
+        )
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(session_id)
+            .unwrap()
+            .provider_cursor,
+        Some(cursor)
+    );
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    assert_eq!(events.journaled_event_count(session_id), 0);
+    std::fs::remove_dir_all(root).ok();
+}
+
 /// Per-token deltas and process-output chunks stream live but never
 /// journal: under heavy fan-out the journaled flood could saturate a
 /// reconnecting client's bounded queue and get it kicked on the next

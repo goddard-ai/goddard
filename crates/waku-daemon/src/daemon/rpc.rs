@@ -1618,24 +1618,10 @@ impl Backend for WakuBackend {
                     allow_model_fallback: false,
                     ephemeral: false,
                 };
-                let resumable = options.provider_cursor.is_some();
-                let cwd = options.cwd.clone();
-                let (handle, computer_use_available) =
+                let (handle, _) =
                     self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
                 let supports_user_input_actions = handle.supports_user_input_actions();
-                self.sessions.lock().insert(
-                    session_id,
-                    RuntimeEntry {
-                        runtime_id,
-                        driver: handle,
-                        last_active: std::time::Instant::now(),
-                        resumable,
-                        computer_use_available,
-                        provider,
-                        cwd,
-                    },
-                );
                 Ok(ResponsePayload::Started {
                     supports_steer,
                     supports_user_input_actions,
