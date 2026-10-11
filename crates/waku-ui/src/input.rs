@@ -690,7 +690,7 @@ pub const ATOM_PASTED_ICON: &str = "icons/file.svg";
 pub fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
     use waku_protocol::model::AtomRefKind;
     match kind {
-        AtomRefKind::Project => "icons/projects.svg",
+        AtomRefKind::Project => "icons/folder.svg",
         AtomRefKind::Persona => "icons/user-round.svg",
         AtomRefKind::Deliverable => "icons/file-text.svg",
         AtomRefKind::MemoryBucket => "icons/database.svg",
@@ -4669,7 +4669,7 @@ mod tests {
         point, prelude::*, px,
     };
 
-    use super::{ATOM_ICON_SLOT, AtomPaint, TokenClass};
+    use super::{atom_ref_icon, ATOM_ICON_SLOT, AtomPaint, TokenClass};
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, InputEvent, Paste, SearchPaint, TextInput,
@@ -4678,6 +4678,14 @@ mod tests {
         nonbreaking_chip_text, pasted_text_for_mode, previous_word_boundary, single_line_scroll,
         trimmed_splice, visual_row_count, word_range_at,
     };
+
+    #[test]
+    fn project_reference_chip_uses_folder_icon() {
+        assert_eq!(
+            atom_ref_icon(waku_protocol::model::AtomRefKind::Project),
+            "icons/folder.svg"
+        );
+    }
 
     #[test]
     fn chip_display_text_has_no_internal_line_breaks_and_copies_verbatim() {
