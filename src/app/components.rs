@@ -663,6 +663,7 @@ fn render_sent_message_attachments(
     }
     let mut row = div()
         .max_w(px(540.0))
+        .min_w_0()
         .flex()
         .flex_wrap()
         .items_center()
@@ -796,8 +797,9 @@ fn render_sent_message_attachments(
                         .id(SharedString::from(format!(
                             "message-{message_id}-attachment-{index}-text"
                         )))
-                        .w(px(360.0))
+                        .w_full()
                         .max_w(px(540.0))
+                        .min_w_0()
                         .max_h(px(240.0))
                         .overflow_y_scroll()
                         .px(px(10.0))
