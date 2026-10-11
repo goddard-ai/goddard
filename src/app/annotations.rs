@@ -399,7 +399,11 @@ impl Waku {
                 spans,
             });
         }
-        let session = self.selected_session()?;
+        // Resolve against the session this transcript actually rendered. A
+        // planning discussion can be shown as a boss-owned surface while its
+        // activation is still settling; using selected_session here drops the
+        // otherwise valid selection before the annotation offer can appear.
+        let session = self.transcript_display_session()?;
         let message_id = Uuid::parse_str(row.strip_prefix("message-")?).ok()?;
         let message = session
             .messages
@@ -3594,6 +3598,36 @@ mod tests {
 
     use super::*;
     use crate::md::selection::TextKey;
+
+    #[test]
+    fn planning_assistant_message_selection_is_annotatable() {
+        let project_id = Uuid::new_v4();
+        let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+        session.planning = Some(crate::model::SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_client::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        session.push_message(MessageRole::Assistant, "The selected planning text.");
+        let message_id = session.messages[0].id;
+        let selection = TranscriptSelection::default();
+        selection.selection.borrow_mut().set_spans(vec![Span {
+            key: TextKey::new(format!("message-{message_id}"), 0),
+            range: 4..12,
+            text: Rc::from("The selected planning text."),
+            block_break: false,
+            copy: Rc::default(),
+        }]);
+
+        let Some((annotated_message, spans)) =
+            annotatable_selection_in(&selection, &session, "message-")
+        else {
+            panic!("planning assistant message selection should be annotatable");
+        };
+        assert_eq!(annotated_message, message_id);
+        assert_eq!(spans[0].text.get(spans[0].range.clone()), Some("selected"));
+    }
 
     fn annotation(id: u64, text: &str, comment: &str) -> TranscriptAnnotation {
         TranscriptAnnotation {
