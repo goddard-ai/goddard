@@ -16009,6 +16009,9 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
         (ProviderKind::Devin, crate::model::SessionEnvironment::Local, true),
         (ProviderKind::Claude, crate::model::SessionEnvironment::Local, false),
         (ProviderKind::Codex, crate::model::SessionEnvironment::Sandbox, false),
+        (ProviderKind::Devin, crate::model::SessionEnvironment::Sandbox, false),
+        (ProviderKind::Codex, crate::model::SessionEnvironment::Cloud, false),
+        (ProviderKind::Devin, crate::model::SessionEnvironment::Cloud, false),
     ] {
         let root = std::env::temp_dir().join(format!("plan-delivery-preflight-{}", Uuid::new_v4()));
         let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
@@ -16045,7 +16048,13 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
             assert!(backend.sessions.lock()[&session_id].plan_gate.is_some());
             assert_eq!(starts.load(Ordering::SeqCst), 1);
         } else {
-            assert!(result.err().unwrap().to_string().contains("plan delivery unsupported"));
+            let error = result.err().unwrap().to_string();
+            let expected = if environment.is_cloud() {
+                "Boss roles require a provider runtime that can reach this daemon"
+            } else {
+                "plan delivery unsupported"
+            };
+            assert!(error.contains(expected), "{provider:?}/{environment:?}: {error}");
             assert_eq!(starts.load(Ordering::SeqCst), 0);
             assert!(!backend.sessions.lock().contains_key(&session_id));
         }
@@ -16154,3 +16163,5 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+mod plan_acceptance;

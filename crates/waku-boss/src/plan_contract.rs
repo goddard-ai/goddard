@@ -615,6 +615,9 @@ mod tests {
         error.downcast::<PlanContractError>().unwrap().kind
     }
 
+    #[path = "plan_contract_acceptance.rs"]
+    mod acceptance;
+
     #[test]
     fn plan_readiness_blocker_is_durable_deduplicated_and_attempt_scoped() {
         let fixture = Fixture::new();

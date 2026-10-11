@@ -1142,6 +1142,8 @@ mod tests {
         }
     }
 
+    mod acceptance;
+
     #[test]
     fn plan_blocker_runtime_report_survives_cli_auth_failure_and_rejects_old_provenance() {
         let fixture = Fixture::new("approved bytes");

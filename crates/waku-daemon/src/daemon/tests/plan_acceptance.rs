@@ -1,0 +1,254 @@
+//! Real daemon/controller with a scripted external provider and synthetic data.
+use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+const MUTATE: &str = "ACCEPTANCE_WRITE_TASK";
+
+struct ScriptedProvider {
+    prompts: Mutex<Vec<String>>,
+    mutations: Mutex<Vec<PathBuf>>,
+    target: PathBuf,
+}
+impl driver::DriverControl for ScriptedProvider {
+    fn prompt(&self, text: String) {
+        if text.contains(MUTATE) {
+            // An independent observable side effect, not just a prompt count.
+            std::fs::write(&self.target, "scripted task change").unwrap();
+            self.mutations.lock().push(self.target.clone());
+        }
+        self.prompts.lock().push(text);
+    }
+    fn cancel(&self) {}
+    fn respond(&self, _: String, _: String) {}
+    fn rollback(
+        &self,
+        _: usize,
+    ) -> anyhow::Result<Option<waku_protocol::model::ProviderResumeCursor>> {
+        Ok(None)
+    }
+}
+
+#[test]
+fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
+    let mut cases = 0;
+    for provider in [ProviderKind::Codex, ProviderKind::Devin] {
+        for workspace in ["direct", "worktree", "cross-project"] {
+            for fault in [
+                "none",
+                "missing-ack",
+                "launch",
+                "auth-after-launch",
+                "provider-switch",
+                "workspace-switch",
+            ] {
+                let root = std::env::temp_dir().join(format!("plan-acceptance-{}", Uuid::new_v4()));
+                let (mut backend, session) = runtime_generation_launch_fixture(&root, true);
+                runtime_generation_configure_launch(&mut backend, &root);
+                let plan = boss_plan("plans/acceptance.md", &[]);
+                backend.boss.add_plan(plan.clone()).unwrap();
+                let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+                backend
+                    .boss
+                    .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+                    .unwrap();
+                backend
+                    .boss
+                    .set_employee_plan(session, Some(Some(plan.plan_file)), None)
+                    .unwrap();
+                let cwd = if workspace == "direct" {
+                    root.join("repo")
+                } else {
+                    root.join(workspace)
+                };
+                std::fs::create_dir_all(cwd.join("plans")).unwrap();
+                std::fs::write(
+                    cwd.join("plans/acceptance.md"),
+                    "PROJECT_LOOKALIKE_SENTINEL",
+                )
+                .unwrap();
+                {
+                    let mut state = backend.task_state.lock();
+                    let mut project = state.projects[0].clone();
+                    if workspace == "cross-project" {
+                        project.id = Uuid::new_v4();
+                        project.path = cwd.clone();
+                        state.projects.push(project.clone());
+                    }
+                    let target = state.session_mut(session).unwrap();
+                    backend.task_store.hydrate(target).unwrap();
+                    target.provider = provider;
+                    if workspace == "worktree" {
+                        target.workspace = SessionWorkspace::Worktree {
+                            path: cwd.clone(),
+                            name: "fixture".into(),
+                            branch: None,
+                            base_branch: None,
+                            adopted_by: None,
+                        };
+                    } else if workspace == "cross-project" {
+                        target.project_id = project.id;
+                    }
+                    state.mark_session_dirty(session);
+                    backend.task_store.save(&mut state).unwrap();
+                }
+                let mut settings = backend.settings.get();
+                settings.provider_binary_overrides.insert(
+                    provider,
+                    root.join("controlled-provider").display().to_string(),
+                );
+                backend.settings.replace(settings).unwrap();
+                let script = Arc::new(ScriptedProvider {
+                    prompts: Mutex::new(Vec::new()),
+                    mutations: Mutex::new(Vec::new()),
+                    target: cwd.join("task-result"),
+                });
+                let starts = Arc::new(AtomicUsize::new(0));
+                let launches = starts.clone();
+                let raw = script.clone();
+                let agent = backend.agent.clone();
+                // Retain event transport so the controlled runtime does not exit.
+                let transport = Arc::new(Mutex::new(None));
+                let sender = transport.clone();
+                backend.runtime_test_start = Some(Arc::new(move |_, options, events| {
+                    assert_eq!(
+                        dunce::canonicalize(&options.cwd).unwrap(),
+                        dunce::canonicalize(raw.target.parent().unwrap()).unwrap()
+                    );
+                    launches.fetch_add(1, Ordering::SeqCst);
+                    if fault == "launch" {
+                        anyhow::bail!("injected provider launch failure");
+                    }
+                    if fault == "auth-after-launch" {
+                        agent.revoke_session(options.agent.as_ref().unwrap().task_id);
+                    }
+                    *sender.lock() = Some(events);
+                    Ok(DriverHandle::from_control(raw.clone()))
+                }));
+                let runtime = backend.ensure_agent_runtime(session, &EventSink::detached());
+                assert_eq!(
+                    starts.load(Ordering::SeqCst),
+                    1,
+                    "{provider:?}/{workspace}/{fault}"
+                );
+                if fault == "launch" {
+                    assert!(runtime.is_err());
+                } else if let Ok((_, driver)) = runtime {
+                    driver.prompt(MUTATE.into());
+                    if fault != "auth-after-launch" {
+                        let prompts = script.prompts.lock();
+                        assert_eq!(prompts.len(), 1);
+                        assert!(!prompts[0].contains(MUTATE));
+                        assert!(prompts[0].contains("# Reviewed fixture\n"));
+                        assert!(!prompts[0].contains("PROJECT_LOOKALIKE_SENTINEL"));
+                        let ack = prompts[0]
+                            .lines()
+                            .find(|line| line.starts_with("PLAN-ACK "))
+                            .unwrap()
+                            .to_owned();
+                        drop(prompts);
+                        assert!(!script.target.exists());
+                        match fault {
+                            "provider-switch" | "workspace-switch" => {
+                                let mut state = backend.task_state.lock();
+                                let target = state.session_mut(session).unwrap();
+                                if fault == "provider-switch" {
+                                    target.provider = if provider == ProviderKind::Codex {
+                                        ProviderKind::Devin
+                                    } else {
+                                        ProviderKind::Codex
+                                    };
+                                } else {
+                                    let moved = root.join("replacement-workspace");
+                                    std::fs::create_dir_all(&moved).unwrap();
+                                    target.workspace = SessionWorkspace::Worktree {
+                                        path: moved,
+                                        name: "replacement".into(),
+                                        branch: None,
+                                        base_branch: None,
+                                        adopted_by: None,
+                                    };
+                                }
+                                state.mark_session_dirty(session);
+                                backend.task_store.save(&mut state).unwrap();
+                            }
+                            _ => {}
+                        }
+                        let gate = backend.sessions.lock()[&session].plan_gate.clone().unwrap();
+                        gate.observe(&DriverEvent::TextDelta(if fault == "missing-ack" {
+                            String::new()
+                        } else {
+                            ack
+                        }));
+                        gate.observe(&DriverEvent::TurnFinished {
+                            success: true,
+                            summary: None,
+                            summary_i18n: None,
+                        });
+                    }
+                } else {
+                    assert_eq!(fault, "auth-after-launch");
+                }
+                assert_eq!(
+                    script.mutations.lock().len(),
+                    usize::from(fault == "none"),
+                    "{provider:?}/{workspace}/{fault}"
+                );
+                assert_eq!(script.target.exists(), fault == "none");
+                backend.shutdown();
+                drop(backend);
+                std::fs::remove_dir_all(root).unwrap();
+                cases += 1;
+            }
+        }
+    }
+    assert_eq!(cases, 36);
+    eprintln!(
+        "plan acceptance runtime matrix: {cases} passed; Codex/Devin x direct/worktree/cross-project x success/missing ack/launch failure/auth revoked/provider switch/workspace switch"
+    );
+}
+
+#[test]
+fn plan_acceptance_ordinary_no_plan_work_keeps_unstaged_dispatch() {
+    for managed in [false, true] {
+        for provider in [ProviderKind::Codex, ProviderKind::Devin] {
+            let root = std::env::temp_dir().join(format!("no-plan-acceptance-{}", Uuid::new_v4()));
+            let (mut backend, session) = runtime_generation_launch_fixture(&root, managed);
+            runtime_generation_configure_launch(&mut backend, &root);
+            {
+                let mut state = backend.task_state.lock();
+                state.session_mut(session).unwrap().provider = provider;
+                state.mark_session_dirty(session);
+                backend.task_store.save(&mut state).unwrap();
+            }
+            let mut settings = backend.settings.get();
+            settings.provider_binary_overrides.insert(
+                provider,
+                root.join("controlled-provider").display().to_string(),
+            );
+            backend.settings.replace(settings).unwrap();
+            let raw = Arc::new(ScriptedProvider {
+                prompts: Mutex::new(Vec::new()),
+                mutations: Mutex::new(Vec::new()),
+                target: root.join("repo/ordinary-result"),
+            });
+            let script = raw.clone();
+            let transport = Arc::new(Mutex::new(None));
+            let sender = transport.clone();
+            backend.runtime_test_start = Some(Arc::new(move |_, _, events| {
+                *sender.lock() = Some(events);
+                Ok(DriverHandle::from_control(script.clone()))
+            }));
+            let (_, driver) = backend
+                .ensure_agent_runtime(session, &EventSink::detached())
+                .unwrap();
+            assert!(backend.sessions.lock()[&session].plan_gate.is_none());
+            driver.prompt(MUTATE.into());
+            assert_eq!(raw.mutations.lock().len(), 1);
+            assert!(raw.target.exists());
+            backend.shutdown();
+            drop(backend);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    eprintln!("plan acceptance ordinary work: 4 passed; no plan gate or acknowledgement required");
+}
