@@ -32,7 +32,6 @@ const EVAL_CANCEL_GRACE: Duration = Duration::from_secs(2);
 const MAX_EVAL_OPERATIONS: u64 = 1_000_000;
 const MAX_EVAL_STRING: usize = 4 * 1024 * 1024;
 const MAX_EVAL_ARRAY: usize = 100_000;
-const MAX_EVAL_MAP: usize = 10_000;
 const MAX_EVAL_CALL_LEVELS: usize = 32;
 const MAX_EVAL_EXPR_DEPTH: usize = 64;
 const MAX_EVAL_EXPR_DEPTH_IN_FUNCTION: usize = 32;
@@ -257,7 +256,13 @@ fn run_script(
             .set_max_operations(MAX_EVAL_OPERATIONS)
             .set_max_string_size(MAX_EVAL_STRING)
             .set_max_array_size(MAX_EVAL_ARRAY)
-            .set_max_map_size(MAX_EVAL_MAP)
+            // No map bound: rhai checks the property count of every value a
+            // bound call returns, and bound calls answer with whole
+            // serialized documents (BossResult::State) whose size grows with
+            // daemon history — a fixed cap only ever rejected legitimate
+            // results. Script-built maps stay bounded by MAX_EVAL_OPERATIONS
+            // and EVAL_WALL_CLOCK.
+            .set_max_map_size(0)
             .set_max_call_levels(MAX_EVAL_CALL_LEVELS)
             .set_max_expr_depths(MAX_EVAL_EXPR_DEPTH, MAX_EVAL_EXPR_DEPTH_IN_FUNCTION)
             .set_max_modules(0);
@@ -887,6 +892,41 @@ mod tests {
                 .unwrap_err()
                 .contains("dispatch rejects it")
         );
+    }
+
+    #[test]
+    fn op_maps_reach_dispatch_and_whole_documents_cross_back() {
+        // The documented minimal attachPlan/resolveHandoff forms carry two
+        // UUIDs (and a nested decision map); building the map field by field
+        // reaches the same boundary. A size rejection is the regression —
+        // the dispatch's own validation error proves the map got through.
+        for script in [
+            r#"op(#{type:"attachPlan", outcome:"d7adf75c-9f00-46f6-b952-8851243bc923", plan:"a464137f-21e1-4800-91d2-6001223eb1d4"})"#,
+            r#"op(#{type:"resolveHandoff", outcome:"d7adf75c-9f00-46f6-b952-8851243bc923", handoff:"3d7b5f5a-a7ab-4370-ac3d-038e43bd2361", decision:#{type:"dismiss"}})"#,
+            r#"let m = #{}; m.type = "attachPlan"; m.outcome = "d7adf75c-9f00-46f6-b952-8851243bc923"; m.plan = "a464137f-21e1-4800-91d2-6001223eb1d4"; op(m)"#,
+        ] {
+            let outcome = eval_with(script, Scope::new(), &|_| bail!("dispatch rejects it"));
+            let error = outcome.value.as_ref().unwrap_err();
+            assert!(
+                error.contains("dispatch rejects it"),
+                "op rejected its operation map before dispatch: {error}"
+            );
+        }
+
+        // Outcome bookkeeping ops answer with the whole state document,
+        // which outgrows any fixed property budget as the daemon
+        // accumulates employees, outcomes, and personas.
+        let outcome = eval_with(r#"op(#{type: "view"}).files.len()"#, Scope::new(), &|_| {
+            Ok(BossResult::Files {
+                files: (0..6_000)
+                    .map(|index| waku_protocol::boss::BossFile {
+                        path: format!("f{index}.md"),
+                        directory: false,
+                    })
+                    .collect(),
+            })
+        });
+        assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(6_000)));
     }
 
     #[test]
