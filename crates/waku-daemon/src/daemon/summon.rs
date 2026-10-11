@@ -110,6 +110,11 @@ impl WakuBackend {
             if self.session_quarantined(target) {
                 continue;
             }
+            // A user-stopped session keeps its parked queue — delivery
+            // waits for the user's next prompt, not a scheduler tick.
+            if self.agent.user_stopped(target) {
+                continue;
+            }
             let pending = self
                 .task_state
                 .lock()

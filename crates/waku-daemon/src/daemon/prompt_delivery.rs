@@ -59,9 +59,11 @@ pub(super) fn employee_update_streaming(
     })
 }
 
-/// Boss notifications yield to open turns and composer-owned follow-ups.
-/// Check the durable queue: settlement can run before the client dequeues
-/// the user's next prompt, and restart recovery has no in-memory user queue.
+/// Boss notifications yield to open turns, composer-owned follow-ups, and
+/// a user stop — the user halted the Boss, so parked deliveries wait for
+/// the next user-initiated resume instead of reactivating it. Check the
+/// durable queue: settlement can run before the client dequeues the user's
+/// next prompt, and restart recovery has no in-memory user queue.
 pub(super) fn boss_notification_waiting(
     target: Uuid,
     agent: &crate::agent::AgentState,
@@ -69,7 +71,8 @@ pub(super) fn boss_notification_waiting(
     task_state: &Mutex<PersistedState>,
 ) -> bool {
     boss.is_boss(target)
-        && (agent.has_open_turn(target)
+        && (agent.user_stopped(target)
+            || agent.has_open_turn(target)
             || agent.is_working(target)
             || task_state
                 .lock()
@@ -127,6 +130,9 @@ pub(super) fn agent_prompt_waiting(
     task_store: &StateStore,
     automations: &AutomationService,
 ) -> bool {
+    if agent.user_stopped(target) {
+        return true;
+    }
     if automation_prompt_waiting(
         target,
         entry.queued_id,
@@ -179,8 +185,9 @@ pub(super) fn deliver_agent_prompt(
     let automation_prompt = entry
         .queued_id
         .is_some_and(|id| automations.is_run_message(id));
-    if (!entry.is_plan_finalization()
-        && boss_notification_waiting(session_id, agent, boss, task_state))
+    if agent.user_stopped(session_id)
+        || (!entry.is_plan_finalization()
+            && boss_notification_waiting(session_id, agent, boss, task_state))
         || (entry.is_plan_finalization()
             && agent.has_open_turn(session_id)
             && !driver.supports_steer())

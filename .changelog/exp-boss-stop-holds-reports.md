@@ -1,0 +1,1 @@
+- Stopping the Boss chat no longer lets queued employee reports resume it immediately; they stay parked until you send the Boss another message.

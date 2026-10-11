@@ -147,6 +147,14 @@ pub struct AgentState {
     /// flag is consumed by the next settle event; it never survives the
     /// turn it armed.
     daemon_interrupts: Mutex<HashSet<Uuid>>,
+    /// Sessions the user stopped — the Boss chat or one of its planning
+    /// sessions — whose parked agent deliveries must not drain into an
+    /// immediate resume. Unlike `daemon_interrupts` this hold persists:
+    /// entries stay queued (and keep their mirrored chips) until the
+    /// user's next prompt or steer releases it, so neither the stop's
+    /// settle nor the reconcile pass can reactivate a session the user
+    /// chose to halt.
+    user_stops: Mutex<HashSet<Uuid>>,
     /// Daemon-owned `agentAsk` requests parked on a session, by request id.
     /// The provider never sees these — the response commands the client
     /// sends resolve here instead of reaching the driver.
@@ -330,6 +338,7 @@ impl AgentState {
         self.pending_steers.lock().remove(&session_id);
         self.turns.lock().remove(&session_id);
         self.daemon_interrupts.lock().remove(&session_id);
+        self.user_stops.lock().remove(&session_id);
     }
 
     /// Forget every credential and queue. Called on daemon shutdown.
@@ -347,6 +356,7 @@ impl AgentState {
         self.memory_delivered.lock().clear();
         self.turns.lock().clear();
         self.daemon_interrupts.lock().clear();
+        self.user_stops.lock().clear();
         for (_, asks) in std::mem::take(&mut *self.pending_asks.lock()) {
             for (_, ask) in asks {
                 let _ = ask.settled.send(AgentAskOutcome::Cancelled);
@@ -442,6 +452,27 @@ impl AgentState {
     /// being processed was ordered by the daemon itself.
     pub fn take_daemon_interrupt(&self, session_id: Uuid) -> bool {
         self.daemon_interrupts.lock().remove(&session_id)
+    }
+
+    /// Mark the session's turn as stopped by the user — call before
+    /// `driver.cancel()` on a Boss-owned session. The hold keeps queued
+    /// agent deliveries parked until [`Self::clear_user_stop`], so the
+    /// stop's settle cannot drain them into an immediate resume.
+    pub fn note_user_stop(&self, session_id: Uuid) {
+        self.user_stops.lock().insert(session_id);
+    }
+
+    /// Release the user-stop hold — a user prompt or steer is the
+    /// resume the queued deliveries were waiting for.
+    pub fn clear_user_stop(&self, session_id: Uuid) {
+        self.user_stops.lock().remove(&session_id);
+    }
+
+    /// Whether agent deliveries to this session are held behind a user
+    /// stop. Held entries behave like any other wait: they park, keep
+    /// their mirrored chips, and deliver once the hold releases.
+    pub fn user_stopped(&self, session_id: Uuid) -> bool {
+        self.user_stops.lock().contains(&session_id)
     }
 
     /// Whether the provider is actively working a turn. Queue-mode prompts

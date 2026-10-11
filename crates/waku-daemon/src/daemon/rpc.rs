@@ -1806,6 +1806,17 @@ impl Backend for WakuBackend {
             command => {
                 if matches!(command, Command::Cancel) {
                     self.agent.cancel_resources(session_id);
+                    // A user stop on a Boss-owned chat holds its parked
+                    // agent deliveries — the settle must not drain them
+                    // into an immediate resume.
+                    if self.boss.is_boss_principal(session_id) {
+                        self.agent.note_user_stop(session_id);
+                    }
+                }
+                // The user's next prompt or steer is the resume the held
+                // deliveries waited for — release the hold.
+                if matches!(command, Command::Prompt { .. } | Command::Steer { .. }) {
+                    self.agent.clear_user_stop(session_id);
                 }
                 // Daemon-owned `agentAsk`/`agentRenameSelf` requests resolve
                 // here — their request ids never reached the provider, so

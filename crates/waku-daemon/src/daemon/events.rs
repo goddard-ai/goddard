@@ -663,16 +663,18 @@ pub(super) fn forward_driver_events(
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if automation_prompt_waiting(
-                    session_id,
-                    entry.queued_id,
-                    &agent,
-                    &task_state,
-                    &task_store,
-                    &automations,
-                ) || (entry.is_plan_finalization()
-                    && agent.has_open_turn(session_id)
-                    && !driver.supports_steer())
+                if agent.user_stopped(session_id)
+                    || automation_prompt_waiting(
+                        session_id,
+                        entry.queued_id,
+                        &agent,
+                        &task_state,
+                        &task_store,
+                        &automations,
+                    )
+                    || (entry.is_plan_finalization()
+                        && agent.has_open_turn(session_id)
+                        && !driver.supports_steer())
                     || (!entry.is_plan_finalization()
                         && (boss_notification_waiting(session_id, &agent, &boss, &task_state)
                             || agent.is_working(session_id)

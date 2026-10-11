@@ -276,6 +276,7 @@ impl WakuBackend {
             );
         }
         if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
+            || self.agent.user_stopped(target)
             || self.agent.is_working(target)
             || automation_prompt_waiting(
                 target,

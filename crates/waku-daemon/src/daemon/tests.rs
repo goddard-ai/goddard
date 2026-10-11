@@ -6383,6 +6383,98 @@ fn boss_notifications_yield_to_user_prompts_and_recover_in_order() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A user stop on the Boss chat holds queued employee reports: neither the
+/// settle's queue drain nor the scheduler may deliver them into an
+/// immediate resume. The next user turn releases the hold and drains in
+/// order.
+#[test]
+fn a_user_stop_holds_boss_reports_until_the_next_user_turn() {
+    let root = std::env::temp_dir().join(format!("boss-stop-hold-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee, parent, _child) = employee_finish_fixture(&root);
+    let events = EventSink::detached();
+    let driver = DriverHandle::from_control(parent.clone());
+    // The report parks behind the Boss's open turn.
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+    let trigger = crate::model::ReportTrigger::new(
+        &backend.boss.employee(employee).unwrap(),
+        crate::model::ReportTriggerKind::Blocker,
+    );
+    backend
+        .deliver_employee_report(
+            supervisor,
+            "blocked on input".into(),
+            employee,
+            Some(trigger),
+            &events,
+        )
+        .unwrap();
+    assert!(backend.agent.has_queued(supervisor));
+    // The user's stop marks the hold before the interrupted settle lands.
+    backend.agent.note_user_stop(supervisor);
+    let stopped = DriverEvent::TurnFinished {
+        success: false,
+        summary: None,
+        summary_i18n: None,
+    };
+    record_boss_event(&backend.task_state, &backend.task_store, supervisor, &stopped).unwrap();
+    backend.agent.note_driver_event(supervisor, &stopped);
+    backend
+        .drain_agent_queue(supervisor, &driver, &events)
+        .unwrap();
+    backend.run_summon_scheduler();
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    assert!(parent.steers.lock().is_empty());
+    assert!(backend.agent.has_queued(supervisor));
+    // A report arriving while the Boss is held parks rather than waking it.
+    backend
+        .deliver_employee_report(supervisor, "finished".into(), employee, None, &events)
+        .unwrap();
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == supervisor)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        assert_eq!(session.queued_messages.len(), 2);
+    }
+    // The user's next prompt releases the hold; the reports stay parked
+    // behind the turn it opens, and each settle drains the next in order.
+    backend.agent.clear_user_stop(supervisor);
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    let finished = DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    };
+    for expected in ["blocked on input", "finished"] {
+        record_boss_event(&backend.task_state, &backend.task_store, supervisor, &finished).unwrap();
+        backend.agent.note_driver_event(supervisor, &finished);
+        backend.run_summon_scheduler();
+        assert!(
+            parent
+                .prompts
+                .lock()
+                .last()
+                .unwrap()
+                .contains(expected)
+        );
+    }
+    assert!(parent.steers.lock().is_empty());
+    assert!(!backend.agent.has_queued(supervisor));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A report parked behind a busy supervisor keeps its trigger through
 /// the durable mirror — a restart rehydrates the queue with the wake
 /// record intact.
