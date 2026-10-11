@@ -16,7 +16,13 @@ pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
 /// Narrow callback into the daemon for completing or recovering one
 /// employee — the settle signal classifies the expiry it drives.
 pub type FinishEmployee = Arc<
-    dyn Fn(uuid::Uuid, waku_protocol::boss::EmployeeSettle) -> anyhow::Result<()> + Send + Sync,
+    dyn Fn(
+            uuid::Uuid,
+            uuid::Uuid,
+            waku_protocol::boss::EmployeeSettle,
+        ) -> anyhow::Result<()>
+        + Send
+        + Sync,
 >;
 
 /// Restart reconciliation callback, separate from ordinary settlement.

@@ -418,6 +418,8 @@ impl WakuBackend {
         &self,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> anyhow::Result<bool> {
+        let lifecycle = self.runtime_lifecycles.session(employee.session_id);
+        let _owner = lifecycle.lock();
         let Some(ticket) = employee.ticket.clone() else {
             return Ok(false);
         };
@@ -505,10 +507,7 @@ impl WakuBackend {
                     // Stopped or re-admitted while the launch ran — the
                     // finish path already reclaimed the slot; tear down
                     // the runtime this launch just started.
-                    let removed = self.sessions.lock().remove(&session_id);
-                    if let Some(entry) = &removed {
-                        entry.driver.begin_shutdown();
-                    }
+                    let removed = self.remove_runtime(session_id, None, false);
                     drop_detached(removed);
                     return Ok(false);
                 }
@@ -1542,6 +1541,8 @@ impl WakuBackend {
         reasoning_effort: Option<String>,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         if self.boss.employee(session_id).is_some_and(|e| e.expired)
             || self
                 .boss
@@ -1621,12 +1622,8 @@ impl WakuBackend {
                 if !applied_in_place {
                     // An idle runtime that refused is rebuilt on the next
                     // prompt — the stored options drive the cold start.
-                    let removed = self.sessions.lock().remove(&session_id);
-                    if let Some(entry) = &removed {
-                        entry.driver.begin_shutdown();
-                    }
+                    let removed = self.remove_runtime(session_id, None, false);
                     drop_detached(removed);
-                    self.agent.revoke_session(session_id);
                 }
                 if interrupted {
                     // Cut the open turn so the retune takes effect now.
@@ -1674,12 +1671,8 @@ impl WakuBackend {
             // own settle lands stale and would leave it open forever.
             record_daemon_interrupt(&self.task_state, &self.task_store, session_id, None)?;
         }
-        let removed = self.sessions.lock().remove(&session_id);
-        if let Some(entry) = &removed {
-            entry.driver.begin_shutdown();
-        }
+        let removed = self.remove_runtime(session_id, None, false);
         drop_detached(removed);
-        self.agent.revoke_session(session_id);
         self.requeue_employee(session_id, |ticket, started| {
             ticket.provider = provider;
             ticket.model = model_id.clone();
@@ -1707,6 +1700,8 @@ impl WakuBackend {
         session_id: Uuid,
         adjust: impl FnOnce(&mut waku_protocol::boss::SummonTicket, bool),
     ) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         // Role validation precedes the parked-prompt move so a rejected
         // resume leaves the queue mirror untouched.
         self.boss.ensure_employee_role(session_id)?;
@@ -1740,6 +1735,7 @@ impl WakuBackend {
                 }
             }
         }
+        _owner.set(None);
         self.agent.clear_session(session_id);
         let (_employee, stale_reservations) =
             self.boss.requeue_employee(session_id, base, |ticket| {

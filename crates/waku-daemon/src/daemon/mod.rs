@@ -9,7 +9,7 @@ use crate::{
     SessionDetailTail, WireDriverEvent, WorkspaceOperation, WorkspaceResult,
 };
 use anyhow::{Context as _, anyhow, bail};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::{Condvar, Mutex, ReentrantMutex};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -496,6 +496,39 @@ fn resolve_agent_trait(
     }
 }
 
+#[cfg(test)]
+type RuntimeStartHook = Arc<
+    dyn Fn(
+            ProviderKind,
+            DriverStartOptions,
+            driver::DriverEventSender,
+        ) -> anyhow::Result<DriverHandle>
+        + Send
+        + Sync,
+>;
+#[cfg(test)]
+type RuntimeForwardHook = Arc<
+    dyn Fn(String, Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Default)]
+struct RuntimeLifecycles {
+    locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
+    shutting_down: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    event_received: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
+    #[cfg(test)]
+    event_applying: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
+}
+
+impl RuntimeLifecycles {
+    fn session(&self, session_id: Uuid) -> Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>> {
+        self.locks.lock().entry(session_id).or_default().clone()
+    }
+}
+
 pub struct WakuBackend {
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
@@ -540,9 +573,18 @@ pub struct WakuBackend {
     /// so server tests can mint a token and connect with it the way a
     /// provider session's harness would.
     pub(crate) agent: Arc<crate::agent::AgentState>,
-    /// Serializes cold-start of a stored task's runtime so two agent prompts
-    /// cannot race to spawn it.
-    runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    /// Serializes ownership changes with runtime effects, including delayed
+    /// settlement. Launch and teardown helpers can re-enter the same session.
+    /// The value remembers the last owner after process exit.
+    runtime_lifecycles: Arc<RuntimeLifecycles>,
+    #[cfg(test)]
+    runtime_test_start: Option<RuntimeStartHook>,
+    #[cfg(test)]
+    runtime_test_cli: Option<PathBuf>,
+    #[cfg(test)]
+    runtime_test_env: Option<Arc<dyn Fn(&crate::agent::AgentLaunchEnv) + Send + Sync>>,
+    #[cfg(test)]
+    runtime_test_forward: Option<RuntimeForwardHook>,
     /// Whether an archive-detail prune sweep is running on its own thread.
     /// `LoadTaskState` retriggers the sweep; the flag keeps one in flight.
     archive_detail_prune_running: Arc<std::sync::atomic::AtomicBool>,

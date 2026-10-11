@@ -16,6 +16,41 @@ impl WakuBackend {
         options: DriverStartOptions,
         events: EventSink,
     ) -> anyhow::Result<(DriverHandle, bool)> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let owner = lifecycle.lock();
+        let result = (|| {
+            anyhow::ensure!(
+                !self
+                    .runtime_lifecycles
+                    .shutting_down
+                    .load(std::sync::atomic::Ordering::Acquire),
+                "daemon is shutting down"
+            );
+            anyhow::ensure!(
+                !self.removed_session_ids.lock().contains(&session_id),
+                "task {session_id} was removed"
+            );
+            drop_detached(self.remove_runtime(session_id, None, false));
+            owner.set(Some(runtime_id));
+            self.spawn_runtime_inner(session_id, runtime_id, provider, options, events.clone())
+        })();
+        if result.is_err() {
+            drop_detached(self.remove_runtime(session_id, Some(runtime_id), false));
+            events
+                .for_session(session_id, runtime_id)
+                .end_session_runtime();
+        }
+        result
+    }
+
+    fn spawn_runtime_inner(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        provider: ProviderKind,
+        options: DriverStartOptions,
+        events: EventSink,
+    ) -> anyhow::Result<(DriverHandle, bool)> {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
         let resumable = options.provider_cursor.is_some();
@@ -98,7 +133,13 @@ impl WakuBackend {
         }
         if !cloud_launch {
             match self.agent_launch_env(session_id) {
-                Ok(launch) => options.agent = Some(launch),
+                Ok(launch) => {
+                    #[cfg(test)]
+                    if let Some(observe) = &self.runtime_test_env {
+                        observe(&launch);
+                    }
+                    options.agent = Some(launch);
+                }
                 Err(error) if managed => {
                     return Err(error.context("Boss requires its scoped agent surface"));
                 }
@@ -256,17 +297,7 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
-        let handle = match if cloud_launch {
-            driver::start_cloud(provider, options, event_sender)
-        } else {
-            driver::start_local(provider, options, event_sender)
-        } {
-            Ok(handle) => handle,
-            Err(error) => {
-                self.agent.revoke_session(session_id);
-                return Err(error);
-            }
-        };
+        let handle = self.start_runtime_driver(provider, options, event_sender, cloud_launch)?;
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");
@@ -301,6 +332,60 @@ impl WakuBackend {
         Ok((handle, computer_use_available))
     }
 
+    fn start_runtime_driver(
+        &self,
+        provider: ProviderKind,
+        options: DriverStartOptions,
+        sender: driver::DriverEventSender,
+        cloud: bool,
+    ) -> anyhow::Result<DriverHandle> {
+        #[cfg(test)]
+        if let Some(start) = &self.runtime_test_start {
+            return start(provider, options, sender);
+        }
+        if cloud {
+            driver::start_cloud(provider, options, sender)
+        } else {
+            driver::start_local(provider, options, sender)
+        }
+    }
+
+    /// Revoke only the owner being removed. A launch attempt can own credentials
+    /// before it owns a driver entry; delayed cleanup must cover that case too.
+    pub(super) fn remove_runtime(
+        &self,
+        session_id: Uuid,
+        expected: Option<Uuid>,
+        clear: bool,
+    ) -> Option<RuntimeEntry> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let owner = lifecycle.lock();
+        let mut sessions = self.sessions.lock();
+        let current = sessions
+            .get(&session_id)
+            .map(|entry| entry.runtime_id)
+            .or(owner.get());
+        if expected.is_some_and(|id| current != Some(id)) {
+            return None;
+        }
+        owner.set(None);
+        let removed = sessions.remove(&session_id);
+        drop(sessions);
+        if clear {
+            self.agent.clear_session(session_id);
+        } else {
+            self.agent.revoke_session(session_id);
+            self.agent
+                .note_driver_event(session_id, &DriverEvent::ProcessExited);
+            self.agent.take_daemon_interrupt(session_id);
+        }
+        self.repo_maps.0.lock().sessions.remove(&session_id);
+        if let Some(entry) = &removed {
+            entry.driver.begin_shutdown();
+        }
+        removed
+    }
+
     /// Publish the runtime before any buffered driver event can be consumed.
     pub(super) fn register_runtime_forwarder(
         &self,
@@ -309,12 +394,16 @@ impl WakuBackend {
         event_receiver: crossbeam_channel::Receiver<DriverEvent>,
         events: EventSink,
     ) -> anyhow::Result<std::thread::JoinHandle<()>> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let owner = lifecycle.lock();
         let runtime_id = entry.runtime_id;
+        owner.set(Some(runtime_id));
         let forwarder_handle = entry.driver.clone();
         let agent = self.agent.clone();
         let task_state = self.task_state.clone();
         let task_store = self.task_store.clone();
         let sessions = self.sessions.clone();
+        let lifecycles = self.runtime_lifecycles.clone();
         let automations = self.automations.clone();
         let boss = self.boss.clone();
         let auto_prompts = self.auto_prompts.clone();
@@ -324,37 +413,44 @@ impl WakuBackend {
         // sessions lock cannot succeed until its entry is visible, even when
         // the provider has already buffered Connected or ProcessExited.
         let mut registered = self.sessions.lock();
-        registered.insert(session_id, entry);
-        let forwarding = std::thread::Builder::new()
-            .name(format!("goddard-daemon-events-{session_id}"))
-            .spawn(move || {
-                forward_driver_events(
-                    session_id,
-                    runtime_id,
-                    event_receiver,
-                    events,
-                    forwarder_handle,
-                    agent,
-                    task_state,
-                    task_store,
-                    sessions,
-                    automations,
-                    boss,
-                    auto_prompts,
-                    repo_maps,
-                );
-            })
-            .context("could not start daemon event forwarding thread");
+        let previous = registered.insert(session_id, entry);
+        if let Some(previous) = &previous {
+            previous.driver.begin_shutdown();
+        }
+        drop_detached(previous);
+        let name = format!("goddard-daemon-events-{session_id}");
+        let forward = move || {
+            forward_driver_events(
+                session_id,
+                runtime_id,
+                event_receiver,
+                events,
+                forwarder_handle,
+                agent,
+                task_state,
+                task_store,
+                sessions,
+                lifecycles,
+                automations,
+                boss,
+                auto_prompts,
+                repo_maps,
+            );
+        };
+        #[cfg(test)]
+        let forwarding = match &self.runtime_test_forward {
+            Some(spawn) => spawn(name, Box::new(forward)),
+            None => std::thread::Builder::new().name(name).spawn(forward),
+        };
+        #[cfg(not(test))]
+        let forwarding = std::thread::Builder::new().name(name).spawn(forward);
+        let forwarding = forwarding.context("could not start daemon event forwarding thread");
+        drop(registered);
         if forwarding.is_err() {
-            let removed = registered.remove(&session_id);
-            self.agent.clear_session(session_id);
-            self.repo_maps.0.lock().sessions.remove(&session_id);
-            drop(registered);
-            if let Some(entry) = &removed {
-                entry.driver.begin_shutdown();
-            }
-            drop_detached(removed);
-            retirement_events.end_session_runtime();
+            drop_detached(self.remove_runtime(session_id, Some(runtime_id), false));
+            retirement_events
+                .for_session(session_id, runtime_id)
+                .end_session_runtime();
         }
         forwarding
     }
@@ -372,6 +468,12 @@ impl WakuBackend {
             .lock()
             .clone()
             .ok_or_else(|| anyhow!("the daemon's bound address is unknown"))?;
+        #[cfg(test)]
+        let cli_path = match &self.runtime_test_cli {
+            Some(path) => path.clone(),
+            None => crate::agent::agent_cli_path()?,
+        };
+        #[cfg(not(test))]
         let cli_path = crate::agent::agent_cli_path()?;
         let shim_directory = self
             .task_store
@@ -422,19 +524,15 @@ impl WakuBackend {
         session_id: Uuid,
         events: &EventSink,
     ) -> anyhow::Result<(Uuid, DriverHandle)> {
-        if let Some(entry) = self.sessions.lock().get_mut(&session_id) {
-            entry.last_active = std::time::Instant::now();
-            return Ok((entry.runtime_id, entry.driver.clone()));
-        }
-        // A per-session lock keeps two simultaneous agent prompts from
-        // cold-starting the same stored task twice.
-        let start_lock = self
-            .runtime_start_locks
-            .lock()
-            .entry(session_id)
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone();
-        let _start_guard = start_lock.lock();
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
+        anyhow::ensure!(
+            !self
+                .runtime_lifecycles
+                .shutting_down
+                .load(std::sync::atomic::Ordering::Acquire),
+            "daemon is shutting down"
+        );
         if let Some(entry) = self.sessions.lock().get_mut(&session_id) {
             entry.last_active = std::time::Instant::now();
             return Ok((entry.runtime_id, entry.driver.clone()));

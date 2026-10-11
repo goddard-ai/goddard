@@ -113,6 +113,7 @@ impl Backend for WakuBackend {
             }
         });
         let sessions = self.sessions.clone();
+        let lifecycles = self.runtime_lifecycles.clone();
         let task_state = self.task_state.clone();
         let settings = self.settings.clone();
         let agent = self.agent.clone();
@@ -146,11 +147,11 @@ impl Backend for WakuBackend {
                             &task_state,
                             &settings,
                             &agent,
+                            &lifecycles,
+                            &repo_maps,
                             under_pressure,
                         ) {
-                            evict_idle_runtime(
-                                session_id, runtime_id, driver, &agent, &repo_maps, &events,
-                            );
+                            evict_idle_runtime(session_id, runtime_id, driver, &events);
                         }
                     };
                     let Some(pressure) = &pressure else {
@@ -1039,15 +1040,9 @@ impl Backend for WakuBackend {
                 drop_detached(removed_terminals);
                 let removed_runtimes = cascaded
                     .iter()
-                    .filter_map(|id| self.sessions.lock().remove(id))
+                    .filter_map(|id| self.remove_runtime(*id, None, true))
                     .collect::<Vec<_>>();
-                for runtime in &removed_runtimes {
-                    runtime.driver.begin_shutdown();
-                }
                 drop_detached(removed_runtimes);
-                for id in cascaded {
-                    self.agent.clear_session(id);
-                }
                 let mut state = self.task_state.lock();
                 let sessions = saved_ids
                     .into_iter()
@@ -1581,14 +1576,6 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::Start { options } => {
-                let previous = self.sessions.lock().remove(&session_id);
-                if let Some(previous) = &previous {
-                    previous.driver.begin_shutdown();
-                }
-                drop_detached(previous);
-                // The replaced runtime's scoped credential dies with it; the
-                // new runtime mints its own inside `spawn_runtime`.
-                self.agent.revoke_session(session_id);
                 let provider = decode_enum(&options.provider)?;
                 let options = DriverStartOptions {
                     binary: options.binary,
@@ -1628,21 +1615,13 @@ impl Backend for WakuBackend {
                 })
             }
             Command::CloseSession => {
-                let removed = {
-                    let mut sessions = self.sessions.lock();
-                    sessions
-                        .get(&session_id)
-                        // A nil runtime id is an explicit task-wide eviction
-                        // from clients that no longer hold an attachment.
-                        .is_some_and(|entry| runtime_id.is_nil() || entry.runtime_id == runtime_id)
-                        .then(|| sessions.remove(&session_id))
-                        .flatten()
-                };
-                if let Some(removed) = &removed {
-                    removed.driver.begin_shutdown();
+                let expected = (!runtime_id.is_nil()).then_some(runtime_id);
+                let removed = self.remove_runtime(session_id, expected, false);
+                if let Some(entry) = &removed {
+                    let sink = events.for_session(session_id, entry.runtime_id);
+                    sink.end_session_runtime();
                 }
                 drop_detached(removed);
-                self.agent.revoke_session(session_id);
                 Ok(ResponsePayload::Ack)
             }
             Command::AgentCreateSession {
@@ -1986,8 +1965,20 @@ impl Backend for WakuBackend {
     }
 
     fn shutdown(&self) {
-        let sessions = std::mem::take(&mut *self.sessions.lock());
-        drop(sessions);
+        self.runtime_lifecycles
+            .shutting_down
+            .store(true, std::sync::atomic::Ordering::Release);
+        let ids: HashSet<_> = self
+            .runtime_lifecycles
+            .locks
+            .lock()
+            .keys()
+            .copied()
+            .chain(self.sessions.lock().keys().copied())
+            .collect();
+        for id in ids {
+            drop_detached(self.remove_runtime(id, None, true));
+        }
         self.agent.clear();
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);

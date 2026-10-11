@@ -277,31 +277,32 @@ pub(super) fn forward_driver_events(
     task_state: Arc<Mutex<PersistedState>>,
     task_store: Arc<StateStore>,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
+    lifecycles: Arc<RuntimeLifecycles>,
     automations: Arc<AutomationService>,
     boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
 ) {
     while let Ok(event) = event_receiver.recv() {
-        // Every forwarded event is activity the idle reaper counts.
-        if let Some(entry) = sessions.lock().get_mut(&session_id)
-            && entry.runtime_id == runtime_id
-        {
-            entry.last_active = std::time::Instant::now();
+        #[cfg(test)]
+        if let Some(received) = lifecycles.event_received.lock().clone() {
+            received(session_id, runtime_id);
         }
+        // Registration and teardown use this same gate. Keep it through every
+        // effect below so replacement cannot win a check/effect race.
+        let lifecycle = lifecycles.session(session_id);
+        let owner = lifecycle.lock();
         let managed = boss.is_managed(session_id);
-        // Events from a runtime the session no longer owns — torn down by
-        // a requeue, a stop, or a replacement — must not rewrite the
-        // transcript or settle the employee's admission. A queued ticket
-        // owns no live runtime either: anything arriving for it is the
-        // previous generation dying.
-        let stale = managed
-            && (boss.employee_lifecycle(session_id)
-                == Some(waku_protocol::boss::EmployeeLifecycle::Queued)
-                || !sessions
-                    .lock()
-                    .get(&session_id)
-                    .is_some_and(|entry| entry.runtime_id == runtime_id));
+        let stale = lifecycles
+            .shutting_down
+            .load(std::sync::atomic::Ordering::Acquire)
+            || !sessions
+                .lock()
+                .get(&session_id)
+                .is_some_and(|entry| entry.runtime_id == runtime_id)
+            || (managed
+                && boss.employee_lifecycle(session_id)
+                    == Some(waku_protocol::boss::EmployeeLifecycle::Queued));
         if stale {
             if matches!(&event, DriverEvent::ProcessExited) {
                 // A queued employee can still own the dying entry. Retire
@@ -314,6 +315,9 @@ pub(super) fn forward_driver_events(
                         .then(|| sessions.remove(&session_id))
                         .flatten()
                 };
+                if removed.is_some() {
+                    owner.set(None);
+                }
                 events
                     .for_session(session_id, runtime_id)
                     .end_session_runtime();
@@ -321,6 +325,14 @@ pub(super) fn forward_driver_events(
                 break;
             }
             continue;
+        }
+        owner.set(Some(runtime_id));
+        #[cfg(test)]
+        if let Some(applying) = lifecycles.event_applying.lock().clone() {
+            applying(session_id, runtime_id);
+        }
+        if let Some(entry) = sessions.lock().get_mut(&session_id) {
+            entry.last_active = std::time::Instant::now();
         }
         // A provider exit that kills an open turn classifies the
         // employee's settle as an interruption — capture the flag before
@@ -626,7 +638,7 @@ pub(super) fn forward_driver_events(
             && !intentional
             && let Some(settle) = settle
         {
-            boss.note_settled(session_id, settle);
+            boss.note_settled(session_id, runtime_id, settle);
         }
         if drains_queue && !stale && !boss.is_employee(session_id) {
             // A restarted daemon rebuilt no in-memory queue — the session

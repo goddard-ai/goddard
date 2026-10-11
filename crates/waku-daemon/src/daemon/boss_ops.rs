@@ -1252,6 +1252,8 @@ impl WakuBackend {
         drain: bool,
         settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         // `finishing` persists while the teardown runs — the model slot
         // stays claimed through shutdown, so a crash mid-finish leaves a
         // reconciling record instead of a leaked or double-counted slot.
@@ -1289,14 +1291,14 @@ impl WakuBackend {
         employee: &waku_protocol::boss::BossEmployee,
         settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         self.integrations.revoke_task(session_id);
         // An unanswered ask's question outlives its waiter — capture it
         // before session teardown drains it as cancelled.
         let pending_question = self.agent.pending_ask_question(session_id);
-        self.agent.clear_session(session_id);
-        let removed = self.sessions.lock().remove(&session_id);
+        let removed = self.remove_runtime(session_id, None, true);
         if let Some(entry) = &removed {
-            entry.driver.begin_shutdown();
             let sink = self
                 .event_source
                 .lock()
@@ -1759,28 +1761,17 @@ impl WakuBackend {
             return Err(error);
         }
         let switch = (|| -> anyhow::Result<()> {
+            let lifecycle = self.runtime_lifecycles.session(session_id);
+            let _owner = lifecycle.lock();
             if self.agent.has_open_turn(session_id)
                 && let Some(entry) = self.sessions.lock().get(&session_id)
             {
                 entry.driver.cancel();
             }
-            let removed = self.sessions.lock().remove(&session_id);
-            if let Some(entry) = &removed {
-                entry.driver.begin_shutdown();
-            }
+            let removed = self.remove_runtime(session_id, None, false);
             drop_detached(removed);
-            self.agent.revoke_session(session_id);
-            // Clearing the guard before the cancelled turn's close event lands
-            // would let its settle finish the employee for real — the
-            // forwarder reads the guard at event time, so the open-turn flag
-            // clearing is what proves that evaluation already happened.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while self.agent.has_open_turn(session_id) {
-                if std::time::Instant::now() >= deadline {
-                    bail!("could not stop the employee's current turn");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
+            // Retired providers cannot close the turn on the new owner's behalf.
+            record_daemon_interrupt(&self.task_state, &self.task_store, session_id, None)?;
             let mut state = self.task_state.lock();
             let session = state
                 .sessions

@@ -99,6 +99,8 @@ impl WakuBackend {
         session_id: Uuid,
         turn_count: usize,
     ) -> anyhow::Result<(AgentSession, Option<String>)> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         let (source, cwd) = {
             let mut state = self.task_state.lock();
             let source_index = state
@@ -198,10 +200,7 @@ impl WakuBackend {
         // events from racing the rewound transcript: the hub retires the
         // runtime id, so anything the detached teardown still emits dies
         // with it.
-        let removed = self.sessions.lock().remove(&session_id);
-        if let Some(removed) = &removed {
-            removed.driver.begin_shutdown();
-        }
+        let removed = self.remove_runtime(session_id, None, false);
         drop_detached(removed);
 
         let mut rewound = source.clone();

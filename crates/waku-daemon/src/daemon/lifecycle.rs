@@ -81,7 +81,15 @@ impl WakuBackend {
             codex_reset_credit_lock: Mutex::new(()),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
-            runtime_start_locks: Mutex::new(HashMap::new()),
+            runtime_lifecycles: Arc::new(RuntimeLifecycles::default()),
+            #[cfg(test)]
+            runtime_test_start: None,
+            #[cfg(test)]
+            runtime_test_cli: None,
+            #[cfg(test)]
+            runtime_test_env: None,
+            #[cfg(test)]
+            runtime_test_forward: None,
             archive_detail_prune_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             idle_reaper_started: std::sync::atomic::AtomicBool::new(false),
             daemon_address: Arc::new(Mutex::new(None)),
@@ -318,16 +326,29 @@ impl WakuBackend {
         self.auto_prompts.start(self);
     }
 
+    /// Validate delayed settlement at the point it can expire an employee.
+    pub(super) fn finish_runtime_employee(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        settle: waku_protocol::boss::EmployeeSettle,
+    ) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let owner = lifecycle.lock();
+        if owner.get() != Some(runtime_id) {
+            return Ok(());
+        }
+        self.finish_boss_employee(session_id, true, settle)
+    }
+
     pub(super) fn bind_boss_finish_callback(self: &Arc<Self>) {
         let backend = Arc::downgrade(self);
         self.boss
-            .set_finish_employee(Arc::new(move |session_id, settle| {
+            .set_finish_employee(Arc::new(move |session_id, runtime_id, settle| {
                 let backend = backend
                     .upgrade()
                     .ok_or_else(|| anyhow::anyhow!("daemon is shutting down"))?;
-                // A settled turn drains: the finish defers while the session's
-                // next turn is already open rather than cutting it mid-tool-call.
-                backend.finish_boss_employee(session_id, true, settle)
+                backend.finish_runtime_employee(session_id, runtime_id, settle)
             }));
         let agent = self.agent.clone();
         self.boss
@@ -706,15 +727,9 @@ impl WakuBackend {
         drop_detached(removed_terminals);
         let removed_runtimes = removed_ids
             .iter()
-            .filter_map(|id| self.sessions.lock().remove(id))
+            .filter_map(|id| self.remove_runtime(*id, None, true))
             .collect::<Vec<_>>();
-        for runtime in &removed_runtimes {
-            runtime.driver.begin_shutdown();
-        }
         drop_detached(removed_runtimes);
-        for id in removed_ids {
-            self.agent.clear_session(id);
-        }
         Ok(())
     }
 
@@ -790,15 +805,9 @@ impl WakuBackend {
         drop_detached(removed_terminals);
         let removed_runtimes = removed_ids
             .iter()
-            .filter_map(|id| self.sessions.lock().remove(id))
+            .filter_map(|id| self.remove_runtime(*id, None, true))
             .collect::<Vec<_>>();
-        for runtime in &removed_runtimes {
-            runtime.driver.begin_shutdown();
-        }
         drop_detached(removed_runtimes);
-        for id in removed_ids {
-            self.agent.clear_session(id);
-        }
         Ok(())
     }
 
@@ -890,23 +899,15 @@ impl WakuBackend {
         let gone: Vec<Uuid> = archived_ids.iter().chain(&removed_ids).copied().collect();
         self.retire_archived_runtimes(&gone);
         for id in removed_ids {
-            self.agent.clear_session(id);
+            drop_detached(self.remove_runtime(id, None, true));
         }
         Ok(())
     }
 
     /// Stop archived provider processes and revoke their scoped credentials.
     pub(super) fn retire_archived_runtimes(&self, session_ids: &[Uuid]) {
-        let removed = session_ids
-            .iter()
-            .filter_map(|id| self.sessions.lock().remove(id))
-            .collect::<Vec<_>>();
-        for runtime in &removed {
-            runtime.driver.begin_shutdown();
-        }
-        drop_detached(removed);
         for id in session_ids {
-            self.agent.revoke_session(*id);
+            drop_detached(self.remove_runtime(*id, None, false));
         }
     }
 

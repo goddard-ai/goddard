@@ -3117,6 +3117,7 @@ fn an_exited_runtime_releases_its_replay_journal() {
         task_state.clone(),
         task_store.clone(),
         sessions.clone(),
+        Arc::new(RuntimeLifecycles::default()),
         Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
         Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
         Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
@@ -3132,8 +3133,22 @@ fn an_exited_runtime_releases_its_replay_journal() {
 /// never to the replacement's credential, prompt queue, cursor or transcript.
 #[test]
 fn stale_runtime_events_preserve_the_replacement() {
+    runtime_generation_stale_events(true);
+}
+
+#[test]
+fn runtime_generation_ordinary_stale_events_preserve_the_replacement() {
+    runtime_generation_stale_events(false);
+}
+
+fn runtime_generation_stale_events(managed: bool) {
     let root = std::env::temp_dir().join(format!("waku-stale-runtime-{}", Uuid::new_v4()));
     let (mut backend, _, session_id, _, capture) = employee_finish_fixture(&root);
+    if !managed {
+        backend.boss =
+            Arc::new(crate::boss::BossService::open(root.join("ordinary-boss")).unwrap());
+    }
+    let last_active = backend.sessions.lock()[&session_id].last_active;
     let runtime_id = backend.sessions.lock()[&session_id].runtime_id;
     let old_runtime_id = Uuid::new_v4();
     let events = EventSink::detached().begin_session_runtime(session_id, old_runtime_id);
@@ -3145,6 +3160,12 @@ fn stale_runtime_events_preserve_the_replacement() {
         .send(WireDriverEvent::new("replacement", Value::Null))
         .unwrap();
     let token = backend.agent.mint(session_id);
+    backend.agent.expect_daemon_interrupt(session_id);
+    for prompt in ["pending acceptance", "pending rejection"] {
+        backend
+            .agent
+            .record_pending_steer(session_id, runtime_generation_prompt(prompt));
+    }
     backend
         .agent
         .note_driver_event(session_id, &DriverEvent::TurnStarted);
@@ -3168,20 +3189,30 @@ fn stale_runtime_events_preserve_the_replacement() {
         .insert(session_id, root.clone());
     // A live automation run belongs to the replacement too; an old settle
     // must neither complete it nor mark it failed.
+    let replacement_turn = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(session_id).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("replacement active turn");
+        let turn = session.active_turn_id().unwrap();
+        state.mark_session_dirty(session_id);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
     let automation_path = root.join("replacement-automation.json");
-    std::fs::write(
-        &automation_path,
-        serde_json::to_vec(&serde_json::json!({
-            "runs": [{
+    backend.automations = Arc::new(AutomationService::open(automation_path).unwrap());
+    backend
+        .automations
+        .accept_test_runs(
+            serde_json::from_value(serde_json::json!([{
                 "id": Uuid::new_v4(), "automationId": Uuid::new_v4(),
                 "trigger": "manual", "status": "running", "scheduledFor": 1,
-                "sessionId": session_id, "createdAt": 1, "updatedAt": 1
-            }]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    backend.automations = Arc::new(AutomationService::open(automation_path).unwrap());
+                "sessionId": session_id, "turnId": replacement_turn,
+                "messageId": Uuid::new_v4(), "createdAt": 1, "updatedAt": 1
+            }]))
+            .unwrap(),
+        )
+        .unwrap();
     let automation_before = backend.automations.document();
     assert_eq!(automation_before.runs.len(), 1);
     let before = serde_json::to_value(&backend.task_state.lock().sessions).unwrap();
@@ -3195,6 +3226,18 @@ fn stale_runtime_events_preserve_the_replacement() {
         },
         DriverEvent::TurnStarted,
         DriverEvent::TextDelta("stale answer".into()),
+        DriverEvent::SteerAccepted {
+            message: "pending acceptance".into(),
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+        },
+        DriverEvent::SteerRejected {
+            message: "pending rejection".into(),
+            reason: "stale".into(),
+            reason_i18n: None,
+            hidden: false,
+        },
         DriverEvent::TurnFinished {
             success: true,
             summary: None,
@@ -3214,12 +3257,26 @@ fn stale_runtime_events_preserve_the_replacement() {
         backend.task_state.clone(),
         backend.task_store.clone(),
         backend.sessions.clone(),
+        backend.runtime_lifecycles.clone(),
         backend.automations.clone(),
         backend.boss.clone(),
         backend.auto_prompts.clone(),
         backend.repo_maps.clone(),
     );
     assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    assert_eq!(
+        backend.sessions.lock()[&session_id].last_active,
+        last_active
+    );
+    assert!(backend.agent.take_daemon_interrupt(session_id));
+    for prompt in ["pending acceptance", "pending rejection"] {
+        assert!(
+            backend
+                .agent
+                .take_pending_steer(session_id, prompt)
+                .is_some()
+        );
+    }
     assert!(backend.agent.has_queued(session_id));
     assert!(backend.agent.has_open_turn(session_id));
     assert_eq!(backend.sessions.lock()[&session_id].runtime_id, runtime_id);
@@ -3239,6 +3296,952 @@ fn stale_runtime_events_preserve_the_replacement() {
 
 /// A provider may emit its entire lifetime before launch returns. Register
 /// before forwarding so its cursor is recorded and its exit retires the entry.
+fn runtime_generation_prompt(prompt: &str) -> crate::agent::AgentPrompt {
+    crate::agent::AgentPrompt {
+        prompt: prompt.into(),
+        transport: None,
+        sender: None,
+        queued_id: Some(Uuid::new_v4()),
+        context: None,
+        hidden: false,
+        report_trigger: None,
+    }
+}
+
+fn runtime_generation_entry(
+    runtime_id: Uuid,
+    capture: Arc<CaptureDriver>,
+    cwd: &Path,
+) -> RuntimeEntry {
+    RuntimeEntry {
+        runtime_id,
+        driver: DriverHandle::from_control(capture),
+        last_active: std::time::Instant::now(),
+        resumable: true,
+        computer_use_available: false,
+        provider: ProviderKind::Codex,
+        cwd: cwd.into(),
+    }
+}
+
+fn runtime_generation_forward(
+    backend: &WakuBackend,
+    session_id: Uuid,
+    runtime_id: Uuid,
+    receiver: crossbeam_channel::Receiver<DriverEvent>,
+    events: EventSink,
+    driver: DriverHandle,
+) {
+    forward_driver_events(
+        session_id,
+        runtime_id,
+        receiver,
+        events,
+        driver,
+        backend.agent.clone(),
+        backend.task_state.clone(),
+        backend.task_store.clone(),
+        backend.sessions.clone(),
+        backend.runtime_lifecycles.clone(),
+        backend.automations.clone(),
+        backend.boss.clone(),
+        backend.auto_prompts.clone(),
+        backend.repo_maps.clone(),
+    );
+}
+
+#[test]
+fn runtime_generation_replacement_before_event_effects() {
+    for managed in [false, true] {
+        let root = std::env::temp_dir().join(format!("runtime-effect-race-{}", Uuid::new_v4()));
+        let (mut backend, _, session_id, _, capture) = employee_finish_fixture(&root);
+        if !managed {
+            backend.boss =
+                Arc::new(crate::boss::BossService::open(root.join("ordinary-boss")).unwrap());
+        }
+        let backend = Arc::new(backend);
+        let old_id = backend.sessions.lock()[&session_id].runtime_id;
+        let events = EventSink::detached().begin_session_runtime(session_id, old_id);
+        let (observed, observation) = crossbeam_channel::bounded(1);
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let waiting = release.clone();
+        let once = std::sync::atomic::AtomicBool::new(false);
+        let sessions = backend.sessions.clone();
+        *backend.runtime_lifecycles.event_received.lock() =
+            Some(Arc::new(move |session, runtime| {
+                if runtime == old_id && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    assert_eq!(sessions.lock()[&session].runtime_id, old_id);
+                    observed.send(()).unwrap();
+                    waiting.wait();
+                }
+            }));
+        let (sender, receiver) = driver::test_event_channel();
+        sender
+            .send(DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            })
+            .unwrap();
+        sender.send(DriverEvent::ProcessExited).unwrap();
+        drop(sender);
+        let old = {
+            let backend = backend.clone();
+            let events = events.clone();
+            std::thread::spawn(move || {
+                runtime_generation_forward(
+                    &backend,
+                    session_id,
+                    old_id,
+                    receiver,
+                    events,
+                    DriverHandle::from_control(capture),
+                )
+            })
+        };
+        observation.recv().unwrap();
+        let new_id = Uuid::new_v4();
+        let replacement_events = events.begin_session_runtime(session_id, new_id);
+        let (new_sender, new_receiver) = driver::test_event_channel();
+        let replacement = backend
+            .register_runtime_forwarder(
+                session_id,
+                runtime_generation_entry(new_id, Arc::new(CaptureDriver::default()), &root),
+                new_receiver,
+                replacement_events,
+            )
+            .unwrap();
+        let token = backend.agent.mint(session_id);
+        backend
+            .agent
+            .enqueue(session_id, runtime_generation_prompt("replacement queue"));
+        backend
+            .agent
+            .note_driver_event(session_id, &DriverEvent::TurnStarted);
+        backend
+            .repo_maps
+            .0
+            .lock()
+            .sessions
+            .insert(session_id, root.clone());
+        let before = serde_json::to_value(&backend.task_state.lock().sessions).unwrap();
+        release.wait();
+        old.join().unwrap();
+        assert_eq!(backend.agent.resolve(&token), Some(session_id));
+        assert!(backend.agent.has_queued(session_id));
+        assert!(backend.agent.has_open_turn(session_id));
+        assert_eq!(backend.sessions.lock()[&session_id].runtime_id, new_id);
+        assert_eq!(backend.repo_maps.0.lock().sessions[&session_id], root);
+        assert_eq!(
+            serde_json::to_value(&backend.task_state.lock().sessions).unwrap(),
+            before
+        );
+        new_sender.send(DriverEvent::ProcessExited).unwrap();
+        replacement.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[test]
+fn runtime_generation_idle_teardown_preserves_replacement() {
+    let root = std::env::temp_dir().join(format!("runtime-idle-race-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let old_id = Uuid::new_v4();
+    let old_driver = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        runtime_generation_entry(old_id, old_driver.clone(), &root),
+    );
+    let old_token = backend.agent.mint(session_id);
+    backend
+        .repo_maps
+        .0
+        .lock()
+        .sessions
+        .insert(session_id, root.clone());
+    let events = EventSink::detached().begin_session_runtime(session_id, old_id);
+    let mut removed = reap_idle_runtimes(
+        &backend.sessions,
+        &backend.task_state,
+        &backend.settings,
+        &backend.agent,
+        &backend.runtime_lifecycles,
+        &backend.repo_maps,
+        true,
+    );
+    assert_eq!(removed.len(), 1);
+    assert_eq!(backend.agent.resolve(&old_token), None);
+    assert!(
+        !backend
+            .repo_maps
+            .0
+            .lock()
+            .sessions
+            .contains_key(&session_id)
+    );
+    let new_id = Uuid::new_v4();
+    let new_events = events.begin_session_runtime(session_id, new_id);
+    let (sender, receiver) = driver::test_event_channel();
+    let forward = backend
+        .register_runtime_forwarder(
+            session_id,
+            runtime_generation_entry(new_id, Arc::new(CaptureDriver::default()), &root),
+            receiver,
+            new_events.clone(),
+        )
+        .unwrap();
+    let token = backend.agent.mint(session_id);
+    backend
+        .agent
+        .enqueue(session_id, runtime_generation_prompt("keep queued"));
+    backend
+        .repo_maps
+        .0
+        .lock()
+        .sessions
+        .insert(session_id, root.clone());
+    new_events
+        .send(WireDriverEvent::new("replacement", Value::Null))
+        .unwrap();
+    let (id, runtime, driver) = removed.pop().unwrap();
+    evict_idle_runtime(id, runtime, driver, &events);
+    assert_eq!(*old_driver.shutdowns.lock(), 1);
+    assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    assert!(backend.agent.has_queued(session_id));
+    assert_eq!(backend.repo_maps.0.lock().sessions[&session_id], root);
+    assert_eq!(new_events.journaled_event_count(session_id), 1);
+    assert!(
+        backend
+            .remove_runtime(session_id, Some(old_id), true)
+            .is_none()
+    );
+    assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    forward.join().unwrap();
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn runtime_generation_exit_cleanup_holds_ownership_until_effects_finish() {
+    for managed in [false, true] {
+        let root = std::env::temp_dir().join(format!("runtime-exit-effect-{}", Uuid::new_v4()));
+        let (backend, session_id) = runtime_generation_launch_fixture(&root, managed);
+        let old_id = Uuid::new_v4();
+        backend.sessions.lock().insert(
+            session_id,
+            runtime_generation_entry(old_id, Arc::new(CaptureDriver::default()), &root),
+        );
+        let old_token = backend.agent.mint(session_id);
+        let (applying, application) = crossbeam_channel::bounded(1);
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let waiting = release.clone();
+        *backend.runtime_lifecycles.event_applying.lock() = Some(Arc::new(move |_, id| {
+            if id == old_id {
+                applying.send(()).unwrap();
+                waiting.wait();
+            }
+        }));
+        let backend = Arc::new(backend);
+        let events = EventSink::detached().begin_session_runtime(session_id, old_id);
+        let (sender, receiver) = driver::test_event_channel();
+        sender.send(DriverEvent::ProcessExited).unwrap();
+        drop(sender);
+        let exiting = {
+            let backend = backend.clone();
+            let events = events.clone();
+            std::thread::spawn(move || {
+                runtime_generation_forward(
+                    &backend,
+                    session_id,
+                    old_id,
+                    receiver,
+                    events,
+                    DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+                );
+            })
+        };
+        application
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        // Pause after ownership validation, at the start of the effects. A
+        // competing registration must still be unable to acquire ownership.
+        let lifecycle = backend.runtime_lifecycles.session(session_id);
+        let held_during_effects = lifecycle.try_lock().is_none();
+        let new_id = Uuid::new_v4();
+        let events = events.begin_session_runtime(session_id, new_id);
+        let (attempted, attempt) = crossbeam_channel::bounded(1);
+        let replacing = {
+            let backend = backend.clone();
+            let root = root.clone();
+            std::thread::spawn(move || {
+                attempted.send(()).unwrap();
+                let lifecycle = backend.runtime_lifecycles.session(session_id);
+                let _owner = lifecycle.lock();
+                let (sender, receiver) = driver::test_event_channel();
+                let forward = backend
+                    .register_runtime_forwarder(
+                        session_id,
+                        runtime_generation_entry(new_id, Arc::new(CaptureDriver::default()), &root),
+                        receiver,
+                        events,
+                    )
+                    .unwrap();
+                let token = backend.agent.mint(session_id);
+                backend
+                    .agent
+                    .enqueue(session_id, runtime_generation_prompt("replacement queue"));
+                backend.repo_maps.0.lock().sessions.insert(session_id, root);
+                (token, sender, forward)
+            })
+        };
+        attempt
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        release.wait();
+        exiting.join().unwrap();
+        let (token, sender, forward) = replacing.join().unwrap();
+        assert!(held_during_effects);
+        assert_eq!(backend.agent.resolve(&old_token), None);
+        assert_eq!(backend.agent.resolve(&token), Some(session_id));
+        assert_eq!(backend.sessions.lock()[&session_id].runtime_id, new_id);
+        assert!(backend.agent.has_queued(session_id));
+        assert_eq!(backend.repo_maps.0.lock().sessions[&session_id], root);
+        sender.send(DriverEvent::ProcessExited).unwrap();
+        forward.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[test]
+fn runtime_generation_current_exit_and_obsolete_close() {
+    let root = std::env::temp_dir().join(format!("runtime-exit-close-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let old_id = Uuid::new_v4();
+    let events = EventSink::detached().begin_session_runtime(session_id, old_id);
+    backend.sessions.lock().insert(
+        session_id,
+        runtime_generation_entry(old_id, Arc::new(CaptureDriver::default()), &root),
+    );
+    let token = backend.agent.mint(session_id);
+    backend
+        .agent
+        .enqueue(session_id, runtime_generation_prompt("old queue"));
+    backend
+        .repo_maps
+        .0
+        .lock()
+        .sessions
+        .insert(session_id, root.clone());
+    let (sender, receiver) = driver::test_event_channel();
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    drop(sender);
+    runtime_generation_forward(
+        &backend,
+        session_id,
+        old_id,
+        receiver,
+        events.clone(),
+        DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+    );
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    assert_eq!(backend.agent.resolve(&token), None);
+    assert!(!backend.agent.has_queued(session_id));
+    assert!(
+        !backend
+            .repo_maps
+            .0
+            .lock()
+            .sessions
+            .contains_key(&session_id)
+    );
+    let new_id = Uuid::new_v4();
+    let new_events = events.begin_session_runtime(session_id, new_id);
+    let (sender, receiver) = driver::test_event_channel();
+    let new_capture = Arc::new(CaptureDriver::default());
+    let forward = backend
+        .register_runtime_forwarder(
+            session_id,
+            runtime_generation_entry(new_id, new_capture.clone(), &root),
+            receiver,
+            new_events,
+        )
+        .unwrap();
+    let token = backend.agent.mint(session_id);
+    // Duplicate exit and a late CloseSession each name the obsolete owner.
+    let (duplicate, receiver) = driver::test_event_channel();
+    duplicate.send(DriverEvent::ProcessExited).unwrap();
+    drop(duplicate);
+    runtime_generation_forward(
+        &backend,
+        session_id,
+        old_id,
+        receiver,
+        events.clone(),
+        DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+    );
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id,
+                runtime_id: old_id,
+                command: Command::CloseSession,
+            },
+            events,
+            None,
+        )
+        .unwrap();
+    assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    assert_eq!(backend.sessions.lock()[&session_id].runtime_id, new_id);
+    assert_eq!(*new_capture.shutdowns.lock(), 0);
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    forward.join().unwrap();
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn runtime_generation_teardown_fences_observed_events_and_new_launches() {
+    runtime_generation_retirement_fences_observed_events(true);
+}
+
+#[test]
+fn runtime_generation_removal_fences_observed_events_and_new_launches() {
+    runtime_generation_retirement_fences_observed_events(false);
+}
+
+fn runtime_generation_retirement_fences_observed_events(shutdown: bool) {
+    let root = std::env::temp_dir().join(format!("runtime-teardown-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let runtime_id = Uuid::new_v4();
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        runtime_generation_entry(runtime_id, capture.clone(), &root),
+    );
+    let token = backend.agent.mint(session_id);
+    backend
+        .agent
+        .enqueue(session_id, runtime_generation_prompt("old queue"));
+    backend
+        .repo_maps
+        .0
+        .lock()
+        .sessions
+        .insert(session_id, root.clone());
+    let backend = Arc::new(backend);
+    let (observed, observation) = crossbeam_channel::bounded(1);
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let waiting = release.clone();
+    let once = std::sync::atomic::AtomicBool::new(false);
+    *backend.runtime_lifecycles.event_received.lock() = Some(Arc::new(move |_, _| {
+        if !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            observed.send(()).unwrap();
+            waiting.wait();
+        }
+    }));
+    let events = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+    let (sender, receiver) = driver::test_event_channel();
+    sender
+        .send(DriverEvent::Connected {
+            provider_cursor: Some(ProviderResumeCursor::Codex {
+                thread_id: "obsolete".into(),
+            }),
+        })
+        .unwrap();
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    drop(sender);
+    let forward = {
+        let backend = backend.clone();
+        let events = events.clone();
+        let capture = capture.clone();
+        std::thread::spawn(move || {
+            runtime_generation_forward(
+                &backend,
+                session_id,
+                runtime_id,
+                receiver,
+                events,
+                DriverHandle::from_control(capture),
+            )
+        })
+    };
+    observation
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    if shutdown {
+        backend.shutdown();
+    } else {
+        backend.remove_session(session_id).unwrap();
+    }
+    let before = serde_json::to_value(&backend.task_state.lock().sessions).unwrap();
+    assert_eq!(*capture.shutdowns.lock(), 1);
+    assert_eq!(backend.agent.resolve(&token), None);
+    assert!(!backend.agent.has_queued(session_id));
+    let new_id = Uuid::new_v4();
+    let attempted = events.begin_session_runtime(session_id, new_id);
+    attempted
+        .send(WireDriverEvent::new("failed launch", Value::Null))
+        .unwrap();
+    let error =
+        runtime_generation_start(&backend, session_id, new_id, &attempted, false).unwrap_err();
+    if shutdown {
+        assert!(error.to_string().contains("daemon is shutting down"));
+    } else {
+        assert!(error.to_string().contains("was removed"));
+    }
+    assert_eq!(attempted.journaled_event_count(session_id), 0);
+    release.wait();
+    forward.join().unwrap();
+    assert!(backend.sessions.lock().is_empty());
+    assert!(backend.repo_maps.0.lock().sessions.is_empty());
+    assert_eq!(*capture.shutdowns.lock(), 1);
+    assert_eq!(
+        serde_json::to_value(&backend.task_state.lock().sessions).unwrap(),
+        before
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+fn runtime_generation_launch_fixture(root: &Path, managed: bool) -> (WakuBackend, Uuid) {
+    let (backend, session_id) = if managed {
+        let (backend, _, session_id, _, _) = employee_finish_fixture(root);
+        (backend, session_id)
+    } else {
+        surface_test_backend(root)
+    };
+    drop_detached(backend.remove_runtime(session_id, None, false));
+    (backend, session_id)
+}
+
+fn runtime_generation_configure_launch(backend: &mut WakuBackend, root: &Path) {
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    // The controlled driver never executes the packaged CLI. Resolve only this
+    // external dependency to a fixture path; credential creation stays real.
+    backend.runtime_test_cli = Some(root.join("controlled-agent-cli"));
+    let binary = root.join("controlled-provider");
+    std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let provider = backend.task_state.lock().sessions[0].provider;
+    let mut settings = backend.settings.get();
+    settings.provider_binary_overrides.insert(
+        provider,
+        root.join("controlled-provider").display().to_string(),
+    );
+    backend.settings.replace(settings).unwrap();
+}
+
+fn runtime_generation_start(
+    backend: &WakuBackend,
+    session_id: Uuid,
+    runtime_id: Uuid,
+    events: &EventSink,
+    cold: bool,
+) -> anyhow::Result<Uuid> {
+    if cold {
+        return backend
+            .ensure_agent_runtime(session_id, events)
+            .map(|(id, _)| id);
+    }
+    let cwd = backend.task_state.lock().projects[0].path.clone();
+    backend.handle(
+        Request {
+            request_id: Uuid::new_v4(),
+            session_id,
+            runtime_id,
+            command: Command::Start {
+                options: waku_protocol::WireDriverStartOptions {
+                    provider: "codex".into(),
+                    binary: PathBuf::from("unused-controlled-driver"),
+                    cwd,
+                    mode: serde_json::to_value(crate::model::RuntimeMode::default())
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    read_own_transcript: false,
+                    provider_cursor: None,
+                },
+            },
+        },
+        events.for_session(session_id, runtime_id),
+        None,
+    )?;
+    Ok(runtime_id)
+}
+
+#[test]
+fn runtime_generation_both_launch_paths_install_before_immediate_events() {
+    for (cold, managed) in [(false, false), (true, false), (false, true), (true, true)] {
+        let root = std::env::temp_dir().join(format!("runtime-launch-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = runtime_generation_launch_fixture(&root, managed);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let tokens = Arc::new(Mutex::new(Vec::new()));
+        let minted = tokens.clone();
+        let cursor = ProviderResumeCursor::Codex {
+            thread_id: "immediate-thread".into(),
+        };
+        let connected = cursor.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, options, sender| {
+            minted
+                .lock()
+                .push(options.agent.as_ref().expect("scoped launch").token.clone());
+            sender
+                .send(DriverEvent::Connected {
+                    provider_cursor: Some(connected.clone()),
+                })
+                .unwrap();
+            sender.send(DriverEvent::ProcessExited).unwrap();
+            Ok(DriverHandle::from_control(Arc::new(
+                CaptureDriver::default(),
+            )))
+        }));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let waiting = release.clone();
+        let (completed, completion) = crossbeam_channel::bounded(1);
+        backend.runtime_test_forward = Some(Arc::new(move |name, forward| {
+            let waiting = waiting.clone();
+            let completed = completed.clone();
+            std::thread::Builder::new().name(name).spawn(move || {
+                waiting.wait();
+                forward();
+                completed.send(()).unwrap();
+            })
+        }));
+        let id = Uuid::new_v4();
+        let source = EventSink::detached();
+        let events = if cold {
+            source
+        } else {
+            source.begin_session_runtime(session_id, id)
+        };
+        let id = runtime_generation_start(&backend, session_id, id, &events, cold).unwrap();
+        assert_eq!(backend.sessions.lock()[&session_id].runtime_id, id);
+        assert_eq!(backend.agent.resolve(&tokens.lock()[0]), Some(session_id));
+        assert!(
+            backend
+                .repo_maps
+                .0
+                .lock()
+                .sessions
+                .contains_key(&session_id)
+        );
+        release.wait();
+        completion
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .session_mut(session_id)
+                .unwrap()
+                .provider_cursor,
+            Some(cursor)
+        );
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+        assert_eq!(backend.agent.resolve(&tokens.lock()[0]), None);
+        assert!(
+            !backend
+                .repo_maps
+                .0
+                .lock()
+                .sessions
+                .contains_key(&session_id)
+        );
+        assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[test]
+fn runtime_generation_preparation_failure_releases_minted_resources() {
+    for cold in [false, true] {
+        let root = std::env::temp_dir().join(format!("runtime-prepare-fail-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = surface_test_backend(&root);
+        runtime_generation_configure_launch(&mut backend, &root);
+        {
+            let mut state = backend.task_state.lock();
+            backend
+                .task_store
+                .hydrate(state.session_mut(session_id).unwrap())
+                .unwrap();
+            state.session_mut(session_id).unwrap().environment =
+                crate::model::SessionEnvironment::Sandbox;
+            state.mark_session_dirty(session_id);
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let mut settings = backend.settings.get();
+        settings.sandbox_experiment_enabled = false;
+        backend.settings.replace(settings).unwrap();
+        let tokens = Arc::new(Mutex::new(Vec::new()));
+        let minted = tokens.clone();
+        backend.runtime_test_env = Some(Arc::new(move |env| minted.lock().push(env.token.clone())));
+        backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+            panic!("preparation failure must not create a driver")
+        }));
+        let id = Uuid::new_v4();
+        let source = EventSink::detached();
+        let events = if cold {
+            source
+        } else {
+            source.begin_session_runtime(session_id, id)
+        };
+        let error = runtime_generation_start(&backend, session_id, id, &events, cold).unwrap_err();
+        assert!(
+            error.to_string().contains("sandbox experiment is off"),
+            "{error:#}"
+        );
+        assert_eq!(tokens.lock().len(), 1);
+        assert_eq!(backend.agent.resolve(&tokens.lock()[0]), None);
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+        assert!(
+            !backend
+                .repo_maps
+                .0
+                .lock()
+                .sessions
+                .contains_key(&session_id)
+        );
+        assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[test]
+fn runtime_generation_launch_failure_rolls_back_all_setup() {
+    for (cold, managed) in [(false, false), (true, false), (false, true), (true, true)] {
+        let root = std::env::temp_dir().join(format!("runtime-launch-fail-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = runtime_generation_launch_fixture(&root, managed);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let tokens = Arc::new(Mutex::new(Vec::new()));
+        let minted = tokens.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, options, _| {
+            minted
+                .lock()
+                .push(options.agent.as_ref().expect("scoped launch").token.clone());
+            anyhow::bail!("injected provider launch failure")
+        }));
+        let id = Uuid::new_v4();
+        let source = EventSink::detached();
+        let events = if cold {
+            source
+        } else {
+            source.begin_session_runtime(session_id, id)
+        };
+        let error = runtime_generation_start(&backend, session_id, id, &events, cold).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("injected provider launch failure")
+        );
+        assert_eq!(tokens.lock().len(), 1);
+        assert_eq!(backend.agent.resolve(&tokens.lock()[0]), None);
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+        assert!(
+            !backend
+                .repo_maps
+                .0
+                .lock()
+                .sessions
+                .contains_key(&session_id)
+        );
+        assert_eq!(events.journaled_event_count(session_id), 0);
+        std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[test]
+fn runtime_generation_forwarder_failure_and_concurrent_replacement() {
+    runtime_generation_concurrent_failure(false);
+    runtime_generation_concurrent_failure(true);
+}
+
+fn runtime_generation_concurrent_failure(fail_driver: bool) {
+    let root = std::env::temp_dir().join(format!("runtime-forward-fail-{}", Uuid::new_v4()));
+    let (mut backend, session_id) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let captures = Arc::new(Mutex::new(Vec::<Arc<CaptureDriver>>::new()));
+    let tokens = Arc::new(Mutex::new(Vec::new()));
+    let senders = Arc::new(Mutex::new(Vec::new()));
+    let (entered, entry) = crossbeam_channel::bounded(1);
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let start_entered = entered.clone();
+    let start_wait = release.clone();
+    let first_start = std::sync::atomic::AtomicBool::new(true);
+    let (recorded, minted, channels) = (captures.clone(), tokens.clone(), senders.clone());
+    backend.runtime_test_start = Some(Arc::new(move |_, options, sender| {
+        minted
+            .lock()
+            .push(options.agent.as_ref().expect("scoped launch").token.clone());
+        channels.lock().push(sender);
+        if fail_driver && first_start.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            start_entered.send(()).unwrap();
+            start_wait.wait();
+            anyhow::bail!("injected provider launch failure");
+        }
+        let capture = Arc::new(CaptureDriver::default());
+        recorded.lock().push(capture.clone());
+        Ok(DriverHandle::from_control(capture))
+    }));
+    let waiting = release.clone();
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let (completed, completion) = crossbeam_channel::bounded(1);
+    backend.runtime_test_forward = Some(Arc::new(move |name, forward| {
+        if !fail_driver && first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            entered.send(()).unwrap();
+            waiting.wait();
+            drop(forward);
+            return Err(std::io::Error::other("injected forwarder failure"));
+        }
+        let completed = completed.clone();
+        std::thread::Builder::new().name(name).spawn(move || {
+            forward();
+            completed.send(()).unwrap();
+        })
+    }));
+    let backend = Arc::new(backend);
+    let old_id = Uuid::new_v4();
+    let new_id = Uuid::new_v4();
+    let events = EventSink::detached().begin_session_runtime(session_id, old_id);
+    let failed = {
+        let backend = backend.clone();
+        let events = events.clone();
+        std::thread::spawn(move || {
+            runtime_generation_start(&backend, session_id, old_id, &events, false)
+        })
+    };
+    entry
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    assert!(
+        backend
+            .runtime_lifecycles
+            .session(session_id)
+            .try_lock()
+            .is_none()
+    );
+    // The newer stream is already active while the failed launch rolls back.
+    let new_events = events.begin_session_runtime(session_id, new_id);
+    new_events
+        .send(WireDriverEvent::new("replacement", Value::Null))
+        .unwrap();
+    let (attempting, attempt) = crossbeam_channel::bounded(1);
+    let replacement = {
+        let backend = backend.clone();
+        let events = new_events.clone();
+        std::thread::spawn(move || {
+            attempting.send(()).unwrap();
+            runtime_generation_start(&backend, session_id, new_id, &events, false)
+        })
+    };
+    attempt
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    release.wait();
+    let error = failed.join().unwrap().unwrap_err();
+    assert!(format!("{error:#}").contains(if fail_driver {
+        "injected provider launch failure"
+    } else {
+        "injected forwarder failure"
+    }));
+    assert_eq!(replacement.join().unwrap().unwrap(), new_id);
+    let replacement_index = if fail_driver {
+        assert_eq!(captures.lock().len(), 1);
+        0
+    } else {
+        assert_eq!(*captures.lock()[0].shutdowns.lock(), 1);
+        1
+    };
+    assert_eq!(*captures.lock()[replacement_index].shutdowns.lock(), 0);
+    assert_eq!(backend.agent.resolve(&tokens.lock()[0]), None);
+    assert_eq!(backend.agent.resolve(&tokens.lock()[1]), Some(session_id));
+    assert_eq!(backend.sessions.lock()[&session_id].runtime_id, new_id);
+    assert!(
+        backend
+            .repo_maps
+            .0
+            .lock()
+            .sessions
+            .contains_key(&session_id)
+    );
+    assert_eq!(new_events.journaled_event_count(session_id), 1);
+    assert!(senders.lock()[0].send(DriverEvent::ProcessExited).is_err());
+    senders.lock()[1].send(DriverEvent::ProcessExited).unwrap();
+    completion
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn runtime_generation_delayed_employee_settlement_rechecks_owner() {
+    let root = std::env::temp_dir().join(format!("runtime-settle-race-{}", Uuid::new_v4()));
+    let (backend, _, session_id, _, _) = employee_finish_fixture(&root);
+    let backend = Arc::new(backend);
+    let old_id = backend.sessions.lock()[&session_id].runtime_id;
+    backend
+        .runtime_lifecycles
+        .session(session_id)
+        .lock()
+        .set(Some(old_id));
+    let (observed, observation) = crossbeam_channel::bounded(1);
+    let release = Arc::new(std::sync::Barrier::new(2));
+    let waiting = release.clone();
+    let settle = {
+        let backend = backend.clone();
+        std::thread::spawn(move || {
+            assert_eq!(backend.sessions.lock()[&session_id].runtime_id, old_id);
+            observed.send(()).unwrap();
+            waiting.wait();
+            backend
+                .finish_runtime_employee(
+                    session_id,
+                    old_id,
+                    waku_protocol::boss::EmployeeSettle::TurnFinished,
+                )
+                .unwrap();
+        })
+    };
+    observation
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    let new_id = Uuid::new_v4();
+    let events = EventSink::detached().begin_session_runtime(session_id, new_id);
+    let (sender, receiver) = driver::test_event_channel();
+    let forward = backend
+        .register_runtime_forwarder(
+            session_id,
+            runtime_generation_entry(new_id, Arc::new(CaptureDriver::default()), &root),
+            receiver,
+            events,
+        )
+        .unwrap();
+    let token = backend.agent.mint(session_id);
+    let employee = serde_json::to_value(backend.boss.employee(session_id)).unwrap();
+    release.wait();
+    settle.join().unwrap();
+    assert_eq!(
+        serde_json::to_value(backend.boss.employee(session_id)).unwrap(),
+        employee
+    );
+    assert_eq!(backend.agent.resolve(&token), Some(session_id));
+    assert_eq!(backend.sessions.lock()[&session_id].runtime_id, new_id);
+    sender.send(DriverEvent::ProcessExited).unwrap();
+    forward.join().unwrap();
+    std::fs::remove_dir_all(root).ok();
+}
+
 #[test]
 fn startup_runtime_events_are_forwarded_after_registration() {
     let root = std::env::temp_dir().join(format!("waku-startup-runtime-{}", Uuid::new_v4()));
@@ -3347,6 +4350,7 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
         task_state.clone(),
         task_store.clone(),
         sessions.clone(),
+        Arc::new(RuntimeLifecycles::default()),
         Arc::new(AutomationService::open(root.join("automations.json")).unwrap()),
         Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
         Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
@@ -3572,6 +4576,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
         &backend.task_state,
         &backend.settings,
         &backend.agent,
+        &backend.runtime_lifecycles,
+        &backend.repo_maps,
         false,
     );
     assert_eq!(evicted.len(), 1);
@@ -3602,6 +4608,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
             &backend.task_state,
             &backend.settings,
             &backend.agent,
+            &backend.runtime_lifecycles,
+            &backend.repo_maps,
             false
         )
         .is_empty()
@@ -3615,6 +4623,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
         &backend.task_state,
         &backend.settings,
         &backend.agent,
+        &backend.runtime_lifecycles,
+        &backend.repo_maps,
         true,
     );
     assert_eq!(evicted.len(), 1);
@@ -3648,6 +4658,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
             &backend.task_state,
             &backend.settings,
             &backend.agent,
+            &backend.runtime_lifecycles,
+            &backend.repo_maps,
             true
         )
         .is_empty()
@@ -9850,6 +10862,7 @@ fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
             backend.task_state.clone(),
             backend.task_store.clone(),
             backend.sessions.clone(),
+            backend.runtime_lifecycles.clone(),
             backend.automations.clone(),
             backend.boss.clone(),
             backend.auto_prompts.clone(),
@@ -14603,6 +15616,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
             backend.task_state.clone(),
             backend.task_store.clone(),
             backend.sessions.clone(),
+            backend.runtime_lifecycles.clone(),
             backend.automations.clone(),
             backend.boss.clone(),
             backend.auto_prompts.clone(),

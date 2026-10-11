@@ -2670,7 +2670,7 @@ impl BossService {
     /// legibly (`EmployeeSettle` → `ExpiryCause`). A queued ticket owns
     /// no live turn, so a settle arriving for one belongs to the previous
     /// generation's dying runtime — it is dropped, not settled.
-    pub fn note_settled(&self, session: Uuid, settle: EmployeeSettle) {
+    pub fn note_settled(&self, session: Uuid, runtime: Uuid, settle: EmployeeSettle) {
         // A settle from a runtime the daemon retired is stale — a ticket
         // parked behind admission has no live turn to finish. Legacy
         // ticketless `queued` records still own a runtime, so theirs land.
@@ -2686,7 +2686,7 @@ impl BossService {
             let _ = std::thread::Builder::new()
                 .name("boss-employee-finish".into())
                 .spawn(move || {
-                    if let Err(error) = finish(session, settle) {
+                    if let Err(error) = finish(session, runtime, settle) {
                         eprintln!("could not settle Boss employee {session}: {error:#}");
                     }
                 });
