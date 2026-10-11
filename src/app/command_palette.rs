@@ -152,10 +152,18 @@ impl PaletteSection {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum PaletteIcon {
     Asset(&'static str),
     Provider(ProviderKind),
+    Employee {
+        session_id: Uuid,
+        job_title: Option<SharedString>,
+    },
+    Session {
+        provider: ProviderKind,
+        project: SharedString,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -606,9 +614,6 @@ fn employee_chat_hit_item(
     {
         details.push(person.clone());
     }
-    if let Some(job) = hit.job_title.as_ref().filter(|job| !job.is_empty()) {
-        details.push(job.clone());
-    }
     if !hit.project.is_empty() {
         details.push(hit.project.clone());
     }
@@ -618,24 +623,36 @@ fn employee_chat_hit_item(
     if hit.employee_expired == Some(true) {
         details.push(tr!("boss.status_expired"));
     }
-    let mut search_text = format!("{} {}", hit.title, details.join(" "));
+    let mut search_text = format!(
+        "{} {} {}",
+        hit.title,
+        hit.job_title.as_deref().unwrap_or_default(),
+        details.join(" ")
+    );
     if let Some(recorded_by) = hit.recorded_by.as_ref() {
         search_text.push(' ');
         search_text.push_str(recorded_by);
     }
-    let content_match = (!hit.excerpt.is_empty()).then(|| {
-        crate::persistence::SessionMessageMatch {
+    let content_match =
+        (!hit.excerpt.is_empty()).then(|| crate::persistence::SessionMessageMatch {
             session_id: hit.task_id,
             message_id: hit.message_id,
             source: hit.role,
             snippet: hit.excerpt.clone(),
-        }
-    });
+        });
     CommandPaletteItem {
         section: PaletteSection::EmployeeChats,
         label: hit.title.clone(),
         detail: (!details.is_empty()).then(|| details.join(" · ")),
-        icon: PaletteIcon::Asset("icons/bot.svg"),
+        icon: PaletteIcon::Employee {
+            session_id: hit.task_id,
+            job_title: hit
+                .job_title
+                .as_ref()
+                .filter(|job| !job.is_empty())
+                .cloned()
+                .map(SharedString::from),
+        },
         shortcut: None,
         action: PaletteAction::OpenEmployeeChat {
             task_id: hit.task_id,
@@ -3423,7 +3440,7 @@ impl Waku {
                         branch.as_deref(),
                     ),
                 };
-                let mut details = vec![project.clone()];
+                let mut details = Vec::new();
                 if let Some(label) = workspace_label {
                     details.push(format!("#{label}"));
                 }
@@ -3448,8 +3465,11 @@ impl Waku {
                         session.model.as_deref().unwrap_or_default(),
                     ),
                     label,
-                    detail: Some(detail),
-                    icon: PaletteIcon::Provider(session.provider),
+                    detail: (!detail.is_empty()).then_some(detail),
+                    icon: PaletteIcon::Session {
+                        provider: session.provider,
+                        project: SharedString::from(project),
+                    },
                     shortcut: None,
                     action: PaletteAction::SelectTask(session.id),
                     content_match,
@@ -5954,17 +5974,34 @@ impl Waku {
                 }
 
                 let highlighted = index == selected;
-                let icon_color = match item.icon {
+                let icon_color = match &item.icon {
                     PaletteIcon::Asset(_) => theme.text_secondary,
-                    PaletteIcon::Provider(provider) => provider_color(&theme, provider),
+                    PaletteIcon::Provider(provider) | PaletteIcon::Session { provider, .. } => {
+                        provider_color(&theme, *provider)
+                    }
+                    PaletteIcon::Employee { .. } => theme.text_secondary,
                 };
                 // A provider row renders through `provider_mark`; an asset row
                 // stays a plain tinted icon.
-                let row_mark = match item.icon {
+                let row_mark = match &item.icon {
                     PaletteIcon::Asset(path) => icon(path, 16.0, icon_color).into_any_element(),
-                    PaletteIcon::Provider(provider) => {
-                        provider_mark(provider, 16.0, icon_color).into_any_element()
+                    PaletteIcon::Provider(provider) | PaletteIcon::Session { provider, .. } => {
+                        provider_mark(*provider, 16.0, icon_color).into_any_element()
                     }
+                    PaletteIcon::Employee { session_id, .. } => self
+                        .boss_session_identity(*session_id)
+                        .map(|identity| self.boss_avatar_animated(&identity, 20.0, cx))
+                        .unwrap_or_else(|| {
+                            icon("icons/bot.svg", 16.0, icon_color).into_any_element()
+                        }),
+                };
+                let employee_job_title = match &item.icon {
+                    PaletteIcon::Employee { job_title, .. } => job_title.clone(),
+                    _ => None,
+                };
+                let session_project = match &item.icon {
+                    PaletteIcon::Session { project, .. } => Some(project.clone()),
+                    _ => None,
                 };
                 let importing = match &item.action {
                     PaletteAction::ResumeProviderSession(_, summary) => self
@@ -6046,6 +6083,7 @@ impl Waku {
                                         .child(
                                             div()
                                                 .min_w_0()
+                                                .flex_1()
                                                 .truncate()
                                                 .text_size(sp(14.0))
                                                 .font_weight(if highlighted {
@@ -6060,6 +6098,31 @@ impl Waku {
                                                 })
                                                 .child(item.label.clone()),
                                         )
+                                        .when_some(employee_job_title, |row, job_title| {
+                                            row.child(
+                                                div()
+                                                    .flex_none()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(4.0))
+                                                    .max_w(px(180.0))
+                                                    .child(icon(
+                                                        super::boss::job_title_icon(
+                                                            job_title.as_ref(),
+                                                        ),
+                                                        12.0,
+                                                        theme.text_tertiary,
+                                                    ))
+                                                    .child(
+                                                        div()
+                                                            .min_w_0()
+                                                            .truncate()
+                                                            .text_size(sp(12.5))
+                                                            .text_color(theme.text_tertiary)
+                                                            .child(job_title),
+                                                    ),
+                                            )
+                                        })
                                         .when_some(detail, |row, detail| {
                                             row.child(
                                                 div()
@@ -6068,6 +6131,29 @@ impl Waku {
                                                     .text_size(sp(12.5))
                                                     .text_color(theme.text_tertiary)
                                                     .child(detail),
+                                            )
+                                        })
+                                        .when_some(session_project, |row, project| {
+                                            row.child(
+                                                div()
+                                                    .max_w(px(180.0))
+                                                    .flex_none()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(4.0))
+                                                    .child(icon(
+                                                        "icons/folder.svg",
+                                                        12.0,
+                                                        theme.text_tertiary,
+                                                    ))
+                                                    .child(
+                                                        div()
+                                                            .min_w_0()
+                                                            .truncate()
+                                                            .text_size(sp(12.5))
+                                                            .text_color(theme.text_tertiary)
+                                                            .child(project),
+                                                    ),
                                             )
                                         }),
                                 )
@@ -6486,7 +6572,15 @@ mod tests {
         assert_eq!(item.label, "employee 7");
         // The person's name repeats the title — the detail drops it and
         // keeps the distinguishing fields.
-        assert_eq!(item.detail.as_deref(), Some("Add a thing · project"));
+        assert_eq!(item.detail.as_deref(), Some("project"));
+        assert!(matches!(
+            &item.icon,
+            PaletteIcon::Employee {
+                session_id,
+                job_title: Some(job_title),
+            } if *session_id == Uuid::from_u128(7) && job_title.as_ref() == "Add a thing"
+        ));
+        assert!(item.search_text.contains("Add a thing"));
         let matched = item.content_match.expect("excerpt rides the row");
         assert_eq!(matched.session_id, Uuid::from_u128(7));
         assert_eq!(matched.message_id, Uuid::from_u128(9));
