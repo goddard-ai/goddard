@@ -14366,16 +14366,14 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
             updated_at: 123,
         });
     }
-    std::fs::write(
-        root.join("automations.json"),
-        serde_json::to_vec(&document).unwrap(),
-    )
-    .unwrap();
     let backend = WakuBackend::new(
         DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
         store,
     )
     .unwrap();
+    // These are newly accepted live runs, not interrupted records loaded
+    // at boot. Restart reconciliation is covered by the durability tests.
+    backend.automations.accept_test_runs(document.runs).unwrap();
     let capture = Arc::new(CaptureDriver::default());
     let driver = DriverHandle::from_control(capture.clone());
     let runtime_id = Uuid::new_v4();
