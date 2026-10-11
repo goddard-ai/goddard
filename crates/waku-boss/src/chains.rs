@@ -150,7 +150,11 @@ fn unique_names(names: &[String], kind: &str) -> Result<()> {
     }
     Ok(())
 }
-fn validate_step(state: &BossState, step: &ChainStepDefinition) -> Result<()> {
+fn validate_step(
+    state: &BossState,
+    step: &ChainStepDefinition,
+    predecessor: Option<HandoffBoundary>,
+) -> Result<()> {
     ensure!(
         !step.title.trim().is_empty() && !step.prompt.trim().is_empty(),
         "step title and prompt are required"
@@ -200,18 +204,18 @@ fn validate_step(state: &BossState, step: &ChainStepDefinition) -> Result<()> {
         step.workspace != AgentWorkspace::Adopt,
         "adoption is resolved only from a validated committed handoff"
     );
-    if step.workspace == AgentWorkspace::Worktree {
+    // A step that adopts a committed workspace — or starts fresh at a landed
+    // revision — takes its base from the verified handoff, not the definition.
+    let inherited_base = matches!(
+        predecessor,
+        Some(HandoffBoundary::CommittedWorkspace | HandoffBoundary::Landed)
+    );
+    if step.workspace == AgentWorkspace::Worktree && !inherited_base {
         ensure!(
             step.base_revision
                 .as_ref()
                 .is_some_and(|revision| !revision.trim().is_empty()),
             "worktree requires a source revision"
-        );
-    }
-    if step.boundary == HandoffBoundary::CommittedWorkspace {
-        // Phase 2 must supply project policy and the designated final submitter.
-        bail!(
-            "committed-workspace boundary requires an execution adapter with project submission policy"
         );
     }
     unique_names(&step.required_checks, "check")?;
@@ -230,9 +234,16 @@ fn validate_definition(state: &BossState, definition: &ChainDefinition) -> Resul
         .find(|outcome| outcome.id == definition.outcome_id)
         .ok_or_else(|| anyhow!("unknown chain outcome"))?;
     ensure!(!outcome.terminal(), "chain outcome is closed");
-    for step in &definition.steps {
-        validate_step(state, step)?;
+    for (index, step) in definition.steps.iter().enumerate() {
+        validate_step(
+            state,
+            step,
+            index
+                .checked_sub(1)
+                .map(|prior| definition.steps[prior].boundary),
+        )?;
     }
+    validate_workspace_run(definition.steps.iter())?;
     if definition.finishes_outcome {
         ensure!(
             !outcome.success_criteria.trim().is_empty(),
@@ -256,6 +267,44 @@ fn validate_definition(state: &BossState, definition: &ChainDefinition) -> Resul
                         && !employee.expired
                         && !employee.cancelled)),
             "outcome already has a live finisher"
+        );
+    }
+    Ok(())
+}
+
+/// A committed workspace is staging, not a boundary: the unit is submitted
+/// only when a later step in the same project declares Landed — that step's
+/// employee adopts the accumulated worktree and runs the merge submit. Every
+/// step in between must keep handing the same worktree forward, so it also
+/// declares CommittedWorkspace inside that project.
+fn validate_workspace_run<'a>(steps: impl Iterator<Item = &'a ChainStepDefinition>) -> Result<()> {
+    let steps: Vec<&ChainStepDefinition> = steps.collect();
+    for (index, step) in steps.iter().enumerate() {
+        if step.boundary != HandoffBoundary::CommittedWorkspace {
+            continue;
+        }
+        let mut submitted = false;
+        for next in &steps[index + 1..] {
+            ensure!(
+                next.project_id == step.project_id,
+                "a committed workspace stays inside its own project"
+            );
+            ensure!(
+                next.workspace == AgentWorkspace::Worktree,
+                "a committed-workspace successor must declare a managed worktree; adoption is resolved at handoff"
+            );
+            if next.boundary == HandoffBoundary::Landed {
+                submitted = true;
+                break;
+            }
+            ensure!(
+                next.boundary == HandoffBoundary::CommittedWorkspace,
+                "a committed workspace must reach its submitting step without interruption"
+            );
+        }
+        ensure!(
+            submitted,
+            "a committed-workspace handoff must name the step that submits the final unit"
         );
     }
     Ok(())
@@ -502,8 +551,16 @@ impl BossService {
                     step,
                     definition,
                 } => {
-                    validate_step(state, &definition)?;
                     self.validate_bucket_ids(&definition.permissions.bucket_ids)?;
+                    let predecessor = state
+                        .chains
+                        .iter()
+                        .find(|chain| chain.id == chain_id)
+                        .and_then(|chain| {
+                            step.checked_sub(1).and_then(|prior| chain.steps.get(prior))
+                        })
+                        .map(|prior| prior.definition.boundary);
+                    validate_step(state, &definition, predecessor)?;
                     let chain = chain_mut(state, chain_id)?;
                     ensure!(
                         chain.revision == expected_revision
@@ -523,6 +580,7 @@ impl BossService {
                         "accepted steps cannot be revised"
                     );
                     target.definition = definition;
+                    validate_workspace_run(chain.steps.iter().map(|step| &step.definition))?;
                     chain.definition_version = chain
                         .definition_version
                         .checked_add(1)

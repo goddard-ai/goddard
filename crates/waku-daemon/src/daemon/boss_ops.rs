@@ -223,14 +223,42 @@ impl WakuBackend {
                     // Lost-response retries use the accepted record even if external
                     // dependencies have since changed; conflicts are checked by the reducer.
                     if !existing_request {
+                        let document = self.boss.document();
                         let steps: Vec<_> = match &action {
                             ChainOperation::Create { definition, .. } => {
                                 definition.steps.iter().collect()
                             }
-                            ChainOperation::Revise { definition, .. } => vec![definition],
+                            ChainOperation::Revise {
+                                chain_id,
+                                step,
+                                definition,
+                                ..
+                            } => {
+                                // Policy checks see the post-edit run, not
+                                // the replacement alone.
+                                document
+                                    .chains
+                                    .iter()
+                                    .find(|chain| chain.id == *chain_id)
+                                    .map(|chain| {
+                                        chain
+                                            .steps
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, stored)| {
+                                                if index == *step {
+                                                    definition
+                                                } else {
+                                                    &stored.definition
+                                                }
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_else(|| vec![definition])
+                            }
                             _ => vec![],
                         };
-                        for step in steps {
+                        for step in &steps {
                             let project = self
                                 .task_state
                                 .lock()
@@ -283,6 +311,7 @@ impl WakuBackend {
                                 );
                             }
                         }
+                        self.validate_chain_projects(&steps)?;
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
                     self.boss.chain_operation(caller, action)?;

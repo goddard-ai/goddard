@@ -1,0 +1,1 @@
+- Boss employee chains now verify a completed step's evidence before the next step starts: artifact references must resolve under the successor's own grants, a committed worktree transfers only through exclusive adoption, and landed work starts the successor fresh at the recorded revision — anything else pauses the chain for repair.

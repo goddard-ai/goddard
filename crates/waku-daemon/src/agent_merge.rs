@@ -257,7 +257,7 @@ fn find_branch_worktree(root: &Path, branch: &str) -> anyhow::Result<Option<Path
     Ok(None)
 }
 
-fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
+pub(crate) fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
     let output = git_capture(cwd, &["merge-base", "--is-ancestor", ancestor, descendant])?;
     match output.status.code() {
         Some(0) => Ok(true),
@@ -273,7 +273,11 @@ fn clean(cwd: &Path) -> anyhow::Result<()> {
     clean_status(cwd, "all", "submitting worktree")
 }
 
-fn clean_status(cwd: &Path, untracked_files: &str, checkout: &str) -> anyhow::Result<()> {
+pub(crate) fn clean_status(
+    cwd: &Path,
+    untracked_files: &str,
+    checkout: &str,
+) -> anyhow::Result<()> {
     let status = git_text(
         cwd,
         &[
@@ -292,7 +296,7 @@ fn clean_status(cwd: &Path, untracked_files: &str, checkout: &str) -> anyhow::Re
     Ok(())
 }
 
-fn no_operation(cwd: &Path) -> anyhow::Result<()> {
+pub(crate) fn no_operation(cwd: &Path) -> anyhow::Result<()> {
     for marker in [
         "rebase-merge",
         "rebase-apply",
@@ -327,7 +331,7 @@ fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<std::process::Output
     }
 }
 
-fn git_text(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+pub(crate) fn git_text(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = git_status(cwd, args)?;
     if !output.status.success() {
         bail!("git {} failed: {}", args.join(" "), command_error(&output));
@@ -343,11 +347,11 @@ fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn command_error(output: &std::process::Output) -> String {
+pub(crate) fn command_error(output: &std::process::Output) -> String {
     output_text(&output.stdout, &output.stderr)
 }
 
-fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
+pub(crate) fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
     let stdout = String::from_utf8_lossy(stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(stderr).trim().to_owned();
     match (stdout.is_empty(), stderr.is_empty()) {

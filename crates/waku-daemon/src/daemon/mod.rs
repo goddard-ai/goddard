@@ -683,6 +683,7 @@ mod agent_tasks;
 mod boss_ops;
 mod boss_rotation;
 mod catalog_ops;
+mod chain_handoff;
 mod driver_commands;
 mod events;
 mod idle;

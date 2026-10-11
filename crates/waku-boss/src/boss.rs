@@ -59,7 +59,7 @@ pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn project_bucket_id(path: &Path) -> String {
+pub fn project_bucket_id(path: &Path) -> String {
     // Git's common directory is stable across linked worktrees. Fall back to
     // the canonical project path for non-Git projects.
     let common_dir = std::process::Command::new("git")
@@ -2329,7 +2329,19 @@ impl BossService {
         })
     }
 
-    pub(crate) fn validate_bucket_ids(&self, buckets: &[String]) -> anyhow::Result<()> {
+    /// Bucket ids the memory engine already knows — read-only, so a grant
+    /// check never materializes a bucket as a side effect.
+    pub fn known_bucket_ids(&self) -> anyhow::Result<Vec<String>> {
+        Ok(
+            waku_memory_engine::buckets::BucketStore::open(self.root.join("files/memory-engine"))?
+                .list_buckets()?
+                .into_iter()
+                .map(|bucket| bucket.id)
+                .collect(),
+        )
+    }
+
+    pub fn validate_bucket_ids(&self, buckets: &[String]) -> anyhow::Result<()> {
         let known =
             waku_memory_engine::buckets::BucketStore::open(self.root.join("files/memory-engine"))?
                 .list_buckets()?
@@ -5276,10 +5288,16 @@ impl BossService {
         Ok(result)
     }
 
+    /// The files root `authorize_file` gates — `plans/` plus persona-pinned
+    /// documents for employees, everything for the boss and the human.
+    pub fn files_root(&self) -> PathBuf {
+        self.root.join("files")
+    }
+
     /// The daemon's deliverable store: `deliverables/<id>/<name>` beside the
     /// files root. Copies live there rather than under `files/` so Boss file
     /// operations cannot rename or overwrite a snapshot behind its record.
-    fn deliverables_root(&self) -> PathBuf {
+    pub fn deliverables_root(&self) -> PathBuf {
         self.root.join("deliverables")
     }
 
