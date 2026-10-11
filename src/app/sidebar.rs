@@ -5005,7 +5005,7 @@ impl Waku {
                 }
                 "left" if !collapsed => {
                     if group == SidebarGroup::Terminals {
-                        this.collapse_terminals_group(window, cx);
+                        this.collapse_terminals_group(cx);
                     } else {
                         this.set_sidebar_group_collapsed(group, true, cx);
                     }
@@ -5144,14 +5144,13 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Opening the Terminals group is a selection, not just disclosure:
-        // the last-shown terminal takes the main area, and folding it back
-        // returns to the previous location.
+        // Opening the Terminals group selects its last-shown terminal. Folding
+        // it only hides the rows and leaves the current page active.
         if group == SidebarGroup::Terminals {
             if self.sidebar_collapsed_groups.contains(&group) {
                 self.expand_terminals_group(window, cx);
             } else {
-                self.collapse_terminals_group(window, cx);
+                self.collapse_terminals_group(cx);
             }
             return;
         }

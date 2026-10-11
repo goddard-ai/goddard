@@ -1150,72 +1150,9 @@ impl Waku {
         }
     }
 
-    /// Folding the group while a terminal holds the main area also leaves
-    /// terminal mode: the selection returns to wherever the history came
-    /// from — the previous chat, a page, or an earlier terminal. With no
-    /// back target the terminal keeps the column; the fold alone changes.
-    pub(super) fn collapse_terminals_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Folding the group only hides its rows; the active page stays selected.
+    pub(super) fn collapse_terminals_group(&mut self, cx: &mut Context<Self>) {
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, true, cx);
-        if self.selected_terminal.is_none() {
-            return;
-        }
-        let Some(current) = self.navigation_location() else {
-            return;
-        };
-        Self::prune_navigation_stack(
-            &self.state.projects,
-            self.state.projects_page_enabled,
-            self.state.automations_enabled,
-            self.state.github_enabled,
-            &mut self.session_navigation.back,
-        );
-        // Switching terminals stacks each one on the history; fold them
-        // all away so closing lands on the chat behind them, not the
-        // previous terminal.
-        while matches!(
-            self.session_navigation.back_target(),
-            Some(NavigationLocation::Terminal(_))
-        ) {
-            self.session_navigation.back.pop();
-        }
-        match self.session_navigation.back_target() {
-            Some(NavigationLocation::Task(target)) => {
-                self.request_session_activation(
-                    target,
-                    SessionActivationTransition::Back { from: current },
-                    cx,
-                );
-            }
-            Some(NavigationLocation::Terminal(target)) => {
-                let _ = self.session_navigation.go_back(current);
-                self.activate_terminal(target, false, window, cx);
-            }
-            Some(NavigationLocation::ProjectsPage(project_id)) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_projects_page(project_id, window, cx);
-            }
-            Some(NavigationLocation::DraftsPage) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_drafts_page(window, cx);
-            }
-            Some(NavigationLocation::AutomationsPage) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_automations_page(window, cx);
-            }
-            Some(NavigationLocation::BossPage(key, tab)) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_boss_page(key, tab, window, cx);
-            }
-            Some(NavigationLocation::Deliverable(key, deliverable_id)) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_deliverable_page(key, deliverable_id, cx);
-            }
-            Some(NavigationLocation::Inbox) => {
-                let _ = self.session_navigation.go_back(current);
-                self.show_inbox(window, cx);
-            }
-            Some(NavigationLocation::Settings) | None => {}
-        }
     }
 
     /// Picking a chat or opening a page folds the Terminals group — the
@@ -1345,7 +1282,7 @@ impl Waku {
                 self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
                 self.select_terminal(next, window, cx);
             } else {
-                self.collapse_terminals_group(window, cx);
+                self.collapse_terminals_group(cx);
             }
         } else {
             self.expand_terminals_group(window, cx);
