@@ -4,10 +4,14 @@
 use crate::BossService;
 use anyhow::{Result, anyhow, bail, ensure};
 use uuid::Uuid;
-use waku_protocol::{AgentWorkspace, boss::BossState, chains::*};
+use waku_protocol::{
+    AgentWorkspace,
+    boss::{BossOutcome, BossState, OutcomeState, OutcomeTransition, PlanActor},
+    chains::*,
+};
 
 const SCHEMA_VERSION: u32 = 1;
-const EXECUTION_PENDING: &str = "chain execution adapter is not enabled";
+const ADMISSION_PENDING: &str = "awaiting daemon admission";
 
 /// Trusted host observations, deliberately absent from the wire operation.
 /// A result producer cannot certify its own shutdown, access, or landing.
@@ -327,6 +331,7 @@ impl BossService {
             self.require_active(caller.ok_or_else(|| anyhow!("missing employee identity"))?)?;
         }
         let mut result = None;
+        let mutating = !matches!(action, ChainOperation::Show { .. });
         self.update(|state| {
             let now = waku_protocol::model::unix_time();
             match action {
@@ -376,7 +381,7 @@ impl BossService {
                         revision: 0,
                         current_step: 0,
                         status: ChainStatus::Waiting,
-                        reason: Some(EXECUTION_PENDING.into()),
+                        reason: Some(ADMISSION_PENDING.into()),
                         steps,
                         attention: None,
                         history: Vec::new(),
@@ -491,7 +496,7 @@ impl BossService {
                                 bail!("retry required; resume never reruns an interrupted attempt");
                             } else {
                                 chain.status = ChainStatus::Waiting;
-                                chain.reason = Some(EXECUTION_PENDING.into());
+                                chain.reason = Some(ADMISSION_PENDING.into());
                             }
                         }
                         ChainControl::Retry => {
@@ -531,7 +536,7 @@ impl BossService {
                             step.attempts.push(attempt);
                             step.status = StepStatus::Waiting;
                             chain.status = ChainStatus::Waiting;
-                            chain.reason = Some(EXECUTION_PENDING.into());
+                            chain.reason = Some(ADMISSION_PENDING.into());
                         }
                     }
                     if matches!(
@@ -644,6 +649,17 @@ impl BossService {
                     result = Some(chain.clone());
                 }
             }
+            // Chain work is outcome activity — an executing chain must not
+            // read as unattended to the outcome reminder scan.
+            if mutating
+                && let Some(chain) = &result
+                && let Some(outcome) = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|outcome| outcome.id == chain.request.outcome_id)
+            {
+                outcome.last_activity_at = now;
+            }
             Ok(())
         })?;
         result.ok_or_else(|| anyhow!("chain operation produced no result"))
@@ -707,12 +723,22 @@ impl BossService {
                 chain.steps[chain.current_step].status = StepStatus::Succeeded;
                 chain.reason = Some("handoff accepted; explicit resume required".into());
             }
-            audit(
+            let outcome_id = chain.request.outcome_id;
+            let result = audit(
                 chain,
                 ChainActor::Daemon,
                 Uuid::new_v4(),
                 "sealed handoff gates rechecked",
-            )
+            );
+            if result.is_ok()
+                && let Some(outcome) = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|outcome| outcome.id == outcome_id)
+            {
+                outcome.last_activity_at = waku_protocol::model::unix_time();
+            }
+            result
         })
     }
 
@@ -921,7 +947,17 @@ impl BossService {
                 ChainObservation::Released { .. } => "ownership released",
                 ChainObservation::EffectsReconciled { .. } => "prior effects reconciled",
             };
-            audit(chain, ChainActor::Daemon, event_id, event)
+            let outcome_id = chain.request.outcome_id;
+            let result = audit(chain, ChainActor::Daemon, event_id, event);
+            if result.is_ok()
+                && let Some(outcome) = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|outcome| outcome.id == outcome_id)
+            {
+                outcome.last_activity_at = waku_protocol::model::unix_time();
+            }
+            result
         })
     }
 
@@ -1038,8 +1074,81 @@ impl BossService {
                     advance(chain)?;
                 }
             }
+            let outcome_id = chain.request.outcome_id;
+            if let Some(outcome) = state
+                .outcomes
+                .iter_mut()
+                .find(|outcome| outcome.id == outcome_id)
+            {
+                outcome.last_activity_at = waku_protocol::model::unix_time();
+            }
             Ok(())
         })
+    }
+
+    /// Deferred outcome closure for a completed finisher chain: the chain's
+    /// own completion is already recorded, and the outcome closes only when
+    /// its ordinary completion conditions are satisfied — otherwise it stays
+    /// open and is rechecked the next time those conditions can change.
+    /// Rechecking never reruns the chain's verification.
+    pub fn settle_chain_finisher(&self, chain_id: Uuid) -> Result<Option<BossOutcome>> {
+        let mut settled = None;
+        self.update(|state| {
+            let Some(chain) = state.chains.iter().find(|chain| chain.id == chain_id) else {
+                return Ok(());
+            };
+            if chain.status != ChainStatus::Completed || !chain.finisher_reserved {
+                return Ok(());
+            }
+            let outcome_id = chain.request.outcome_id;
+            let Some(outcome) = state.outcomes.iter().find(|entry| entry.id == outcome_id) else {
+                return Ok(());
+            };
+            if outcome.terminal() {
+                settled = Some(outcome.clone());
+                return Ok(());
+            }
+            let outstanding = outcome.completion_outstanding(
+                &state.employees,
+                &state.retired_employees,
+                Uuid::nil(),
+            );
+            if !outstanding.is_empty() {
+                settled = Some(outcome.clone());
+                return Ok(());
+            }
+            let now = waku_protocol::model::unix_time();
+            let evidence = format!(
+                "Employee chain {chain_id} completed: {}",
+                chain
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .map(|(index, step)| {
+                        format!("step {} \"{}\" succeeded", index + 1, step.definition.title)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+            let outcome = state
+                .outcomes
+                .iter_mut()
+                .find(|entry| entry.id == outcome_id)
+                .ok_or_else(|| anyhow!("chain outcome is missing"))?;
+            outcome.state = OutcomeState::Completed;
+            outcome.completed_at = Some(now);
+            outcome.completion_conflict = None;
+            outcome.evidence = Some(evidence);
+            outcome.last_activity_at = now;
+            outcome.history.push(OutcomeTransition {
+                state: OutcomeState::Completed,
+                at: now,
+                actor: PlanActor::Boss,
+            });
+            settled = Some(outcome.clone());
+            Ok(())
+        })?;
+        Ok(settled)
     }
 }
 
@@ -1143,10 +1252,14 @@ fn advance(chain: &mut EmployeeChain) -> Result<()> {
         chain.reason = Some("chain complete; outcome closure remains separately gated".into());
     } else {
         chain.current_step += 1;
-        // Phase 1 resolves the handoff to the durable step but never admits it.
-        chain.steps[chain.current_step].status = StepStatus::NotStarted;
+        // Advancement and the successor's durable admission key commit in the
+        // same write — the host binds a real employee to this attempt's
+        // `dispatch_id`, never a fabricated one.
+        let step = &mut chain.steps[chain.current_step];
+        step.status = StepStatus::Waiting;
+        step.attempts.push(new_attempt(chain.definition_version));
         chain.status = ChainStatus::Waiting;
-        chain.reason = Some(EXECUTION_PENDING.into());
+        chain.reason = Some(ADMISSION_PENDING.into());
     }
     Ok(())
 }
@@ -1166,8 +1279,32 @@ pub(crate) fn reconcile(state: &mut BossState) -> Result<()> {
         );
         if live(chain) {
             let attempt = chain.steps[chain.current_step].attempts.last();
-            if attempt
-                .is_some_and(|attempt| attempt.employee_id.is_some() && attempt.sealed.is_none())
+            // A bound attempt only becomes uncertain once it could have
+            // produced effects: starting or running work, a recorded
+            // terminal or release, or a dead bound employee. One still
+            // parked at the admission boundary — the durable ticket holds
+            // the identity and the queue replays it — restarts clean.
+            let uncertain = attempt.is_some_and(|attempt| {
+                if attempt.sealed.is_some() {
+                    return false;
+                }
+                attempt.terminal.is_some()
+                    || attempt.execution_released
+                    || attempt.workspace_released
+                    || matches!(
+                        attempt.status,
+                        StepStatus::Starting | StepStatus::Working | StepStatus::CheckingHandoff
+                    )
+                    || attempt.employee_id.is_some_and(|employee| {
+                        state
+                            .employees
+                            .iter()
+                            .chain(state.retired_employees.iter())
+                            .find(|entry| entry.session_id == employee)
+                            .is_none_or(|entry| entry.expired)
+                    })
+            });
+            if uncertain
                 && !matches!(
                     chain.status,
                     ChainStatus::Pausing | ChainStatus::Cancelling | ChainStatus::Paused
@@ -1488,7 +1625,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(resumed.current_step, 1);
-        assert!(resumed.steps[1].attempts.is_empty());
+        // Advancement persists the successor's admission key — the daemon
+        // binds a real employee to it; a fabricated id cannot appear.
+        assert_eq!(resumed.steps[1].attempts.len(), 1);
+        assert!(resumed.steps[1].attempts[0].employee_id.is_none());
+        assert_eq!(resumed.steps[1].status, StepStatus::Waiting);
+        assert_eq!(resumed.status, ChainStatus::Waiting);
     }
 
     #[test]
@@ -1563,7 +1705,11 @@ mod tests {
         let accepted = fixture.read(chain.id);
         assert_eq!(accepted.current_step, 1);
         assert_eq!(accepted.steps[0].status, StepStatus::Succeeded);
-        assert!(accepted.steps[1].attempts.is_empty()); // later dispatch intentionally disabled
+        // Advancement commits the successor's admission key in the same
+        // write — unbound until the daemon admits a real employee to it.
+        assert_eq!(accepted.steps[1].attempts.len(), 1);
+        assert!(accepted.steps[1].attempts[0].employee_id.is_none());
+        assert_eq!(accepted.steps[1].status, StepStatus::Waiting);
         assert_eq!(
             accepted.steps[0].attempts[0]
                 .sealed
@@ -1577,7 +1723,7 @@ mod tests {
         assert_eq!(fixture.service.document().revision, revision);
         let reopened = BossService::open(fixture.root.clone()).unwrap();
         assert_eq!(reopened.document().chains[0].current_step, 1);
-        assert!(reopened.document().chains[0].steps[1].attempts.is_empty());
+        assert_eq!(reopened.document().chains[0].steps[1].attempts.len(), 1);
     }
 
     #[test]

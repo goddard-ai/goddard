@@ -276,6 +276,7 @@ impl WakuBackend {
         self.retire_dispatch_notifications();
         self.deliver_wave_notifications();
         self.deliver_plan_blocker_notifications();
+        self.drive_chains();
         loop {
             let heads = self.boss.queued_heads();
             let updates = self.boss.pending_resource_updates();
@@ -430,6 +431,32 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
+        // A chain-bound ticket may only launch while its attempt still
+        // waits for a dispatcher — a pause/cancel landed meanwhile, or a
+        // newer attempt superseded it, ends the stale admission here.
+        match chain_exec::chain_binding(&self.boss, session_id) {
+            Some(chain_exec::ChainBinding::Current {
+                status: waku_protocol::chains::StepStatus::Queued,
+                chain_status: waku_protocol::chains::ChainStatus::Queued,
+                ..
+            })
+            | None => {}
+            Some(_) => {
+                let _ = self.boss.mark_cancelled(session_id);
+                record_daemon_interrupt(
+                    &self.task_state,
+                    &self.task_store,
+                    session_id,
+                    Some("Cancelled while queued"),
+                )?;
+                self.finish_boss_employee(
+                    session_id,
+                    false,
+                    waku_protocol::boss::EmployeeSettle::Stopped,
+                )?;
+                return Ok(true);
+            }
+        }
         if let Err(error) = self.boss.validate_plan_binding(employee) {
             self.record_queued_plan_failure(employee, error.clone())?;
             self.boss.record_blocked(
@@ -535,6 +562,36 @@ impl WakuBackend {
             }
             return Ok(false);
         }
+        // Dispatch began — the attempt records it before the provider
+        // launch, so a launch error and a Working confirmation read in
+        // order. A control landing mid-dispatch rejects the observation;
+        // the grant releases and nothing launches.
+        if let Some(chain_exec::ChainBinding::Current {
+            chain_id,
+            attempt_id,
+            definition_version,
+            dispatch_id,
+            ..
+        }) = chain_exec::chain_binding(&self.boss, session_id)
+            && chain_exec::observe_quiet(
+                &self.boss,
+                chain_id,
+                attempt_id,
+                definition_version,
+                dispatch_id,
+                chain_exec::OBSERVE_STARTING,
+                waku_boss::chains::ChainObservation::Starting,
+            )
+            .is_err()
+        {
+            let _ = self.boss.mark_cancelled(session_id);
+            self.finish_boss_employee(
+                session_id,
+                false,
+                waku_protocol::boss::EmployeeSettle::Stopped,
+            )?;
+            return Ok(true);
+        }
         match self.dispatch_employee(employee, &ticket) {
             Ok(resumed) => {
                 if !self.boss.mark_working(session_id, ticket.generation)? {
@@ -544,6 +601,32 @@ impl WakuBackend {
                     let removed = self.remove_runtime(session_id, None, false);
                     drop_detached(removed);
                     return Ok(false);
+                }
+                // Confirmed execution reports its real checkout and base —
+                // the attempt's durable `startingRevision`, never the
+                // intended one.
+                if let Some(chain_exec::ChainBinding::Current {
+                    chain_id,
+                    attempt_id,
+                    definition_version,
+                    dispatch_id,
+                    ..
+                }) = chain_exec::chain_binding(&self.boss, session_id)
+                    && let (Some(workspace), Some(revision)) =
+                        self.chain_workspace_revision(session_id, &ticket)
+                {
+                    let _ = chain_exec::observe_quiet(
+                        &self.boss,
+                        chain_id,
+                        attempt_id,
+                        definition_version,
+                        dispatch_id,
+                        chain_exec::OBSERVE_WORKING,
+                        waku_boss::chains::ChainObservation::Working {
+                            starting_revision: revision,
+                            workspace,
+                        },
+                    );
                 }
                 if resumed {
                     // The envelope parked in the daemon queue while the
@@ -609,6 +692,34 @@ impl WakuBackend {
             "assignment binding changed before dispatch"
         );
         let events = self.event_source.lock().clone();
+        if !self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+        {
+            // A pre-dispatch shell is memory-only — a restart between
+            // admission and dispatch leaves the durable ticket pointing
+            // at nothing. Rebuild the shell from the ticket's committed
+            // selection so the queued admission replays instead of
+            // failing the launch.
+            let resolved = self.resolve_agent_task_selection(
+                Some(current.supervisor_id),
+                &AgentCreateSelection {
+                    provider: Some(ticket.provider),
+                    model: Some(ticket.model.clone()),
+                    reasoning_effort: ticket.reasoning_effort.clone(),
+                    title: Some(current.identity.name.clone()),
+                    service_tier: None,
+                    context_window: None,
+                },
+                Path::new(&ticket.project),
+                &ticket.prompt,
+                true,
+            )?;
+            self.create_employee_shell(&current, &resolved, ticket)?;
+        }
         let started = {
             let mut state = self.task_state.lock();
             let index = state
@@ -1037,6 +1148,11 @@ impl WakuBackend {
             .iter()
             .chain(document.retired_employees.iter())
         {
+            // A chain-bound employee's plan blocker stays quiet — the
+            // attempt's terminal disposition carries it as one incident.
+            if chain_exec::chain_binding(&self.boss, employee.session_id).is_some() {
+                continue;
+            }
             for notice in employee
                 .plan_blockers
                 .iter()
@@ -1255,7 +1371,7 @@ impl WakuBackend {
         let mut employee = self.boss.prepare_employee(
             supervisor,
             persona_id,
-            job_title,
+            job_title.clone(),
             permissions,
             work_goal,
             icon,
@@ -1322,20 +1438,48 @@ impl WakuBackend {
         employee.item_id = item;
         employee.plan_binding = plan_binding;
         employee.assignment = assignment.clone();
-        let employee_name = employee.identity.name.clone();
-        let employee_title = employee.job_title.clone();
-        // The summon marker freezes the identity the card shows — name,
-        // avatar seed, job title, and the icon the roster would resolve —
-        // so the transcript keeps rendering it after the roster record
-        // retires or the employee's task archives.
+        // The task shell lands before the roster does — a client that
+        // opens the new employee immediately finds the assignment's
+        // session, still unstarted: no worktree, no runtime, no claims.
+        self.create_employee_shell(&employee, &resolved, &ticket)?;
+        let session_id = employee.session_id;
+        if let Err(error) = self.boss.enqueue_ticket(employee.clone(), ticket) {
+            self.remove_session_shell(session_id);
+            return Err(error);
+        }
+        // The task's finishing pointer lands once the employee exists —
+        // admission already proved the designation is free to take.
+        if let Some(assignment) = assignment
+            .as_ref()
+            .filter(|assignment| assignment.finishes_outcome)
+        {
+            self.boss
+                .designate_finisher(assignment.outcome_id, session_id)?;
+        }
+        self.post_summon_marker(supervisor, &employee, events)?;
+        self.wake_summon_queue();
+        Ok((session_id, true))
+    }
+
+    /// The durable summon card in the supervisor's transcript — name, seed,
+    /// title, and icon frozen at admission so the row still renders after
+    /// the roster record retires — plus the live-stream send a registered
+    /// runtime can take. The marker is quiet: it reports admission happened,
+    /// never a supervisor prompt.
+    pub(super) fn post_summon_marker(
+        &self,
+        supervisor: Uuid,
+        employee: &waku_protocol::boss::BossEmployee,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
         let summon_card = {
             let document = self.boss.document();
             waku_protocol::model::BossSummonCard {
                 session_id: employee.session_id,
-                name: employee_name.clone(),
+                name: employee.identity.name.clone(),
                 avatar_seed: employee.identity.avatar_seed.clone(),
                 avatar_style: employee.identity.avatar_style,
-                job_title: employee_title.clone(),
+                job_title: employee.job_title.clone(),
                 icon: employee
                     .icon
                     .filter(|icon| icon.is_employee_icon())
@@ -1349,31 +1493,16 @@ impl WakuBackend {
                     }),
             }
         };
-        // The task shell lands before the roster does — a client that
-        // opens the new employee immediately finds the assignment's
-        // session, still unstarted: no worktree, no runtime, no claims.
-        self.create_employee_shell(&employee, &resolved, &ticket)?;
-        let session_id = employee.session_id;
-        if let Err(error) = self.boss.enqueue_ticket(employee, ticket) {
-            self.remove_session_shell(session_id);
-            return Err(error);
-        }
-        // The task's finishing pointer lands once the employee exists —
-        // admission already proved the designation is free to take.
-        if let Some(assignment) = assignment
-            .as_ref()
-            .filter(|assignment| assignment.finishes_outcome)
-        {
-            self.boss
-                .designate_finisher(assignment.outcome_id, session_id)?;
-        }
         // The summon marker lands in the supervisor's transcript now —
         // the card reads the roster for live status and shows its queued
         // state until the ticket dispatches.
         let mut marker = crate::model::ActivityItem::new(
             None,
             crate::model::ActivityKind::Tool,
-            format!("Summoned {employee_name} — {employee_title}"),
+            format!(
+                "Summoned {} — {}",
+                employee.identity.name, employee.job_title
+            ),
             None,
             true,
         )
@@ -1396,8 +1525,7 @@ impl WakuBackend {
                 .for_session(supervisor, runtime_id)
                 .send(event_to_wire(event)?);
         }
-        self.wake_summon_queue();
-        Ok((session_id, true))
+        Ok(())
     }
 
     /// Wait for a persisted admission denial or a completed dispatch, outside
@@ -1857,6 +1985,9 @@ impl WakuBackend {
         // Role validation precedes the parked-prompt move so a rejected
         // resume leaves the queue mirror untouched.
         self.boss.ensure_employee_role(session_id)?;
+        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
+            bail!("chain attempts requeue through chain controls");
+        }
         let (base, started) = self.ticket_base_for(session_id)?;
         let mut parked = Vec::new();
         {
@@ -1920,6 +2051,11 @@ impl WakuBackend {
             .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
         if !employee.expired {
             bail!("employee {session_id} is still live — prompt it instead of resuming");
+        }
+        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
+            bail!(
+                "chain attempts resume through chain controls — boss chain control resume or retry"
+            );
         }
         let expiry = employee.expiry.as_ref();
         let cause = expiry
@@ -2086,17 +2222,13 @@ impl WakuBackend {
             Some(_) => None,
         }
         .or_else(|| {
-            selected
-                .model
-                .default_reasoning_effort
-                .clone()
-                .or_else(|| {
-                    selected
-                        .model
-                        .reasoning_efforts
-                        .first()
-                        .map(|option| option.id.clone())
-                })
+            selected.model.default_reasoning_effort.clone().or_else(|| {
+                selected
+                    .model
+                    .reasoning_efforts
+                    .first()
+                    .map(|option| option.id.clone())
+            })
         });
         Ok((selected.model.id.clone(), effort))
     }

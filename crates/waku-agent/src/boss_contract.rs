@@ -25,7 +25,7 @@ pub(super) fn availability(path: &str) -> Value {
             json!({"roles":["task","boss","planning","human"],"conditions":["Employees cannot use task prompts; boss prompt retains control of supervised employees"]})
         }
         "boss chain" => {
-            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employees may only record their bound attempt result; response is Saved","Controls and inspection require Boss or human authority","Phase 1 stores safety contracts only; provider dispatch is disabled"]})
+            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employees may only record their bound attempt result; response is Saved","Controls and inspection require Boss or human authority","Accepted steps admit and hand off automatically; exceptions pause the chain"]})
         }
         "boss summon" => {
             json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employee requires summonEmployees grant and active supervisor","Employee permissions are clamped to its grants"]})

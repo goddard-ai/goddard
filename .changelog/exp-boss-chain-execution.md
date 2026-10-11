@@ -1,0 +1,1 @@
+- **Employee chains:** Chain steps now execute in order — each finished step hands its sealed result to the next employee automatically, surfaces one exception per incident, and reports once when the chain completes. Artifact delivery and workspace transfer between steps are still pending.

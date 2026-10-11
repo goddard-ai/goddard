@@ -1,5 +1,10 @@
 use super::*;
 use crate::model::{ActivityItem, MessageRole, TranscriptBlock};
+use waku_protocol::boss::{BossOperation, BossResult};
+use waku_protocol::chains::{
+    ChainControl, ChainDefinition, ChainOperation, ChainResult, ChainStatus, ChainStepDefinition,
+    HandoffBoundary, ResultDisposition, StepStatus,
+};
 
 fn detailed_session() -> AgentSession {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
@@ -3827,6 +3832,7 @@ fn runtime_generation_configure_launch(backend: &mut WakuBackend, root: &Path) {
     backend.set_daemon_address("http://127.0.0.1:1".into());
     // The controlled driver never executes the packaged CLI. Resolve only this
     // external dependency to a fixture path; credential creation stays real.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
     backend.runtime_test_cli = Some(root.join("controlled-agent-cli"));
     let binary = root.join("controlled-provider");
     std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
@@ -4909,8 +4915,7 @@ fn employee_search_stays_inside_its_assigned_project() {
     let boss_id = state.sessions[0].id;
     let boss_project_name = state.projects[0].name.clone();
     state.sessions[0].begin_turn("the rare needle phrase");
-    state.sessions[0]
-        .finish_active_turn(crate::model::TurnStatus::Completed);
+    state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
     // The employee's assigned project holds a sibling task with the needle.
     let assigned = Project::from_path(root.join("assigned"));
     let mut sibling = AgentSession::new(assigned.id, ProviderKind::Codex);
@@ -4990,10 +4995,13 @@ fn employee_search_stays_inside_its_assigned_project() {
     // accepted, naming any other project — the boss's included — is an
     // error, and no token widens the scan beyond the caller's project.
     assert_eq!(
-        hits(&format!("project:{} rare needle", assigned.name), employee_id)
-            .iter()
-            .map(|hit| hit.task_id)
-            .collect::<Vec<_>>(),
+        hits(
+            &format!("project:{} rare needle", assigned.name),
+            employee_id
+        )
+        .iter()
+        .map(|hit| hit.task_id)
+        .collect::<Vec<_>>(),
         vec![sibling_id]
     );
     for query in [
@@ -6352,10 +6360,18 @@ fn boss_notifications_yield_to_user_prompts_and_recover_in_order() {
         assert!(parent.prompts.lock().last().unwrap().contains(expected));
     }
     // A second drain that already popped this id cannot deliver it twice.
-    record_boss_event(&backend.task_state, &backend.task_store, supervisor, &finished).unwrap();
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        supervisor,
+        &finished,
+    )
+    .unwrap();
     backend.agent.note_driver_event(supervisor, &finished);
     backend.agent.enqueue(supervisor, stale);
-    backend.drain_agent_queue(supervisor, &driver, &events).unwrap();
+    backend
+        .drain_agent_queue(supervisor, &driver, &events)
+        .unwrap();
     assert_eq!(parent.prompts.lock().len(), 2);
     assert!(parent.steers.lock().is_empty());
     assert!(!backend.agent.has_queued(supervisor));
@@ -6418,7 +6434,13 @@ fn a_user_stop_holds_boss_reports_until_the_next_user_turn() {
         summary: None,
         summary_i18n: None,
     };
-    record_boss_event(&backend.task_state, &backend.task_store, supervisor, &stopped).unwrap();
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        supervisor,
+        &stopped,
+    )
+    .unwrap();
     backend.agent.note_driver_event(supervisor, &stopped);
     backend
         .drain_agent_queue(supervisor, &driver, &events)
@@ -6458,17 +6480,16 @@ fn a_user_stop_holds_boss_reports_until_the_next_user_turn() {
         summary_i18n: None,
     };
     for expected in ["blocked on input", "finished"] {
-        record_boss_event(&backend.task_state, &backend.task_store, supervisor, &finished).unwrap();
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            supervisor,
+            &finished,
+        )
+        .unwrap();
         backend.agent.note_driver_event(supervisor, &finished);
         backend.run_summon_scheduler();
-        assert!(
-            parent
-                .prompts
-                .lock()
-                .last()
-                .unwrap()
-                .contains(expected)
-        );
+        assert!(parent.prompts.lock().last().unwrap().contains(expected));
     }
     assert!(parent.steers.lock().is_empty());
     assert!(!backend.agent.has_queued(supervisor));
@@ -7625,7 +7646,9 @@ fn boss_summon_card_event_reaches_the_registered_runtime() {
         Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
     );
     let live_card = waku_protocol::model::BossSummonCard::parse(
-        item.arguments.as_deref().expect("the event carries the card"),
+        item.arguments
+            .as_deref()
+            .expect("the event carries the card"),
     )
     .expect("the event arguments parse as a summon card");
     assert_eq!(live_card.session_id, employee_id);
@@ -7645,8 +7668,7 @@ fn boss_summon_card_event_reaches_the_registered_runtime() {
             .iter()
             .flat_map(|block| block.activities.iter())
             .find(|activity| {
-                activity.tool_name.as_deref()
-                    == Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
+                activity.tool_name.as_deref() == Some(waku_protocol::model::BOSS_SUMMON_TOOL_NAME)
             })
             .and_then(|activity| activity.arguments.clone())
             .expect("the summon marker landed in the transcript")
@@ -10638,7 +10660,9 @@ fn an_employee_prompt_is_refused_with_the_report_channels() {
         )
         .unwrap_err();
     assert!(
-        error.to_string().contains("steer-supervisor is unavailable"),
+        error
+            .to_string()
+            .contains("steer-supervisor is unavailable"),
         "{error}"
     );
     // A boss prompt to a working employee still steers — supervisor
@@ -10657,11 +10681,13 @@ fn an_employee_prompt_is_refused_with_the_report_channels() {
             EventSink::detached(),
         )
         .unwrap();
-    assert!(child_capture
-        .steers
-        .lock()
-        .iter()
-        .any(|text| text.contains("direction")));
+    assert!(
+        child_capture
+            .steers
+            .lock()
+            .iter()
+            .any(|text| text.contains("direction"))
+    );
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -11083,9 +11109,7 @@ fn a_resume_drains_parked_prompts_first() {
 /// the employee re-admits in place with its cancelled mark cleared.
 #[test]
 fn a_human_resume_requeues_a_stopped_employee() {
-    use waku_protocol::boss::{
-        BossOperation, EmployeeControl, EmployeeLifecycle, ExpiryCause,
-    };
+    use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle, ExpiryCause};
     let root = std::env::temp_dir().join(format!("boss-resume-stopped-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
     // Pin a model so the synthesized ticket queues under a closed pool —
@@ -13254,13 +13278,8 @@ fn finalize_plan_steers_an_open_boss_turn() {
         pending.hidden,
         pending.report_trigger,
     );
-    unmirror_agent_queued_prompt(
-        &backend.task_state,
-        &backend.task_store,
-        boss,
-        queued_id,
-    )
-    .unwrap();
+    unmirror_agent_queued_prompt(&backend.task_state, &backend.task_store, boss, queued_id)
+        .unwrap();
     let mut state = backend.task_state.lock();
     let session = state
         .sessions
@@ -15686,9 +15705,12 @@ fn boss_operation_history_search_uses_boss_reach_for_the_human_only() {
         .expect("the archived task is in the corpus");
     assert_eq!(task_hit.kind, HistorySourceKind::Task);
     assert!(task_hit.archived);
-    assert!(result.hits.iter().any(|hit| {
-        hit.task_id == employee_id && hit.kind == HistorySourceKind::Employee
-    }));
+    assert!(
+        result
+            .hits
+            .iter()
+            .any(|hit| { hit.task_id == employee_id && hit.kind == HistorySourceKind::Employee })
+    );
 
     // The boss principal rides the same operation with the same reach.
     let BossResult::HistorySearch { result: for_boss } = backend
@@ -15702,11 +15724,7 @@ fn boss_operation_history_search_uses_boss_reach_for_the_human_only() {
 
     // A kind filter narrows the corpus, not the scope statement.
     let BossResult::HistorySearch { result: employees } = backend
-        .handle_boss_operation(
-            None,
-            operation(Some(HistorySourceKind::Employee)),
-            &events,
-        )
+        .handle_boss_operation(None, operation(Some(HistorySourceKind::Employee)), &events)
         .unwrap()
     else {
         panic!("a kind-filtered search returns the result")
@@ -15749,7 +15767,7 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
         ChainDefinition, ChainOperation, ChainStatus, ChainStepDefinition, HandoffBoundary,
     };
     let root = std::env::temp_dir().join(format!("chain-api-{}", Uuid::new_v4()));
-    let (backend, boss) = summon_test_backend(&root);
+    let (backend, boss, _head) = chain_backend(&root);
     let project_id = backend.task_state.lock().projects[0].id;
     let outcome = backend
         .boss
@@ -15816,9 +15834,13 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
         panic!("chain state expected")
     };
     assert_eq!(state.chains.len(), 1);
-    assert_eq!(state.chains[0].status, ChainStatus::Waiting);
-    assert!(state.chains[0].steps[0].attempts[0].employee_id.is_none());
+    // Admission is real now: the first step's ticket queued behind
+    // capacity, its attempt bound to a durable employee — and it stays
+    // there because no scheduler pass launches it in this test.
+    assert_eq!(state.chains[0].status, ChainStatus::Queued);
+    assert!(state.chains[0].steps[0].attempts[0].employee_id.is_some());
     assert!(state.chains[0].steps[1].attempts.is_empty());
+    assert_eq!(state.employees.len(), 1);
     let accepted = state.chains[0].id;
     // A repeated accepted request remains queryable even after project access disappears.
     backend.task_state.lock().projects.clear();
@@ -15830,10 +15852,803 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
     };
     assert_eq!(state.chains.len(), 1);
     assert_eq!(state.chains[0].id, accepted);
-    assert!(state.employees.is_empty());
+    assert_eq!(state.employees.len(), 1);
     std::fs::remove_dir_all(root).unwrap();
 }
 
+fn chain_backend(root: &Path) -> (WakuBackend, Uuid, String) {
+    let (mut backend, boss) = summon_test_backend(root);
+    // Chain admission wakes the summon scheduler — holding the wake lets
+    // each test drive every boundary deterministically instead of racing
+    // a background dispatch.
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    // A captured control driver stands in for every provider launch so
+    // chain dispatch reaches Working without a real CLI.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    for provider in [ProviderKind::Claude, ProviderKind::Codex] {
+        daemon_settings
+            .provider_binary_overrides
+            .insert(provider, "/usr/bin/true".into());
+    }
+    backend.settings.replace(daemon_settings).unwrap();
+    // Step bases must resolve — give the fixture repo one real commit.
+    let repo = backend.task_state.lock().projects[0].path.clone();
+    let git = |args: &[&str]| {
+        let output = crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    git(&["init", "--quiet", "-b", "main"]);
+    git(&["config", "user.name", "Goddard Tests"]);
+    git(&["config", "user.email", "waku@example.com"]);
+    std::fs::write(repo.join("README.md"), "base\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "initial"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    (backend, boss, head)
+}
+
+fn chain_test_definition(
+    project: Uuid,
+    outcome: Uuid,
+    persona: Uuid,
+    retries: u32,
+    base: String,
+) -> ChainDefinition {
+    ChainDefinition {
+        outcome_id: outcome,
+        finishes_outcome: true,
+        steps: vec![
+            ChainStepDefinition {
+                project_id: project,
+                title: "investigate".into(),
+                prompt: "find the root cause".into(),
+                persona_id: Some(persona),
+                provider: ProviderKind::Codex,
+                model: "gpt-5.5".into(),
+                reasoning_effort: None,
+                permissions: waku_protocol::boss::PersonaPermissions::default(),
+                resources: waku_protocol::resources::ResourceSet::default(),
+                workspace: waku_protocol::AgentWorkspace::Worktree,
+                base_revision: Some(base.clone()),
+                boundary: HandoffBoundary::ArtifactsReady,
+                required_checks: Vec::new(),
+                required_artifacts: Vec::new(),
+                required_approvals: Vec::new(),
+                max_retries: retries,
+                successor_brief: "the root cause you found".into(),
+                plan_id: None,
+                item_id: None,
+            },
+            ChainStepDefinition {
+                project_id: project,
+                title: "verify".into(),
+                prompt: "verify the fix".into(),
+                persona_id: Some(persona),
+                provider: ProviderKind::Codex,
+                model: "gpt-5.5".into(),
+                reasoning_effort: None,
+                permissions: waku_protocol::boss::PersonaPermissions::default(),
+                resources: waku_protocol::resources::ResourceSet::default(),
+                workspace: waku_protocol::AgentWorkspace::Local,
+                base_revision: None,
+                boundary: HandoffBoundary::ArtifactsReady,
+                required_checks: Vec::new(),
+                required_artifacts: Vec::new(),
+                required_approvals: Vec::new(),
+                max_retries: 0,
+                successor_brief: String::new(),
+                plan_id: None,
+                item_id: None,
+            },
+        ],
+    }
+}
+
+fn chain_result_op(
+    chain_id: Uuid,
+    attempt: &waku_protocol::chains::ChainAttempt,
+    disposition: ResultDisposition,
+) -> BossOperation {
+    use waku_protocol::chains::{ChainCheck, CheckStatus};
+    BossOperation::Chain {
+        action: ChainOperation::RecordResult {
+            chain_id,
+            attempt_id: attempt.id,
+            definition_version: attempt.definition_version,
+            result: ChainResult {
+                disposition,
+                checks: vec![ChainCheck {
+                    name: "checks pass".into(),
+                    status: CheckStatus::Pass,
+                    evidence: "ok".into(),
+                }],
+                artifacts: Vec::new(),
+                code: None,
+                limitations: Vec::new(),
+            },
+        },
+    }
+}
+
+fn chain_control_op(
+    chain_id: Uuid,
+    revision: u64,
+    control: ChainControl,
+    source_revision: Option<String>,
+) -> BossOperation {
+    BossOperation::Chain {
+        action: ChainOperation::Control {
+            chain_id,
+            expected_revision: revision,
+            control,
+            source_revision,
+        },
+    }
+}
+
+fn write_employee_final(backend: &WakuBackend, session_id: Uuid, message: &str) {
+    let mut state = backend.task_state.lock();
+    let index = state
+        .sessions
+        .iter()
+        .position(|session| session.id == session_id)
+        .unwrap();
+    backend
+        .task_store
+        .hydrate(&mut state.sessions[index])
+        .unwrap();
+    state.sessions[index]
+        .messages
+        .push(crate::model::Message::new(
+            crate::model::MessageRole::Assistant,
+            message,
+        ));
+    state.mark_session_dirty(session_id);
+    backend.task_store.save(&mut state).unwrap();
+}
+
+/// Supervisor-facing chain traffic — parked reports and transcript rows
+/// whose content names a chain.
+fn chain_reports(backend: &WakuBackend, session_id: Uuid) -> Vec<String> {
+    let mut state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    session
+        .queued_messages
+        .iter()
+        .map(|queued| queued.content.clone())
+        .chain(
+            session
+                .messages
+                .iter()
+                .map(|message| message.content.clone()),
+        )
+        .filter(|content| content.contains("Employee chain"))
+        .collect()
+}
+
+fn reopen_backend(root: &Path) -> WakuBackend {
+    let mut backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    backend
+        .summon_scheduler_started
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    for provider in [ProviderKind::Claude, ProviderKind::Codex] {
+        daemon_settings
+            .provider_binary_overrides
+            .insert(provider, "/usr/bin/true".into());
+    }
+    backend.settings.replace(daemon_settings).unwrap();
+    backend
+}
+
+#[test]
+fn chains_execute_in_order_sealing_handoffs_quietly() {
+    let root = std::env::temp_dir().join(format!("waku-chain-order-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let definition = chain_test_definition(project, outcome.id, personas[0].id, 0, head.clone());
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    // Creation admitted the first step — a real employee, durable binding.
+    let chain_id = state.chains[0].id;
+    let first = state.employees[0].clone();
+    assert_eq!(
+        Some(first.session_id),
+        state.chains[0].steps[0].attempts[0].employee_id
+    );
+    assert_eq!(state.chains[0].status, ChainStatus::Queued);
+    // Re-drive replays the same dispatch identity — no duplicate employee.
+    backend.drive_chains();
+    assert_eq!(backend.boss.document().employees.len(), 1);
+    // Dispatch lands through the normal queue: the attempt records
+    // Starting then Working with the workspace's real revision.
+    backend.run_summon_scheduler();
+    let entry = backend.boss.employee(first.session_id).unwrap();
+    assert_eq!(
+        entry.lifecycle(),
+        waku_protocol::boss::EmployeeLifecycle::Working,
+        "blocker: {:?}",
+        entry.blocker
+    );
+    let attempt0 = backend.boss.document().chains[0].steps[0].attempts[0].clone();
+    assert_eq!(attempt0.status, StepStatus::Working);
+
+    // Step one finishes: the exact terminal message seals, the successor
+    // admits, and the supervisor hears nothing about it.
+    backend
+        .handle_boss_operation(
+            Some(first.session_id),
+            chain_result_op(chain_id, &attempt0, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(
+        &backend,
+        first.session_id,
+        "root cause found — fix lands next",
+    );
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.current_step, 1);
+    assert_eq!(chain.steps[0].status, StepStatus::Succeeded);
+    let sealed = chain.steps[0].attempts[0].sealed.as_ref().unwrap();
+    assert!(sealed.accepted);
+    assert_eq!(sealed.terminal_message, "root cause found — fix lands next");
+    assert_eq!(sealed.successor_step, Some(1));
+    assert!(chain_reports(&backend, boss).is_empty(), "quiet handoff");
+    // The successor's prompt carries the sealed handoff and its own brief.
+    let second = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id != first.session_id)
+        .unwrap()
+        .clone();
+    let attempt1 = chain.steps[1].attempts[0].clone();
+    assert_eq!(Some(second.session_id), attempt1.employee_id);
+    let prompt = &second.ticket.as_ref().unwrap().prompt;
+    assert!(prompt.contains("root cause found — fix lands next"));
+    assert!(prompt.contains("the root cause you found"));
+    assert!(prompt.contains(&attempt1.id.to_string()));
+    backend.run_summon_scheduler();
+
+    // The final step finishes the chain — exactly one consolidated report.
+    backend
+        .handle_boss_operation(
+            Some(second.session_id),
+            chain_result_op(chain_id, &attempt1, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, second.session_id, "all verified");
+    backend
+        .finish_boss_employee(
+            second.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let chain = document.chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Completed);
+    // The finisher reservation closed the outcome — recorded, not rerun.
+    let outcome = document
+        .outcomes
+        .iter()
+        .find(|entry| entry.id == outcome.id);
+    assert_eq!(
+        outcome.map(|outcome| outcome.state),
+        Some(waku_protocol::boss::OutcomeState::Completed)
+    );
+    let reports = chain_reports(&backend, boss);
+    assert_eq!(reports.len(), 1, "one final report per chain");
+    assert!(reports[0].contains("finished"));
+    assert!(reports[0].contains("all verified"));
+    assert!(reports[0].contains("Outcome"));
+    backend.drive_chains();
+    assert_eq!(chain_reports(&backend, boss).len(), 1, "redelivery dedupes");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chain_terminal_failure_pauses_once_and_retry_continues() {
+    let root = std::env::temp_dir().join(format!("waku-chain-fail-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        2,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let chain_id = state.chains[0].id;
+    let first = state.employees[0].clone();
+    backend.run_summon_scheduler();
+    // The employee dies mid-work — terminal failure seals and the chain
+    // pauses with one exception for the incident.
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert!(chain.attention.is_some());
+    let attempt0 = &chain.steps[0].attempts[0];
+    let sealed = attempt0.sealed.as_ref().unwrap();
+    assert!(!sealed.accepted);
+    assert_eq!(sealed.result.disposition, ResultDisposition::Failed);
+    let reports = chain_reports(&backend, boss);
+    assert_eq!(reports.len(), 1, "one exception per incident");
+    assert!(reports[0].contains("paused"));
+    backend.drive_chains();
+    assert_eq!(
+        chain_reports(&backend, boss).len(),
+        1,
+        "no stacked incident"
+    );
+    // Retry echoes the reconciled base — the daemon recorded it at seal.
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    let reconciled = chain.steps[0].attempts[0]
+        .reconciled_retry_revision
+        .clone()
+        .expect("retry base recorded");
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            chain_control_op(
+                chain_id,
+                chain.revision,
+                ChainControl::Retry,
+                Some(reconciled),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    let retry = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id != first.session_id)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        Some(retry.session_id),
+        chain.steps[0].attempts[1].employee_id
+    );
+    assert_eq!(
+        chain.steps[0].attempts[1].starting_revision.as_deref(),
+        Some(head.as_str())
+    );
+    // The retried attempt succeeds and the chain advances on its own.
+    backend.run_summon_scheduler();
+    let attempt1 = chain.steps[0].attempts[1].clone();
+    backend
+        .handle_boss_operation(
+            Some(retry.session_id),
+            chain_result_op(chain_id, &attempt1, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, retry.session_id, "fixed this time");
+    backend
+        .finish_boss_employee(
+            retry.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.current_step, 1);
+    assert_eq!(chain.steps[0].status, StepStatus::Succeeded);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chain_restart_recovers_at_admission_and_handoff_boundaries() {
+    let root = std::env::temp_dir().join(format!("waku-chain-restart-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        0,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let chain_id = state.chains[0].id;
+    let first = state.employees[0].clone();
+    drop(backend);
+    // Restart after admission but before dispatch — the durable ticket and
+    // binding survive; driving replays the same identity, never a second
+    // admission.
+    let backend = reopen_backend(&root);
+    backend.drive_chains();
+    let document = backend.boss.document();
+    // The admission-boundary attempt never executed — no pause, no
+    // exception, the binding replays through the queue.
+    assert_eq!(document.chains[0].status, ChainStatus::Queued);
+    assert!(document.chains[0].attention.is_none());
+    assert_eq!(document.employees.len(), 1);
+    assert_eq!(
+        Some(first.session_id),
+        document.chains[0].steps[0].attempts[0].employee_id
+    );
+    // Dispatch after the restart rebuilds the memory-only shell and lands
+    // the same Starting/Working observations — deduped, never doubled.
+    backend.run_summon_scheduler();
+    assert_eq!(
+        backend.boss.document().chains[0].steps[0].attempts[0].status,
+        StepStatus::Working
+    );
+    assert_eq!(backend.boss.document().employees.len(), 1);
+    // Restart between seal and successor admission — the waiting attempt
+    // the advance wrote is what the next drive admits.
+    let attempt0 = document.chains[0].steps[0].attempts[0].clone();
+    backend
+        .handle_boss_operation(
+            Some(first.session_id),
+            chain_result_op(chain_id, &attempt0, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, first.session_id, "sealed before the crash");
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    drop(backend);
+    let backend = reopen_backend(&root);
+    backend.drive_chains();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.current_step, 1);
+    assert_eq!(document.employees.len(), 2);
+    let successor = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id != first.session_id)
+        .unwrap();
+    assert_eq!(
+        Some(successor.session_id),
+        chain.steps[1].attempts[0].employee_id
+    );
+    // The successor dispatch replays across the restart the same way.
+    backend.run_summon_scheduler();
+    assert_eq!(
+        backend.boss.document().chains[0].steps[1].attempts[0].status,
+        StepStatus::Working
+    );
+    assert_eq!(backend.boss.document().employees.len(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chain_controls_win_the_finish_race() {
+    let root = std::env::temp_dir().join(format!("waku-chain-controls-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let create = |backend: &WakuBackend| {
+        // Each chain needs its own outcome — a finisher reservation is unique.
+        let outcome = backend
+            .boss
+            .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+            .unwrap();
+        let BossResult::State { state } = backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Chain {
+                    action: ChainOperation::Create {
+                        request_id: Uuid::new_v4(),
+                        definition: chain_test_definition(
+                            project,
+                            outcome.id,
+                            personas[0].id,
+                            0,
+                            head.clone(),
+                        ),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("chain state expected")
+        };
+        state.chains.last().unwrap().id
+    };
+    // Pause racing a successful finish: the control lands while the
+    // attempt still runs, the terminal seals retained, and the hold wins
+    // — a reducer-level control avoids the synchronous drive that a full
+    // operation would run first.
+    let chain_id = create(&backend);
+    let first = backend.boss.document().employees[0].clone();
+    backend.run_summon_scheduler();
+    let attempt0 = backend.boss.document().chains[0].steps[0].attempts[0].clone();
+    backend
+        .handle_boss_operation(
+            Some(first.session_id),
+            chain_result_op(chain_id, &attempt0, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let revision = backend.boss.document().chains[0].revision;
+    backend
+        .boss
+        .chain_operation(
+            Some(boss),
+            ChainOperation::Control {
+                chain_id,
+                expected_revision: revision,
+                control: ChainControl::Pause,
+                source_revision: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        backend.boss.document().chains[0].status,
+        ChainStatus::Pausing
+    );
+    write_employee_final(&backend, first.session_id, "done — but paused");
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused, "the hold wins the race");
+    assert_eq!(chain.current_step, 0);
+    let sealed = chain.steps[0].attempts[0].sealed.as_ref().unwrap();
+    assert!(sealed.accepted, "produced evidence stays retained");
+    // The owner paused — an owner-initiated hold owes nobody an exception.
+    assert!(chain_reports(&backend, boss).is_empty());
+    // Resume completes the deferred advance — a fresh successor admits.
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            chain_control_op(chain_id, chain.revision, ChainControl::Resume, None),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.current_step, 1);
+    assert!(chain.steps[1].attempts[0].employee_id.is_some());
+    // Cancel racing a finish cancels the chain outright — work retained,
+    // no exception, no report.
+    let chain_id = create(&backend);
+    let second = backend
+        .boss
+        .document()
+        .employees
+        .iter()
+        .find(|employee| {
+            !backend.boss.document().chains[0]
+                .steps
+                .iter()
+                .flat_map(|step| step.attempts.iter())
+                .any(|attempt| attempt.employee_id == Some(employee.session_id))
+        })
+        .cloned()
+        .unwrap();
+    let revision = backend
+        .boss
+        .document()
+        .chains
+        .iter()
+        .find(|chain| chain.id == chain_id)
+        .unwrap()
+        .revision;
+    backend
+        .boss
+        .chain_operation(
+            Some(boss),
+            ChainOperation::Control {
+                chain_id,
+                expected_revision: revision,
+                control: ChainControl::Cancel,
+                source_revision: None,
+            },
+        )
+        .unwrap();
+    write_employee_final(&backend, second.session_id, "finished during cancel");
+    backend
+        .finish_boss_employee(
+            second.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let chain = document
+        .chains
+        .iter()
+        .find(|chain| chain.id == chain_id)
+        .unwrap();
+    assert_eq!(chain.status, ChainStatus::Cancelled);
+    let attempt = &chain.steps[0].attempts[0];
+    assert!(attempt.sealed.is_some(), "cancelled work retains its seal");
+    // Owner-initiated controls surface nothing — no exception, no report.
+    let landed = chain_reports(&backend, boss);
+    assert!(landed.is_empty(), "unexpected reports: {landed:?}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chain_employees_skip_ordinary_reporting_and_resume() {
+    let root = std::env::temp_dir().join(format!("waku-chain-quiet-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        0,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let employee = state.employees[0].clone();
+    backend.run_summon_scheduler();
+    // A chain-bound blocker stays quiet — the sealed disposition carries it.
+    backend
+        .handle_boss_operation(
+            Some(employee.session_id),
+            BossOperation::ReportBlocker {
+                message: "stuck on credentials".into(),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let mut task_state = backend.task_state.lock();
+    let session = task_state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == boss)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    assert!(
+        !session
+            .queued_messages
+            .iter()
+            .any(|queued| queued.content.contains("blocker")),
+        "no report-blocker wake for chain employees"
+    );
+    drop(task_state);
+    // Chain-owned resume/retry paths refuse the generic employee revive.
+    backend
+        .finish_boss_employee(
+            employee.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    assert!(
+        backend.resume_employee(employee.session_id).is_err(),
+        "chain attempts resume through chain controls"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
 
 #[test]
 fn automation_runs_wait_for_their_own_delivered_turns() {
@@ -16222,8 +17037,14 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
     let plan = boss_plan("plans/runtime-bound.md", &[]);
     backend.boss.add_plan(plan.clone()).unwrap();
     let reviewed = review_plan_fixture(&backend, &plan.plan_file);
-    backend.boss.finalize_plan(&plan.plan_file, None, 1, &reviewed).unwrap();
-    backend.boss.set_employee_plan(session_id, Some(Some(plan.plan_file.clone())), None).unwrap();
+    backend
+        .boss
+        .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+        .unwrap();
+    backend
+        .boss
+        .set_employee_plan(session_id, Some(Some(plan.plan_file.clone())), None)
+        .unwrap();
     let capture = Arc::new(CaptureDriver::default());
     let raw = capture.clone();
     let transport = Arc::new(Mutex::new(None::<driver::DriverEventSender>));
@@ -16237,12 +17058,27 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
     driver.prompt("IMPLEMENT_SENTINEL".into());
     let first = capture.prompts.lock()[0].clone();
     assert!(!first.contains("IMPLEMENT_SENTINEL"));
-    let old_ack = first.lines().find(|line| line.starts_with("PLAN-ACK ")).unwrap().to_owned();
+    let old_ack = first
+        .lines()
+        .find(|line| line.starts_with("PLAN-ACK "))
+        .unwrap()
+        .to_owned();
     // A mutable path can change without changing what this attempt receives.
-    std::fs::write(backend.boss.plan_document_path(&plan.plan_file).unwrap(), "mutable lookalike").unwrap();
-    let gate = backend.sessions.lock()[&session_id].plan_gate.clone().unwrap();
+    std::fs::write(
+        backend.boss.plan_document_path(&plan.plan_file).unwrap(),
+        "mutable lookalike",
+    )
+    .unwrap();
+    let gate = backend.sessions.lock()[&session_id]
+        .plan_gate
+        .clone()
+        .unwrap();
     gate.observe(&DriverEvent::TextDelta("wrong revision".into()));
-    gate.observe(&DriverEvent::TurnFinished { success: true, summary: None, summary_i18n: None });
+    gate.observe(&DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    });
     assert!(!gate.ready());
     drop_detached(backend.remove_runtime(session_id, Some(generation), false));
     let (fresh_generation, fresh) = backend.ensure_agent_runtime(session_id, &source).unwrap();
@@ -16252,12 +17088,24 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
     assert!(review.contains("# Reviewed fixture\n"));
     assert!(!review.contains("mutable lookalike"));
     assert!(!review.contains("IMPLEMENT_SENTINEL"));
-    let acknowledgement = review.lines().find(|line| line.starts_with("PLAN-ACK ")).unwrap().to_owned();
+    let acknowledgement = review
+        .lines()
+        .find(|line| line.starts_with("PLAN-ACK "))
+        .unwrap()
+        .to_owned();
     assert_ne!(old_ack, acknowledgement);
     let events = transport.lock().as_ref().unwrap().clone();
     events.send(DriverEvent::TurnStarted).unwrap();
-    events.send(DriverEvent::TextDelta(acknowledgement)).unwrap();
-    events.send(DriverEvent::TurnFinished { success: true, summary: None, summary_i18n: None }).unwrap();
+    events
+        .send(DriverEvent::TextDelta(acknowledgement))
+        .unwrap();
+    events
+        .send(DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        })
+        .unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while capture.prompts.lock().len() < 3 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -16267,11 +17115,26 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
     assert!(!backend.boss.employee(session_id).unwrap().expired);
     // A grant update retires this generation instead of reusing its receipt.
     let permissions = waku_protocol::boss::PermissionOverrides {
-        computer_use: Some(!backend.boss.employee(session_id).unwrap().permissions.computer_use),
+        computer_use: Some(
+            !backend
+                .boss
+                .employee(session_id)
+                .unwrap()
+                .permissions
+                .computer_use,
+        ),
         ..Default::default()
     };
-    backend.handle_boss_operation(None, BossOperation::Control { session_id,
-        action: EmployeeControl::SetPermissions { permissions } }, &source).unwrap();
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetPermissions { permissions },
+            },
+            &source,
+        )
+        .unwrap();
     assert!(!backend.sessions.lock().contains_key(&session_id));
     fresh.prompt("STALE_BRIEF_SENTINEL".into());
     assert_eq!(capture.prompts.lock().len(), 3);
@@ -16284,13 +17147,41 @@ fn plan_delivery_runtime_reviews_before_execution_and_recovers_exact_revision() 
 fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     for (provider, environment, supported) in [
-        (ProviderKind::Codex, crate::model::SessionEnvironment::Local, true),
-        (ProviderKind::Devin, crate::model::SessionEnvironment::Local, true),
-        (ProviderKind::Claude, crate::model::SessionEnvironment::Local, false),
-        (ProviderKind::Codex, crate::model::SessionEnvironment::Sandbox, false),
-        (ProviderKind::Devin, crate::model::SessionEnvironment::Sandbox, false),
-        (ProviderKind::Codex, crate::model::SessionEnvironment::Cloud, false),
-        (ProviderKind::Devin, crate::model::SessionEnvironment::Cloud, false),
+        (
+            ProviderKind::Codex,
+            crate::model::SessionEnvironment::Local,
+            true,
+        ),
+        (
+            ProviderKind::Devin,
+            crate::model::SessionEnvironment::Local,
+            true,
+        ),
+        (
+            ProviderKind::Claude,
+            crate::model::SessionEnvironment::Local,
+            false,
+        ),
+        (
+            ProviderKind::Codex,
+            crate::model::SessionEnvironment::Sandbox,
+            false,
+        ),
+        (
+            ProviderKind::Devin,
+            crate::model::SessionEnvironment::Sandbox,
+            false,
+        ),
+        (
+            ProviderKind::Codex,
+            crate::model::SessionEnvironment::Cloud,
+            false,
+        ),
+        (
+            ProviderKind::Devin,
+            crate::model::SessionEnvironment::Cloud,
+            false,
+        ),
     ] {
         let root = std::env::temp_dir().join(format!("plan-delivery-preflight-{}", Uuid::new_v4()));
         let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
@@ -16298,8 +17189,14 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
         let plan = boss_plan("plans/preflight.md", &[]);
         backend.boss.add_plan(plan.clone()).unwrap();
         let reviewed = review_plan_fixture(&backend, &plan.plan_file);
-        backend.boss.finalize_plan(&plan.plan_file, None, 1, &reviewed).unwrap();
-        backend.boss.set_employee_plan(session_id, Some(Some(plan.plan_file)), None).unwrap();
+        backend
+            .boss
+            .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+            .unwrap();
+        backend
+            .boss
+            .set_employee_plan(session_id, Some(Some(plan.plan_file)), None)
+            .unwrap();
         {
             let mut state = backend.task_state.lock();
             let session = state.session_mut(session_id).unwrap();
@@ -16310,7 +17207,10 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
             backend.task_store.save(&mut state).unwrap();
         }
         let mut settings = backend.settings.get();
-        settings.provider_binary_overrides.insert(provider, root.join("controlled-provider").display().to_string());
+        settings.provider_binary_overrides.insert(
+            provider,
+            root.join("controlled-provider").display().to_string(),
+        );
         backend.settings.replace(settings).unwrap();
         let starts = Arc::new(AtomicUsize::new(0));
         let launched = starts.clone();
@@ -16319,7 +17219,9 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
         backend.runtime_test_start = Some(Arc::new(move |_, _, events| {
             launched.fetch_add(1, Ordering::SeqCst);
             *sender.lock() = Some(events);
-            Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+            Ok(DriverHandle::from_control(Arc::new(
+                CaptureDriver::default(),
+            )))
         }));
         let result = backend.ensure_agent_runtime(session_id, &EventSink::detached());
         if supported {
@@ -16333,7 +17235,10 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
             } else {
                 "plan delivery unsupported"
             };
-            assert!(error.contains(expected), "{provider:?}/{environment:?}: {error}");
+            assert!(
+                error.contains(expected),
+                "{provider:?}/{environment:?}: {error}"
+            );
             assert_eq!(starts.load(Ordering::SeqCst), 0);
             assert!(!backend.sessions.lock().contains_key(&session_id));
         }

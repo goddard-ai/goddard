@@ -492,6 +492,18 @@ pub(super) fn forward_driver_events(
                 eprintln!("could not record task settlement {session_id}: {error:#}");
             }
         }
+        // A chain attempt whose session stopped for input — a permission
+        // wait or an unanswered ask — is unsealed but no longer executing:
+        // the observation reports the wait, never a verdict.
+        if !stale
+            && managed
+            && matches!(
+                &event,
+                DriverEvent::Permission { .. } | DriverEvent::UserInputRequested { .. }
+            )
+        {
+            chain_exec::observe_chain_idle(&boss, session_id);
+        }
         let plan_gate = sessions
             .lock()
             .get(&session_id)

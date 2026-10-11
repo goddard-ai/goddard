@@ -201,11 +201,30 @@ impl WakuBackend {
         self.boss.activate()?;
         if !was_active {
             self.wake_summon_queue();
+            // Chains waiting on admission or a deferred seal resume on the
+            // first activation — reconcile already paused uncertain binds.
+            self.drive_chains();
         }
         match operation {
             BossOperation::Chain { action } => {
-                self.boss.with_operation_lock(|| {
-                    use waku_protocol::chains::ChainOperation;
+                use waku_protocol::chains::{ChainControl, ChainOperation};
+                // Resume on a gate-paused chain re-verifies the sealed
+                // handoff against live host facts before the control runs —
+                // outside the operation lock so its git checks never
+                // serialize boss writes. A gate that still fails reports
+                // the re-paused state; a repaired gate lets Resume advance.
+                if let ChainOperation::Control {
+                    chain_id,
+                    control: ChainControl::Resume,
+                    ..
+                } = &action
+                    && self.chain_resume_recheck(*chain_id)?
+                {
+                    return Ok(BossResult::State {
+                        state: self.boss.document(),
+                    });
+                }
+                let result = self.boss.with_operation_lock(|| {
                     anyhow::ensure!(
                         matches!(action, ChainOperation::RecordResult { .. })
                             || caller.is_none_or(|id| self.boss.is_boss_principal(id)),
@@ -314,6 +333,20 @@ impl WakuBackend {
                         self.validate_chain_projects(&steps)?;
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
+                    // Resume on a gate-paused chain re-verifies the sealed
+                    // handoff first — a gate that still fails reports the
+                    // re-paused state instead of the control's retry bail.
+                    if let ChainOperation::Control {
+                        chain_id,
+                        control: ChainControl::Resume,
+                        ..
+                    } = &action
+                        && self.chain_resume_recheck(*chain_id)?
+                    {
+                        return Ok(BossResult::State {
+                            state: self.boss.document(),
+                        });
+                    }
                     self.boss.chain_operation(caller, action)?;
                     if is_result {
                         Ok(BossResult::Saved)
@@ -322,7 +355,20 @@ impl WakuBackend {
                             state: self.boss.document(),
                         })
                     }
-                })
+                })?;
+                // Accepted transitions carry host effects: admission for
+                // waiting steps, employee stops for pause/cancel, and the
+                // quiet routing owed. Outside the operation lock so a
+                // git check or summon never serializes boss writes.
+                self.drive_chains();
+                match result {
+                    // The caller reads actual lifecycle state — admission
+                    // the drive just produced is part of it.
+                    BossResult::State { .. } => Ok(BossResult::State {
+                        state: self.boss.document(),
+                    }),
+                    other => Ok(other),
+                }
             }
             BossOperation::Automation { action } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
@@ -960,7 +1006,11 @@ impl WakuBackend {
                 let caller =
                     caller.ok_or_else(|| anyhow!("only a Boss employee can report a blocker"))?;
                 let employee = self.boss.report_blocker(caller, message)?;
-                if let Some(supervisor) = self.boss.report_target(&employee) {
+                // A chain-bound blocker stays quiet — the attempt's sealed
+                // disposition carries it as one incident's exception.
+                if self.chain_binding(employee.session_id).is_none()
+                    && let Some(supervisor) = self.boss.report_target(&employee)
+                {
                     let prompt = format!(
                         "Employee {} ({}) reports a blocker that needs your attention: {}",
                         employee.identity.name,
@@ -1090,21 +1140,29 @@ impl WakuBackend {
                 outcome,
                 handoff,
                 decision,
-            } => self.boss.with_operation_lock(|| {
-                let (record, stop) =
-                    self.boss
-                        .resolve_handoff(caller, outcome, handoff, decision)?;
-                // A `completeOutcome` decision retires the same stranded
-                // queue a direct completion reports.
-                self.stop_outcome_assignments(stop, "Outcome completed")?;
-                // A settled handoff can unblock a waiting finishing
-                // assignment — re-run the dispatch pass after the decision.
-                self.wake_summon_queue();
-                let _ = record;
-                Ok(BossResult::State {
-                    state: self.boss.document(),
-                })
-            }),
+            } => {
+                let result = self
+                    .boss
+                    .with_operation_lock(|| -> anyhow::Result<BossResult> {
+                        let (record, stop) =
+                            self.boss
+                                .resolve_handoff(caller, outcome, handoff, decision)?;
+                        // A `completeOutcome` decision retires the same stranded
+                        // queue a direct completion reports.
+                        self.stop_outcome_assignments(stop, "Outcome completed")?;
+                        // A settled handoff can unblock a waiting finishing
+                        // assignment — re-run the dispatch pass after the decision.
+                        self.wake_summon_queue();
+                        let _ = record;
+                        Ok(BossResult::State {
+                            state: self.boss.document(),
+                        })
+                    })?;
+                // Cleared handoffs can unblock a completed finisher chain's
+                // deferred outcome closure.
+                self.drive_chains();
+                Ok(result)
+            }
             BossOperation::SetProjectSubmissions { project, enabled } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can configure project submissions");
@@ -1317,12 +1375,7 @@ impl WakuBackend {
     ) -> anyhow::Result<()> {
         for session_id in stop {
             self.boss.mark_cancelled(session_id)?;
-            record_daemon_interrupt(
-                &self.task_state,
-                &self.task_store,
-                session_id,
-                Some(notice),
-            )?;
+            record_daemon_interrupt(&self.task_state, &self.task_store, session_id, Some(notice))?;
             self.finish_boss_employee(
                 session_id,
                 false,
@@ -1405,11 +1458,12 @@ impl WakuBackend {
             sink.end_session_runtime();
         }
         drop_detached(removed);
-        let (body, failed, parked_prompts) = {
+        let (body, failed, parked_prompts, final_message) = {
             let mut state = self.task_state.lock();
             let mut body = String::new();
             let mut failed = false;
             let mut parked = 0_u32;
+            let mut final_message = String::new();
             // A session gone from the document still expires — the record
             // keeps the settle's classification rather than stranding at
             // `finishing` on a missing transcript.
@@ -1445,10 +1499,25 @@ impl WakuBackend {
                 let (rendered, _) =
                     crate::model::render_transcript_index(&session.transcript_index());
                 body = rendered.trim_end().to_owned();
+                // The employee's exact final message — the last thing it
+                // actually said, not a daemon notice row — seals verbatim
+                // into a chain handoff when this expiry belongs to one.
+                final_message = session
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|message| {
+                        message.role == crate::model::MessageRole::Assistant
+                            && message.notice.is_none()
+                            && !message.hidden
+                            && !message.content.trim().is_empty()
+                    })
+                    .map(|message| message.content.clone())
+                    .unwrap_or_default();
                 state.mark_session_dirty(session_id);
                 self.task_store.save(&mut state)?;
             }
-            (body, failed, parked)
+            (body, failed, parked, final_message)
         };
         // `begin_finishing` recorded the preliminary cause — a `finishing`
         // record recovered after a restart keeps it — so the tail only
@@ -1539,6 +1608,22 @@ impl WakuBackend {
             .boss
             .employee(session_id)
             .unwrap_or_else(|| employee.clone());
+        // A chain-bound expiry takes the sealed-handoff path — the chain
+        // owns the silence, the successor's admission, and any exception
+        // the seal owes. An adapter error still suppresses the ordinary
+        // report: duplicated evidence is better than a wrong wake.
+        match self.finish_chain_attempt(&employee, settle, failed, &final_message) {
+            Ok(true) => {
+                self.deliver_wave_notifications();
+                return Ok(());
+            }
+            Ok(false) => {}
+            Err(error) => {
+                eprintln!("chain finish path failed for {session_id}: {error:#}");
+                self.deliver_wave_notifications();
+                return Ok(());
+            }
+        }
         let expiry = employee.expiry.as_ref();
         let interrupted = expiry.is_some_and(|expiry| expiry.reports());
         // The work kind the summon fixed decides whether a clean finish
@@ -1795,6 +1880,9 @@ impl WakuBackend {
         self.boss.require_active(session_id)?;
         if self.boss.employee(session_id).is_none() {
             bail!("a retired employee's workspace changes when it is revived");
+        }
+        if self.chain_binding(session_id).is_some() {
+            bail!("chain employee workspaces move through chain controls");
         }
         let (project_path, old_path) = {
             let state = self.task_state.lock();
