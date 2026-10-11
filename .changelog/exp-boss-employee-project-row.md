@@ -1,0 +1,1 @@
+- **Employees:** The Employees tab now shows each employee’s project beside their name, with the relative time on that same line.

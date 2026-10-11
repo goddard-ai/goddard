@@ -6458,14 +6458,8 @@ impl Waku {
                     .map(|ticket| ticket.project.trim().to_owned())
                     .filter(|project| !project.is_empty())
             });
-        let mut detail = job.clone();
-        if let Some(project) = project.filter(|project| !project.is_empty()) {
-            detail = if detail.is_empty() {
-                project
-            } else {
-                format!("{detail} · {project}")
-            };
-        }
+        let project = project.filter(|project| !project.is_empty());
+        let detail = job.clone();
         let blocker = employee.and_then(|employee| employee.blocker.clone());
         let readiness = employee.and_then(boss_plan_readiness_label);
         let model_detail = if let Some((model_key, provider, model, effort)) =
@@ -6535,11 +6529,48 @@ impl Waku {
                     .flex_col()
                     .child(
                         div()
-                            .text_size(sp(14.0))
-                            .line_height(sp(17.0))
-                            .text_color(theme.text)
-                            .truncate()
-                            .child(identity.name.clone()),
+                            .flex()
+                            .items_center()
+                            .min_w_0()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .text_size(sp(14.0))
+                                    .line_height(sp(17.0))
+                                    .text_color(theme.text)
+                                    .truncate()
+                                    .child(identity.name.clone()),
+                            )
+                            .when_some(project.clone(), |row, project| {
+                                row.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .min_w_0()
+                                        .gap(px(4.0))
+                                        .text_size(sp(12.0))
+                                        .line_height(sp(15.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
+                                        .child(div().min_w_0().truncate().child(project)),
+                                )
+                            })
+                            .when_some(stamp, |row, stamp| {
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .ml_auto()
+                                        .w(px(72.0))
+                                        .text_right()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_ghost)
+                                        .child(sidebar::format_time_ago(
+                                            unix_time().saturating_sub(stamp),
+                                        )),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -6603,17 +6634,6 @@ impl Waku {
                 )
             })
             .when_some(resume, |row, button| row.child(button))
-            .when_some(stamp, |row, stamp| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .w(px(72.0))
-                        .text_right()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_ghost)
-                        .child(sidebar::format_time_ago(unix_time().saturating_sub(stamp))),
-                )
-            })
             .into_any_element()
     }
 
