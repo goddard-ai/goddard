@@ -566,6 +566,9 @@ pub(super) struct BossUi {
     pub(super) goals_list_owner: Option<DaemonKey>,
     pub(super) goals_signature: Option<u64>,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
+    /// Daemons whose Pending section was seeded collapsed — the fold is a
+    /// first-visit default; toggles after that win freely.
+    pub(super) goals_collapsed_seeded: HashSet<DaemonKey>,
     pub(super) goals_history_expanded: HashSet<DaemonKey>,
     /// Outcome rows the user opened for assignment detail — honored per
     /// Boss daemon across snapshots and section moves.
@@ -741,6 +744,7 @@ impl Default for BossUi {
             goals_list_owner: None,
             goals_signature: None,
             goals_collapsed: HashSet::new(),
+            goals_collapsed_seeded: HashSet::new(),
             goals_history_expanded: HashSet::new(),
             goals_row_expanded: HashSet::new(),
             goals_focus_handles: HashMap::new(),
@@ -905,9 +909,10 @@ struct WireBossBucket {
 /// records reach these lists — errands never appear in the tab.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum BossGoalSection {
-    Finished,
-    InProgress,
     Pending,
+    Blocked,
+    InProgress,
+    Finished,
 }
 
 /// One daemon-owned outcome prepared for the Tasks panel — the durable

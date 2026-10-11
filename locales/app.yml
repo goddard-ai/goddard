@@ -6338,6 +6338,8 @@ boss.goals_section_finished:
   en: Finished
 boss.goals_section_pending:
   en: Pending
+boss.goals_section_blocked:
+  en: Blocked
 boss.goals_show_older:
   en: Show more (%{count} older)
 boss.goals_show_less:

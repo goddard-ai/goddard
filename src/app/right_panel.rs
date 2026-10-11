@@ -1537,9 +1537,10 @@ fn boss_goal_row_height(font_size: f32) -> f32 {
 /// renders under — the specific [`BossGoalStatus`] stays on the row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BossGoalBucket {
-    Finished,
-    Running,
     Pending,
+    Blocked,
+    Running,
+    Finished,
 }
 
 /// The specific status a goal row reports. Glyphs and tones mirror the
@@ -1845,10 +1846,10 @@ fn boss_expiry_cause_label(cause: waku_protocol::boss::ExpiryCause) -> Option<St
 }
 
 /// The outcome's section and headline status — the plan's section rules.
-/// Terminal state owns Finished outright; a live member owns In progress
+/// Terminal state owns Finished outright; needs-attention evidence and
+/// owed decisions land in Blocked; a healthy live member owns In progress
 /// even when queued work or a wait stands beside it; everything else
-/// lands in Pending with its honest label — needs attention with its
-/// cause, needs follow-up for an owed decision, queued, waiting with its
+/// lands in Pending with its honest label — queued, waiting with its
 /// recorded reason, not started, or simply open.
 fn boss_outcome_status(
     row: &boss::BossOutcomeRow,
@@ -1879,15 +1880,22 @@ fn boss_outcome_status(
         } else {
             status
         };
-        return (BossGoalBucket::Running, status);
+        // Needs-attention work files under Blocked; genuinely running
+        // work stays In progress.
+        let bucket = if row.attention || status.attention() {
+            BossGoalBucket::Blocked
+        } else {
+            BossGoalBucket::Running
+        };
+        return (bucket, status);
     }
-    // Nothing is running — the Pending precedence orders the most
-    // actionable signal first.
+    // Nothing is running — the Blocked precedence names the needs-
+    // attention signal first, then the Pending labels' own order.
     if row.attention {
-        return (BossGoalBucket::Pending, BossGoalStatus::Blocked);
+        return (BossGoalBucket::Blocked, BossGoalStatus::Blocked);
     }
     if row.outcome.pending_handoffs().next().is_some() {
-        return (BossGoalBucket::Pending, BossGoalStatus::FollowUp);
+        return (BossGoalBucket::Blocked, BossGoalStatus::FollowUp);
     }
     if row.members.iter().any(boss_outcome_queued) {
         return (BossGoalBucket::Pending, BossGoalStatus::Queued);
@@ -2075,6 +2083,7 @@ enum BossOutcomeItem {
     Header {
         section: boss::BossGoalSection,
         label: String,
+        count: usize,
         attention: usize,
         collapsed: bool,
         top_gap: bool,
@@ -2125,13 +2134,14 @@ fn boss_goals_item_focus_key(item: &BossOutcomeItem) -> Option<String> {
     }
 }
 
-/// One disclosure header — quiet label, its trailing chevron, and the
-/// "needs attention" tally folded sections carry in place of their hidden
-/// rows.
+/// One disclosure header — quiet label, its trailing chevron, and, while
+/// the section is folded, a muted total next to the label plus the "needs
+/// attention" tally folded sections carry in place of their hidden rows.
 #[track_caller]
 fn boss_goal_section_header(
     section: boss::BossGoalSection,
     label: &str,
+    count: usize,
     attention: usize,
     collapsed: bool,
     top_gap: bool,
@@ -2167,6 +2177,15 @@ fn boss_goal_section_header(
                 .text_color(theme.text_secondary)
                 .child(label.to_owned()),
         )
+        .when(collapsed, |element| {
+            element.child(
+                div()
+                    .flex_none()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(count.to_string()),
+            )
+        })
         .child(icon(
             if collapsed {
                 "icons/chevron-right.svg"
@@ -2178,7 +2197,12 @@ fn boss_goal_section_header(
         ))
         .child(div().flex_1())
         .when(
-            attention > 0 && collapsed && section != boss::BossGoalSection::Finished,
+            attention > 0
+                && collapsed
+                && !matches!(
+                    section,
+                    boss::BossGoalSection::Finished | boss::BossGoalSection::Blocked
+                ),
             |element| {
                 element.child(
                     div()
@@ -3880,10 +3904,11 @@ mod tests {
     }
 
 
-    /// The section rules: terminal state owns Finished; a live member owns
-    /// In progress over queued or waiting work; and the member-less cases
-    /// read Pending with their honest labels — attention, follow-up,
-    /// queued, waiting, not started, or open.
+    /// The section rules: terminal state owns Finished; needs-attention
+    /// evidence and owed decisions read Blocked; a healthy live member
+    /// owns In progress over queued or waiting work; and the member-less
+    /// cases read Pending with their honest labels — queued, waiting, not
+    /// started, or open.
     #[test]
     fn outcome_status_follows_terminal_then_live_then_pending_rules() {
         use waku_protocol::boss::{EmployeeLifecycle, OutcomeState};
@@ -3925,7 +3950,7 @@ mod tests {
         row.members[0].employee.blocker = Some("needs a decision".into());
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
-            (BossGoalBucket::Running, BossGoalStatus::Attention)
+            (BossGoalBucket::Blocked, BossGoalStatus::Attention)
         );
 
         // Queued members with nothing running read Pending · Queued.
@@ -3963,7 +3988,8 @@ mod tests {
             (BossGoalBucket::Pending, BossGoalStatus::Open)
         );
 
-        // An owed handoff reads Pending · Needs follow-up.
+        // An owed handoff reads Blocked · Needs follow-up — a decision the
+        // boss still owes is an attention item.
         let mut row = outcome_row(OutcomeState::Open, Vec::new());
         row.outcome.handoffs.push(waku_protocol::boss::OutcomeHandoff {
             id: Uuid::new_v4(),
@@ -3975,10 +4001,10 @@ mod tests {
         });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
-            (BossGoalBucket::Pending, BossGoalStatus::FollowUp)
+            (BossGoalBucket::Blocked, BossGoalStatus::FollowUp)
         );
 
-        // Unresolved failures read Pending · Needs attention and outrank
+        // Unresolved failures read Blocked · Needs attention and outrank
         // the waiting and queued labels.
         let mut row = outcome_row(
             OutcomeState::Open,
@@ -3987,7 +4013,7 @@ mod tests {
         row.attention = true;
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
-            (BossGoalBucket::Pending, BossGoalStatus::Blocked)
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
         );
 
         // Zero assignments reads Pending · Not started; settled work with
@@ -4777,9 +4803,16 @@ impl Waku {
     /// is reconstructed on restore and remains present while user tabs come
     /// and go. Boss pages do not claim the chat's strip.
     pub(super) fn sync_boss_tasks_panel(&mut self, cx: &mut Context<Self>) {
-        let Some(_key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
+        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
             return;
         };
+        // The queued backlog starts folded — seeded once per daemon before
+        // any header toggle can override it.
+        if self.boss_ui.goals_collapsed_seeded.insert(key) {
+            self.boss_ui
+                .goals_collapsed
+                .insert((key, boss::BossGoalSection::Pending));
+        }
         let Some(first_tab) = ensure_boss_tasks_tab(
             &mut self.right_panel_surfaces,
             &mut self.right_panel_active_surface,
@@ -11934,6 +11967,7 @@ impl Waku {
         let now = unix_time();
         let mut finished: Vec<Arc<BossOutcomePanelRow>> = Vec::new();
         let mut running = Vec::new();
+        let mut blocked = Vec::new();
         let mut pending = Vec::new();
         // Expanded entries are prepared beside their rows so the item
         // lists and signatures below carry them; a row moving sections
@@ -11970,29 +12004,26 @@ impl Waku {
             }
             match prepared.bucket {
                 BossGoalBucket::Finished => finished.push(prepared),
+                BossGoalBucket::Blocked => blocked.push(prepared),
                 BossGoalBucket::Running => running.push(prepared),
                 BossGoalBucket::Pending => pending.push(prepared),
             }
         }
-        // Finished is newest first; In progress and Pending lead with
-        // actionable items, then outcome age.
+        // Finished is newest first; In progress, Blocked, and Pending lead
+        // with actionable items, then outcome age.
         finished.sort_by(|a, b| {
             b.updated_sort
                 .cmp(&a.updated_sort)
                 .then_with(|| a.outcome.cmp(&b.outcome))
         });
-        running.sort_by(|a, b| {
-            b.attention
-                .cmp(&a.attention)
-                .then_with(|| a.created_sort.cmp(&b.created_sort))
-                .then_with(|| a.outcome.cmp(&b.outcome))
-        });
-        pending.sort_by(|a, b| {
-            b.attention
-                .cmp(&a.attention)
-                .then_with(|| a.created_sort.cmp(&b.created_sort))
-                .then_with(|| a.outcome.cmp(&b.outcome))
-        });
+        for section_rows in [&mut running, &mut blocked, &mut pending] {
+            section_rows.sort_by(|a, b| {
+                b.attention
+                    .cmp(&a.attention)
+                    .then_with(|| a.created_sort.cmp(&b.created_sort))
+                    .then_with(|| a.outcome.cmp(&b.outcome))
+            });
+        }
         let finished_collapsed = self
             .boss_ui
             .goals_collapsed
@@ -12001,6 +12032,10 @@ impl Waku {
             .boss_ui
             .goals_collapsed
             .contains(&(key, boss::BossGoalSection::InProgress));
+        let blocked_collapsed = self
+            .boss_ui
+            .goals_collapsed
+            .contains(&(key, boss::BossGoalSection::Blocked));
         let pending_collapsed = self
             .boss_ui
             .goals_collapsed
@@ -12029,13 +12064,55 @@ impl Waku {
             .collect();
         let older_count = finished.len().saturating_sub(recent_limit);
         let mut items: Vec<BossOutcomeItem> = Vec::new();
+        for (section, label, section_rows, collapsed) in [
+            (
+                boss::BossGoalSection::Pending,
+                tr!("boss.goals_section_pending"),
+                &pending,
+                pending_collapsed,
+            ),
+            (
+                boss::BossGoalSection::Blocked,
+                tr!("boss.goals_section_blocked"),
+                &blocked,
+                blocked_collapsed,
+            ),
+            (
+                boss::BossGoalSection::InProgress,
+                tr!("boss.goals_in_progress"),
+                &running,
+                in_progress_collapsed,
+            ),
+        ] {
+            if section_rows.is_empty() {
+                continue;
+            }
+            items.push(BossOutcomeItem::Header {
+                section,
+                label,
+                count: section_rows.len(),
+                attention: section_rows.iter().filter(|row| row.attention).count(),
+                collapsed,
+                top_gap: !items.is_empty(),
+                focus: self
+                    .boss_ui
+                    .goals_focus_handles
+                    .entry((key, format!("header:{section:?}")))
+                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                    .clone(),
+            });
+            if !collapsed {
+                items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
+            }
+        }
         if !finished.is_empty() {
             items.push(BossOutcomeItem::Header {
                 section: boss::BossGoalSection::Finished,
                 label: tr!("boss.goals_section_finished"),
+                count: finished.len(),
                 attention: 0,
                 collapsed: finished_collapsed,
-                top_gap: false,
+                top_gap: !items.is_empty(),
                 focus: self
                     .boss_ui
                     .goals_focus_handles
@@ -12051,40 +12128,6 @@ impl Waku {
                         expanded: history_expanded,
                     });
                 }
-            }
-        }
-        for (section, label, section_rows, collapsed) in [
-            (
-                boss::BossGoalSection::InProgress,
-                tr!("boss.goals_in_progress"),
-                &running,
-                in_progress_collapsed,
-            ),
-            (
-                boss::BossGoalSection::Pending,
-                tr!("boss.goals_section_pending"),
-                &pending,
-                pending_collapsed,
-            ),
-        ] {
-            if section_rows.is_empty() {
-                continue;
-            }
-            items.push(BossOutcomeItem::Header {
-                section,
-                label,
-                attention: section_rows.iter().filter(|row| row.attention).count(),
-                collapsed,
-                top_gap: !items.is_empty(),
-                focus: self
-                    .boss_ui
-                    .goals_focus_handles
-                    .entry((key, format!("header:{section:?}")))
-                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
-                    .clone(),
-            });
-            if !collapsed {
-                items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
             }
         }
         // Focus handles live only while their item renders — a removed
@@ -12105,12 +12148,14 @@ impl Waku {
         let item_signature = |hasher: &mut DefaultHasher, item: &BossOutcomeItem| match item {
             BossOutcomeItem::Header {
                 section,
+                count,
                 attention,
                 collapsed,
                 ..
             } => {
                 0u8.hash(hasher);
                 section.hash(hasher);
+                count.hash(hasher);
                 attention.hash(hasher);
                 collapsed.hash(hasher);
             }
@@ -12182,6 +12227,7 @@ impl Waku {
                                 BossOutcomeItem::Header {
                                     section,
                                     label,
+                                    count,
                                     attention,
                                     collapsed,
                                     top_gap,
@@ -12189,6 +12235,7 @@ impl Waku {
                                 } => boss_goal_section_header(
                                     *section,
                                     label,
+                                    *count,
                                     *attention,
                                     *collapsed,
                                     *top_gap,

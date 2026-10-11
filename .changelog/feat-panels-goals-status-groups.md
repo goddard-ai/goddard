@@ -1,0 +1,1 @@
+- The Goals panel now groups employee work as Pending, Blocked, In progress, and Finished — Pending starts collapsed, collapsed groups show a muted row count, and blocked or needs-attention tasks collect under Blocked.

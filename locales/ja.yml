@@ -3145,6 +3145,7 @@ boss.goals_status_unavailable: 状態を取得できません
 boss.goals_status_finished: 終了
 boss.goals_section_finished: 終了
 boss.goals_section_pending: 保留中
+boss.goals_section_blocked: ブロック中
 boss.goals_show_older: "さらに表示（あと %{count} 件）"
 boss.goals_show_less: 表示を減らす
 boss.goals_needs_attention: "%{count} 件が対応待ち"

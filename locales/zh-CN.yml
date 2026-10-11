@@ -3096,6 +3096,7 @@ boss.goals_status_unavailable: 状态不可用
 boss.goals_status_finished: 已结束
 boss.goals_section_finished: 已结束
 boss.goals_section_pending: 待处理
+boss.goals_section_blocked: 已阻塞
 boss.goals_show_older: "显示更多（还有 %{count} 条）"
 boss.goals_show_less: 收起
 boss.goals_needs_attention: "%{count} 项需要关注"
