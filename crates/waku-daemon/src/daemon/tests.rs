@@ -10749,6 +10749,78 @@ fn a_resume_requeues_the_expired_employee_with_its_cause() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A re-admitted employee's shell keeps its last admission's terminal
+/// status — a failed verdict would ride the sidebar row past resume until
+/// the next prompt lands, so dispatch marks the shell connecting while
+/// the new turn spins up.
+#[test]
+fn a_resumed_employee_reads_connecting_once_dispatched() {
+    use waku_protocol::boss::{BossOperation, EmployeeSettle};
+    let root = std::env::temp_dir().join(format!("boss-resume-active-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
+    // The finished shell carries its failed verdict into the expiry —
+    // the state a sidebar row reads for any non-queued employee.
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.status = SessionStatus::Failed;
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
+        .unwrap();
+    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    // Close the model pool so the requeue parks — the dispatch boundary is
+    // exercised directly rather than racing the synchronous scheduler.
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == employee_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.model = Some("gpt-5.5".into());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .handle_boss_operation(
+            Some(supervisor),
+            BossOperation::Resume {
+                session_id: employee_id,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.employee(employee_id).unwrap();
+    let mut ticket = employee.ticket.clone().unwrap();
+    // The prompt envelope needs the daemon's bound agent surface, which a
+    // test backend does not have — the shell-status write happens before
+    // the envelope queues anyway.
+    ticket.prompt.clear();
+    ticket.pending_prompts.clear();
+    backend.dispatch_employee(&employee, &ticket).unwrap();
+    let session = {
+        let mut state = backend.task_state.lock();
+        let index = state
+            .sessions
+            .iter()
+            .position(|session| session.id == employee_id)
+            .unwrap();
+        backend.task_store.hydrate(&mut state.sessions[index]).unwrap();
+        state.sessions[index].clone()
+    };
+    assert_eq!(session.status, SessionStatus::Connecting);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Resume is for expired records — a queued or working employee takes
 /// its next input as a prompt, not a revive.
 #[test]

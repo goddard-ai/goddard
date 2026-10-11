@@ -711,6 +711,11 @@ impl WakuBackend {
                 session.provider = ticket.provider;
                 session.model = Some(ticket.model.clone());
                 session.reasoning_effort = ticket.reasoning_effort.clone();
+                // The shell keeps its last admission's terminal status past
+                // requeue — a failed verdict would ride the sidebar row
+                // through dispatch until the next prompt lands, so the
+                // record reads connecting while the new turn spins up.
+                session.status = SessionStatus::Connecting;
                 session.updated_at = crate::model::unix_time();
                 state.mark_session_dirty(session_id);
                 self.task_store.save(&mut state)?;

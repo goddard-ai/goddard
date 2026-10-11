@@ -1,0 +1,1 @@
+- Fixed a resumed employee's sidebar row showing its previous turn's failed marker while it rejoins the summon queue and starts up — the row now reads as connecting until the new turn begins.
