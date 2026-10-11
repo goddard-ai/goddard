@@ -6581,11 +6581,15 @@ impl Waku {
 
     pub(super) fn render_header(
         &self,
+        deliverable_header: Option<AnyElement>,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
         let session = self.selected_session();
+        // A deliverable's preview page swaps the session's title and chips
+        // for the file's own chrome — the header is the page's top bar.
+        let deliverable_page = deliverable_header.is_some();
         // The header's pull-request chip reads the same scan the sidebar
         // badge does; the sidebar's own ensure never runs while it is hidden.
         self.ensure_sidebar_pull_requests(cx);
@@ -6619,9 +6623,15 @@ impl Waku {
                 .get(&session.id)
                 .filter(|title| !title.is_empty())
         });
-        let agent_preset_label = session
-            .filter(|session| session.provider == ProviderKind::DeepSeek && session.has_started())
-            .and_then(|session| self.agent_preset_label_for_session(session));
+        let agent_preset_label = (!deliverable_page)
+            .then(|| {
+                session
+                    .filter(|session| {
+                        session.provider == ProviderKind::DeepSeek && session.has_started()
+                    })
+                    .and_then(|session| self.agent_preset_label_for_session(session))
+            })
+            .flatten();
         // The badge belongs to the session surface — the new-task composer or
         // a selected session's transcript. When another page owns the main
         // column the title still names that session, but the badge is not
@@ -6631,7 +6641,8 @@ impl Waku {
             && !self.automations_page
             && self.boss_ui.page.is_none()
             && self.projects_page.is_none()
-            && !self.notifications.open;
+            && !self.notifications.open
+            && !deliverable_page;
         // A managed session's header leads with its Boss identity —
         // avatar, name, and job title — in place of the session title the
         // daemon keeps in sync with it.
@@ -6757,15 +6768,16 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(7.0))
-                        .child(match &managed_identity {
-                            Some((session_id, identity, job_title)) => self
+                        .child(match (deliverable_header, &managed_identity) {
+                            (Some(header), _) => header,
+                            (None, Some((session_id, identity, job_title))) => self
                                 .render_managed_session_identity(
                                     *session_id,
                                     identity,
                                     job_title,
                                     cx,
                                 ),
-                            None => div()
+                            (None, None) => div()
                                 .min_w_0()
                                 .truncate()
                                 .text_size(sp(13.0))
@@ -6793,8 +6805,7 @@ impl Waku {
                             )
                         })
                         .children(
-                            managed_identity
-                                .is_none()
+                            (managed_identity.is_none() && !deliverable_page)
                                 .then_some(employee_job_title)
                                 .flatten()
                                 .map(|job_title| {

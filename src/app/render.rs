@@ -14,15 +14,12 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
-fn main_header_navigation_visible(
-    sidebar_visible: bool,
-    boss_brain_page: bool,
-    deliverable_page: bool,
-) -> bool {
-    // With the sidebar open, its title bar already owns these controls. A
-    // full-page surface suppresses the main header, except when the sidebar
-    // is hidden and the header is their only remaining home.
-    !sidebar_visible || !(boss_brain_page || deliverable_page)
+fn main_header_navigation_visible(sidebar_visible: bool, boss_brain_page: bool) -> bool {
+    // With the sidebar open, its title bar already owns these controls. The
+    // Brain page suppresses the main header, except when the sidebar is
+    // hidden and the header is their only remaining home. A deliverable's
+    // page always keeps it — its file chrome rides the header's title slot.
+    !sidebar_visible || !boss_brain_page
 }
 
 // Floats normally borrow the transcript's bottom padding. An approval card
@@ -686,7 +683,10 @@ impl Render for Waku {
             session.provider == ProviderKind::Antigravity && session.has_started()
         });
         let composer_mounted = self.composer_mounted();
-        let deliverable_page = self.render_deliverable_preview_page(window, cx);
+        let (deliverable_header, deliverable_page) = self
+            .render_deliverable_preview_page(window, cx)
+            .map(|(header, page)| (Some(header), Some(page)))
+            .unwrap_or((None, None));
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -938,13 +938,20 @@ impl Render for Waku {
                         main_header_navigation_visible(
                             self.sidebar_visible,
                             self.boss_ui.page.is_some(),
-                            deliverable_page.is_some(),
-                        )
-                            && (!self.drafts_page
-                                || self.selected_terminal.is_some_and(|id| {
-                                    self.right_panel_terminals.contains_key(&id)
-                                })),
-                        |element| element.child(self.render_header(window, cx)),
+                        ) && (!self.drafts_page
+                            || self
+                                .selected_terminal
+                                .is_some_and(|id| self.right_panel_terminals.contains_key(&id))),
+                        |element| {
+                            element.child(self.render_header(
+                                // A Brain page covers the deliverable's
+                                // surface — its own page header owns the
+                                // column while it is open.
+                                deliverable_header.filter(|_| self.boss_ui.page.is_none()),
+                                window,
+                                cx,
+                            ))
+                        },
                     )
                     .children(self.friend_watch_banner(cx))
                     .children(self.daemon_degraded_banner(cx))
@@ -1312,17 +1319,16 @@ mod tests {
     }
 
     #[test]
-    fn deliverable_page_keeps_navigation_header_when_sidebar_is_hidden() {
-        assert!(main_header_navigation_visible(false, false, true));
-        assert!(!main_header_navigation_visible(true, false, true));
-        assert!(main_header_navigation_visible(false, false, false));
+    fn deliverable_page_keeps_the_header_for_its_file_chrome() {
+        assert!(main_header_navigation_visible(false, false));
+        assert!(main_header_navigation_visible(true, false));
     }
 
     #[test]
     fn boss_brain_page_keeps_navigation_header_when_sidebar_is_hidden() {
-        assert!(main_header_navigation_visible(false, true, false));
-        assert!(!main_header_navigation_visible(true, true, false));
-        assert!(main_header_navigation_visible(false, false, false));
+        assert!(main_header_navigation_visible(false, true));
+        assert!(!main_header_navigation_visible(true, true));
+        assert!(main_header_navigation_visible(false, false));
     }
 }
 

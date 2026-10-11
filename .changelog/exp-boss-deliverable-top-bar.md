@@ -1,0 +1,1 @@
+- An open deliverable's title, file name, and preview controls now live in the window's top bar beside the navigation buttons, replacing the separate file header row and the "Goddard Boss" identity that crowded it.

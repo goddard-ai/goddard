@@ -1188,6 +1188,17 @@ fn markdown_preview_mode(
         }
 }
 
+/// The render modes a file viewer resolves for one path — which body it draws
+/// and which toggles its top bar offers.
+struct FileViewerModes {
+    is_markdown: bool,
+    is_svg: bool,
+    is_wireframe: bool,
+    image_mode: bool,
+    wireframe_mode: bool,
+    preview: bool,
+}
+
 /// Whether this file names a planning-session wireframe document.
 fn is_wireframe_document(relative_path: &str) -> bool {
     Path::new(relative_path)
@@ -8339,11 +8350,15 @@ impl Waku {
     /// underneath with the boss's chip, so a send from here lands on the
     /// boss chat with the deliverable attached. `None` whenever no armed deliverable
     /// is holding a page open, which drops stale state as it is found.
+    ///
+    /// The pair is `(header chrome, page)` — the file's title/icon/path and
+    /// toggles ride the window header's title slot, so the page itself carries
+    /// no top bar of its own.
     pub(super) fn render_deliverable_preview_page(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> Option<(AnyElement, AnyElement)> {
         let Some((key, deliverable_id)) = self.live_deliverable_page() else {
             self.unmount_deliverable_page(cx);
             return None;
@@ -8363,68 +8378,65 @@ impl Waku {
             self.unmount_deliverable_page(cx);
             return None;
         };
-        Some(
-            self.render_right_panel_file(
-                relative_path,
-                self.chat_viewport_width(window),
-                false,
-                Some(deliverable_title),
-                window,
-                cx,
-            )
-            .into_any_element(),
-        )
+        let page = self.render_right_panel_file(
+            relative_path.clone(),
+            self.chat_viewport_width(window),
+            false,
+            Some(deliverable_title.clone()),
+            window,
+            cx,
+        );
+        let header = self.deliverable_page_chrome(&relative_path, &deliverable_title, cx);
+        Some((header, page.into_any_element()))
     }
 
-    /// `show_tree` mounts the working-tree column beside the editor — the
-    /// strip's own browsing surface. A deliverable's preview page leaves it
-    /// out: the page previews one published file, not its directory.
-    /// `deliverable_title` lays the surface out as a page — the markdown preview
-    /// centers its column like the maximized panel, a bottom fade marks
-    /// content scrolling under the composer as the transcript's does, and the
-    /// header carries the deliverable's name like a top bar title.
-    fn render_right_panel_file(
+    /// The deliverable page's file chrome, laid out to ride the window
+    /// header's title slot — the same title/icon/path/toggles the file bar
+    /// builds, minus the tree and traffic-light handling the header already
+    /// owns.
+    fn deliverable_page_chrome(
         &mut self,
-        relative_path: String,
-        panel_width: f32,
-        show_tree: bool,
-        deliverable_title: Option<String>,
-        window: &mut Window,
+        relative_path: &str,
+        deliverable_title: &str,
         cx: &mut Context<Self>,
-    ) -> Div {
-        let theme = Theme::current(cx);
-        let deliverable_page = deliverable_title.is_some();
-        let fullscreen = self.panel_fullscreen_active();
-        let file_tree_width = if !show_tree || fullscreen {
-            0.0
-        } else if !self.right_panel_file_tree_visible {
-            0.0
-        } else {
-            fitted_file_tree_width(panel_width, self.right_panel_file_tree_width)
-        };
-        let (editor_state, writable, _) =
-            self.ensure_right_panel_file_editor(&relative_path, window, cx);
+    ) -> AnyElement {
+        div()
+            .min_w_0()
+            .flex_shrink(1.0)
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .children(self.file_viewer_chrome(
+                relative_path,
+                Some(deliverable_title.to_owned()),
+                false,
+                cx,
+            ))
+            .into_any_element()
+    }
 
-        // Deliverables use a per-file reading toggle; other Markdown files
-        // carry the global source/preview toggle. Every other
-        // language always shows source. Image files render pixels instead of
-        // text — SVGs alone keep a source view behind the toggle, since
-        // their text stays editable. `.wireframe.json` previews as themed
-        // elements behind the wireframes experiment; with the flag off, or
-        // flipped to source, it is just a JSON file in the editor.
-        let is_markdown = file_highlighter_language(&relative_path) == "markdown";
+    /// The render modes a file viewer resolves for `relative_path` — which
+    /// body it draws and which toggles its top bar offers. Deliverables use a
+    /// per-file reading toggle; other Markdown files carry the global
+    /// source/preview toggle. Every other language always shows source. Image
+    /// files render pixels instead of text — SVGs alone keep a source view
+    /// behind the toggle, since their text stays editable. `.wireframe.json`
+    /// previews as themed elements behind the wireframes experiment; with the
+    /// flag off, or flipped to source, it is just a JSON file in the editor.
+    fn file_viewer_modes(&self, relative_path: &str, deliverable_page: bool) -> FileViewerModes {
+        let is_markdown = file_highlighter_language(relative_path) == "markdown";
         let is_svg =
-            image_preview::image_format_for_name(&relative_path) == Some(gpui::ImageFormat::Svg);
+            image_preview::image_format_for_name(relative_path) == Some(gpui::ImageFormat::Svg);
         let is_wireframe =
-            self.state.wireframes_experiment_enabled && is_wireframe_document(&relative_path);
+            self.state.wireframes_experiment_enabled && is_wireframe_document(relative_path);
         let image_mode = self
             .right_panel_file_editors
-            .get(&relative_path)
-            .is_some_and(|editor| file_shows_image(editor, &relative_path));
+            .get(relative_path)
+            .is_some_and(|editor| file_shows_image(editor, relative_path));
         let wireframe_mode = is_wireframe
             && self
                 .right_panel_file_editors
-                .get(&relative_path)
+                .get(relative_path)
                 .is_none_or(|editor| !editor.show_source);
         let preview = !image_mode
             && !wireframe_mode
@@ -8432,36 +8444,38 @@ impl Waku {
                 is_markdown,
                 deliverable_page,
                 self.right_panel_file_editors
-                    .get(&relative_path)
+                    .get(relative_path)
                     .is_some_and(|editor| editor.show_source),
                 self.state.markdown_preview,
             );
-        let body = if image_mode {
-            self.render_file_image_preview(&relative_path, cx)
-        } else if wireframe_mode {
-            self.render_file_wireframe_preview(&relative_path, &editor_state, cx)
-        } else if preview {
-            self.render_file_markdown_preview(
-                &relative_path,
-                &editor_state,
-                panel_width - file_tree_width,
-                deliverable_page,
-                window,
-                cx,
-            )
-        } else {
-            self.render_file_editor_body(
-                &relative_path,
-                &editor_state,
-                panel_width - file_tree_width,
-                writable,
-                window,
-                cx,
-            )
-        };
+        FileViewerModes {
+            is_markdown,
+            is_svg,
+            is_wireframe,
+            image_mode,
+            wireframe_mode,
+            preview,
+        }
+    }
+
+    /// A file viewer top bar's contents, in order: the deliverable's title
+    /// when `deliverable_title` is set, the type icon, the path link, a
+    /// filler, and the GitHub/tree/preview toggles. `show_tree_toggle` gates
+    /// the working-tree column's toggle — a deliverable's page previews one
+    /// published file and never offers it.
+    fn file_viewer_chrome(
+        &mut self,
+        relative_path: &str,
+        deliverable_title: Option<String>,
+        show_tree_toggle: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let theme = Theme::current(cx);
+        let deliverable_page = deliverable_title.is_some();
+        let modes = self.file_viewer_modes(relative_path, deliverable_page);
         let github_url = self.right_panel_files_root.clone().and_then(|workspace| {
             let snapshot = self.branch_snapshot_for_workspace(&workspace, cx)?;
-            match self.remote_file_for(&workspace, &relative_path, cx) {
+            match self.remote_file_for(&workspace, relative_path, cx) {
                 // Verified against the remote-tracking refs — the remote
                 // serves the file at this ref + repo-relative path.
                 Some(Ok(Some(remote))) => {
@@ -8476,7 +8490,7 @@ impl Waku {
                 Some(Ok(None)) => None,
                 // Unverifiable — keep the optimistic guess rather than
                 // drop an affordance that used to render unconditionally.
-                Some(Err(_)) => branches::github_file_url(&snapshot, &relative_path),
+                Some(Err(_)) => branches::github_file_url(&snapshot, relative_path),
                 // Answer in flight; drawing the old guess here would
                 // flash a button that can vanish a frame later.
                 None => None,
@@ -8510,7 +8524,7 @@ impl Waku {
                     }
                 })
         });
-        let tree_toggle = (show_tree && !fullscreen).then(|| {
+        let tree_toggle = show_tree_toggle.then(|| {
             let focus = self.transcript_control_focus("file-tree-toggle", cx);
             let label = if self.right_panel_file_tree_visible {
                 tr!("files.hide_tree")
@@ -8544,13 +8558,13 @@ impl Waku {
                     }
                 }))
         });
-        let preview_toggle = (is_markdown || is_svg || is_wireframe).then(|| {
+        let preview_toggle = (modes.is_markdown || modes.is_svg || modes.is_wireframe).then(|| {
             let focus = self.transcript_control_focus("file-preview-toggle", cx);
-            let (icon_path, label) = if preview || image_mode || wireframe_mode {
+            let (icon_path, label) = if modes.preview || modes.image_mode || modes.wireframe_mode {
                 ("icons/pencil.svg", tr!("files.edit_markdown_source"))
-            } else if is_svg {
+            } else if modes.is_svg {
                 ("icons/eye.svg", tr!("files.preview_image"))
-            } else if is_wireframe {
+            } else if modes.is_wireframe {
                 ("icons/eye.svg", tr!("files.preview_wireframe"))
             } else {
                 ("icons/eye.svg", tr!("files.preview_markdown"))
@@ -8571,9 +8585,9 @@ impl Waku {
                 .child(icon(icon_path, 12.0, theme.text_tertiary))
                 .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
                 .on_click(cx.listener({
-                    let relative_path = relative_path.clone();
+                    let relative_path = relative_path.to_owned();
                     move |this, _, _, cx| {
-                        if is_svg || is_wireframe || deliverable_page {
+                        if modes.is_svg || modes.is_wireframe || deliverable_page {
                             this.toggle_file_source_view(&relative_path, cx);
                         } else {
                             this.toggle_markdown_preview(cx);
@@ -8581,10 +8595,10 @@ impl Waku {
                     }
                 }))
                 .on_key_down(cx.listener({
-                    let relative_path = relative_path.clone();
+                    let relative_path = relative_path.to_owned();
                     move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            if is_svg || is_wireframe || deliverable_page {
+                            if modes.is_svg || modes.is_wireframe || deliverable_page {
                                 this.toggle_file_source_view(&relative_path, cx);
                             } else {
                                 this.toggle_markdown_preview(cx);
@@ -8594,93 +8608,137 @@ impl Waku {
                     }
                 }))
         });
+        let mut children = Vec::new();
+        if let Some(title) = deliverable_title {
+            children.push(
+                div()
+                    .min_w_0()
+                    .flex_shrink(1.0)
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(title)
+                    .into_any_element(),
+            );
+        }
+        children.push(file_icon(file_icon_for_path(relative_path), 13.0).into_any_element());
+        children.push(file_link(
+            div()
+                .id(SharedString::from(format!(
+                    "file-viewer-path-{relative_path}"
+                )))
+                .min_w_0()
+                .flex_shrink(1.0)
+                .truncate()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(relative_path.to_owned()),
+            &self.transcript_control_focus(format!("file-viewer-path-{relative_path}"), cx),
+            relative_path.to_owned(),
+            self,
+            &cx.entity().downgrade(),
+            format!("file-link-menu-viewer-{relative_path}"),
+            cx,
+        ));
+        // The filler holds a full-width bar's toggles on its right edge; in
+        // the header's shrink-to-fit title slot it collapses to nothing.
+        children.push(div().flex_1().into_any_element());
+        children.extend(github_button.map(IntoElement::into_any_element));
+        children.extend(tree_toggle.map(IntoElement::into_any_element));
+        children.extend(preview_toggle.map(IntoElement::into_any_element));
+        children
+    }
+
+    /// `show_tree` mounts the working-tree column beside the editor — the
+    /// strip's own browsing surface. A deliverable's preview page leaves it
+    /// out: the page previews one published file, not its directory.
+    /// `deliverable_title` lays the surface out as a page — the markdown preview
+    /// centers its column like the maximized panel, a bottom fade marks
+    /// content scrolling under the composer as the transcript's does, and the
+    /// file's top bar moves into the window header's title slot.
+    fn render_right_panel_file(
+        &mut self,
+        relative_path: String,
+        panel_width: f32,
+        show_tree: bool,
+        deliverable_title: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let deliverable_page = deliverable_title.is_some();
+        let fullscreen = self.panel_fullscreen_active();
+        let file_tree_width = if !show_tree || fullscreen {
+            0.0
+        } else if !self.right_panel_file_tree_visible {
+            0.0
+        } else {
+            fitted_file_tree_width(panel_width, self.right_panel_file_tree_width)
+        };
+        let (editor_state, writable, _) =
+            self.ensure_right_panel_file_editor(&relative_path, window, cx);
+
+        let modes = self.file_viewer_modes(&relative_path, deliverable_page);
+        let body = if modes.image_mode {
+            self.render_file_image_preview(&relative_path, cx)
+        } else if modes.wireframe_mode {
+            self.render_file_wireframe_preview(&relative_path, &editor_state, cx)
+        } else if modes.preview {
+            self.render_file_markdown_preview(
+                &relative_path,
+                &editor_state,
+                panel_width - file_tree_width,
+                deliverable_page,
+                window,
+                cx,
+            )
+        } else {
+            self.render_file_editor_body(
+                &relative_path,
+                &editor_state,
+                panel_width - file_tree_width,
+                writable,
+                window,
+                cx,
+            )
+        };
         let editor = div()
             .flex_1()
             .min_h_0()
             .min_w_0()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(42.0))
-                    .flex_none()
-                    // A deliverable's page owns the chat column, so its top
-                    // bar is the surface under the window's left edge — it
-                    // keeps the same traffic-light clearance the chat header
-                    // does while the sidebar is too narrow to host them.
-                    .pl(px(if deliverable_page {
-                        if self.sidebar_visible {
-                            16.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0)
-                        } else {
-                            TRAFFIC_LIGHT_CLEARANCE
-                        }
-                    } else {
-                        16.0
-                    }))
-                    .pr(px(16.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .border_b(hairline())
-                    .border_color(theme.separator)
-                    .children(
-                        (deliverable_page && !self.sidebar_visible)
-                            .then(|| {
-                                self.render_client_window_controls(
-                                    super::window_chrome::WindowControlSide::Left,
-                                    window,
-                                    cx,
-                                )
-                            })
-                            .flatten(),
-                    )
-                    .when_some(deliverable_title, |header, title| {
-                        header.child(
-                            div()
-                                .min_w_0()
-                                .flex_shrink(1.0)
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(title),
-                        )
-                    })
-                    .child(file_icon(file_icon_for_path(&relative_path), 13.0))
-                    .child(file_link(
-                        div()
-                            .id(SharedString::from(format!(
-                                "file-viewer-path-{relative_path}"
-                            )))
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(relative_path.clone()),
-                        &self.transcript_control_focus(
-                            format!("file-viewer-path-{relative_path}"),
+            // A deliverable's page draws no bar of its own — its chrome rides
+            // the window header's title slot. Other files keep the bar here.
+            .when(!deliverable_page, |editor| {
+                editor.child(
+                    div()
+                        .h(px(42.0))
+                        .flex_none()
+                        .px(px(16.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .border_b(hairline())
+                        .border_color(theme.separator)
+                        .children(self.file_viewer_chrome(
+                            &relative_path,
+                            None,
+                            show_tree && !fullscreen,
                             cx,
-                        ),
-                        relative_path.clone(),
-                        self,
-                        &cx.entity().downgrade(),
-                        format!("file-link-menu-viewer-{relative_path}"),
-                        cx,
-                    ))
-                    .children(github_button)
-                    .children(tree_toggle)
-                    .children(preview_toggle),
-            )
+                        )),
+                )
+            })
             .child(body)
             // A deliverable's page rides above the composer like the transcript:
             // its rows dissolve into the surface where more waits below.
             .when_some(
                 deliverable_page
                     .then(|| {
-                        if image_mode {
+                        if modes.image_mode {
                             None
-                        } else if preview {
+                        } else if modes.preview {
                             self.preview_list_state(&relative_path)
                                 .map(|state| -> Box<dyn scrollbar::Scrollable> { Box::new(state) })
                         } else {
