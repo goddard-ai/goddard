@@ -587,7 +587,8 @@ pub(super) struct BossUi {
     pub managed: HashSet<Uuid>,
     /// Rotated Boss chats: retired session id → replacement session id.
     /// Composer draft keys resolve through this so a swap mid-draft re-keys
-    /// the slot instead of stranding the text on the archived row.
+    /// the slot instead of stranding the text on the archived row, and
+    /// submissions armed before the swap retarget to the live chat.
     pub(super) rotated_chat_drafts: HashMap<Uuid, Uuid>,
     pub identities: HashMap<Uuid, BossIdentity>,
     /// Cached `ListBuckets` replies per daemon — the `@` mention pool's
@@ -1203,6 +1204,53 @@ fn boss_state_owning_session(
                 .iter()
                 .any(|plan| plan.session_id == session_id)
     })
+}
+
+/// The boss document's `session_id` trails the task catalog across a
+/// rotation: the retired chat is archived and its replacement pushed with
+/// the task state while the document only lands on the next boss load — and
+/// a submission parked on the retired chat keeps its id outright. Resolve a
+/// recorded boss chat to the live one while the client can tell them apart:
+/// the session itself while it still takes prompts, the swap the client
+/// already recorded, or the unarchived boss-managed chat that shares the
+/// retired chat's project — exactly one can be live, and planning sessions
+/// are a different kind. Anything else passes through.
+fn live_boss_chat_session(
+    sessions: &[AgentSession],
+    identities: &HashSet<Uuid>,
+    rotated: &HashMap<Uuid, Uuid>,
+    recorded: Uuid,
+) -> Uuid {
+    // A state refresh can land while the catalog still trails; follow
+    // recorded swaps to their end so chained rotations resolve too.
+    let mut resolved = recorded;
+    for _ in 0..8 {
+        match rotated.get(&resolved) {
+            Some(&next) if next != resolved => resolved = next,
+            _ => break,
+        }
+    }
+    let Some(entry) = sessions.iter().find(|session| session.id == resolved) else {
+        return resolved;
+    };
+    if entry.archived_at.is_none()
+        || !entry.boss_managed
+        || entry.planning.is_some()
+        || !identities.contains(&entry.project_id)
+    {
+        return resolved;
+    }
+    let mut replacements = sessions.iter().filter(|session| {
+        session.id != resolved
+            && session.boss_managed
+            && session.planning.is_none()
+            && session.project_id == entry.project_id
+            && session.archived_at.is_none()
+    });
+    match (replacements.next(), replacements.next()) {
+        (Some(session), None) => session.id,
+        _ => resolved,
+    }
 }
 
 fn viewed_plan_just_finalized(
@@ -2593,6 +2641,27 @@ impl Waku {
             .collect()
     }
 
+    /// An armed command or a parked submission can outlive the boss chat it
+    /// names: rotation archives the session and publishes its replacement
+    /// while the boss document's pointer is still in flight, and the daemon
+    /// refuses sends to the retired chat. Retarget retired boss chats to
+    /// the live replacement so the send reaches the active session; every
+    /// other id passes through.
+    pub(super) fn resolve_boss_chat_session(&self, session_id: Uuid) -> Uuid {
+        let identities: HashSet<Uuid> = self
+            .boss_ui
+            .states
+            .values()
+            .map(|state| state.identity.id)
+            .collect();
+        live_boss_chat_session(
+            &self.state.sessions,
+            &identities,
+            &self.boss_ui.rotated_chat_drafts,
+            session_id,
+        )
+    }
+
     /// The boss chat a main-composer submission answers to while armed —
     /// a live employee's task is on screen or a sidebar deliverable was
     /// clicked — plus the context it attaches. `None` leaves the
@@ -2610,7 +2679,7 @@ impl Waku {
             && let Some(session_id) = state.session_id
         {
             return Some(BossCommand {
-                session_id,
+                session_id: self.resolve_boss_chat_session(session_id),
                 identity: state.identity.clone(),
                 context: BossCommandContext::MemoryFeedback(key),
             });
@@ -2623,7 +2692,7 @@ impl Waku {
                     .find(|deliverable| deliverable.id == deliverable_id)
                     .and_then(|deliverable| {
                         Some(BossCommand {
-                            session_id: state.session_id?,
+                            session_id: self.resolve_boss_chat_session(state.session_id?),
                             identity: state.identity.clone(),
                             context: BossCommandContext::Deliverable {
                                 path: PathBuf::from(&deliverable.path),
@@ -2650,7 +2719,7 @@ impl Waku {
         let key = self.daemons.session_owner(employee_id);
         let state = self.boss_ui.states.get(&key)?;
         Some(BossCommand {
-            session_id: state.session_id?,
+            session_id: self.resolve_boss_chat_session(state.session_id?),
             identity: state.identity.clone(),
             context: BossCommandContext::Employee(employee_id),
         })
@@ -10486,6 +10555,130 @@ mod tests {
         assert_eq!(
             boss_queue_detail(&resources, Some(1)),
             Some("waiting for a build slot".to_owned())
+        );
+    }
+
+    fn boss_chat_session(project: Uuid, id: Uuid, archived: bool) -> AgentSession {
+        let mut session = AgentSession::new(project, ProviderKind::Codex);
+        session.id = id;
+        session.boss_managed = true;
+        session.archived_at = archived.then_some(1);
+        session
+    }
+
+    #[test]
+    fn employee_chat_submission_after_rotation_targets_the_live_chat() {
+        // The employee-page composer armed while the document still named
+        // the retired chat: the catalog already carries the swap, so the
+        // send resolves to the replacement rather than landing on the
+        // archived session the daemon refuses.
+        let project = Uuid::new_v4();
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        let sessions = vec![
+            boss_chat_session(project, old, true),
+            boss_chat_session(project, next, false),
+        ];
+        let identities = HashSet::from([project]);
+        assert_eq!(
+            live_boss_chat_session(&sessions, &identities, &HashMap::new(), old),
+            next
+        );
+        // The same resolution settles a draft parked on the retired chat —
+        // a follow-up queued before the swap.
+        assert_eq!(
+            live_boss_chat_session(&sessions, &identities, &HashMap::from([(old, next)]), old),
+            next
+        );
+        // With no replacement in the catalog yet the recorded chat stands —
+        // the send proceeds on the id it armed with.
+        let unswapped = vec![boss_chat_session(project, old, false)];
+        assert_eq!(
+            live_boss_chat_session(&unswapped, &identities, &HashMap::new(), old),
+            old
+        );
+    }
+
+    #[test]
+    fn deliverable_submission_after_rotation_targets_the_live_chat() {
+        // The deliverable page armed the command before the refresh landed:
+        // the recorded swap resolves the retired chat to its replacement
+        // even while the catalog still shows the old row unarchived.
+        let project = Uuid::new_v4();
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        let sessions = vec![
+            boss_chat_session(project, old, false),
+            boss_chat_session(project, next, false),
+        ];
+        let identities = HashSet::from([project]);
+        let rotated = HashMap::from([(old, next)]);
+        assert_eq!(
+            live_boss_chat_session(&sessions, &identities, &rotated, old),
+            next
+        );
+        // Chained rotations follow to the live chat.
+        let newer = Uuid::new_v4();
+        let rotated = HashMap::from([(old, next), (next, newer)]);
+        let chained = vec![
+            boss_chat_session(project, old, true),
+            boss_chat_session(project, next, true),
+            boss_chat_session(project, newer, false),
+        ];
+        assert_eq!(
+            live_boss_chat_session(&chained, &identities, &rotated, old),
+            newer
+        );
+    }
+
+    #[test]
+    fn rotation_retargeting_never_touches_employee_sessions_or_live_chats() {
+        let project = Uuid::new_v4();
+        let employee_project = Uuid::new_v4();
+        let chat = Uuid::new_v4();
+        let archived_employee = Uuid::new_v4();
+        let sibling_employee = Uuid::new_v4();
+        let sessions = vec![
+            boss_chat_session(project, chat, false),
+            boss_chat_session(employee_project, archived_employee, true),
+            boss_chat_session(employee_project, sibling_employee, false),
+        ];
+        let identities = HashSet::from([project]);
+        // An archived employee keeps its own id — its project is not a
+        // boss workspace, so a live colleague in it is not a replacement.
+        assert_eq!(
+            live_boss_chat_session(
+                &sessions,
+                &identities,
+                &HashMap::new(),
+                archived_employee
+            ),
+            archived_employee
+        );
+        // A live recorded chat answers itself even with a stale rotation
+        // map — the session that still takes prompts wins.
+        assert_eq!(
+            live_boss_chat_session(&sessions, &identities, &HashMap::new(), chat),
+            chat
+        );
+        // Planning sessions are a different boss-owned kind; an archived
+        // one never retargets onto the chat.
+        let mut planning = boss_chat_session(project, Uuid::new_v4(), true);
+        planning.planning = Some(crate::model::SessionPlanning {
+            plan_file: "plans/auth.md".into(),
+            idea: "Auth".into(),
+            label: waku_client::WireTranslation::new("boss.planning_label", []),
+            finalized_at: None,
+        });
+        let sessions = vec![planning, boss_chat_session(project, chat, false)];
+        assert_eq!(
+            live_boss_chat_session(
+                &sessions,
+                &identities,
+                &HashMap::new(),
+                sessions[0].id
+            ),
+            sessions[0].id
         );
     }
 

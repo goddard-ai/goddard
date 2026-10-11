@@ -6486,9 +6486,19 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session.id) {
             return;
         }
-        let session_id = session.id;
-        let is_background = session.status == SessionStatus::Background;
-        let is_busy = session.is_busy();
+        let session_id = self.resolve_boss_chat_session(session.id);
+        let (is_background, is_busy) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| {
+                (
+                    session.status == SessionStatus::Background,
+                    session.is_busy(),
+                )
+            })
+            .unwrap_or_default();
         // A message leaving this composer retires the transcription
         // bubble anchored to its pad — hidden nudges keep it.
         if !submission.hidden
@@ -6574,6 +6584,7 @@ impl Waku {
         queue_background: bool,
         cx: &mut Context<Self>,
     ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
         let Some(session) = self
             .state
             .sessions
@@ -6661,6 +6672,7 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
         let Some(session) = self
             .state
             .sessions
@@ -6833,6 +6845,7 @@ impl Waku {
         mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
         submission.prompt = submission.prompt.trim().to_owned();
         if submission.prompt.is_empty() {
             return;
@@ -7137,6 +7150,7 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
@@ -7571,6 +7585,16 @@ impl Waku {
                     }
                     session.status = SessionStatus::Idle;
                 }
+                // An armed boss command leaves its own composer on screen —
+                // the employee on view or the deliverable page — so the
+                // target is never the selected session, and a refused send
+                // would strand the typed prompt without this restore.
+                let boss_send = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| self.session_is_boss_owned(session));
                 if selected {
                     if self
                         .transcript_anchor
@@ -7581,6 +7605,8 @@ impl Waku {
                         self.transcript_anchor_following.set(false);
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                }
+                if selected || boss_send {
                     self.restore_composer_submission(session_id, submission, cx);
                     self.show_toast(tr!("errors.create_worktree", error = error));
                 }

@@ -1,0 +1,1 @@
+- A message sent from an employee's page or a deliverable's preview while the Boss session rotates now reaches the replacement Boss chat — it used to target the retired session, which refused it and dropped the prompt.
