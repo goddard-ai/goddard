@@ -15651,8 +15651,8 @@ impl Waku {
                     .rounded(px(16.0))
                     .bg(theme.raised)
                     .flex()
-                    .items_center()
-                    .child(settings_row_icon("icons/server.svg", theme))
+                    .items_start()
+                    .child(settings_row_icon("icons/server.svg", theme).mt(px(1.0)))
                     .child(
                         div()
                             .flex_1()
@@ -17218,20 +17218,37 @@ fn parse_key_value_lines(text: &str) -> Option<BTreeMap<String, String>> {
 /// brand-family color where the official one is too dark (Sentry, Atlassian).
 #[track_caller]
 fn integration_logo(id: &str, theme: Theme) -> Svg {
-    let (path, color): (&'static str, Hsla) = match id {
-        "atlassian" => ("icons/integration-atlassian.svg", rgb(0x2684FF).into()),
-        "figma" => ("icons/integration-figma.svg", rgb(0xF24E1E).into()),
-        "github" => ("icons/integration-github.svg", theme.text),
-        "linear" => ("icons/integration-linear.svg", rgb(0x5E6AD2).into()),
-        "monday" => ("icons/integration-monday.svg", rgb(0xFF3D57).into()),
-        "notion" => ("icons/integration-notion.svg", theme.text),
-        "sentry" => ("icons/integration-sentry.svg", rgb(0x6C5FC7).into()),
-        "stripe" => ("icons/integration-stripe.svg", rgb(0x635BFF).into()),
-        "supabase" => ("icons/integration-supabase.svg", rgb(0x3ECF8E).into()),
-        "vercel" => ("icons/integration-vercel.svg", theme.text),
-        _ => ("icons/server.svg", theme.text_tertiary),
+    let path = integration_logo_path(id);
+    let color = match id {
+        "atlassian" => rgb(0x2684FF).into(),
+        "clickup" => rgb(0x7B68EE).into(),
+        "figma" => rgb(0xF24E1E).into(),
+        "github" | "notion" | "vercel" => theme.text,
+        "linear" => rgb(0x5E6AD2).into(),
+        "monday" => rgb(0xFF3D57).into(),
+        "sentry" => rgb(0x6C5FC7).into(),
+        "stripe" => rgb(0x635BFF).into(),
+        "supabase" => rgb(0x3ECF8E).into(),
+        _ => theme.text_tertiary,
     };
     icon(path, 15.0, color)
+}
+
+fn integration_logo_path(id: &str) -> &'static str {
+    match id {
+        "atlassian" => "icons/integration-atlassian.svg",
+        "clickup" => "icons/integration-clickup.svg",
+        "figma" => "icons/integration-figma.svg",
+        "github" => "icons/integration-github.svg",
+        "linear" => "icons/integration-linear.svg",
+        "monday" => "icons/integration-monday.svg",
+        "notion" => "icons/integration-notion.svg",
+        "sentry" => "icons/integration-sentry.svg",
+        "stripe" => "icons/integration-stripe.svg",
+        "supabase" => "icons/integration-supabase.svg",
+        "vercel" => "icons/integration-vercel.svg",
+        _ => "icons/server.svg",
+    }
 }
 
 #[track_caller]
@@ -17415,6 +17432,14 @@ mod tests {
                 "missing embedded icon: {icon}"
             );
         }
+    }
+
+    #[test]
+    fn clickup_integration_uses_its_brand_mark() {
+        assert_eq!(
+            super::integration_logo_path("clickup"),
+            "icons/integration-clickup.svg"
+        );
     }
 
     #[test]

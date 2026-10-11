@@ -210,6 +210,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "inbox-sidebar",
     "info",
     "integration-atlassian",
+    "integration-clickup",
     "integration-figma",
     "integration-github",
     "integration-linear",
