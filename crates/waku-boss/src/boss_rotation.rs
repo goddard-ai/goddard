@@ -51,6 +51,22 @@ pub struct RotationIntent {
     pub committed_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The authorization-bearing identity revision bound when the intent was
+    /// persisted. The successor may publish only while the authoritative
+    /// document still digests to this value — a persona, policy or grant
+    /// change during staging aborts the rotation rather than activating
+    /// stale grants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_digest: Option<String>,
+    /// The provider/model configuration this rotation was staged under,
+    /// recorded for telemetry and rebound validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The prevention-contract evidence held for `provider` at intent time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_qualification: Option<crate::rotation_continuity::ProviderQualification>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -86,6 +102,10 @@ impl RotationJournal {
             created_at: now,
             committed_at: None,
             reason: None,
+            identity_digest: None,
+            provider: None,
+            model: None,
+            provider_qualification: None,
         });
         Ok(())
     }

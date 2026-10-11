@@ -14209,6 +14209,24 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
     assert!(prompts[0].contains("Keep supervising the release"));
     assert!(prompts[0].contains(&format!("boss transcript {old}")));
     drop(prompts);
+    // Submission keeps the bound package pending — it is consumed when
+    // provider transport acceptance (`TurnStarted`) is recorded.
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(next)
+            .unwrap()
+            .pending_provider_context
+            .is_some()
+    );
+    super::events::boss_continuity_note_event(
+        &backend.boss,
+        &backend.task_state,
+        &backend.task_store,
+        next,
+        &DriverEvent::TurnStarted,
+    );
     assert!(
         backend
             .task_state

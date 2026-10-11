@@ -57,6 +57,10 @@ impl WakuBackend {
         let cwd = options.cwd.clone();
         let mut options = options;
         self.boss.require_active(session_id)?;
+        anyhow::ensure!(
+            !self.boss_fenced_chat(session_id),
+            "task {session_id} is a fenced Boss generation; the active chat owns coordination"
+        );
         let managed = self.boss.is_managed(session_id);
         let employee_snapshot = self.boss.employee(session_id);
         let environment = self
@@ -350,8 +354,7 @@ impl WakuBackend {
         let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
             DriverHandle::from_control(gate.clone())
         });
-        #[cfg(test)]
-        let handle = self.observe_boss_driver(session_id, runtime_id, handle);
+        let handle = self.boss_driver_boundary(session_id, runtime_id, handle);
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");

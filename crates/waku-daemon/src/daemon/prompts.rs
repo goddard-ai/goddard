@@ -79,6 +79,9 @@ impl WakuBackend {
             );
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        // An address resolved against a stale Boss pointer still means "the
+        // Boss" — deliver it to the committed owner exactly once.
+        let target = self.boss_active_alias(target);
         if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
             use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;
@@ -202,6 +205,10 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        // A queued event addressed to a retired Boss chat belongs to the
+        // committed owner — retarget before it is enqueued or mirrored so
+        // the successor receives it exactly once.
+        let target = self.boss_active_alias(target);
         let plan_finalized = report_trigger
             .as_ref()
             .is_some_and(|trigger| trigger.kind == crate::model::ReportTriggerKind::PlanFinalized);
@@ -276,6 +283,7 @@ impl WakuBackend {
             );
         }
         if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
+            || self.boss_incident_fenced(target)
             || self.agent.user_stopped(target)
             || self.agent.is_working(target)
             || automation_prompt_waiting(
@@ -372,6 +380,12 @@ impl WakuBackend {
         sink: &EventSink,
     ) -> anyhow::Result<()> {
         rehydrate_agent_queue(&self.agent, &self.task_state, &self.task_store, session_id);
+        // An incident-fenced Boss chat holds its queue: popping and
+        // "delivering" into a fence-denied provider boundary would record
+        // the message while silently dropping the effect.
+        if self.boss.is_boss(session_id) && self.boss_incident_fenced(session_id) {
+            return Ok(());
+        }
         while let Some(entry) = self.agent.pop_queued(session_id) {
             if agent_prompt_waiting(
                 session_id,

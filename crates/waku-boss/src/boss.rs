@@ -619,6 +619,36 @@ impl BossService {
         (state.identity.clone(), state.session_id)
     }
 
+    /// The service's durable root — the directory holding `boss.json`, the
+    /// rotation journal, and the continuity ledger.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The authorization-bearing identity revision for rotation binding:
+    /// the coordinator's identity, its canonical persona record, the shipped
+    /// persona-default provenance, and the resource grant policy. Employee
+    /// roster churn deliberately stays out — assignments are durable work,
+    /// not identity. A rotation revalidates this digest before publishing
+    /// the successor so a persona or grant change mid-refresh can never
+    /// activate stale authorization.
+    pub fn identity_digest(&self) -> String {
+        let state = self.state.lock();
+        let material = serde_json::json!({
+            "identity": state.identity,
+            "personaId": state.persona_id,
+            "persona": state
+                .personas
+                .iter()
+                .find(|persona| persona.id == state.persona_id),
+            "employeePersonaId": state.employee_persona_id,
+            "specialistPersonaIds": state.specialist_persona_ids,
+            "personaDefaults": state.persona_defaults,
+            "resourcePolicy": state.resource_policy,
+        });
+        format!("{:x}", Sha256::digest(material.to_string().as_bytes()))
+    }
+
     pub fn set_session_id(&self, session_id: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
             state.session_id = Some(session_id);

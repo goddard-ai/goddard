@@ -7,32 +7,50 @@ unsafe admissions, compaction entry, ownership conflicts, duplicate provider
 effects, and invalid lifecycle transitions. It does not infer safety from a
 rotation request.
 
+## The ownership fence and continuity ledger
+
+`BossOwnershipDriver` wraps every Boss-chat `DriverHandle` in production —
+the last daemon-owned boundary before the provider. It admits a
+context-growing call only while the durable pointer still names that
+session, the session is unarchived, and no compaction incident fenced it.
+`compact` is never forwarded: a manual compact writes a durable refresh
+request that the reconciler settles as a rotation, and a detected
+provider-side compaction records an incident that fences the generation
+and requests the same refresh. Unqualified provider configurations fail
+closed through the same path.
+
+`boss/continuity.json` is the durable ledger beside the journal: bound
+handoff deliveries move `Prepared → Submitted → Accepted`, where only a
+recorded `TurnStarted` consumes `pending_provider_context`. A rejected or
+unconfirmed submission stays pending under the same delivery identifier
+and reconciles on retry. The ledger also holds compaction incidents and
+the rotation request queue.
+
 ## Test-only daemon seams
 
-The current lifecycle does not have a measured admission guard. Until the
-implementation workstreams land one, daemon unit tests can install
-`RuntimeLifecycles::rotation_observer` and receive these observations:
+Daemon unit tests install `RuntimeLifecycles::rotation_observer` and
+receive these observations:
 
-- `RotationObservedDriver` wraps the live Boss `DriverHandle` under tests
-  and records every context-growing prompt, continuation, resume/replay, or
-  computer-tool result immediately before it reaches the provider. These
-  calls are deliberately reported `Unguarded`; `compact` is reported as
-  `ProviderCompaction::Attempted` so it can never masquerade as a successful
-  rotation.
+- The production `BossOwnershipDriver` reports each admission decision
+  (`Unguarded` while the ownership fence holds — the measured U+G+M<C
+  guard is still a workstream-3 item — or `Blocked` when it denies) and
+  the `Submitted` transport for the pending bound delivery.
+  `RotationObservedDriver` keeps the observation-only wrap for other Boss
+  principals.
 - `forward_driver_events` maps actual provider events for Boss principals:
   usage updates become context samples, `TurnStarted`/steer acknowledgements
-  become transport evidence, and localized compaction activities become
-  compaction started/completed/failed observations.
+  become transport evidence bound to the journal's generation, and
+  localized compaction activities become compaction
+  started/completed/failed observations.
 - `rotate_boss_chat` emits lifecycle, durable-action, and ownership
   observations when the existing journal persists an intent, stages the
   successor, publishes the pointer, fences the predecessor, and commits the
   ownership switch.
 
-These are `#[cfg(test)]` seams: they add no runtime I/O or product behavior.
-When workstreams 2–4 add acceptance-aware delivery and the U+G+M<C guard,
-they should replace `AdmissionDecision::Unguarded` and `None` generation
-transport fields at the same observation points rather than adding a second
-source of truth.
+The observer seam itself stays `#[cfg(test)]`: it adds no runtime I/O or
+product behavior. When the guarded lifecycle lands it should replace
+`AdmissionDecision::Unguarded` at the same observation points rather than
+adding a second source of truth.
 
 ## Fixture coverage
 

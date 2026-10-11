@@ -219,6 +219,120 @@ pub(super) fn record_boss_event(
     Ok(())
 }
 
+/// The generation the rotation journal currently assigns a session, for
+/// binding transport and continuity observations to durable ownership.
+#[cfg(test)]
+fn boss_journal_generation(boss: &crate::boss::BossService, session_id: Uuid) -> Option<u64> {
+    let journal =
+        crate::boss_rotation::RotationJournal::load(&boss.root().join("rotation.json"))
+            .unwrap_or_default();
+    if let Some(intent) = &journal.intent {
+        if intent.new_session_id == session_id {
+            return Some(intent.old_generation.saturating_add(1));
+        }
+        if intent.old_session_id == session_id {
+            return Some(intent.old_generation);
+        }
+    }
+    if boss.is_boss(session_id) {
+        return Some(journal.generation);
+    }
+    journal.rotations.iter().rev().find_map(|rotation| {
+        if rotation.new_session_id == session_id {
+            Some(rotation.old_generation.saturating_add(1))
+        } else if rotation.old_session_id == session_id {
+            Some(rotation.old_generation)
+        } else {
+            None
+        }
+    })
+}
+
+/// Reconcile the Boss continuity ledger with a real provider event.
+///
+/// `TurnStarted` is transport acceptance: the bound package the session
+/// carried is consumed — the ledger records `Accepted` and the durable
+/// `pending_provider_context` copy is finally cleared. A failed turn or a
+/// dead runtime without acceptance marks the still-`Submitted` delivery
+/// `Rejected` so the next outbound prompt reconciles the same delivery.
+/// Provider-side compaction on the Boss session is an incident: the
+/// generation is fenced and a safe refresh is requested.
+pub(super) fn boss_continuity_note_event(
+    boss: &crate::boss::BossService,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    event: &DriverEvent,
+) {
+    if !boss.is_boss(session_id) {
+        return;
+    }
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    let path = boss.root().join("continuity.json");
+    let now = crate::model::unix_time();
+    match event {
+        DriverEvent::TurnStarted => {
+            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
+                return;
+            };
+            let had_pending = ledger.pending_for_session(session_id).is_some();
+            ledger.mark_accepted(session_id, now);
+            if had_pending && let Err(error) = ledger.persist(&path) {
+                eprintln!("could not record Boss transport acceptance: {error:#}");
+            }
+            let mut state = task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                && session.pending_provider_context.take().is_some()
+            {
+                state.mark_session_dirty(session_id);
+                if let Err(error) = task_store.save(&mut state) {
+                    eprintln!("could not consume the delivered Boss context: {error:#}");
+                }
+            }
+        }
+        DriverEvent::TurnFinished {
+            success: false, ..
+        }
+        | DriverEvent::Error(_)
+        | DriverEvent::LocalizedError { .. }
+        | DriverEvent::ProcessExited => {
+            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
+                return;
+            };
+            if ledger.pending_for_session(session_id).is_some() {
+                ledger.mark_rejected(session_id, now);
+                if let Err(error) = ledger.persist(&path) {
+                    eprintln!("could not record Boss transport rejection: {error:#}");
+                }
+            }
+        }
+        DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
+            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
+                return;
+            };
+            if ledger.has_incident(session_id) {
+                return;
+            }
+            eprintln!(
+                "Boss compaction incident on session {session_id}: {}; the generation is fenced and a safe refresh was requested",
+                item.title,
+            );
+            ledger.record_compaction_incident(
+                session_id,
+                now,
+                format!("provider compaction activity: {}", item.title),
+            );
+            if let Err(error) = ledger.persist(&path) {
+                eprintln!("could not record the Boss compaction incident: {error:#}");
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Test-only conversion of the real provider event stream. The future guard
 /// can enrich these observations with its measured bound and logical
 /// delivery id without moving the provider-side observation point.
@@ -226,6 +340,7 @@ pub(super) fn record_boss_event(
 fn boss_rotation_driver_observation(
     session_id: Uuid,
     runtime_id: Uuid,
+    owner_generation: Option<u64>,
     event: &DriverEvent,
 ) -> Option<waku_boss::rotation_oracle::RotationObservation> {
     use waku_boss::rotation_oracle::{
@@ -238,7 +353,7 @@ fn boss_rotation_driver_observation(
                 delivery_id: format!("provider-turn:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
-                owner_generation: None,
+                owner_generation,
                 boundary: AdmissionBoundary::Request,
                 status: ProviderTransportStatus::Accepted,
             },
@@ -248,7 +363,7 @@ fn boss_rotation_driver_observation(
                 delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
-                owner_generation: None,
+                owner_generation,
                 boundary: AdmissionBoundary::Continuation,
                 status: ProviderTransportStatus::Accepted,
             },
@@ -258,7 +373,7 @@ fn boss_rotation_driver_observation(
                 delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
-                owner_generation: None,
+                owner_generation,
                 boundary: AdmissionBoundary::Continuation,
                 status: ProviderTransportStatus::Rejected,
             },
@@ -269,7 +384,7 @@ fn boss_rotation_driver_observation(
         } => Some(RotationObservation::ContextSample(ContextSample {
             session_id,
             runtime_id,
-            owner_generation: None,
+            owner_generation,
             context_tokens: context_tokens.unwrap_or_default(),
             context_window: *context_window,
             source: ContextSampleSource::ProviderReport,
@@ -279,7 +394,7 @@ fn boss_rotation_driver_observation(
                 ProviderCompaction {
                     session_id,
                     runtime_id,
-                    owner_generation: None,
+                    owner_generation,
                     stage: if item.failed {
                         CompactionStage::Failed
                     } else if item.complete {
@@ -408,12 +523,17 @@ pub(super) fn forward_driver_events(
         }
         #[cfg(test)]
         if boss.is_boss_principal(session_id)
-            && let Some(observation) =
-                boss_rotation_driver_observation(session_id, runtime_id, &event)
+            && let Some(observation) = boss_rotation_driver_observation(
+                session_id,
+                runtime_id,
+                boss_journal_generation(&boss, session_id),
+                &event,
+            )
             && let Some(observer) = lifecycles.rotation_observer.lock().clone()
         {
             observer(observation);
         }
+        boss_continuity_note_event(&boss, &task_state, &task_store, session_id, &event);
         if let Some(entry) = sessions.lock().get_mut(&session_id) {
             entry.last_active = std::time::Instant::now();
         }

@@ -38,21 +38,22 @@ impl WakuBackend {
     /// already-settled turn could not take.
     pub(super) fn boss_outbound_prompt(&self, session_id: Uuid, prompt: String) -> String {
         // A rotated chat's first human prompt carries the same durable
-        // handoff as the daemon's queued-prompt path.
+        // handoff as the daemon's queued-prompt path. It stays pending
+        // until provider transport acceptance — a `TurnStarted` — is
+        // recorded; submissions only mark the delivery attempted.
         let handoff = if self.boss.is_boss(session_id) {
-            let mut state = self.task_state.lock();
-            let handoff = state
-                .session_mut(session_id)
-                .and_then(|session| session.pending_provider_context.take());
-            if handoff.is_some() {
-                if let Err(error) = self.task_store.save(&mut state) {
-                    eprintln!("could not persist Boss context delivery: {error:#}");
-                }
-            }
-            handoff
+            self.task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.pending_provider_context.clone())
         } else {
             None
         };
+        if handoff.is_some() {
+            mark_boss_delivery_submitted(&self.boss, session_id);
+        }
         let prompt = match handoff {
             Some(context) if !prompt.contains(&context) => format!("{context}\n\n{prompt}"),
             _ => prompt,

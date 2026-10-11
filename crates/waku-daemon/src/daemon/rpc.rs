@@ -207,6 +207,14 @@ impl Backend for WakuBackend {
     ) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
+        // A scoped credential minted for a retired Boss generation carries
+        // no authority: the pointer — not the credential — defines who may
+        // coordinate, so every command through it is denied outright.
+        if let Some(caller) = agent
+            && self.boss_fenced_chat(caller)
+        {
+            bail!("credential belongs to a fenced Boss generation; the active chat owns coordination");
+        }
         if let Command::Respond { request_id, .. } = &request.command
             && request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
         {
@@ -1642,6 +1650,12 @@ impl Backend for WakuBackend {
                 let sender = agent.or_else(|| {
                     (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
                 });
+                // The coordinator delegates execution — an unmanaged task
+                // launch would bypass employee admission, grants and durable
+                // records. Boss principals summon instead.
+                if sender.is_some_and(|id| self.boss.is_boss_principal(id)) {
+                    bail!("the boss delegates task work to employees — summon one instead");
+                }
                 self.agent_create_session(
                     sender,
                     AgentCreateSelection {
@@ -1677,7 +1691,14 @@ impl Backend for WakuBackend {
             Command::AgentProposeArchive { task_ids, reason } => {
                 self.agent_propose_archive(agent, task_ids, reason, &events)
             }
-            Command::AgentMergeSubmit => self.agent_merge_submit(agent),
+            Command::AgentMergeSubmit => {
+                // Merge submission is employee integration work — the
+                // coordinator's own unit is the Boss document.
+                if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
+                    bail!("the boss delegates merge submission to its assigned employee");
+                }
+                self.agent_merge_submit(agent)
+            }
             Command::AgentReadSession {
                 task_id,
                 thread_id,
@@ -1715,15 +1736,22 @@ impl Backend for WakuBackend {
                 intent,
                 anchors,
                 known_paths,
-            } => self.agent_project_map(
-                agent,
-                &query,
-                path.as_deref(),
-                max_tokens,
-                intent,
-                &anchors,
-                &known_paths,
-            ),
+            } => {
+                // Codebase research is delegation work — planning sessions
+                // keep it because research is their assignment.
+                if agent.is_some_and(|id| self.boss.is_boss(id)) {
+                    bail!("the boss delegates codebase research to employees");
+                }
+                self.agent_project_map(
+                    agent,
+                    &query,
+                    path.as_deref(),
+                    max_tokens,
+                    intent,
+                    &anchors,
+                    &known_paths,
+                )
+            }
             Command::AgentAsk { questions } => {
                 self.agent_ask(session_id, agent, questions, &events)
             }
@@ -1731,17 +1759,22 @@ impl Backend for WakuBackend {
                 code,
                 timeout_ms,
                 title,
-            } => self.agent_computer_use(
-                session_id,
-                agent,
-                Some(&code),
-                timeout_ms,
-                title.as_deref(),
-            ),
+            } => {
+                if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
+                    bail!("the boss delegates computer use to granted employees");
+                }
+                self.agent_computer_use(session_id, agent, Some(&code), timeout_ms, title.as_deref())
+            }
             Command::AgentComputerUseRun { request } => {
+                if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
+                    bail!("the boss delegates computer use to granted employees");
+                }
                 self.agent_computer_use_run(session_id, agent, request)
             }
             Command::AgentComputerUseReset => {
+                if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
+                    bail!("the boss delegates computer use to granted employees");
+                }
                 self.agent_computer_use(session_id, agent, None, None, None)
             }
             Command::AgentResources { operation } => {

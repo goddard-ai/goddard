@@ -291,16 +291,28 @@ pub(super) fn deliver_agent_prompt(
         reference_context,
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
+    let boss_chat = boss.is_boss(session_id);
     let handoff = {
         let mut state = task_state.lock();
         state
             .sessions
             .iter_mut()
             .find(|session| session.id == session_id)
-            .and_then(|session| session.pending_provider_context.take())
+            .and_then(|session| {
+                // The Boss's bound context package survives submission: it is
+                // consumed only when provider transport acceptance records it
+                // (`TurnStarted` in the event forwarder). A rejected or
+                // unconfirmed send retries with the same delivery identity.
+                if boss_chat {
+                    session.pending_provider_context.clone()
+                } else {
+                    session.pending_provider_context.take()
+                }
+            })
     };
     let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
         .unwrap_or(entry.prompt);
+    let carried_handoff = handoff.is_some();
     let prompt = handoff.map_or(prompt.clone(), |context| {
         format!("{context}\n\nNext assignment: {prompt}")
     });
@@ -311,7 +323,31 @@ pub(super) fn deliver_agent_prompt(
         session_id,
         prompt,
     ));
+    if boss_chat && carried_handoff {
+        mark_boss_delivery_submitted(boss, session_id);
+    }
     Ok(())
+}
+
+/// The bound package just went out over provider transport. Submission is
+/// recorded without consuming the pending state — only a `TurnStarted`
+/// acceptance clears it.
+pub(super) fn mark_boss_delivery_submitted(boss: &crate::boss::BossService, session_id: Uuid) {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    let path = boss.root().join("continuity.json");
+    let Ok(mut ledger) = ContinuityLedger::load(&path) else {
+        return;
+    };
+    let Some(delivery_id) = ledger
+        .pending_for_session(session_id)
+        .map(|delivery| delivery.delivery_id.clone())
+    else {
+        return;
+    };
+    ledger.mark_submitted(&delivery_id, crate::model::unix_time());
+    if let Err(error) = ledger.persist(&path) {
+        eprintln!("could not record a Boss continuity submission: {error:#}");
+    }
 }
 
 /// The boss-context half of an outbound boss prompt: the persona wrap
