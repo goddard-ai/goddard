@@ -1060,6 +1060,11 @@ impl AutomationService {
         message_id: Uuid,
         turn_id: Uuid,
     ) -> anyhow::Result<()> {
+        // The queue calls this hook for ordinary prompts too. Automation
+        // persistence failures must only inhibit automation delivery.
+        if !self.is_run_message(message_id) {
+            return Ok(());
+        }
         let now = unix_time();
         self.transition(|document| {
             let Some(run) = document.runs.iter_mut().find(|run| {
@@ -2296,6 +2301,12 @@ mod tests {
             persisted(&service).runs[0].status,
             AutomationRunStatus::Running
         );
+        // Ordinary delivery is independent of an automation's failed
+        // bookkeeping; it neither retries nor acknowledges that candidate.
+        service
+            .note_prompt_delivered(Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4())
+            .unwrap();
+        assert!(service.lifecycle.lock().repair.is_some());
         service.finish_run(
             run.id,
             AutomationRunStatus::Failed,
