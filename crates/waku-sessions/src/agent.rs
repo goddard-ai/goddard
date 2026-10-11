@@ -617,13 +617,24 @@ impl AgentState {
     }
 
     /// Remember a steer injection so the provider's `steerAccepted` echo can
-    /// be attributed to its sender.
-    pub fn record_pending_steer(&self, session_id: Uuid, prompt: AgentPrompt) {
-        self.pending_steers
-            .lock()
-            .entry(session_id)
-            .or_default()
-            .push_back(prompt);
+    /// be attributed to its sender. A mirrored queue entry may be in flight
+    /// only once — a drain that re-seeded its parked chip folds onto the
+    /// in-flight steer rather than issuing a duplicate. Returns whether the
+    /// steer was recorded; `false` means an identical `queued_id` already
+    /// awaits its echo, so the caller drops the extra entry instead of
+    /// steering the provider twice.
+    pub fn record_pending_steer(&self, session_id: Uuid, prompt: AgentPrompt) -> bool {
+        let mut steers = self.pending_steers.lock();
+        let pending = steers.entry(session_id).or_default();
+        if let Some(queued_id) = prompt.queued_id
+            && pending
+                .iter()
+                .any(|steer| steer.queued_id == Some(queued_id))
+        {
+            return false;
+        }
+        pending.push_back(prompt);
+        true
     }
 
     /// Resolve the steer the provider just accepted or rejected. Providers

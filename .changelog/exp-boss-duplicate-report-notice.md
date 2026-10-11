@@ -1,0 +1,1 @@
+- Fixed duplicate employee finish and blocker reports reaching the Boss: a report parked behind a busy supervisor could be delivered twice when a daemon restart or a competing delivery pass replayed its queued copy before the first steer landed.

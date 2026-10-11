@@ -6527,6 +6527,121 @@ fn a_parked_report_keeps_its_trigger_through_the_mirror() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A steered report parks its mirror until the provider's echo, so two
+/// failures must not repeat it: a concurrent drain that re-seeds the chip
+/// before the pending steer lands folds onto the in-flight steer instead
+/// of steering the provider twice, and a restart that loses the steer
+/// bookkeeping while the chip survives dedupes the redelivery on the
+/// trigger's durable event id rather than opening a second report turn.
+#[test]
+fn a_steered_report_delivers_once_through_mirror_and_restart() {
+    let root = std::env::temp_dir().join(format!("boss-steer-dedup-{}", Uuid::new_v4()));
+    let (backend, supervisor, employee, parent, _child) = employee_finish_fixture(&root);
+    detach_boss_session(&backend, supervisor);
+    let events = EventSink::detached();
+    let driver = DriverHandle::from_control(parent.clone());
+    // The supervisor's parked turn accepts the report as a steer.
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnStarted);
+    backend
+        .agent
+        .note_driver_event(supervisor, &DriverEvent::TurnParked);
+    // The source's open turn holds the report in the durable queue.
+    backend
+        .agent
+        .note_driver_event(employee, &DriverEvent::TurnStarted);
+    let trigger = crate::model::ReportTrigger::new(
+        &backend.boss.employee(employee).unwrap(),
+        crate::model::ReportTriggerKind::Blocker,
+    );
+    backend
+        .deliver_employee_report(
+            supervisor,
+            "blocked on input".into(),
+            employee,
+            Some(trigger),
+            &events,
+        )
+        .unwrap();
+    assert!(backend.agent.has_queued(supervisor));
+    let finished = DriverEvent::TurnFinished {
+        success: true,
+        summary: None,
+        summary_i18n: None,
+    };
+    backend.agent.note_driver_event(employee, &finished);
+    // Drain A pops the queued entry; before its pending steer records,
+    // drain B re-seeds the still-mirrored chip — the race this regression
+    // reproduces.
+    let entry = backend.agent.pop_queued(supervisor).unwrap();
+    backend.agent.enqueue(supervisor, entry.clone());
+    deliver_agent_prompt(
+        supervisor,
+        &driver,
+        entry,
+        &events,
+        &backend.agent,
+        &backend.auto_prompts,
+        &backend.task_state,
+        &backend.task_store,
+        &backend.boss,
+        &backend.automations,
+    )
+    .unwrap();
+    assert_eq!(parent.steers.lock().len(), 1);
+    // Drain B's copy folds onto the in-flight steer — one provider steer.
+    backend
+        .drain_agent_queue(supervisor, &driver, &events)
+        .unwrap();
+    assert_eq!(parent.steers.lock().len(), 1);
+    let steer = backend
+        .agent
+        .take_pending_steer(supervisor, &parent.steers.lock()[0])
+        .expect("the report steer is pending");
+    let event_id = steer.report_trigger.as_ref().unwrap().event_id;
+    record_agent_steer(
+        &backend.task_state,
+        &backend.task_store,
+        supervisor,
+        &steer.prompt,
+        employee,
+        true,
+        steer.report_trigger.clone(),
+    );
+    // Restart between the echo's transcript write and the chip's unmirror:
+    // the parked entry survives while the in-memory steer bookkeeping dies.
+    backend.agent.clear_session(supervisor);
+    *backend.task_state.lock() = backend.task_store.load().unwrap();
+    backend
+        .drain_agent_queue(supervisor, &driver, &events)
+        .unwrap();
+    backend.run_summon_scheduler();
+    assert!(parent.prompts.lock().is_empty());
+    assert_eq!(parent.steers.lock().len(), 1);
+    let mut state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == supervisor)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    assert!(session.queued_messages.is_empty());
+    let rows = session
+        .messages
+        .iter()
+        .filter(|message| {
+            message
+                .report_trigger
+                .as_ref()
+                .is_some_and(|trigger| trigger.event_id == event_id)
+        })
+        .count();
+    assert_eq!(rows, 1);
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Approved plan work reports even when a clean goal would otherwise be silent.
 #[test]
 fn a_plan_goal_finish_wakes_the_idle_boss_once_with_the_queue() {

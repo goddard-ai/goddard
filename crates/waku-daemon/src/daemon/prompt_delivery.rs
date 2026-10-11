@@ -212,7 +212,11 @@ pub(super) fn deliver_agent_prompt(
             .transport
             .clone()
             .unwrap_or_else(|| entry.prompt.clone());
-        agent.record_pending_steer(session_id, entry);
+        if !agent.record_pending_steer(session_id, entry) {
+            // A concurrent drain already steered this parked chip — its
+            // echo completes the delivery and unmirrors the chip.
+            return Ok(());
+        }
         driver.steer(prompt);
         return Ok(());
     }
@@ -266,7 +270,10 @@ pub(super) fn deliver_agent_prompt(
             agent.requeue_front(session_id, entry);
             return Ok(());
         }
-        PromptPersistence::Duplicate => return Ok(()),
+        PromptPersistence::Duplicate => {
+            send_agent_queue_changed(task_state, sink, session_id);
+            return Ok(());
+        }
     }
     automations.note_prompt_delivered(session_id, message_id, turn_id)?;
     if automation_prompt {
@@ -376,13 +383,6 @@ pub(super) fn persist_agent_prompt(
         // Claim the durable id under the same lock as the user queue and
         // active turn. A competing settlement/scheduler delivery may have
         // rehydrated this entry before the first delivery removed its mirror.
-        if session
-            .messages
-            .iter()
-            .any(|message| message.id == message_id)
-        {
-            return Ok(PromptPersistence::Duplicate);
-        }
         if session.active_turn_id().is_some()
             || (boss_notification
                 && !report_trigger.as_ref().is_some_and(|trigger| {
@@ -402,6 +402,29 @@ pub(super) fn persist_agent_prompt(
             .retain(|queued| queued.id != queued_id);
         session.queued_messages.len() != before
     });
+    // A redriven delivery folds onto the copy that already landed — the
+    // trigger's event id is the dedupe identity whether the first delivery
+    // persisted by message id or a steered echo's own.
+    let duplicate = (boss_notification || automation_prompt)
+        && session
+            .messages
+            .iter()
+            .any(|message| message.id == message_id)
+        || report_trigger.as_ref().is_some_and(|trigger| {
+            session.messages.iter().any(|message| {
+                message
+                    .report_trigger
+                    .as_ref()
+                    .is_some_and(|held| held.event_id == trigger.event_id)
+            })
+        });
+    if duplicate {
+        if dequeued {
+            state.mark_session_dirty(session_id);
+            task_store.save(&mut state)?;
+        }
+        return Ok(PromptPersistence::Duplicate);
+    }
     if session.adopt_submitted_prompt(
         message,
         turn_id,
@@ -591,6 +614,19 @@ pub(super) fn record_agent_steer(
         return;
     };
     if task_store.hydrate(session).is_err() {
+        return;
+    }
+    // A redriven echo — a second pending steer for the same parked report,
+    // or a stale one resolving after the queue delivery landed — folds
+    // onto the row the first delivery wrote instead of repeating it.
+    if let Some(trigger) = &report_trigger
+        && session.messages.iter().any(|stored| {
+            stored
+                .report_trigger
+                .as_ref()
+                .is_some_and(|held| held.event_id == trigger.event_id)
+        })
+    {
         return;
     }
     let message_id = session.push_user_message_with_presentation(
