@@ -5,7 +5,8 @@ use super::*;
 /// global terminal that exists only in the group.
 pub(super) struct TerminalRecord {
     pub session: Option<Uuid>,
-    /// Pinned terminals keep a sidebar row while the group is collapsed.
+    /// Pinned terminals keep a sidebar row while the group is collapsed —
+    /// as does the selected standalone terminal.
     pub pinned: bool,
     /// Where the PTY starts — `None` resolves to the owning session's
     /// workspace at spawn time, so the terminal follows the workspace
@@ -891,10 +892,11 @@ impl Waku {
         self.spawn_terminal_entity(terminal_id, working_directory, cx);
         self.analytics
             .track(crate::analytics::Event::TerminalOpened { kind });
-        // Every terminal lists a row in the Terminals group — unfold it
-        // and scroll the fresh row on screen so a creation lands nowhere
-        // the user cannot see.
-        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        // Every terminal lists a row in the Terminals group, but creating
+        // one leaves the fold alone — a selected terminal keeps a row under
+        // the collapsed header anyway. When the group is open the fresh row
+        // still scrolls on screen so a creation lands nowhere the user
+        // cannot see.
         self.reveal_sidebar_terminal(terminal_id);
         self.save();
         cx.notify();

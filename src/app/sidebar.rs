@@ -106,7 +106,7 @@ pub(super) enum SidebarGroup {
     Pinned,
     /// Every terminal — session-scoped and global — sitting between the
     /// search field and the session history. Starts collapsed; pinned
-    /// terminals keep a row while it is.
+    /// terminals and the selected standalone one keep a row while it is.
     Terminals,
     /// Swept and stale tasks, always the last section regardless of
     /// grouping. Starts collapsed like Terminals.
@@ -3857,6 +3857,8 @@ impl Waku {
         );
         // The Terminals group reads its ids in list order plus each row's
         // pin state — pinned rows survive the fold, so both feed the rows.
+        // The selected standalone terminal survives the fold too, so while
+        // the group is collapsed the selection joins the fingerprint.
         for terminal_id in self.sidebar_terminal_ids() {
             fingerprint = mix_uuid(fingerprint, terminal_id);
             fingerprint = mix(
@@ -3867,6 +3869,13 @@ impl Waku {
                         .is_some_and(|record| record.pinned),
                 ),
             );
+        }
+        if self
+            .sidebar_collapsed_groups
+            .contains(&SidebarGroup::Terminals)
+            && let Some(terminal_id) = self.selected_terminal
+        {
+            fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
             let (rows, collapsed_members) = self.sidebar_rows(today);
@@ -3950,7 +3959,8 @@ impl Waku {
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
         // empty group is how a first global terminal is made — and folding
-        // it keeps only the pinned rows.
+        // it keeps the pinned rows plus the selected standalone terminal,
+        // which stays on screen however the user left the group.
         let terminals_collapsed = self
             .sidebar_collapsed_groups
             .contains(&SidebarGroup::Terminals);
@@ -3960,7 +3970,11 @@ impl Waku {
                 || self
                     .terminal_records
                     .get(&terminal_id)
-                    .is_some_and(|record| record.pinned)
+                    .is_some_and(|record| {
+                        record.pinned
+                            || (record.session.is_none()
+                                && self.selected_terminal == Some(terminal_id))
+                    })
             {
                 rows.push(SidebarRow::Terminal(terminal_id));
             }
@@ -5049,8 +5063,8 @@ impl Waku {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
             // The Terminals group's compose button opens a global terminal
-            // in the home directory; creation unfolds the group and
-            // scrolls the new row — and the selection — on screen.
+            // in the home directory; the selection keeps its row on screen
+            // whether the group is folded or not.
             SidebarGroup::Terminals => {
                 if let Some(home) = dirs::home_dir()
                     && let Some(terminal_id) = self.create_terminal(home, None, None, cx)
