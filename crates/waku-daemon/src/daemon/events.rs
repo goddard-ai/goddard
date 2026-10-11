@@ -219,6 +219,81 @@ pub(super) fn record_boss_event(
     Ok(())
 }
 
+/// Test-only conversion of the real provider event stream. The future guard
+/// can enrich these observations with its measured bound and logical
+/// delivery id without moving the provider-side observation point.
+#[cfg(test)]
+fn boss_rotation_driver_observation(
+    session_id: Uuid,
+    runtime_id: Uuid,
+    event: &DriverEvent,
+) -> Option<waku_boss::rotation_oracle::RotationObservation> {
+    use waku_boss::rotation_oracle::{
+        AdmissionBoundary, CompactionStage, ContextSample, ContextSampleSource,
+        ProviderCompaction, ProviderTransport, ProviderTransportStatus, RotationObservation,
+    };
+    match event {
+        DriverEvent::TurnStarted => Some(RotationObservation::ProviderTransport(
+            ProviderTransport {
+                delivery_id: format!("provider-turn:{session_id}:{runtime_id}"),
+                session_id,
+                runtime_id,
+                owner_generation: None,
+                boundary: AdmissionBoundary::Request,
+                status: ProviderTransportStatus::Accepted,
+            },
+        )),
+        DriverEvent::SteerAccepted { .. } => Some(RotationObservation::ProviderTransport(
+            ProviderTransport {
+                delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
+                session_id,
+                runtime_id,
+                owner_generation: None,
+                boundary: AdmissionBoundary::Continuation,
+                status: ProviderTransportStatus::Accepted,
+            },
+        )),
+        DriverEvent::SteerRejected { .. } => Some(RotationObservation::ProviderTransport(
+            ProviderTransport {
+                delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
+                session_id,
+                runtime_id,
+                owner_generation: None,
+                boundary: AdmissionBoundary::Continuation,
+                status: ProviderTransportStatus::Rejected,
+            },
+        )),
+        DriverEvent::UsageUpdated {
+            context_tokens,
+            context_window,
+        } => Some(RotationObservation::ContextSample(ContextSample {
+            session_id,
+            runtime_id,
+            owner_generation: None,
+            context_tokens: context_tokens.unwrap_or_default(),
+            context_window: *context_window,
+            source: ContextSampleSource::ProviderReport,
+        })),
+        DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
+            Some(RotationObservation::ProviderCompaction(
+                ProviderCompaction {
+                    session_id,
+                    runtime_id,
+                    owner_generation: None,
+                    stage: if item.failed {
+                        CompactionStage::Failed
+                    } else if item.complete {
+                        CompactionStage::Completed
+                    } else {
+                        CompactionStage::Started
+                    },
+                },
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Record a turn's end the daemon ordered itself — a supervisor stop, a
 /// queued-ticket cancel, or a mid-flight reconfigure. The turn closes
 /// `Interrupted` attributed to the daemon, the session reads idle rather
@@ -330,6 +405,14 @@ pub(super) fn forward_driver_events(
         #[cfg(test)]
         if let Some(applying) = lifecycles.event_applying.lock().clone() {
             applying(session_id, runtime_id);
+        }
+        #[cfg(test)]
+        if boss.is_boss_principal(session_id)
+            && let Some(observation) =
+                boss_rotation_driver_observation(session_id, runtime_id, &event)
+            && let Some(observer) = lifecycles.rotation_observer.lock().clone()
+        {
+            observer(observation);
         }
         if let Some(entry) = sessions.lock().get_mut(&session_id) {
             entry.last_active = std::time::Instant::now();

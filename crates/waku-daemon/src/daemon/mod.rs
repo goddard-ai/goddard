@@ -513,6 +513,9 @@ type RuntimeForwardHook = Arc<
         + Send
         + Sync,
 >;
+#[cfg(test)]
+type RotationObserver =
+    Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservation) + Send + Sync>;
 
 #[derive(Default)]
 struct RuntimeLifecycles {
@@ -522,6 +525,8 @@ struct RuntimeLifecycles {
     event_received: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
     #[cfg(test)]
     event_applying: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
+    #[cfg(test)]
+    rotation_observer: Mutex<Option<RotationObserver>>,
 }
 
 impl RuntimeLifecycles {

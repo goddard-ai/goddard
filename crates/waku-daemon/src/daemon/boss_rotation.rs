@@ -1,6 +1,12 @@
 use super::*;
 use crate::boss_rotation::{BossRotationConfig, RotationJournal};
 use crate::model::MessageRole;
+#[cfg(test)]
+use waku_boss::rotation_oracle::{
+    AdmissionBoundary, AdmissionDecision, CompactionStage, DurableAction, DurableActionKind,
+    DurableActionStatus, LifecycleObservation, OwnershipObservation, OwnershipState,
+    ProviderAdmission, ProviderCompaction, RotationLifecycleStage, RotationObservation,
+};
 
 impl WakuBackend {
     /// The Boss scheduler checks settled chats, including after restart.
@@ -13,6 +19,168 @@ impl WakuBackend {
         }
         self.boss
             .with_operation_lock(|| self.rotate_boss_chat(&settings, now))
+    }
+
+    #[cfg(test)]
+    fn record_rotation_observation(&self, observation: RotationObservation) {
+        if let Some(observer) = self.runtime_lifecycles.rotation_observer.lock().clone() {
+            observer(observation);
+        }
+    }
+
+    #[cfg(test)]
+    fn observe_rotation_lifecycle(
+        &self,
+        intent: &crate::boss_rotation::RotationIntent,
+        stage: RotationLifecycleStage,
+    ) {
+        self.record_rotation_observation(RotationObservation::Lifecycle(
+            LifecycleObservation {
+                rotation_id: intent.new_session_id,
+                old_session_id: intent.old_session_id,
+                new_session_id: intent.new_session_id,
+                old_generation: intent.old_generation,
+                new_generation: intent.old_generation.saturating_add(1),
+                stage,
+            },
+        ));
+    }
+
+    #[cfg(test)]
+    fn observe_rotation_ownership(
+        &self,
+        session_id: Uuid,
+        generation: u64,
+        state: OwnershipState,
+    ) {
+        self.record_rotation_observation(RotationObservation::Ownership(
+            OwnershipObservation {
+                session_id,
+                generation,
+                state,
+            },
+        ));
+    }
+
+    #[cfg(test)]
+    fn observe_rotation_durable_action(
+        &self,
+        intent: &crate::boss_rotation::RotationIntent,
+        action: &str,
+        session_id: Option<Uuid>,
+        owner_generation: Option<u64>,
+        kind: DurableActionKind,
+    ) {
+        self.record_rotation_observation(RotationObservation::DurableAction(
+            DurableAction {
+                action_id: format!("boss-rotation:{}:{action}", intent.new_session_id),
+                session_id,
+                owner_generation,
+                kind,
+                status: DurableActionStatus::Committed,
+            },
+        ));
+    }
+
+    #[cfg(test)]
+    fn boss_rotation_ownership(&self, session_id: Uuid) -> Option<OwnershipObservation> {
+        let journal = RotationJournal::load(&self.data_dir.join("boss/rotation.json"))
+            .unwrap_or_default();
+        let (_, active) = self.boss.identity_and_session();
+        if let Some(intent) = &journal.intent {
+            if intent.new_session_id == session_id {
+                return Some(OwnershipObservation {
+                    session_id,
+                    generation: intent.old_generation.saturating_add(1),
+                    state: OwnershipState::Published,
+                });
+            }
+            if intent.old_session_id == session_id {
+                return Some(OwnershipObservation {
+                    session_id,
+                    generation: intent.old_generation,
+                    state: if active == Some(session_id) {
+                        OwnershipState::Active
+                    } else {
+                        OwnershipState::Fenced
+                    },
+                });
+            }
+        }
+        if active == Some(session_id) {
+            return Some(OwnershipObservation {
+                session_id,
+                generation: journal.generation,
+                state: OwnershipState::Active,
+            });
+        }
+        if let Some(rotation) = journal
+            .rotations
+            .iter()
+            .rev()
+            .find(|rotation| {
+                rotation.old_session_id == session_id || rotation.new_session_id == session_id
+            })
+        {
+            if rotation.new_session_id == session_id {
+                return Some(OwnershipObservation {
+                    session_id,
+                    generation: rotation.old_generation.saturating_add(1),
+                    state: OwnershipState::Active,
+                });
+            }
+            return Some(OwnershipObservation {
+                session_id,
+                generation: rotation.old_generation,
+                state: OwnershipState::Fenced,
+            });
+        }
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| session.boss_managed)
+            .map(|session| OwnershipObservation {
+                session_id,
+                generation: 0,
+                state: if session.archived_at.is_some() {
+                    OwnershipState::Fenced
+                } else {
+                    OwnershipState::Published
+                },
+            })
+    }
+
+    /// Wrap the live provider handle at the last daemon-owned boundary. This
+    /// catches direct internal prompt/steer calls as well as RPC commands; the
+    /// future guard can replace `Unguarded` with its measured decision here.
+    #[cfg(test)]
+    pub(super) fn observe_boss_driver(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        driver: DriverHandle,
+    ) -> DriverHandle {
+        if !self.boss.is_boss_principal(session_id) {
+            return driver;
+        }
+        let Some(observer) = self.runtime_lifecycles.rotation_observer.lock().clone() else {
+            return driver;
+        };
+        if let Some(ownership) = self.boss_rotation_ownership(session_id) {
+            self.record_rotation_observation(RotationObservation::Ownership(ownership));
+        }
+        DriverHandle::from_control(Arc::new(RotationObservedDriver {
+            inner: driver,
+            session_id,
+            runtime_id,
+            owner_generation: self
+                .boss_rotation_ownership(session_id)
+                .map(|ownership| ownership.generation),
+            observer,
+            next_operation: std::sync::atomic::AtomicU64::new(0),
+        }))
     }
 
     fn rotate_boss_chat(&self, settings: &crate::DaemonSettings, now: u64) -> anyhow::Result<()> {
@@ -63,6 +231,25 @@ impl WakuBackend {
                 usage.window.unwrap_or_default(),
             ));
             journal.persist(&path)?;
+            #[cfg(test)]
+            {
+                self.observe_rotation_ownership(active, journal.generation, OwnershipState::Active);
+                self.observe_rotation_lifecycle(
+                    journal.intent.as_ref().expect("begun rotation"),
+                    RotationLifecycleStage::Triggered,
+                );
+                self.observe_rotation_lifecycle(
+                    journal.intent.as_ref().expect("begun rotation"),
+                    RotationLifecycleStage::IntentPersisted,
+                );
+                self.observe_rotation_durable_action(
+                    journal.intent.as_ref().expect("begun rotation"),
+                    "intent",
+                    Some(active),
+                    Some(journal.generation),
+                    DurableActionKind::PersistedIntent,
+                );
+            }
         }
         let intent = journal.intent.as_ref().expect("pending rotation").clone();
         anyhow::ensure!(
@@ -118,8 +305,28 @@ impl WakuBackend {
                 // Stage the initialized chat before publishing its id.
                 self.task_store.save(&mut state)?;
             }
+            #[cfg(test)]
+            {
+                self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::SuccessorPrepared);
+                self.observe_rotation_durable_action(
+                    &intent,
+                    "successor",
+                    Some(intent.new_session_id),
+                    Some(intent.old_generation.saturating_add(1)),
+                    DurableActionKind::SuccessorPreparation,
+                );
+            }
             self.boss
                 .replace_session_id(active, intent.new_session_id)?;
+            #[cfg(test)]
+            {
+                self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::PointerPublished);
+                self.observe_rotation_ownership(
+                    intent.new_session_id,
+                    intent.old_generation.saturating_add(1),
+                    OwnershipState::Published,
+                );
+            }
         }
         anyhow::ensure!(
             state
@@ -184,8 +391,33 @@ impl WakuBackend {
         // Same runtime/credential retirement as ordinary archival. The
         // transcript stays in the task store under its old session id.
         self.retire_archived_runtimes(&[intent.old_session_id]);
+        #[cfg(test)]
+        {
+            self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::PredecessorFenced);
+            self.observe_rotation_ownership(
+                intent.old_session_id,
+                intent.old_generation,
+                OwnershipState::Fenced,
+            );
+        }
         journal.commit(now)?;
         journal.persist(&path)?;
+        #[cfg(test)]
+        {
+            self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::OwnershipCommitted);
+            self.observe_rotation_ownership(
+                intent.new_session_id,
+                journal.generation,
+                OwnershipState::Active,
+            );
+            self.observe_rotation_durable_action(
+                &intent,
+                "ownership",
+                Some(intent.new_session_id),
+                Some(journal.generation),
+                DurableActionKind::OwnershipCommit,
+            );
+        }
         // The retired chat's unsent composer draft belongs to its
         // replacement — re-key the persisted slot so clients that load
         // drafts after the swap still see the text. A draft-store failure
@@ -203,6 +435,179 @@ impl WakuBackend {
             notifier();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+struct RotationObservedDriver {
+    inner: DriverHandle,
+    session_id: Uuid,
+    runtime_id: Uuid,
+    owner_generation: Option<u64>,
+    observer: RotationObserver,
+    next_operation: std::sync::atomic::AtomicU64,
+}
+
+#[cfg(test)]
+impl RotationObservedDriver {
+    fn admit(&self, boundary: AdmissionBoundary) {
+        (self.observer)(RotationObservation::ProviderAdmission(
+            ProviderAdmission {
+                operation_id: format!(
+                    "boss-driver:{}:{}:{boundary:?}:{}",
+                    self.session_id,
+                    self.runtime_id,
+                    self.next_operation
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                ),
+                session_id: self.session_id,
+                runtime_id: self.runtime_id,
+                owner_generation: self.owner_generation,
+                boundary,
+                decision: AdmissionDecision::Unguarded,
+            },
+        ));
+    }
+}
+
+#[cfg(test)]
+impl crate::driver::DriverControl for RotationObservedDriver {
+    fn prompt(&self, prompt: String) {
+        self.admit(AdmissionBoundary::Request);
+        self.inner.prompt(prompt);
+    }
+
+    fn prompt_with_attachments(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+    ) {
+        self.admit(AdmissionBoundary::Request);
+        self.inner.prompt_with_attachments(prompt, attachments);
+    }
+
+    fn supports_steer(&self) -> bool {
+        self.inner.supports_steer()
+    }
+
+    fn agent_surface_delivery(&self) -> crate::driver::AgentSurfaceDelivery {
+        self.inner.agent_surface_delivery()
+    }
+
+    fn steer(&self, prompt: String) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.steer(prompt);
+    }
+
+    fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    fn begin_shutdown(&self) {
+        self.inner.begin_shutdown();
+    }
+
+    fn cancel_computer_use(&self) {
+        self.inner.cancel_computer_use();
+    }
+
+    fn computer_use_available(&self) -> bool {
+        self.inner.computer_use_available()
+    }
+
+    fn refresh_background_work(&self) {
+        self.inner.refresh_background_work();
+    }
+
+    fn stop_background_work(
+        &self,
+        key: crate::model::BackgroundWorkKey,
+        control_id: String,
+    ) {
+        self.inner.stop_background_work(key, control_id);
+    }
+
+    fn respond(&self, request_id: String, option_id: String) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.respond(request_id, option_id);
+    }
+
+    fn respond_user_input(
+        &self,
+        request_id: String,
+        answers: Vec<crate::model::UserInputAnswer>,
+    ) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.respond_user_input(request_id, answers);
+    }
+
+    fn supports_user_input_actions(&self) -> bool {
+        self.inner.supports_user_input_actions()
+    }
+
+    fn clarify_user_input(&self, request_id: String, content: String) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.clarify_user_input(request_id, content);
+    }
+
+    fn cancel_user_input(&self, request_id: String) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.cancel_user_input(request_id);
+    }
+
+    fn goal(&self, operation: crate::model::GoalOperation) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.goal(operation);
+    }
+
+    fn compact(&self) {
+        (self.observer)(RotationObservation::ProviderCompaction(
+            ProviderCompaction {
+                session_id: self.session_id,
+                runtime_id: self.runtime_id,
+                owner_generation: self.owner_generation,
+                stage: CompactionStage::Attempted,
+            },
+        ));
+        self.inner.compact();
+    }
+
+    fn delete_provider_session(&self) {
+        self.inner.delete_provider_session();
+    }
+
+    fn run_computer_tool(&self, request: crate::computer_use::ComputerToolRequest) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.run_computer_tool(request);
+    }
+
+    fn reject_computer_tool(
+        &self,
+        request: crate::computer_use::ComputerToolRequest,
+        reason: String,
+    ) {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.reject_computer_tool(request, reason);
+    }
+
+    fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
+        self.inner.apply_options(options)
+    }
+
+    fn rollback(
+        &self,
+        turns: usize,
+    ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+        self.admit(AdmissionBoundary::Resume);
+        self.inner.rollback(turns)
+    }
+
+    fn fork(
+        &self,
+        turns_to_remove: usize,
+    ) -> anyhow::Result<crate::model::ProviderResumeCursor> {
+        self.admit(AdmissionBoundary::Resume);
+        self.inner.fork(turns_to_remove)
     }
 }
 

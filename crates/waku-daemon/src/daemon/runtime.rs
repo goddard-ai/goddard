@@ -350,6 +350,8 @@ impl WakuBackend {
         let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
             DriverHandle::from_control(gate.clone())
         });
+        #[cfg(test)]
+        let handle = self.observe_boss_driver(session_id, runtime_id, handle);
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");
