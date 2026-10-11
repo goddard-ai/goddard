@@ -792,6 +792,15 @@ impl Waku {
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
             self.store_transcript_scroll_position();
+            // A picker raised over the surface this activation replaces
+            // lost the session its commit guards key off — close it rather
+            // than let a stale commit target the new surface.
+            if let Some(previous_focus) = self.project_switcher.dismiss() {
+                let window_handle = self.window_handle;
+                let _ = window_handle.update(cx, move |_, window, cx| {
+                    window.focus(&previous_focus, cx);
+                });
+            }
         }
         self.state.selected_session = Some(session_id);
         self.ensure_recent_boss_history(cx);

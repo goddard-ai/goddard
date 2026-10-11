@@ -698,6 +698,11 @@ pub(super) struct BossUi {
     generation: u64,
     pending: bool,
     pending_reply: Option<BossReply>,
+    /// The session that was selected when the in-flight `BossOperation::Open`
+    /// went out — the surface the open was asked to navigate away from. Its
+    /// reply may activate the chat only while this still holds; a picker
+    /// commit or a sidebar click in between retires the intent.
+    open_from: Option<Uuid>,
     /// Planning sessions whose `finalizePlan` dispatch went out and did
     /// not come back failed — the approval chip hides and the composer
     /// seals for the in-flight window. Success leaves the entry until
@@ -705,10 +710,11 @@ pub(super) struct BossUi {
     /// failed reply removes it so both restore for a retry.
     pub(super) plan_finalizing: HashSet<Uuid>,
     /// An `Open` a boss-chat click carried while another request held the
-    /// pipe. Navigation activates the locally held session immediately and
-    /// parks the operation here; the next request completion re-issues it so
-    /// the daemon still sees the open. Last click wins.
-    queued_open: Option<(DaemonKey, BossOperation)>,
+    /// pipe, parked with the surface it was issued from. The next request
+    /// completion re-issues it so the daemon still sees the open — unless
+    /// the user has since left that surface, which retires the intent.
+    /// Last click wins.
+    queued_open: Option<(DaemonKey, BossOperation, Option<Uuid>)>,
     /// A `HistorySearch` parked while another request held the pipe — a
     /// refinement submitted mid-flight replaces the park rather than
     /// dropping silently. Last submission wins.
@@ -798,6 +804,7 @@ impl Default for BossUi {
             generation: 0,
             pending: false,
             pending_reply: None,
+            open_from: None,
             plan_finalizing: HashSet::new(),
             queued_open: None,
             queued_history_search: None,
@@ -2106,7 +2113,8 @@ impl Waku {
                         cx,
                     );
                 } else {
-                    self.boss_ui.queued_open = Some((key, operation));
+                    self.boss_ui.queued_open =
+                        Some((key, operation, self.state.selected_session));
                 }
             } else if let BossOperation::HistorySearch { .. } = operation {
                 // A lookup submitted mid-flight parks instead of dropping —
@@ -2177,6 +2185,15 @@ impl Waku {
         let generation = self.boss_ui.generation;
         self.boss_ui.pending = true;
         self.boss_ui.pending_reply = Some(reply);
+        // An Open's reply navigates only while the surface it was issued
+        // from survives — a picker commit or a sidebar click in between
+        // means the user moved on and the late reply must not drag them
+        // back.
+        self.boss_ui.open_from = if matches!(operation, BossOperation::Open { .. }) {
+            self.state.selected_session
+        } else {
+            None
+        };
         if let BossReply::Finalize(session_id) = reply {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
@@ -2293,11 +2310,16 @@ impl Waku {
                                 } else {
                                     this.state.sessions.push(*session);
                                 }
-                                this.request_session_activation(
-                                    id,
-                                    SessionActivationTransition::Visit,
-                                    cx,
-                                );
+                                if boss_open_reply_navigates(
+                                    this.boss_ui.open_from,
+                                    this.state.selected_session,
+                                ) {
+                                    this.request_session_activation(
+                                        id,
+                                        SessionActivationTransition::Visit,
+                                        cx,
+                                    );
+                                }
                             }
                             BossResult::PlanFinalized { .. }
                                 if matches!(reply, BossReply::Finalize(_)) =>
@@ -2404,9 +2426,15 @@ impl Waku {
                 // handling already started another request, the parked op
                 // stays parked and the next completion retries.
                 if !this.boss_ui.pending
-                    && let Some((queued_key, operation)) = this.boss_ui.queued_open.take()
+                    && let Some((queued_key, operation, from)) =
+                        this.boss_ui.queued_open.take()
                 {
-                    this.boss_request(queued_key, operation, BossReply::Open, cx);
+                    // The click that parked this open was issued on a surface
+                    // the user has since left — re-issuing would yank them
+                    // back to a chat they navigated away from.
+                    if this.state.selected_session == from {
+                        this.boss_request(queued_key, operation, BossReply::Open, cx);
+                    }
                 }
                 if !this.boss_ui.pending
                     && let Some((queued_key, operation)) =
@@ -9546,6 +9574,14 @@ fn boss_loading_label_visible(pending: bool) -> bool {
     pending
 }
 
+/// An `Open` reply lands on whatever surface the user had when the request
+/// went out. If they have since navigated — a project-switcher commit, a
+/// sidebar click — the open's intent is stale and the reply must not
+/// activate the chat over the surface they chose.
+fn boss_open_reply_navigates(open_from: Option<Uuid>, selected: Option<Uuid>) -> bool {
+    open_from == selected
+}
+
 fn lines(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
@@ -11778,5 +11814,31 @@ mod tests {
         );
         // The window clamps at zero rather than wrapping.
         assert_eq!(HistoryDateRange::Last7.bounds(0), (Some(0), None));
+    }
+
+    #[test]
+    fn open_reply_loses_navigation_authority_to_a_picker_commit() {
+        // ⌘N on the boss chat commits each destination by changing the
+        // selected session; an Open reply already in flight must not undo
+        // the landing. Before the gate existed, the reply activated the
+        // chat unconditionally and snapped the user back.
+        let chat = Uuid::new_v4();
+        let project_draft = Uuid::new_v4();
+        let projectless_draft = Uuid::new_v4();
+        assert!(!boss_open_reply_navigates(
+            Some(chat),
+            Some(project_draft)
+        ));
+        assert!(!boss_open_reply_navigates(
+            Some(chat),
+            Some(projectless_draft)
+        ));
+        // A Boss pick keeps the same selection, so the open's intent still
+        // stands — as does any open whose surface was never left.
+        assert!(boss_open_reply_navigates(Some(chat), Some(chat)));
+        // An open issued with nothing selected navigates only while nothing
+        // was selected since.
+        assert!(boss_open_reply_navigates(None, None));
+        assert!(!boss_open_reply_navigates(None, Some(project_draft)));
     }
 }

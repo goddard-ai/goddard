@@ -1,0 +1,1 @@
+- ⌘N on the boss chat: picking a project or "No project" now reliably lands on the New task page; previously a still-pending open of the chat could snap the view back right after the pick.
