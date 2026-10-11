@@ -106,6 +106,7 @@ function employee(overrides: Partial<BossEmployee> = {}): BossEmployee {
     jobTitle: "U0",
     personaId: "persona-1",
     workGoal: "errand",
+    assignmentKind: "implementation",
     permissions: {
       bucketIds: [],
       integrationIds: [],
@@ -139,6 +140,7 @@ function deliverable(overrides: Partial<BossDeliverable> = {}): BossDeliverable 
 
 function plan(overrides: Partial<BossPlan> = {}): BossPlan {
   return {
+    approvedRevisions: [],
     id: "plan-1",
     sessionId: "plan-session",
     planFile: "plans/goddard-xplat-boss-chat.md",

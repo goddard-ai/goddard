@@ -6420,11 +6420,19 @@ fn a_parked_report_keeps_its_trigger_through_the_mirror() {
 fn a_plan_goal_finish_wakes_the_idle_boss_once_with_the_queue() {
     let root = std::env::temp_dir().join(format!("boss-plan-wake-{}", Uuid::new_v4()));
     let (backend, _supervisor, employee_id, parent, _child) = employee_finish_fixture(&root);
-    let mut plan = boss_plan("plans/chain.md", &["Build", "Verify"]);
-    plan.finalized_at = Some(1);
+    let plan = boss_plan("plans/chain.md", &["Build", "Verify"]);
     let plan_id = plan.id;
     let item_id = plan.items[0].id;
-    backend.boss.add_plan(plan).unwrap();
+    backend.boss.add_plan(plan.clone()).unwrap();
+    backend
+        .boss
+        .finalize_plan(
+            &plan.plan_file,
+            None,
+            1,
+            &review_plan_fixture(&backend, &plan.plan_file),
+        )
+        .unwrap();
     backend
         .boss
         .set_employee_plan(
@@ -7162,6 +7170,7 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
+            assignment_kind: Default::default(),
             persona_id: Some(persona),
 
             job_title: "Worktree job".into(),
@@ -7247,6 +7256,7 @@ fn boss_summon_marker_freezes_the_card_identity() {
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
+            assignment_kind: Default::default(),
             persona_id: Some(persona),
 
             job_title: "Release checks".into(),
@@ -7483,6 +7493,7 @@ impl AdoptFixture {
         self.backend.handle_boss_operation(
             Some(self.boss),
             BossOperation::Summon {
+                assignment_kind: Default::default(),
                 persona_id: Some(self.backend.boss.document().personas[0].id),
                 job_title: "Adopt job".into(),
                 prompt: "Continue the work".into(),
@@ -7837,6 +7848,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         backend.handle_boss_operation(
             Some(boss),
             BossOperation::Summon {
+                assignment_kind: Default::default(),
                 persona_id: Some(persona),
 
                 job_title: "Verify".into(),
@@ -7998,6 +8010,7 @@ fn summon_op(
     model: Option<&str>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
+        assignment_kind: Default::default(),
         persona_id: Some(backend.boss.document().personas[0].id),
         job_title: job.into(),
         prompt: format!("Work on {job}"),
@@ -12647,6 +12660,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
         .handle_boss_operation(
             None,
             BossOperation::FinalizePlan {
+                reviewed: Some(review_plan_fixture(&backend, "plans/auth.md")),
                 plan_file: Some("memory/plans/auth.md".into()),
                 items: None,
             },
@@ -12736,6 +12750,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
             .handle_boss_operation(
                 None,
                 BossOperation::FinalizePlan {
+                    reviewed: Some(review_plan_fixture(&backend, "plans/auth.md")),
                     plan_file: Some("auth.md".into()),
                     items: None,
                 },
@@ -12890,6 +12905,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
             .handle_boss_operation(
                 None,
                 BossOperation::FinalizePlan {
+                    reviewed: Some(review_plan_fixture(&backend, "plans/auth.md")),
                     plan_file: Some("auth.md".into()),
                     items: None,
                 },
@@ -12989,6 +13005,7 @@ fn plan_finalization_is_user_only() {
                 .handle_boss_operation(
                     Some(caller),
                     BossOperation::FinalizePlan {
+                        reviewed: Some(review_plan_fixture(&backend, "plans/auth.md")),
                         plan_file,
                         items: None,
                     },
@@ -13006,6 +13023,7 @@ fn plan_finalization_is_user_only() {
         .handle_boss_operation(
             None,
             BossOperation::FinalizePlan {
+                reviewed: Some(review_plan_fixture(&backend, "plans/auth.md")),
                 plan_file: Some("plans/auth.md".into()),
                 items: None,
             },
@@ -13305,6 +13323,7 @@ fn summon_with_tag(
     request_id: Option<Uuid>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
+        assignment_kind: Some(waku_protocol::boss::PlanAssignmentKind::Research),
         persona_id: Some(persona),
 
         job_title: "Tagged job".into(),
@@ -13336,9 +13355,19 @@ fn summon_with_tag(
 
 /// A plan record pushed straight into the Boss document — the
 /// daemon path tests drive the service, not `createPlan`.
+fn review_plan_fixture(backend: &WakuBackend, reference: &str) -> waku_protocol::boss::PlanReview {
+    let file = backend.boss.plan_document_path(reference).unwrap();
+    if !file.exists() {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "# Reviewed fixture\n").unwrap();
+    }
+    backend.boss.preview_plan(reference).unwrap().0
+}
+
 fn boss_plan(plan_file: &str, items: &[&str]) -> waku_protocol::boss::BossPlan {
     use waku_protocol::boss::{PlanItem, PlanItemState};
     waku_protocol::boss::BossPlan {
+        approved_revisions: Vec::new(),
         id: Uuid::new_v4(),
         session_id: Uuid::new_v4(),
         plan_file: plan_file.into(),
@@ -13364,7 +13393,7 @@ fn boss_plan(plan_file: &str, items: &[&str]) -> waku_protocol::boss::BossPlan {
 /// the same path the worktree summon test relies on.
 #[test]
 fn boss_summon_plan_tag_persists_and_validates_references() {
-    use waku_protocol::boss::PlanOutcome;
+    use waku_protocol::boss::{BossResult, PlanFailureKind, PlanOutcome};
     let root = std::env::temp_dir().join(format!("boss-summon-plan-{}", Uuid::new_v4()));
     let project = root.join("project");
     std::fs::create_dir_all(&project).unwrap();
@@ -13398,12 +13427,16 @@ fn boss_summon_plan_tag_persists_and_validates_references() {
     // Unknown plans, orphan items, and unknown items fail admission.
     let count = || backend.boss.document().employees.len();
     for (plan, item, want) in [
-        (Some("plans/missing.md".into()), None, "unknown plan"),
-        (None, Some(item), "requires a plan"),
+        (
+            Some("plans/missing.md".into()),
+            None,
+            PlanFailureKind::MissingPlan,
+        ),
+        (None, Some(item), PlanFailureKind::Item),
         (
             Some("auth.md".into()),
             Some(Uuid::new_v4()),
-            "unknown work item",
+            PlanFailureKind::Item,
         ),
     ] {
         let result = backend.handle_boss_operation(
@@ -13411,9 +13444,10 @@ fn boss_summon_plan_tag_persists_and_validates_references() {
             summon_with_tag(persona, &project, plan, item, None),
             &events,
         );
-        let message = result.unwrap_err().to_string();
-        assert!(message.contains(want), "{message} should mention {want}");
-        assert_eq!(count(), 1, "{want} added no employee");
+        assert!(
+            matches!(result.unwrap(), BossResult::PlanRejected { error } if error.kind == want)
+        );
+        assert_eq!(count(), 1, "rejection added no employee");
     }
 
     // Marking the item done rejects new tags for it; the plan still
@@ -13433,10 +13467,7 @@ fn boss_summon_plan_tag_persists_and_validates_references() {
         &events,
     );
     assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("reopen it to tag work")
+        matches!(result.unwrap(), BossResult::PlanRejected { error } if error.kind == PlanFailureKind::Item)
     );
     let result = backend.handle_boss_operation(
         Some(boss),
@@ -13460,7 +13491,9 @@ fn boss_summon_plan_tag_persists_and_validates_references() {
         summon_with_tag(persona, &project, Some("auth.md".into()), None, None),
         &events,
     );
-    assert!(result.unwrap_err().to_string().contains("abandoned"));
+    assert!(
+        matches!(result.unwrap(), BossResult::PlanRejected { error } if error.kind == PlanFailureKind::Lifecycle)
+    );
     assert_eq!(count(), 2);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -15673,4 +15706,180 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
         assert!(detail.messages.iter().any(|message| Some(message.id) == run.message_id && message.turn_id == run.turn_id));
     }
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Contract checks stop before any resource claim or provider launch.
+#[test]
+fn plan_binding_revalidates_inherited_authority_before_dispatch() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossResult, ModelLimit, PlanAssignmentKind, PlanFailureKind,
+    };
+    let root = std::env::temp_dir().join(format!("plan-binding-dispatch-{}", Uuid::new_v4()));
+    let project = root.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let (backend, boss) = summon_test_backend(&root);
+    backend.boss.set_session_id(boss).unwrap();
+    backend
+        .boss
+        .set_resource_policy(
+            None,
+            backend.boss.document().resource_policy.revision,
+            vec![ModelLimit {
+                provider: ProviderKind::Codex,
+                model: "gpt-5.5".into(),
+                live_limit: 0,
+                hard_cap: 0,
+            }],
+            None,
+        )
+        .unwrap();
+    let plan = boss_plan("plans/bound.md", &["Implement"]);
+    backend.boss.add_plan(plan.clone()).unwrap();
+    let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+    backend
+        .boss
+        .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+        .unwrap();
+    let outcome = backend
+        .boss
+        .create_outcome(None, "Inherited", "Pass the check")
+        .unwrap();
+    backend
+        .boss
+        .attach_plan(None, outcome.id, &plan.plan_file)
+        .unwrap();
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "Bound implementation",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let waku_protocol::boss::BossOperation::Summon {
+        outcome_id,
+        item,
+        assignment_kind,
+        ..
+    } = &mut operation
+    {
+        *outcome_id = Some(outcome.id);
+        *item = Some(plan.items[0].id);
+        *assignment_kind = Some(PlanAssignmentKind::Implementation);
+    }
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(Some(boss), operation, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected accepted queued assignment");
+    };
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.plan_id, Some(plan.id));
+    assert!(
+        employee
+            .plan_binding
+            .as_ref()
+            .unwrap()
+            .revision_id
+            .is_some()
+    );
+    assert!(backend.sessions.lock().get(&session_id).is_none());
+    let other = boss_plan("plans/other-bound.md", &[]);
+    backend.boss.add_plan(other.clone()).unwrap();
+    let reviewed = review_plan_fixture(&backend, &other.plan_file);
+    backend
+        .boss
+        .finalize_plan(&other.plan_file, None, 2, &reviewed)
+        .unwrap();
+    backend
+        .boss
+        .attach_plan(None, outcome.id, &other.plan_file)
+        .unwrap();
+    assert!(!backend.dispatch_queued_head(&employee).unwrap());
+    let unchanged = backend.boss.employee(session_id).unwrap();
+    assert_eq!(unchanged.plan_binding, employee.plan_binding);
+    assert!(
+        unchanged
+            .ticket
+            .unwrap()
+            .blocked_by
+            .iter()
+            .any(|reason| matches!(reason,
+        AdmissionBlocker::Plan { error } if error.kind == PlanFailureKind::BindingChanged))
+    );
+    assert!(backend.sessions.lock().get(&session_id).is_none());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn plan_approval_rejects_missing_review_and_changed_review_before_freezing() {
+    use waku_protocol::boss::{BossOperation, BossResult, PlanFailureKind};
+    let root = std::env::temp_dir().join(format!("plan-approval-preview-{}", Uuid::new_v4()));
+    let (backend, boss) = surface_test_backend(&root);
+    backend.boss.set_session_id(boss).unwrap();
+    let mut plan = boss_plan("plans/preview.md", &[]);
+    // A legacy freeze is eligible for explicit human reconfirmation even
+    // after the planning session has archived; original history stays intact.
+    plan.finalized_at = Some(1);
+    backend.boss.add_plan(plan.clone()).unwrap();
+    let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+    let result = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::FinalizePlan {
+                plan_file: Some(plan.plan_file.clone()),
+                items: None,
+                reviewed: None,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(
+        matches!(result, BossResult::PlanRejected { error } if error.kind == PlanFailureKind::ContentChanged)
+    );
+    std::fs::write(
+        backend.boss.plan_document_path(&plan.plan_file).unwrap(),
+        "changed after preview",
+    )
+    .unwrap();
+    let result = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::FinalizePlan {
+                plan_file: Some(plan.plan_file.clone()),
+                items: None,
+                reviewed: Some(reviewed),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(
+        matches!(result, BossResult::PlanRejected { error } if error.kind == PlanFailureKind::ContentChanged)
+    );
+    assert!(
+        backend
+            .boss
+            .plan_for_file(&plan.plan_file)
+            .unwrap()
+            .approved_revisions
+            .is_empty()
+    );
+    let reviewed = backend.boss.preview_plan(&plan.plan_file).unwrap().0;
+    let result = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::FinalizePlan {
+                plan_file: Some(plan.plan_file.clone()),
+                items: None,
+                reviewed: Some(reviewed),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(matches!(result, BossResult::PlanFinalized { .. }));
+    let captured = backend.boss.plan_for_file(&plan.plan_file).unwrap();
+    assert_eq!(captured.finalized_at, Some(1));
+    assert_eq!(captured.approved_revisions.len(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
 }

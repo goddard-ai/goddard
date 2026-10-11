@@ -16,15 +16,17 @@ import type { OutcomeState } from "./OutcomeState";
 import type { OutcomeWait } from "./OutcomeWait";
 import type { PermissionOverrides } from "./PermissionOverrides";
 import type { PersonaDefaultAction } from "./PersonaDefaultAction";
+import type { PlanAssignmentKind } from "./PlanAssignmentKind";
 import type { PlanItemInput } from "./PlanItemInput";
 import type { PlanItemState } from "./PlanItemState";
 import type { PlanOutcome } from "./PlanOutcome";
+import type { PlanReview } from "./PlanReview";
 import type { ProviderKind } from "./ProviderKind";
 import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
+export type BossOperation = { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, reviewed?: PlanReview, } | { "type": "previewPlan", plan: string, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
 /**
  * The employee role layered on the canonical Employee base — a
  * shipped specialist or a custom persona. `None` assigns the
@@ -139,17 +141,15 @@ finishesOutcome: boolean,
  */
 prerequisites?: Array<string>,
 /**
- * Tag the assignment to a plan — the `BossPlan::id`, its
- * planning-session id, or its `plans/<file>.md` path. An unknown
- * plan or a plan with a closed outcome fails the summon rather
- * than landing untagged; a still-open draft tags fine. The tag
- * is the durable, user-visible grouping — orthogonal to
- * `work_goal`, `outcome_id`, and `group_id`.
+ * Explicit governing plan (id, planning session, or normalized path).
+ * Otherwise inherit the outcome's attached plan; conflicts reject.
+ * Implementation requires an exact approved revision; draft tags
+ * authorize only explicitly classified research.
  */
-plan?: string,
+plan?: string, assignmentKind?: PlanAssignmentKind,
 /**
- * The `PlanItem::id` inside `plan` the assignment serves —
- * requires `plan`; an unknown or already done/dropped item
+ * The `PlanItem::id` inside the selected explicit/inherited plan —
+ * an unknown or already done/dropped item
  * fails the summon. Omitted lists the employee under the plan's
  * unallocated work.
  */

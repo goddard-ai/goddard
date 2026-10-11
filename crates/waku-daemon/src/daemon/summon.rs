@@ -424,6 +424,13 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
+        if let Err(error) = self.boss.validate_plan_binding(employee) {
+            self.boss.record_blocked(
+                session_id,
+                vec![waku_protocol::boss::AdmissionBlocker::Plan { error }],
+            )?;
+            return Ok(false);
+        }
         // An unresolved Employee base holds the ticket rather than
         // dispatching under a persona the reconciler could not identify —
         // the human's choice in Persona settings clears the wait.
@@ -490,10 +497,29 @@ impl WakuBackend {
             self.boss.record_blocked(session_id, attempt.blockers)?;
             return Ok(false);
         }
-        if !self
-            .boss
-            .mark_dispatching(session_id, ticket.generation, Some(reservation_id))?
-        {
+        let dispatching =
+            self.boss
+                .mark_dispatching(session_id, ticket.generation, Some(reservation_id));
+        let dispatching = match dispatching {
+            Ok(marked) => marked,
+            Err(error) => {
+                if let Ok(broker) = self.resource_broker() {
+                    broker.release_admission(session_id, reservation_id);
+                }
+                if let Some(error) = error.downcast_ref::<waku_protocol::boss::PlanContractError>()
+                {
+                    self.boss.record_blocked(
+                        session_id,
+                        vec![waku_protocol::boss::AdmissionBlocker::Plan {
+                            error: error.clone(),
+                        }],
+                    )?;
+                    return Ok(false);
+                }
+                return Err(error);
+            }
+        };
+        if !dispatching {
             // A stop or re-admission settled the generation mid-grant —
             // drop the claims; nobody else will.
             if let Ok(broker) = self.resource_broker() {
@@ -565,6 +591,15 @@ impl WakuBackend {
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<bool> {
         let session_id = employee.session_id;
+        let current = self
+            .boss
+            .employee(session_id)
+            .ok_or_else(|| anyhow!("employee is missing"))?;
+        self.boss.validate_plan_binding(&current)?;
+        anyhow::ensure!(
+            current.plan_binding == employee.plan_binding,
+            "assignment binding changed before dispatch"
+        );
         let events = self.event_source.lock().clone();
         let started = {
             let mut state = self.task_state.lock();
@@ -1029,6 +1064,7 @@ impl WakuBackend {
         prerequisites: Vec<Uuid>,
         plan: Option<String>,
         item: Option<Uuid>,
+        assignment_kind: waku_protocol::boss::PlanAssignmentKind,
         request_id: Option<Uuid>,
         events: &EventSink,
     ) -> anyhow::Result<(Uuid, bool)> {
@@ -1060,7 +1096,7 @@ impl WakuBackend {
             "priority": priority, "outcomeId": outcome_id, "newOutcome": new_outcome,
             "afterSuccess": after_success, "finishesOutcome": finishes_outcome,
             "prerequisites": prerequisites,
-            "plan": plan, "item": item,
+            "plan": plan, "item": item, "assignmentKind": assignment_kind,
         }))?;
         if let Some(request_id) = request_id
             && let Some(existing) = self
@@ -1079,11 +1115,9 @@ impl WakuBackend {
         }
         // The plan tag resolves at admission — unknown or closed plans and
         // unknown or finished items fail here rather than landing untagged.
-        let plan_tag = match (&plan, item) {
-            (Some(reference), item) => Some(self.boss.plan_assignment(reference, item)?),
-            (None, Some(_)) => bail!("a summon item tag requires a plan"),
-            (None, None) => None,
-        };
+        let plan_binding =
+            self.boss
+                .effective_plan_binding(plan.as_deref(), outcome_id, item, assignment_kind)?;
         // The assignment link resolves the same way: unknown or closed tasks,
         // a second live finisher, the finisher/intent conflict, an
         // out-of-task prerequisite, and new work during the finishing
@@ -1095,7 +1129,7 @@ impl WakuBackend {
             finishes_outcome,
             after_success,
             prerequisites,
-            plan_tag.map(|(plan_id, _)| plan_id),
+            plan_binding.as_ref().map(|binding| binding.plan_id),
         )?;
         if let Some(adopt) = &adopt_worktree {
             self.resolve_worktree_adoption(Path::new(&project), adopt, None)?;
@@ -1165,10 +1199,10 @@ impl WakuBackend {
         };
         employee.request_id = request_id;
         employee.request_fingerprint = request_id.map(|_| fingerprint);
-        if let Some((plan_id, item_id)) = plan_tag {
-            employee.plan_id = Some(plan_id);
-            employee.item_id = item_id;
-        }
+        employee.assignment_kind = assignment_kind;
+        employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
+        employee.item_id = item;
+        employee.plan_binding = plan_binding;
         employee.assignment = assignment.clone();
         let employee_name = employee.identity.name.clone();
         let employee_title = employee.job_title.clone();

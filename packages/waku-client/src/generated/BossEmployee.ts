@@ -6,6 +6,8 @@ import type { EmployeeExpiry } from "./EmployeeExpiry";
 import type { EmployeeGoal } from "./EmployeeGoal";
 import type { EmployeeLifecycle } from "./EmployeeLifecycle";
 import type { PersonaPermissions } from "./PersonaPermissions";
+import type { PlanAssignmentKind } from "./PlanAssignmentKind";
+import type { PlanBinding } from "./PlanBinding";
 import type { SummonTicket } from "./SummonTicket";
 
 export type BossEmployee = { sessionId: string, supervisorId: string, identity: BossIdentity, jobTitle: string, personaId: string,
@@ -96,6 +98,14 @@ requestFingerprint?: string,
  * employee outside every plan group.
  */
 planId?: string,
+/**
+ * Explicit research is read-only; legacy assignments default to implementation.
+ */
+assignmentKind: PlanAssignmentKind,
+/**
+ * Exact authority selected at acceptance; never upgraded by dispatch.
+ */
+planBinding?: PlanBinding,
 /**
  * The `PlanItem::id` inside `plan_id` the assignment serves — `None`
  * leaves the employee unallocated at the bottom of its plan group.

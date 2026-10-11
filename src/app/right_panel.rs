@@ -3644,6 +3644,8 @@ mod tests {
         blocker: Option<&str>,
     ) -> waku_protocol::boss::BossEmployee {
         waku_protocol::boss::BossEmployee {
+            assignment_kind: Default::default(),
+            plan_binding: None,
             session_id: Uuid::new_v4(),
             supervisor_id: Uuid::new_v4(),
             identity: waku_protocol::boss::BossIdentity {
@@ -5045,7 +5047,7 @@ impl Waku {
     /// and the tab is not already mounted — callers gate the mount on the
     /// fetched document holding real contents. Returns whether the strip
     /// changed so a landing read can skip repainting an identical doc.
-    fn mount_plan_tab(&mut self, session_id: Uuid, plan_file: String) -> bool {
+    pub(super) fn mount_plan_tab(&mut self, session_id: Uuid, plan_file: String) -> bool {
         if self.right_panel_live_owner != RightPanelOwner::Session(session_id) {
             return false;
         }
@@ -9902,6 +9904,8 @@ impl Waku {
             self.plan_docs.insert(
                 session_id,
                 PlanDoc {
+                    reviewed: None,
+                    displayed_reviewed: None,
                     key,
                     revision,
                     requested: false,
@@ -9916,9 +9920,19 @@ impl Waku {
             .plan_docs
             .get(&session_id)
             .and_then(|doc| doc.content.clone());
+        let reviewed = self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.reviewed.clone());
+        let displayed_reviewed = self
+            .plan_docs
+            .get(&session_id)
+            .and_then(|doc| doc.displayed_reviewed.clone());
         self.plan_docs.insert(
             session_id,
             PlanDoc {
+                reviewed,
+                displayed_reviewed,
                 key,
                 revision,
                 requested: true,
@@ -9934,7 +9948,7 @@ impl Waku {
                         Uuid::nil(),
                         Uuid::nil(),
                         waku_client::Command::Boss {
-                            operation: waku_client::boss::BossOperation::ReadFile { path },
+                            operation: waku_client::boss::BossOperation::PreviewPlan { plan: path },
                         },
                     )
                 })
@@ -9951,8 +9965,14 @@ impl Waku {
                 doc.requested = false;
                 let next = match result {
                     Ok(waku_client::ResponsePayload::Boss {
-                        result: waku_client::boss::BossResult::File { content, .. },
-                    }) => Ok(content),
+                        result: waku_client::boss::BossResult::PlanPreview { content, reviewed },
+                    }) => {
+                        doc.reviewed = Some(reviewed);
+                        Ok(content)
+                    }
+                    Ok(waku_client::ResponsePayload::Boss {
+                        result: waku_client::boss::BossResult::PlanRejected { error },
+                    }) => Err(error.detail),
                     Ok(_) => Err(tr!("boss.unexpected_response")),
                     Err(error) => Err(error.to_string()),
                 };
@@ -9994,6 +10014,11 @@ impl Waku {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) -> Div {
+        if let Some(doc) = self.plan_docs.get_mut(&session_id) {
+            // Both callers render this doc's fetched text. Remember the
+            // version shown, not an unseen background refresh.
+            doc.displayed_reviewed = doc.reviewed.clone();
+        }
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
         let (block_count, content_changed) = {

@@ -171,6 +171,25 @@ impl WakuBackend {
         operation: waku_protocol::boss::BossOperation,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        self.handle_boss_operation_inner(caller, operation, events)
+            .or_else(|error| {
+                if let Some(error) = error.downcast_ref::<waku_protocol::boss::PlanContractError>()
+                {
+                    Ok(waku_protocol::boss::BossResult::PlanRejected {
+                        error: error.clone(),
+                    })
+                } else {
+                    Err(error)
+                }
+            })
+    }
+
+    fn handle_boss_operation_inner(
+        &self,
+        caller: Option<Uuid>,
+        operation: waku_protocol::boss::BossOperation,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{
             AutomationOperation, BossOperation, BossResult, EmployeeControl,
         };
@@ -542,9 +561,11 @@ impl WakuBackend {
                 }
                 Ok(BossResult::TerminalRequested { title, cwd })
             }
-            BossOperation::FinalizePlan { plan_file, items } => {
-                self.finalize_plan(caller, plan_file, items, events)
-            }
+            BossOperation::FinalizePlan {
+                plan_file,
+                items,
+                reviewed,
+            } => self.finalize_plan(caller, plan_file, items, reviewed, events),
             BossOperation::Summon {
                 persona_id,
                 job_title,
@@ -570,6 +591,7 @@ impl WakuBackend {
                 prerequisites,
                 plan,
                 item,
+                assignment_kind,
                 request_id,
             } => {
                 let (session_id, newly_admitted) = self.boss.with_operation_lock(|| {
@@ -599,6 +621,7 @@ impl WakuBackend {
                         prerequisites,
                         plan,
                         item,
+                        assignment_kind.unwrap_or_default(),
                         request_id,
                         events,
                     )
@@ -623,8 +646,8 @@ impl WakuBackend {
                 }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
-                    // Re-tagging is pure bookkeeping — it applies in every
-                    // lifecycle state, queued and finished included.
+                    // Retags validate plan authority. A live assignment
+                    // keeps its accepted revision rather than switching plans.
                     if let EmployeeControl::SetPlan { plan, item } = &action {
                         self.boss
                             .set_employee_plan(session_id, plan.clone(), *item)?;

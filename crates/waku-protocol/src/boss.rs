@@ -1098,6 +1098,8 @@ pub struct SummonTicket {
     rename_all_fields = "camelCase"
 )]
 pub enum AdmissionBlocker {
+    /// Approval or assignment identity failed revalidation.
+    Plan { error: PlanContractError },
     /// The provider+model cap is full.
     ModelLimit { used: u32, limit: u32 },
     /// A declared host resource set cannot be granted right now.
@@ -1333,6 +1335,13 @@ pub struct BossEmployee {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub plan_id: Option<Uuid>,
+    /// Explicit research is read-only; legacy assignments default to implementation.
+    #[serde(default)]
+    pub assignment_kind: PlanAssignmentKind,
+    /// Exact authority selected at acceptance; never upgraded by dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_binding: Option<PlanBinding>,
     /// The `PlanItem::id` inside `plan_id` the assignment serves — `None`
     /// leaves the employee unallocated at the bottom of its plan group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1590,6 +1599,10 @@ pub struct BossPlan {
     pub idea: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finalized_at: Option<u64>,
+    /// Approved bytes and provenance commit together in Boss state. Legacy
+    /// timestamps do not populate this list; they require human reconfirmation.
+    #[serde(default)]
+    pub approved_revisions: Vec<ApprovedPlanRevision>,
     /// The ordered work breakdown — the plan's intended course of work,
     /// seeded from the approved design at finalization and reshaped by the
     /// boss thereafter as execution diverges. The frozen document stays
@@ -1610,6 +1623,75 @@ pub struct BossPlan {
 fn new_plan_id() -> Uuid {
     Uuid::new_v4()
 }
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanAssignmentKind {
+    #[default]
+    Implementation,
+    Research,
+}
+
+/// The identity of the complete document shown to the human before approval.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanReview {
+    pub owner_id: Uuid,
+    pub plan_id: Uuid,
+    /// SHA-256 of the exact UTF-8 snapshot, without normalization.
+    pub content_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovedPlanRevision {
+    pub id: Uuid,
+    pub review: PlanReview,
+    pub approved_at: u64,
+    pub actor: PlanActor,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanBinding {
+    pub owner_id: Uuid,
+    pub plan_id: Uuid,
+    /// Only explicitly classified research may omit revision/digest.
+    pub revision_id: Option<Uuid>,
+    pub content_digest: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanFailureKind {
+    MissingPlan,
+    Conflict,
+    Unapproved,
+    LegacyApproval,
+    ContentChanged,
+    CaptureFailed,
+    Integrity,
+    BindingChanged,
+    Item,
+    Lifecycle,
+}
+
+/// Machine-readable failure with an actionable, body-free explanation.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanContractError {
+    pub kind: PlanFailureKind,
+    pub detail: String,
+}
+
+impl std::fmt::Display for PlanContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for PlanContractError {}
 
 /// The plan's panel-facing lifecycle — `Planning` stays derived from
 /// `finalized_at` (an archived draft adds the session's archive status on
@@ -2549,11 +2631,11 @@ pub enum BossOperation {
         #[ts(optional)]
         command: Option<String>,
     },
-    /// Freeze a plan document after user approval. A planning session
-    /// finalizes its own plan (`plan_file` omitted); the boss chat or a
-    /// human names the file. Approval lands on a daemon-owned request card;
-    /// the approved design is handed to the boss chat for implementation,
-    /// and the session archives once the grace period elapses. `items`
+    /// Human-only approval of the exact reviewed text. `reviewed` must
+    /// match a preview; missing identity or changed bytes leave it unapproved.
+    /// Legacy timestamps require explicit human reconfirmation as a new
+    /// revision, preserving history and work state. Initial approval hands
+    /// the design to the boss; the session archives after its grace period. `items`
     /// seeds the work breakdown from the approved document's course of
     /// work — what the user signed off on is what the list starts as;
     /// omit it to leave an already-declared breakdown unchanged.
@@ -2563,6 +2645,13 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         items: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        reviewed: Option<PlanReview>,
+    },
+    /// Shared plan preview; carries the exact identity the human approves.
+    PreviewPlan {
+        plan: String,
     },
     /// Manage the user's daemon-owned scheduled automations. Boss-only.
     Automation {
@@ -2682,17 +2771,18 @@ pub enum BossOperation {
         /// an existing `outcome_id` only.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         prerequisites: Vec<Uuid>,
-        /// Tag the assignment to a plan — the `BossPlan::id`, its
-        /// planning-session id, or its `plans/<file>.md` path. An unknown
-        /// plan or a plan with a closed outcome fails the summon rather
-        /// than landing untagged; a still-open draft tags fine. The tag
-        /// is the durable, user-visible grouping — orthogonal to
-        /// `work_goal`, `outcome_id`, and `group_id`.
+        /// Explicit governing plan (id, planning session, or normalized path).
+        /// Otherwise inherit the outcome's attached plan; conflicts reject.
+        /// Implementation requires an exact approved revision; draft tags
+        /// authorize only explicitly classified research.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         plan: Option<String>,
-        /// The `PlanItem::id` inside `plan` the assignment serves —
-        /// requires `plan`; an unknown or already done/dropped item
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        assignment_kind: Option<PlanAssignmentKind>,
+        /// The `PlanItem::id` inside the selected explicit/inherited plan —
+        /// an unknown or already done/dropped item
         /// fails the summon. Omitted lists the employee under the plan's
         /// unallocated work.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3132,6 +3222,14 @@ fn default_true() -> bool {
     rename_all_fields = "camelCase"
 )]
 pub enum BossResult {
+    /// Recoverable approval/binding rejection; does not authorize execution.
+    PlanRejected {
+        error: PlanContractError,
+    },
+    PlanPreview {
+        reviewed: PlanReview,
+        content: String,
+    },
     State {
         state: BossState,
     },
@@ -3317,9 +3415,8 @@ pub enum EmployeeControl {
     SetResources {
         resources: crate::resources::ResourceSet,
     },
-    /// Re-tag the employee's plan and item links — the mutable half of
-    /// the summon tag, so a mis-tagged employee moves groups without a
-    /// resummon. Both fields are tri-state: an absent field keeps the
+    /// Retag work at explicit intake. Live bindings retain their accepted
+    /// revision and reject a different governing plan. Both fields are tri-state: an absent field keeps the
     /// current link, `null` clears it, and a value re-tags. Re-tagging
     /// the plan without restating `item` drops the employee to the plan's
     /// unallocated list; an `item` set resolves against the employee's
@@ -3556,6 +3653,7 @@ mod tests {
         assert!(matches!(
             finalize,
             super::BossOperation::FinalizePlan {
+                reviewed: None,
                 plan_file: None,
                 items: None
             }
@@ -3569,6 +3667,7 @@ mod tests {
         assert!(matches!(
             seeded,
             super::BossOperation::FinalizePlan {
+                reviewed: None,
                 plan_file: Some(file),
                 items: Some(items)
             } if file == "plans/auth.md" && items == ["Probe", "Verify"]

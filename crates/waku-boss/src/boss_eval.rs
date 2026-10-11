@@ -49,7 +49,7 @@ exist only during this script invocation; use named memory buckets for durable s
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,item?,requestId?})
+  summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,assignmentKind?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's
@@ -67,7 +67,11 @@ exist only during this script invocation; use named memory buckets for durable s
                                             intent — finishesOutcome makes it the
                                             finisher whose success completes the outcome
                                             silently, and prerequisites holds it queued
-                                            until the named siblings finish
+                                            until the named siblings finish;
+                                            assignmentKind: \"research\" labels
+                                            read-only work on draft plans; the
+                                            default \"implementation\" requires
+                                            the exact approved plan revision
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
                         setWorkspace|setResources|setPlan,...})
@@ -723,6 +727,10 @@ fn unwrap_result(result: serde_json::Value) -> Result<Dynamic, Box<EvalAltResult
     let serde_json::Value::Object(mut object) = result else {
         return Ok(json_to_dynamic(result));
     };
+    if object.get("type").and_then(|value| value.as_str()) == Some("planRejected") {
+        let error = object.get("error").cloned().unwrap_or_default();
+        return Err(format!("plan assignment rejected: {error}").into());
+    }
     object.remove("type");
     Ok(match object.len() {
         0 => Dynamic::UNIT,

@@ -3161,6 +3161,7 @@ boss.plan_seed_opener: "这个规划会话属于你，用于处理上面的请�
 boss.plan_finalize_title: 定稿计划？
 boss.plan_finalize_detail: "将 %{file}（“%{idea}”）冻结为已批准的设计？文档将变为只读，老板接手实现；规划会话会短暂保留以回答问题，然后归档。"
 boss.plan_finalize: 定稿计划
+boss.plan_reconfirm: 重新批准已审阅的计划
 boss.plan_finalized: 计划已定稿
 boss.plan_finalized_ago: "%{ago}前定稿"
 boss.plan_approve_prompt: 设计已获批准——定稿并把实现交给老板。

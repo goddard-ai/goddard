@@ -6554,6 +6554,8 @@ boss.plan_finalize_detail:
   en: Freeze %{file} ("%{idea}") as the approved design? The document becomes read-only and the boss takes over implementation; the planning session stays open briefly for questions, then archives.
 boss.plan_finalize:
   en: Finalize plan
+boss.plan_reconfirm:
+  en: Reconfirm reviewed plan
 boss.plan_finalized:
   en: Plan finalized
 boss.plan_finalized_ago:

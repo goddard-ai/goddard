@@ -911,6 +911,9 @@ enum RightPanelSurface {
 /// A planning session's fetched plan document. `revision` is the Boss
 /// document revision the read answered — a newer state re-arms the fetch.
 struct PlanDoc {
+    reviewed: Option<waku_client::boss::PlanReview>,
+    /// The preview identity actually rendered, kept across offscreen refreshes.
+    displayed_reviewed: Option<waku_client::boss::PlanReview>,
     key: waku_client::DaemonKey,
     /// The Boss document revision this read was issued against — the doc
     /// stays fresh until that host's state moves again.

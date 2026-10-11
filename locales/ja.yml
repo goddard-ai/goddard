@@ -3210,6 +3210,7 @@ boss.plan_seed_opener: "この計画セッションは上記のリクエスト�
 boss.plan_finalize_title: 計画を確定しますか？
 boss.plan_finalize_detail: "%{file}（「%{idea}」）を承認済み設計として確定しますか？ドキュメントは読み取り専用になり、実装はボスが引き継ぎます。計画セッションは質問のため短時間開いたままになり、その後アーカイブされます。"
 boss.plan_finalize: 計画を確定
+boss.plan_reconfirm: 確認した計画を再承認
 boss.plan_finalized: 計画が確定しました
 boss.plan_finalized_ago: "%{ago}前に確定"
 boss.plan_approve_prompt: 設計は承認されました——確定して実装をボスに引き継ぎます。

@@ -79,6 +79,7 @@ const VALUE_OPTIONS: &[&str] = &[
     "--model",
     "--effort",
     "--work-goal",
+    "--assignment-kind",
     "--workspace",
     "--base-branch",
     "--adopt-worktree",
@@ -366,7 +367,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent read TASK_ID --turn 3".to_owned(),
         ),
         "boss summon" => (
-            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md — tags the assignment to the plan's Goals group","optional":true},"--item":{"type":"work item UUID inside --plan; requires --plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key"}),
+            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"default":"implementation","notes":"Research is read-only; draft tags never authorize implementation"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key"}),
             json!({"json":{"type":"summoned","sessionId":"employee UUID","state":"queued|dispatching|working","admission":{"provider":"resolved provider","model":"resolved model","reasoningEffort":"resolved effort or null","queuePosition":"optional queue position","blockedBy":"admission blockers"}}}),
             "goddard-agent boss summon --persona Researcher --title 'Review diff' --file brief.md"
                 .to_owned(),
@@ -1073,10 +1074,14 @@ fn main() -> ExitCode {
         Err(error) => {
             let message = format!("{error:#}");
             if JSON_OUTPUT.load(Ordering::Relaxed) {
-                std::eprintln!(
-                    "{}",
-                    json!({"error":{"code":"invalid_input","command":"goddard-agent","message":message,"hint":error_hint()}})
-                );
+                let mut payload = json!({"error":{"code":"invalid_input","command":"goddard-agent","message":message,"hint":error_hint()}});
+                if let Some(contract) =
+                    error.downcast_ref::<waku_protocol::boss::PlanContractError>()
+                {
+                    payload["error"]["code"] = json!("plan_contract");
+                    payload["error"]["planFailure"] = json!(contract);
+                }
+                std::eprintln!("{}", payload);
             } else {
                 eprintln!("goddard-agent: {message}");
             }
@@ -1815,6 +1820,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 })
                 .transpose()?;
             print_boss(boss_request(Op::FinalizePlan {
+                reviewed: None,
                 plan_file: pos.first().cloned(),
                 items,
             })?)
@@ -2295,6 +2301,7 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
             "model",
             "effort",
             "work-goal",
+            "assignment-kind",
             "plan",
             "item",
             "workspace",
@@ -2406,8 +2413,8 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
     {
         bail!("--outcome-id and --new-outcome-json[-file] are mutually exclusive");
     }
-    if opts.contains_key("item") && !opts.contains_key("plan") {
-        bail!("--item requires --plan");
+    if opts.contains_key("item") && !opts.contains_key("plan") && !opts.contains_key("outcome-id") {
+        bail!("--item requires --plan or an --outcome-id with an attached plan");
     }
     let prerequisites = if opts.contains_key("prerequisites-json")
         || opts.contains_key("prerequisites-json-file")
@@ -2422,6 +2429,7 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
         "reasoningEffort":opts.get("effort"), "workspace":workspace, "baseBranch":opts.get("base-branch"),
         "adoptWorktree":opts.get("adopt-worktree"), "workGoal":opts.get("work-goal").map(String::as_str).unwrap_or("errand"),
         "icon":icon, "plan":opts.get("plan"), "item":opts.get("item"), "requestId":opts.get("request-id"),
+        "assignmentKind":opts.get("assignment-kind").map(String::as_str).unwrap_or("implementation"),
         "permissions":structured("permissions")?, "resources":structured("resources")?,
         "allowBurst":opts.contains_key("allow-burst"), "groupId":opts.get("group-id"), "priority":priority,
         "outcomeId":opts.get("outcome-id"), "newOutcome":structured("new-outcome")?,
@@ -2755,6 +2763,9 @@ fn boss_request(
         Uuid::nil(),
         Command::Boss { operation },
     )? {
+        ResponsePayload::Boss {
+            result: waku_protocol::boss::BossResult::PlanRejected { error },
+        } => Err(error.into()),
         ResponsePayload::Boss { result } => Ok(result),
         other => bail!("unexpected Boss response: {other:?}"),
     }

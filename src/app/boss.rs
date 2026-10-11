@@ -2120,6 +2120,22 @@ impl Waku {
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
+                            BossResult::PlanRejected { error } => {
+                                this.show_toast(tr!("boss.failed", error = error.detail));
+                                if let BossReply::Finalize(session_id) = reply {
+                                    this.plan_docs.remove(&session_id);
+                                    if let Some(plan_file) = this
+                                        .state
+                                        .sessions
+                                        .iter()
+                                        .find(|session| session.id == session_id)
+                                        .and_then(|session| session.planning.as_ref())
+                                        .map(|planning| planning.plan_file.clone())
+                                    {
+                                        this.ensure_plan_doc(key, session_id, &plan_file, true, cx);
+                                    }
+                                }
+                            }
                             BossResult::State { state } => {
                                 if let (Some(editor), Some((values, _))) =
                                     (&mut this.boss_ui.editor, &saved)
@@ -8338,7 +8354,7 @@ impl Waku {
                 session.map(|_| tr!("boss.plan_open_discussion")),
             )
         };
-        let header = div()
+        let mut header = div()
             .flex_none()
             .flex()
             .items_center()
@@ -8386,6 +8402,15 @@ impl Waku {
                         }),
                 )
             });
+        if plan.finalized_at.is_some() && plan.approved_revisions.is_empty() {
+            header = header.child(
+                boss_button("boss-plan-reconfirm", tr!("boss.plan_reconfirm"), &theme)
+                    .child(tr!("boss.plan_reconfirm"))
+                    .on_activation(cx, move |this, _, cx| {
+                        this.request_plan_reconfirmation(key, session_id, cx);
+                    }),
+            );
+        }
         self.ensure_plan_doc(key, session_id, &plan.plan_file, false, cx);
         let body = match self
             .plan_docs
@@ -9473,6 +9498,7 @@ fn boss_queue_detail(
             used = used,
             limit = limit
         ),
+        Some(waku_protocol::boss::AdmissionBlocker::Plan { error }) => error.detail.clone(),
         Some(waku_protocol::boss::AdmissionBlocker::HostResources { detail })
         | Some(waku_protocol::boss::AdmissionBlocker::OutcomeWait { detail })
         | Some(waku_protocol::boss::AdmissionBlocker::EmployeeBase { detail }) => detail.clone(),
@@ -10030,6 +10056,8 @@ mod tests {
 
     fn boss_employee(created_at: Option<u64>) -> waku_protocol::boss::BossEmployee {
         waku_protocol::boss::BossEmployee {
+            assignment_kind: Default::default(),
+            plan_binding: None,
             session_id: Uuid::new_v4(),
             supervisor_id: Uuid::new_v4(),
             identity: BossIdentity {
@@ -10346,6 +10374,8 @@ mod tests {
     ) -> waku_protocol::boss::BossEmployee {
         let session_id = Uuid::from_u128(id);
         waku_protocol::boss::BossEmployee {
+            assignment_kind: Default::default(),
+            plan_binding: None,
             session_id,
             supervisor_id: Uuid::from_u128(u128::MAX),
             identity: BossIdentity {
@@ -10554,6 +10584,7 @@ mod tests {
         let planning = Uuid::new_v4();
         state.session_id = Some(chat);
         state.planning = vec![waku_protocol::boss::BossPlan {
+            approved_revisions: Vec::new(),
             id: Uuid::new_v4(),
             session_id: planning,
             plan_file: "plans/auth.md".into(),
@@ -10581,6 +10612,7 @@ mod tests {
         let mut previous = boss_state_for_queue_test();
         let planning = Uuid::new_v4();
         previous.planning = vec![waku_protocol::boss::BossPlan {
+            approved_revisions: Vec::new(),
             id: Uuid::new_v4(),
             session_id: planning,
             plan_file: "plans/auth.md".into(),

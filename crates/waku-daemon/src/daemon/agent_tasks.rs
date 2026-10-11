@@ -378,6 +378,7 @@ impl WakuBackend {
             };
             let sender = caller.or(boss.session_id);
             let plan = waku_protocol::boss::BossPlan {
+                approved_revisions: Vec::new(),
                 id: Uuid::new_v4(),
                 session_id: Uuid::new_v4(),
                 plan_file: plan_file.clone(),
@@ -449,6 +450,7 @@ impl WakuBackend {
         caller: Option<Uuid>,
         plan_file: Option<String>,
         items: Option<Vec<String>>,
+        reviewed: Option<waku_protocol::boss::PlanReview>,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::BossResult;
@@ -487,22 +489,31 @@ impl WakuBackend {
                     .ok_or_else(|| anyhow!("this session owns no plan to finalize"))?
             }
         };
-        if plan.finalized_at.is_some() {
+        if !plan.approved_revisions.is_empty() {
             bail!("plan {} is already finalized", plan.plan_file);
         }
+        let reviewed = reviewed.ok_or_else(|| waku_protocol::boss::PlanContractError {
+            kind: waku_protocol::boss::PlanFailureKind::ContentChanged,
+            detail: "approval requires the reviewed plan identity; reopen its preview and confirm"
+                .into(),
+        })?;
         {
             let state = self.task_state.lock();
-            if !state
-                .sessions
-                .iter()
-                .any(|session| session.id == plan.session_id && session.archived_at.is_none())
+            if plan.finalized_at.is_none()
+                && !state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == plan.session_id && session.archived_at.is_none())
             {
                 bail!("planning session for {} is gone", plan.plan_file);
             }
         }
-        let finalized =
-            self.boss
-                .finalize_plan(&plan.plan_file, items, crate::model::unix_time())?;
+        let finalized = self.boss.finalize_plan(
+            &plan.plan_file,
+            items,
+            crate::model::unix_time(),
+            &reviewed,
+        )?;
         {
             let mut state = self.task_state.lock();
             if let Some(session) = state
@@ -523,7 +534,7 @@ impl WakuBackend {
         self.boss.reset_context(plan.session_id);
         // Approval hands implementation to the boss. Deliver into an open
         // turn immediately; otherwise the hidden prompt is parked durably.
-        if let Some(boss_session) = self.boss.document().session_id {
+        if plan.finalized_at.is_none() && let Some(boss_session) = self.boss.document().session_id {
             let handoff = format!(
                 "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Immediately confirm to the human that you received the finalized plan, then coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,

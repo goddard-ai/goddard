@@ -1,0 +1,1 @@
+- Boss approval now freezes the reviewed text, and implementation assignments stay bound to that approved revision. Draft plan assignments require explicit read-only research.

@@ -1,5 +1,8 @@
 //! Persistent Boss state and compartment-aware file access.
 
+#[path = "plan_contract.rs"]
+mod plan_contract;
+
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -917,9 +920,9 @@ impl BossService {
             .cloned()
     }
 
-    /// Freeze the named plan at `now`. Callers validate the record exists
-    /// and is not already frozen; the stamp is monotonic. `items` seeds
-    /// the work breakdown from the approved document's course of work —
+    /// Capture the exact human-reviewed bytes at `now`. Approval and
+    /// snapshot commit together; legacy reconfirmation preserves history.
+    /// `items` seeds the work breakdown from the approved document's course of work —
     /// the declared list replaces whatever a session declared early, and
     /// the approval lands on the audit trail as the user's act.
     pub fn finalize_plan(
@@ -927,21 +930,9 @@ impl BossService {
         plan_file: &str,
         items: Option<Vec<String>>,
         now: u64,
+        reviewed: &waku_protocol::boss::PlanReview,
     ) -> anyhow::Result<BossPlan> {
-        let mut finalized = None;
-        self.update(|state| {
-            let plan = state
-                .planning
-                .iter_mut()
-                .find(|plan| plan.plan_file == plan_file)
-                .ok_or_else(|| anyhow!("unknown plan {plan_file}"))?;
-            if plan.finalized_at.is_none() {
-                apply_plan_approval(plan, items, now)?;
-            }
-            finalized = Some(plan.clone());
-            Ok(())
-        })?;
-        Ok(finalized.unwrap())
+        self.capture_plan_revision(plan_file, items, now, reviewed)
     }
 
     /// Resolve a summon or `setPlan` `plan`+`item` tag to the link ids —
@@ -983,7 +974,15 @@ impl BossService {
                 .find(|entry| entry.session_id == session_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("not a Boss employee"))?;
-            let effective_plan = plan_id.unwrap_or(current.plan_id);
+            let effective_plan = plan_id.unwrap_or(current.plan_id).or_else(|| {
+                current.assignment.as_ref().and_then(|assignment| {
+                    state
+                        .outcomes
+                        .iter()
+                        .find(|outcome| outcome.id == assignment.outcome_id)
+                        .and_then(|outcome| outcome.plan_id)
+                })
+            });
             let item_id = match item {
                 Some(Some(item)) => {
                     let plan = effective_plan.ok_or_else(|| {
@@ -997,14 +996,44 @@ impl BossService {
                 None if plan_id.is_some() => None,
                 None => current.item_id,
             };
+            let mut candidate = current.clone();
+            candidate.plan_id = effective_plan;
+            candidate.item_id = item_id;
+            if current.plan_binding.is_some() && (!current.expired || plan.is_none()) {
+                // Same-plan item edits retain the accepted revision. A live
+                // assignment cannot switch authority through bookkeeping.
+                plan_contract::validate_binding(state, &candidate)?;
+            } else {
+                // Item bookkeeping cannot silently backfill a legacy or
+                // newly required plan. Explicit plan selection is intake.
+                if !current.expired && plan.is_none() && effective_plan.is_some() {
+                    plan_contract::validate_binding(state, &candidate)?;
+                }
+                candidate.plan_binding = plan_contract::select_binding(
+                    state,
+                    effective_plan.map(|id| id.to_string()).as_deref(),
+                    current
+                        .assignment
+                        .as_ref()
+                        .map(|assignment| assignment.outcome_id),
+                    item_id,
+                    current.assignment_kind,
+                )?;
+                candidate.plan_id = candidate
+                    .plan_binding
+                    .as_ref()
+                    .map(|binding| binding.plan_id);
+                plan_contract::validate_binding(state, &candidate)?;
+            }
             let employee = state
                 .employees
                 .iter_mut()
                 .chain(state.retired_employees.iter_mut())
                 .find(|entry| entry.session_id == session_id)
                 .expect("employee presence checked above");
-            employee.plan_id = effective_plan;
-            employee.item_id = item_id;
+            employee.plan_id = candidate.plan_id;
+            employee.item_id = candidate.item_id;
+            employee.plan_binding = candidate.plan_binding;
             Ok(())
         })
     }
@@ -2189,6 +2218,8 @@ impl BossService {
             Ok(())
         })?;
         Ok(BossEmployee {
+            assignment_kind: Default::default(),
+            plan_binding: None,
             session_id: id,
             supervisor_id: caller,
             identity: BossIdentity {
@@ -2568,6 +2599,19 @@ impl BossService {
                 .map(|persona| persona.markdown.clone())
                 .unwrap_or_default()
         };
+        let authority = employee.map(|employee| {
+            match employee.assignment_kind {
+                waku_protocol::boss::PlanAssignmentKind::Research => {
+                    "\nAssignment: Research only — shared drafts are research material, never implementation authority.".to_owned()
+                }
+                waku_protocol::boss::PlanAssignmentKind::Implementation => employee.plan_binding.as_ref()
+                    .map(|binding| format!("\nAssignment: Implementation bound to plan {} owned by {}, approved revision {}, digest {}. This authority stays fixed for this assignment.",
+                        binding.plan_id, binding.owner_id,
+                        binding.revision_id.map(|id| id.to_string()).unwrap_or_default(),
+                        binding.content_digest.as_deref().unwrap_or_default()))
+                    .unwrap_or_default(),
+            }
+        }).unwrap_or_default();
         let role = if let Some(employee) = employee {
             // The kind the summon fixed decides what the finish does —
             // an assignment reports to its supervisor while a goal lands on
@@ -2622,7 +2666,7 @@ impl BossService {
         format!(
             "<boss-persona>\n{}\n\n{}{}\nPinned documents: {}. Read them selectively with `goddard-agent boss file read PATH`.\n{project_context}\n</boss-persona>\n\n{prompt}",
             instructions,
-            role,
+            format!("{role}{authority}"),
             planning,
             pinned_paths(
                 employee
@@ -3184,6 +3228,7 @@ impl BossService {
     ) -> anyhow::Result<BossEmployee> {
         let now = waku_protocol::model::unix_time();
         self.update(|state| {
+            plan_contract::validate_binding(state, &employee)?;
             state.next_sequence = state.next_sequence.saturating_add(1);
             ticket.sequence = state.next_sequence;
             employee.set_lifecycle(EmployeeLifecycle::Queued, now);
@@ -3375,7 +3420,7 @@ impl BossService {
         self.update(|state| {
             let Some(entry) = state
                 .employees
-                .iter_mut()
+                .iter()
                 .find(|entry| entry.session_id == session)
             else {
                 return Ok(());
@@ -3388,6 +3433,12 @@ impl BossService {
             if stale {
                 return Ok(());
             }
+            plan_contract::validate_binding(state, entry)?;
+            let entry = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+                .expect("queued employee checked above");
             entry.set_lifecycle(EmployeeLifecycle::Dispatching, 0);
             entry.queued_at = None;
             if let Some(ticket) = &mut entry.ticket {
@@ -4428,6 +4479,15 @@ impl BossService {
                     path,
                     content: fs::read_to_string(file)?,
                 })
+            }
+            BossOperation::PreviewPlan { plan } => {
+                let state = self.document();
+                let plan = find_plan(&state.planning, &plan)
+                    .ok_or_else(|| anyhow!("unknown plan {plan}"))?;
+                // Preserve the shared-plan authorization boundary used by ReadFile.
+                self.authorize_file(caller, &plan.plan_file, false)?;
+                let (reviewed, content) = self.preview_plan(&plan.plan_file)?;
+                Ok(BossResult::PlanPreview { reviewed, content })
             }
             BossOperation::WriteFile { path, content } => {
                 self.require_owner(caller)?;
@@ -7682,6 +7742,8 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    assignment_kind: Default::default(),
+                    plan_binding: None,
                     session_id: supervisor_id,
                     supervisor_id: boss,
                     identity: BossIdentity {
@@ -7755,6 +7817,8 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    assignment_kind: Default::default(),
+                    plan_binding: None,
                     session_id,
                     supervisor_id: state.identity.id,
                     identity: BossIdentity {
@@ -8132,6 +8196,8 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    assignment_kind: Default::default(),
+                    plan_binding: None,
                     session_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {
@@ -8275,6 +8341,8 @@ mod tests {
             service
                 .update(|state| {
                     state.employees.push(BossEmployee {
+                        assignment_kind: Default::default(),
+                        plan_binding: None,
                         session_id,
                         supervisor_id: Uuid::new_v4(),
                         identity: BossIdentity {
@@ -8763,6 +8831,8 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    assignment_kind: Default::default(),
+                    plan_binding: None,
                     session_id: employee_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {
@@ -9166,6 +9236,7 @@ mod tests {
                     (referenced_plan, "plans/billing.md"),
                 ] {
                     state.planning.push(BossPlan {
+                        approved_revisions: Vec::new(),
                         id,
                         session_id: Uuid::new_v4(),
                         plan_file: plan_file.into(),
@@ -9477,6 +9548,8 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    assignment_kind: Default::default(),
+                    plan_binding: None,
                     session_id,
                     supervisor_id: Uuid::new_v4(),
                     identity: BossIdentity {
@@ -10336,6 +10409,7 @@ mod memory_op_tests {
             .update(|state| {
                 state.session_id = Some(boss);
                 state.planning.push(BossPlan {
+                    approved_revisions: Vec::new(),
                     id: Uuid::new_v4(),
                     session_id: planning,
                     plan_file: "plans/parallel.md".into(),
@@ -10373,6 +10447,7 @@ mod memory_op_tests {
             .update(|state| {
                 state.session_id = Some(boss);
                 state.planning.push(BossPlan {
+                    approved_revisions: Vec::new(),
                     id: Uuid::new_v4(),
                     session_id: planning,
                     plan_file: "plans/auth.md".into(),
@@ -10422,14 +10497,28 @@ mod memory_op_tests {
                 },
             )
             .unwrap();
-        let stamped = service.finalize_plan("plans/auth.md", None, 100).unwrap();
+        let stamped = service
+            .finalize_plan(
+                "plans/auth.md",
+                None,
+                100,
+                &test_review(&service, "plans/auth.md"),
+            )
+            .unwrap();
         assert_eq!(stamped.finalized_at, Some(100));
         // The stamp is monotonic: re-finalizing cannot re-time it.
-        assert_eq!(
+        assert!(
             service
-                .finalize_plan("plans/auth.md", None, 200)
-                .unwrap()
-                .finalized_at,
+                .finalize_plan(
+                    "plans/auth.md",
+                    None,
+                    200,
+                    &test_review(&service, "plans/auth.md")
+                )
+                .is_err()
+        );
+        assert_eq!(
+            service.plan_for_file("plans/auth.md").unwrap().finalized_at,
             Some(100)
         );
         for spelling in ["plans/auth.md", "plans//auth.md", "memory/plans/auth.md"] {
@@ -10540,7 +10629,14 @@ mod memory_op_tests {
                 },
             )
             .unwrap();
-        service.finalize_plan("plans/auth.md", None, 100).unwrap();
+        service
+            .finalize_plan(
+                "plans/auth.md",
+                None,
+                100,
+                &test_review(&service, "plans/auth.md"),
+            )
+            .unwrap();
         assert!(
             service
                 .handle(
@@ -10627,6 +10723,7 @@ mod memory_op_tests {
             .update(|state| {
                 state.session_id = Some(boss);
                 state.planning.push(BossPlan {
+                    approved_revisions: Vec::new(),
                     id: Uuid::new_v4(),
                     session_id: planning,
                     plan_file: "plans/auth.md".into(),
@@ -11144,8 +11241,18 @@ mod memory_op_tests {
 
     /// A draft plan record for the tests below — `session_id` doubles as
     /// the planning session's identity.
+    fn test_review(service: &BossService, reference: &str) -> waku_protocol::boss::PlanReview {
+        let file = service.plan_document_path(reference).unwrap();
+        if !file.exists() {
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, "# Reviewed fixture\n").unwrap();
+        }
+        service.preview_plan(reference).unwrap().0
+    }
+
     fn test_plan(plan_file: &str) -> BossPlan {
         BossPlan {
+            approved_revisions: Vec::new(),
             id: Uuid::new_v4(),
             session_id: Uuid::new_v4(),
             plan_file: plan_file.into(),
@@ -11368,6 +11475,7 @@ mod memory_op_tests {
                 "plans/auth.md",
                 Some(vec!["Probe".into(), "Verify".into()]),
                 100,
+                &test_review(&service, "plans/auth.md"),
             )
             .unwrap();
         assert_eq!(plan.outcome(), PlanOutcome::Approved);
@@ -11450,7 +11558,14 @@ mod memory_op_tests {
         assert_eq!(plan.items[0].history.len(), 3);
         assert_eq!(plan.items[0].history[2].state, PlanItemState::ToDo);
         // A closed plan refuses item bookkeeping until reopened.
-        service.finalize_plan("plans/auth.md", None, 100).unwrap();
+        service
+            .finalize_plan(
+                "plans/auth.md",
+                None,
+                100,
+                &test_review(&service, "plans/auth.md"),
+            )
+            .unwrap();
         service
             .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Abandoned)
             .unwrap();
@@ -11515,7 +11630,14 @@ mod memory_op_tests {
                 .plan_assignment("plans/auth.md", Some(Uuid::new_v4()))
                 .is_err()
         );
-        service.finalize_plan("plans/auth.md", None, 10).unwrap();
+        service
+            .finalize_plan(
+                "plans/auth.md",
+                None,
+                10,
+                &test_review(&service, "plans/auth.md"),
+            )
+            .unwrap();
         service
             .set_plan_outcome(None, "plans/auth.md", PlanOutcome::Abandoned)
             .unwrap();
@@ -11547,7 +11669,7 @@ mod memory_op_tests {
             )
             .unwrap();
         let item = plan.items[0].id;
-        let employee = service
+        let mut employee = service
             .prepare_employee(
                 boss,
                 Some(service.document().personas[0].id),
@@ -11557,6 +11679,8 @@ mod memory_op_tests {
                 None,
             )
             .unwrap();
+        employee.assignment_kind = waku_protocol::boss::PlanAssignmentKind::Research;
+        employee.expired = true;
         let session = employee.session_id;
         service
             .update(|state| {
@@ -11621,11 +11745,23 @@ mod memory_op_tests {
         let approved = test_plan("plans/approved.md");
         let approved_id = add_plan(&service, approved);
         service
-            .finalize_plan("plans/approved.md", None, 10)
+            .finalize_plan(
+                "plans/approved.md",
+                None,
+                10,
+                &test_review(&service, "plans/approved.md"),
+            )
             .unwrap();
         let abandoned = test_plan("plans/dead.md");
         let abandoned_id = add_plan(&service, abandoned);
-        service.finalize_plan("plans/dead.md", None, 5).unwrap();
+        service
+            .finalize_plan(
+                "plans/dead.md",
+                None,
+                5,
+                &test_review(&service, "plans/dead.md"),
+            )
+            .unwrap();
         service
             .set_plan_outcome(Some(boss), "plans/dead.md", PlanOutcome::Abandoned)
             .unwrap();

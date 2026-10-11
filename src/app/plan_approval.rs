@@ -94,9 +94,27 @@ impl Waku {
             return;
         };
         let key = self.daemons.session_owner(session_id);
+        let Some(reviewed) = self
+            .plan_docs
+            .get(&session_id)
+            .filter(|doc| doc.key == key && matches!(&doc.content, Some(Ok(_))))
+            .and_then(|doc| doc.displayed_reviewed.clone())
+        else {
+            self.ensure_plan_doc(key, session_id, &plan_file, true, cx);
+            self.mount_plan_tab(session_id, plan_file);
+            if let Some(index) = self.right_panel_surfaces.iter().position(|surface|
+                matches!(surface, RightPanelSurface::Plan { session_id: id, .. } if *id == session_id))
+            {
+                self.right_panel_active_surface = Some(index);
+                self.right_panel_visible = true;
+            }
+            cx.notify();
+            return;
+        };
         self.boss_request(
             key,
             waku_client::boss::BossOperation::FinalizePlan {
+                reviewed: Some(reviewed),
                 plan_file: Some(plan_file),
                 // Approval only seals the document — an already-declared
                 // work breakdown stays as it is.
@@ -105,6 +123,28 @@ impl Waku {
             super::boss::BossReply::Finalize(session_id),
             cx,
         );
+    }
+
+    /// Explicit human reconfirmation creates a new revision for a legacy
+    /// approval without claiming to recover its historical bytes.
+    pub(super) fn request_plan_reconfirmation(
+        &mut self, key: waku_client::DaemonKey, session_id: Uuid, cx: &mut Context<Self>,
+    ) {
+        let Some(plan) = self.boss_ui.states.get(&key)
+            .and_then(|state| state.planning.iter().find(|plan| plan.session_id == session_id))
+            .filter(|plan| plan.finalized_at.is_some() && plan.approved_revisions.is_empty())
+            .cloned()
+        else { return; };
+        let Some(reviewed) = self.plan_docs.get(&session_id)
+            .filter(|doc| doc.key == key && matches!(&doc.content, Some(Ok(_))))
+            .and_then(|doc| doc.displayed_reviewed.clone())
+        else {
+            self.ensure_plan_doc(key, session_id, &plan.plan_file, true, cx);
+            return;
+        };
+        self.boss_request(key, waku_client::boss::BossOperation::FinalizePlan {
+            plan_file: Some(plan.plan_file), items: None, reviewed: Some(reviewed),
+        }, super::boss::BossReply::Finalize(session_id), cx);
     }
 
     /// The "Finalize plan" approval chip — suggestion-chip shell, same as
