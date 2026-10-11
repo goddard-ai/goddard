@@ -238,6 +238,7 @@ impl Waku {
         let annotation_tooltip = self.render_annotation_tooltip(cx);
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
+        let boss_lifecycle = self.render_boss_lifecycle_status(cx);
         let daemon_request = self.render_daemon_request(cx);
         let queued_employee = self.render_queued_employee_prompt(cx);
         let transcript_rows = self.active_transcript_rows().clone();
@@ -458,8 +459,28 @@ impl Waku {
                 theme.surface,
             ))
             .children(navigation_rail)
-            .children(daemon_request)
-            .children(queued_employee)
+            .children({
+                // Transcript-top cards stack in one strip — never overlap:
+                // the lifecycle banner, a daemon request, and a queued
+                // employee's assignment card can all coexist.
+                let strip = [boss_lifecycle, daemon_request, queued_employee]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
+                (!strip.is_empty()).then(|| {
+                    div()
+                        .id("transcript-top-strip")
+                        .absolute()
+                        .top(px(8.0))
+                        .left_0()
+                        .right_0()
+                        .px(px(20.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .children(strip)
+                })
+            })
             .children(scroll_to_bottom)
             .children(status_marker_float)
             .child(scrollbar::vertical(
@@ -562,11 +583,6 @@ impl Waku {
         Some(
             div()
                 .id("queued-employee-prompt-layer")
-                .absolute()
-                .top(px(8.0))
-                .left_0()
-                .right_0()
-                .px(px(20.0))
                 .child(
                     div()
                         .w_full()
@@ -728,11 +744,6 @@ impl Waku {
         Some(
             div()
                 .id("daemon-request-layer")
-                .absolute()
-                .top(px(8.0))
-                .left_0()
-                .right_0()
-                .px(px(20.0))
                 .child(
                     div()
                         .id("daemon-request")
@@ -797,6 +808,130 @@ impl Waku {
                                 )),
                         )
                         .child(buttons),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The Boss chat's lifecycle banner — a transcript-top overlay like
+    /// the daemon request, so delay and pause read as live state rather
+    /// than transcript history. `Refreshing` stays quiet: the design's
+    /// markers only become visible once a deadline or failure makes the
+    /// handoff worth reporting.
+    fn render_boss_lifecycle_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use waku_protocol::boss::{BossOperation, BossRotationPhase};
+        let session_id = self.state.selected_session?;
+        let (key, status) = self.boss_ui.states.iter().find_map(|(key, state)| {
+            if state.session_id != Some(session_id) {
+                return None;
+            }
+            state.rotation.clone().map(|status| (*key, status))
+        })?;
+        let theme = Theme::current(cx);
+        let (icon_path, icon_color, title, detail, cause) = match status.phase {
+            BossRotationPhase::Delayed => (
+                "icons/hourglass.svg",
+                theme.text_secondary,
+                tr!("boss.rotation_delayed_title"),
+                tr!("boss.rotation_delayed_detail"),
+                None,
+            ),
+            BossRotationPhase::Paused => (
+                "icons/alert.svg",
+                theme.warning,
+                tr!("boss.rotation_paused_title"),
+                tr!("boss.rotation_paused_detail"),
+                status.cause.clone(),
+            ),
+            BossRotationPhase::CompactionIncident => (
+                "icons/alert.svg",
+                theme.warning,
+                tr!("boss.rotation_incident_title"),
+                tr!("boss.rotation_incident_detail"),
+                status.cause.clone(),
+            ),
+            BossRotationPhase::Refreshing => return None,
+        };
+        let retry = (status.phase == BossRotationPhase::Paused).then(|| {
+            let focus = self.transcript_control_focus("boss-lifecycle-retry", cx);
+            div()
+                .id("boss-lifecycle-retry")
+                .track_focus(&focus)
+                .tab_index(0)
+                .mt(px(10.0))
+                .h(px(28.0))
+                .px(px(13.0))
+                .rounded(px(9.0))
+                .border(hairline())
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay).text_color(theme.text))
+                .active(|element| element.opacity(0.8))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .child(tr!("boss.rotation_retry"))
+                .on_activation(cx, move |this, _, cx| {
+                    this.boss_request(
+                        key,
+                        BossOperation::RetryRotation,
+                        super::boss::BossReply::RotationRetry,
+                        cx,
+                    );
+                })
+        });
+        Some(
+            div()
+                .id("boss-lifecycle-layer")
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .p(px(12.0))
+                        .rounded(px(15.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .shadow_md()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon(icon_path, 13.0, icon_color))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme.text)
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(detail),
+                                ),
+                        )
+                        .when_some(cause, |card, cause| {
+                            card.child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .line_height(sp(16.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(cause),
+                            )
+                        })
+                        .when_some(retry, |card, retry| card.child(retry)),
                 )
                 .into_any_element(),
         )

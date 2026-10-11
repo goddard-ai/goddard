@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub use waku_boss::boss_rotation::{
-    BossRotationConfig as BossRotationPolicy, RotationIntent, RotationJournal,
+    BossRotationConfig as BossRotationPolicy, CompactionOrigin, RotationEventBoundary,
+    RotationInstruction, RotationIntent, RotationJournal, RotationSignal, RotationUsageSample,
 };
 
 /// Compatibility configuration with the daemon settings constructor retained.

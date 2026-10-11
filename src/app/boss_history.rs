@@ -476,7 +476,7 @@ mod tests {
     }
 
     fn rotate(old: &mut AgentSession, next: &mut AgentSession) {
-        let marker = "Boss session rotated.";
+        let marker = "Boss session refreshed; active work preserved.";
         old.push_message(MessageRole::System, marker);
         let mut link = Message::new(
             MessageRole::System,

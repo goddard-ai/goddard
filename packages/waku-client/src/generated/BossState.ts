@@ -6,6 +6,7 @@ import type { BossOutcome } from "./BossOutcome";
 import type { BossPersona } from "./BossPersona";
 import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
+import type { BossRotationStatus } from "./BossRotationStatus";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
 import type { EmployeeChain } from "./EmployeeChain";
@@ -44,7 +45,13 @@ personaDefaults: PersonaDefaultsState,
  * The consolidated persona-defaults upgrade notice awaiting delivery
  * into the boss's next natural turn.
  */
-personaDefaultNotice?: PersonaDefaultNotice | null, sessionId: string | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
+personaDefaultNotice?: PersonaDefaultNotice | null, sessionId: string | null,
+/**
+ * The Boss chat's live rotation position — refreshing, delayed,
+ * paused for recovery, or a detected compaction incident. `None`
+ * while the session owns coordination unencumbered.
+ */
+rotation?: BossRotationStatus | null, personas: Array<BossPersona>, employees: Array<BossEmployee>,
 /**
  * Retired identities remain available for revival until their name is
  * assigned to another employee. They are not part of the visible roster.

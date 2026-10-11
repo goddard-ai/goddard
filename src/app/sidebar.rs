@@ -7614,6 +7614,7 @@ mod tests {
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,
+            rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),

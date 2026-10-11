@@ -472,6 +472,7 @@ pub(super) fn forward_driver_events(
     boss: Arc<crate::boss::BossService>,
     auto_prompts: Arc<AutoPromptService>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
+    data_dir: std::path::PathBuf,
 ) {
     while let Ok(event) = event_receiver.recv() {
         #[cfg(test)]
@@ -520,6 +521,28 @@ pub(super) fn forward_driver_events(
         #[cfg(test)]
         if let Some(applying) = lifecycles.event_applying.lock().clone() {
             applying(session_id, runtime_id);
+        }
+        if let DriverEvent::RichActivity(item) = &event
+            && crate::model::is_context_compaction(item)
+            && boss.is_boss_principal(session_id)
+        {
+            // Provider-reported compaction on a Boss principal is durable
+            // lifecycle telemetry — the journal correlates it to the
+            // generation and surfaces the incident.
+            boss_rotation::record_boss_compaction_signal(
+                &data_dir,
+                session_id,
+                Some(runtime_id),
+                if item.failed {
+                    waku_boss::rotation_oracle::CompactionStage::Failed
+                } else if item.complete {
+                    waku_boss::rotation_oracle::CompactionStage::Completed
+                } else {
+                    waku_boss::rotation_oracle::CompactionStage::Started
+                },
+                crate::boss_rotation::CompactionOrigin::ProviderAutonomous,
+                crate::model::unix_time(),
+            );
         }
         #[cfg(test)]
         if boss.is_boss_principal(session_id)

@@ -2003,6 +2003,20 @@ impl Backend for WakuBackend {
                         },
                     );
                 }
+                if matches!(command, Command::Compact) && self.boss.is_boss_principal(session_id)
+                {
+                    // A manual compact on a Boss principal is telemetry,
+                    // never a successful rotation — the journal correlates
+                    // it to the session's generation.
+                    boss_rotation::record_boss_compaction_signal(
+                        &self.data_dir,
+                        session_id,
+                        Some(runtime_id),
+                        waku_boss::rotation_oracle::CompactionStage::Attempted,
+                        crate::boss_rotation::CompactionOrigin::DaemonCommand,
+                        crate::model::unix_time(),
+                    );
+                }
                 handle_driver_command(&driver, command)
             }
         }

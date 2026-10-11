@@ -1862,6 +1862,43 @@ impl PlanItem {
     }
 }
 
+/// The live position of the Boss chat's session rotation — what the
+/// lifecycle banner reads. `Refreshing` and `Delayed` describe the same
+/// pending handoff inside and past the delay deadline; `Paused` carries
+/// the failure the reconciler last recorded; `CompactionIncident` is a
+/// detected provider compaction on the active owner, surfaced until a
+/// committed rotation installs a clean generation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum BossRotationPhase {
+    Refreshing,
+    Delayed,
+    Paused,
+    CompactionIncident,
+}
+
+/// The lifecycle status the daemon publishes for the Boss chat —
+/// `None` while the session owns coordination unencumbered. Absent on
+/// documents written before the field existed.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BossRotationStatus {
+    pub phase: BossRotationPhase,
+    /// Unix seconds when the pending rotation intent (or incident) began.
+    pub since: u64,
+    /// The generation the pending rotation would install, or the
+    /// generation an incident affected.
+    pub generation: u64,
+    /// The pending rotation's stable identity — its successor session id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rotation_id: Option<Uuid>,
+    /// The concrete cause — the paused banner's failure line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cause: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
@@ -1893,6 +1930,11 @@ pub struct BossState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona_default_notice: Option<PersonaDefaultNotice>,
     pub session_id: Option<Uuid>,
+    /// The Boss chat's live rotation position — refreshing, delayed,
+    /// paused for recovery, or a detected compaction incident. `None`
+    /// while the session owns coordination unencumbered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<BossRotationStatus>,
     pub personas: Vec<BossPersona>,
     pub employees: Vec<BossEmployee>,
     /// Retired identities remain available for revival until their name is
@@ -2667,6 +2709,11 @@ pub enum BossOperation {
     /// A bounded digest of the user's projects, tasks, and automations —
     /// the same snapshot the context router attaches to boss prompts.
     Context,
+    /// Re-run the rotation reconciler now — the paused banner's retry
+    /// action. Human-only: the reconcile still enforces its own settle
+    /// and threshold rules, so retrying can only advance a pending
+    /// intent or wait, never force an unsafe swap.
+    RetryRotation,
     Open {
         provider: ProviderKind,
         model: Option<String>,

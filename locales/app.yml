@@ -6510,6 +6510,22 @@ boss.history_load:
   en: Load earlier conversation
 boss.history_retry:
   en: Retry loading earlier conversation
+boss.rotation_delayed_title:
+  en: Boss is refreshing its session
+boss.rotation_delayed_detail:
+  en: Messages are saved; employees continue.
+boss.rotation_paused_title:
+  en: Boss coordination paused to protect its instructions
+boss.rotation_paused_detail:
+  en: Messages and employee progress are preserved; retry runs automatically.
+boss.rotation_incident_title:
+  en: Context compaction detected in the Boss session
+boss.rotation_incident_detail:
+  en: A fresh session takes over; the compacted session does not coordinate again.
+boss.rotation_retry:
+  en: Retry refresh
+boss.rotation_retry_sent:
+  en: Refresh retry sent
 boss.unreachable:
   en: The boss's daemon is unavailable.
 boss.project_required:

@@ -1081,6 +1081,19 @@ impl WakuBackend {
                     context: self.boss_work_context().digest,
                 })
             }
+            BossOperation::RetryRotation => {
+                anyhow::ensure!(
+                    caller.is_none(),
+                    "only the human can retry a Boss session refresh"
+                );
+                // No operation lock here — the reconciler takes it
+                // internally, and its own settle checks decide whether
+                // anything can move.
+                self.reconcile_boss_rotation(crate::model::unix_time())?;
+                Ok(BossResult::State {
+                    state: self.boss.document(),
+                })
+            }
             BossOperation::Roster => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can read the employee roster");

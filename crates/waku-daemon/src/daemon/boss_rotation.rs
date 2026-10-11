@@ -1,19 +1,58 @@
 use super::*;
-use crate::boss_rotation::{BossRotationConfig, RotationJournal};
+use crate::boss_rotation::{
+    BossRotationConfig, CompactionOrigin, RotationEventBoundary, RotationInstruction,
+    RotationJournal, RotationSignal, RotationUsageSample,
+};
 use crate::model::MessageRole;
+use waku_boss::boss_rotation::RotationCause;
 use waku_boss::rotation_continuity::{ContinuityDeliveryKind, ContinuityLedger};
+use waku_boss::rotation_oracle::{CompactionStage, ContextSampleSource, RotationLifecycleStage};
 #[cfg(test)]
 use waku_boss::rotation_oracle::{
-    AdmissionBoundary, AdmissionDecision, CompactionStage, DurableAction, DurableActionKind,
-    DurableActionStatus, LifecycleObservation, OwnershipObservation, OwnershipState,
-    ProviderAdmission, ProviderCompaction, ProviderTransport, ProviderTransportStatus,
-    RotationLifecycleStage, RotationObservation,
+    AdmissionBoundary, AdmissionDecision, DurableAction, DurableActionKind, DurableActionStatus,
+    LifecycleObservation, OwnershipObservation, OwnershipState, ProviderAdmission,
+    ProviderCompaction, ProviderTransport, ProviderTransportStatus, RotationObservation,
 };
 
 /// The logical identifier of the bound handoff a successor must receive.
 /// Retries reconcile onto the same delivery rather than duplicating it.
 fn handoff_delivery_id(session_id: Uuid) -> String {
     format!("boss-handoff:{session_id}")
+}
+
+/// The transcript's quiet lifecycle marker — the archived chat and its
+/// successor each carry one at the boundary. The pre-refresh text stays
+/// recognized so an intent staged before the rename cannot duplicate it.
+const ROTATION_MARKERS: [&str; 2] = [
+    "Boss session rotated.",
+    "Boss session refreshed; active work preserved.",
+];
+const ROTATION_MARKER: &str = ROTATION_MARKERS[1];
+
+/// Record a Boss compaction signal into the lifecycle journal — attempt,
+/// start, completion, or failure, correlated to the session's owner
+/// generation. Best-effort telemetry: a write failure logs and never
+/// faults the caller.
+pub(super) fn record_boss_compaction_signal(
+    data_dir: &std::path::Path,
+    session_id: Uuid,
+    runtime_id: Option<Uuid>,
+    stage: CompactionStage,
+    origin: CompactionOrigin,
+    at: u64,
+) {
+    let path = data_dir.join("boss/rotation.json");
+    let mut journal = match RotationJournal::load(&path) {
+        Ok(journal) => journal,
+        Err(error) => {
+            eprintln!("could not load Boss rotation journal for compaction telemetry: {error:#}");
+            return;
+        }
+    };
+    journal.record_compaction(session_id, runtime_id, stage, origin, at);
+    if let Err(error) = journal.persist(&path) {
+        eprintln!("could not record Boss compaction telemetry: {error:#}");
+    }
 }
 
 impl WakuBackend {
@@ -153,14 +192,71 @@ impl WakuBackend {
 
     /// The Boss scheduler checks settled chats, including after restart.
     /// Fresh chats use the same durable initialization and lazy provider
-    /// launch as BossOperation::Open.
+    /// launch as BossOperation::Open. Every pass republishes the journal's
+    /// lifecycle position so a delayed or paused refresh stays visible.
     pub(super) fn reconcile_boss_rotation(&self, now: u64) -> anyhow::Result<()> {
         let settings = self.settings.get();
         if !settings.boss_experiment_enabled || !self.boss.is_active() {
             return Ok(());
         }
-        self.boss
-            .with_operation_lock(|| self.rotate_boss_chat(&settings, now))
+        self.boss.with_operation_lock(|| {
+            let result = self.rotate_boss_chat(&settings, now);
+            if let Err(error) = &result {
+                self.note_rotation_failure(now, error);
+            }
+            self.publish_rotation_status(now);
+            result
+        })
+    }
+
+    /// Record a failed reconcile pass against the pending intent — the
+    /// paused status carries its cause until the rotation resolves.
+    fn note_rotation_failure(&self, now: u64, error: &anyhow::Error) {
+        let path = self.boss_journal_path();
+        let Ok(mut journal) = RotationJournal::load(&path) else {
+            return;
+        };
+        if journal.intent.is_none() {
+            return;
+        }
+        journal.record_attempt_failure(format!("{error:#}"), now);
+        if let Err(error) = journal.persist(&path) {
+            eprintln!("could not record Boss rotation failure: {error:#}");
+        }
+    }
+
+    /// Republish the journal's lifecycle position onto the Boss document —
+    /// `set_rotation_status` skips the write when nothing moved.
+    fn publish_rotation_status(&self, now: u64) {
+        let status = RotationJournal::load(&self.boss_journal_path())
+            .map(|journal| journal.status(now))
+            .unwrap_or_default();
+        if let Err(error) = self.boss.set_rotation_status(status) {
+            eprintln!("could not publish Boss rotation status: {error:#}");
+        }
+    }
+
+    /// The canonical instruction identity carried through a rotation —
+    /// persona id, shipped base revision, and a digest of the effective
+    /// markdown. The instruction text itself is never logged.
+    fn rotation_instruction(&self) -> Option<RotationInstruction> {
+        use sha2::Digest;
+        let document = self.boss.document();
+        let persona = document
+            .personas
+            .iter()
+            .find(|persona| persona.id == document.persona_id)?;
+        let defaults = document
+            .persona_defaults
+            .get(waku_protocol::boss::PersonaDefaultRole::Boss);
+        Some(RotationInstruction {
+            persona_id: persona.id,
+            base_revision: defaults.starting_revision.or(defaults.reviewed_revision),
+            digest: Some(format!(
+                "{:x}",
+                sha2::Sha256::digest(persona.markdown.as_bytes())
+            )),
+        })
     }
 
     #[cfg(test)]
@@ -359,24 +455,16 @@ impl WakuBackend {
             if !boss_chat_settled(old, &self.agent) {
                 return Ok(());
             }
+            let policy = BossRotationConfig::from_settings(settings);
             let reason = if let Some(reason) = requested.clone() {
                 reason
             } else {
                 let Some(usage) = old.context_usage else {
                     return Ok(());
                 };
-                let policy = BossRotationConfig::from_settings(settings);
                 if !policy.should_rotate(usage.tokens, usage.window) {
                     return Ok(());
                 }
-                eprintln!(
-                    "Boss session rotation: boss_id={} old_session_id={} context_threshold={} context_tokens={} context_window={}",
-                    identity.id,
-                    active,
-                    policy.context_threshold,
-                    usage.tokens,
-                    usage.window.unwrap_or_default(),
-                );
                 format!(
                     "boss_rotation_context_threshold={} exceeded (context_tokens={}, context_window={})",
                     policy.context_threshold,
@@ -397,6 +485,31 @@ impl WakuBackend {
                 intent.model = old.model.clone();
                 intent.provider_qualification =
                     Some(self.boss_provider_qualification(old.provider));
+                // The diagnostics record reports what this trigger measured
+                // and the cause it classified — a compaction incident or a
+                // requested refresh is never a threshold rotation.
+                let diagnostics = &mut intent.diagnostics;
+                diagnostics.cause = if ledger.has_incident(active) {
+                    RotationCause::Incident
+                } else if requested.is_some() {
+                    RotationCause::Requested
+                } else {
+                    RotationCause::ContextThreshold
+                };
+                diagnostics.provider = Some(old.provider);
+                diagnostics.model = old.model.clone();
+                diagnostics.context_threshold = Some(policy.context_threshold);
+                diagnostics.usage = old.context_usage.map(|usage| RotationUsageSample {
+                    context_tokens: Some(usage.tokens),
+                    context_window: usage.window,
+                    source: ContextSampleSource::ProviderReport,
+                });
+                diagnostics.event_boundary = Some(RotationEventBoundary {
+                    session_id: active,
+                    message_count: old.messages.len(),
+                    last_message_id: old.messages.last().map(|message| message.id),
+                });
+                diagnostics.instruction = self.rotation_instruction();
                 eprintln!(
                     "Boss session rotation: boss_id={} old_session_id={} new_session_id={} reason={:?} provider={} qualification={:?}",
                     identity.id,
@@ -407,6 +520,8 @@ impl WakuBackend {
                     intent.provider_qualification,
                 );
             }
+            journal.record_stage(RotationLifecycleStage::Triggered, now);
+            journal.record_stage(RotationLifecycleStage::IntentPersisted, now);
             journal.persist(&path)?;
             #[cfg(test)]
             {
@@ -437,7 +552,6 @@ impl WakuBackend {
             active == intent.old_session_id || active == intent.new_session_id,
             "Boss rotation session pointer diverged"
         );
-        let marker = "Boss session rotated.";
         let predecessor = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if active == intent.old_session_id {
             let old = state
@@ -471,8 +585,8 @@ impl WakuBackend {
                 next.agent_preset = old.agent_preset.clone();
                 next.agent_rename_allowed = false;
                 next.boss_managed = true;
-                next.pending_provider_context = Some(boss_rotation_handoff(old, marker));
-                next.push_message(MessageRole::System, marker);
+                next.pending_provider_context = Some(boss_rotation_handoff(old, ROTATION_MARKER));
+                next.push_message(MessageRole::System, ROTATION_MARKER);
                 next.push_message(MessageRole::System, &predecessor);
                 next.messages
                     .last_mut()
@@ -482,6 +596,8 @@ impl WakuBackend {
                 // Stage the initialized chat before publishing its id.
                 self.task_store.save(&mut state)?;
             }
+            journal.record_stage(RotationLifecycleStage::SuccessorPrepared, now);
+            journal.persist(&path)?;
             #[cfg(test)]
             {
                 self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::SuccessorPrepared);
@@ -558,6 +674,8 @@ impl WakuBackend {
             }
             self.boss
                 .replace_session_id(active, intent.new_session_id)?;
+            journal.record_stage(RotationLifecycleStage::PointerPublished, now);
+            journal.persist(&path)?;
             #[cfg(test)]
             {
                 self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::PointerPublished);
@@ -583,12 +701,11 @@ impl WakuBackend {
             next.boss_managed && next.project_id == identity.id,
             "rotation destination is not a Boss chat"
         );
-        if !next
-            .messages
-            .iter()
-            .any(|message| message.role == MessageRole::System && message.content == marker)
-        {
-            next.push_message(MessageRole::System, marker);
+        if !next.messages.iter().any(|message| {
+            message.role == MessageRole::System
+                && ROTATION_MARKERS.contains(&message.content.as_str())
+        }) {
+            next.push_message(MessageRole::System, ROTATION_MARKER);
         }
         if !next
             .messages
@@ -605,12 +722,11 @@ impl WakuBackend {
             .session_mut(intent.old_session_id)
             .ok_or_else(|| anyhow!("rotation source session is missing"))?;
         self.task_store.hydrate(old)?;
-        if !old
-            .messages
-            .iter()
-            .any(|message| message.role == MessageRole::System && message.content == marker)
-        {
-            old.push_message(MessageRole::System, marker);
+        if !old.messages.iter().any(|message| {
+            message.role == MessageRole::System
+                && ROTATION_MARKERS.contains(&message.content.as_str())
+        }) {
+            old.push_message(MessageRole::System, ROTATION_MARKER);
         }
         let old_link = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if !old
@@ -631,6 +747,7 @@ impl WakuBackend {
         // Same runtime/credential retirement as ordinary archival. The
         // transcript stays in the task store under its old session id.
         self.retire_archived_runtimes(&[intent.old_session_id]);
+        journal.record_stage(RotationLifecycleStage::PredecessorFenced, now);
         #[cfg(test)]
         {
             self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::PredecessorFenced);
@@ -641,6 +758,16 @@ impl WakuBackend {
             );
         }
         journal.commit(now)?;
+        // A generation that closed without any compaction signal gets an
+        // explicit gap record — silence is not evidence of absence.
+        if !journal.observed_compaction_telemetry(intent.old_session_id) {
+            journal.record_signal(RotationSignal::CompactionTelemetryGap {
+                at: now,
+                session_id: intent.old_session_id,
+                generation: Some(intent.old_generation),
+                rotation_id: Some(intent.new_session_id),
+            });
+        }
         journal.persist(&path)?;
         // The refresh request — manual compact or incident — is consumed
         // by the committed swap. Incidents stay as evidence.

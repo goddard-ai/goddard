@@ -1247,6 +1247,9 @@ pub(super) enum BossReply {
     /// A manual `resume` dispatch — confirms the re-admission and pulls
     /// the fresh roster rather than reusing `Saved`'s editor bookkeeping.
     Resume,
+    /// The paused-refresh banner's retry — confirms the dispatch and
+    /// refreshes state like `Resume`.
+    RotationRetry,
     /// An Employees → History lookup — the reply merges into the host's
     /// `BossHistorySearch` instead of the roster list.
     HistorySearch,
@@ -2359,6 +2362,10 @@ impl Waku {
                         }
                         if matches!(reply, BossReply::BaseChoice) {
                             this.show_toast(tr!("boss.base_choice_saved"));
+                        }
+                        if matches!(reply, BossReply::RotationRetry) {
+                            this.show_success_toast(tr!("boss.rotation_retry_sent"));
+                            this.refresh_boss_state_on(key, cx);
                         }
                         if matches!(reply, BossReply::Resume) {
                             this.show_success_toast(tr!("boss.resume_queued"));
@@ -10403,6 +10410,7 @@ mod tests {
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,
+            rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),
@@ -11577,6 +11585,7 @@ mod tests {
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: None,
+            rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),

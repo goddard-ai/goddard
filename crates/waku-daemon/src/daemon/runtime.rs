@@ -466,6 +466,7 @@ impl WakuBackend {
         let boss = self.boss.clone();
         let auto_prompts = self.auto_prompts.clone();
         let repo_maps = self.repo_maps.clone();
+        let data_dir = self.data_dir.clone();
         let retirement_events = events.clone();
         // Hold registration through thread creation. The forwarder's first
         // sessions lock cannot succeed until its entry is visible, even when
@@ -493,6 +494,7 @@ impl WakuBackend {
                 boss,
                 auto_prompts,
                 repo_maps,
+                data_dir,
             );
         };
         #[cfg(test)]

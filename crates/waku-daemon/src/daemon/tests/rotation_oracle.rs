@@ -632,6 +632,7 @@ fn identity_drift_during_staging_aborts_the_rotation() {
         provider: None,
         model: None,
         provider_qualification: None,
+        diagnostics: Default::default(),
     });
     journal.persist(&journal_path).unwrap();
 

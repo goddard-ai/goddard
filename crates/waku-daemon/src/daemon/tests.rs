@@ -3136,6 +3136,7 @@ fn an_exited_runtime_releases_its_replay_journal() {
         Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
         Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
         Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
+        root.clone(),
     );
 
     assert!(sessions.lock().is_empty());
@@ -3276,6 +3277,7 @@ fn runtime_generation_stale_events(managed: bool) {
         backend.boss.clone(),
         backend.auto_prompts.clone(),
         backend.repo_maps.clone(),
+        backend.data_dir.clone(),
     );
     assert_eq!(backend.agent.resolve(&token), Some(session_id));
     assert_eq!(
@@ -3362,6 +3364,7 @@ fn runtime_generation_forward(
         backend.boss.clone(),
         backend.auto_prompts.clone(),
         backend.repo_maps.clone(),
+        backend.data_dir.clone(),
     );
 }
 
@@ -4373,6 +4376,7 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
         Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap()),
         Arc::new(AutoPromptService::open(root.join("auto-prompts.json")).unwrap()),
         Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
+        root.clone(),
     );
 
     assert_eq!(events.journaled_event_count(session_id), 1);
@@ -11217,6 +11221,7 @@ fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
             backend.boss.clone(),
             backend.auto_prompts.clone(),
             backend.repo_maps.clone(),
+            backend.data_dir.clone(),
         );
     };
     forward(&[DriverEvent::TurnFinished {
@@ -14125,7 +14130,7 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
         let marker = session
             .messages
             .iter()
-            .find(|message| message.content == "Boss session rotated.")
+            .find(|message| message.content == "Boss session refreshed; active work preserved.")
             .unwrap();
         assert_eq!(marker.role, MessageRole::System);
         assert!(!marker.hidden);
@@ -14443,7 +14448,9 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
             old_session
                 .messages
                 .iter()
-                .filter(|message| message.content == "Boss session rotated.")
+                .filter(|message| {
+                    message.content == "Boss session refreshed; active work preserved."
+                })
                 .count(),
             1
         );
@@ -16814,6 +16821,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
             backend.boss.clone(),
             backend.auto_prompts.clone(),
             backend.repo_maps.clone(),
+            backend.data_dir.clone(),
         );
     };
     settle();
@@ -17368,3 +17376,4 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
 
 mod plan_acceptance;
 mod rotation_oracle;
+mod rotation_status;

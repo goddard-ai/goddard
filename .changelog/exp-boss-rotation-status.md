@@ -1,0 +1,1 @@
+- Boss session refreshes now surface a banner at the top of the transcript when the handoff is delayed or paused — a paused refresh shows the concrete failure and a Retry refresh button — and a provider-reported compaction on the active Boss chat is flagged as an incident until the refresh installs a clean session.

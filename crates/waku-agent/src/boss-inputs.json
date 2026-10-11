@@ -58,6 +58,18 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "retryRotation"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "open"
             },
             "provider": {
@@ -208,10 +220,29 @@
               "items": {
                 "type": "string"
               }
+            },
+            "reviewed": {
+              "$ref": "#/definitions/PlanReview"
             }
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "previewPlan"
+            },
+            "plan": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plan"
           ],
           "additionalProperties": false
         },
@@ -364,6 +395,9 @@
             },
             "plan": {
               "type": "string"
+            },
+            "assignmentKind": {
+              "$ref": "#/definitions/PlanAssignmentKind"
             },
             "item": {
               "type": "string",
@@ -666,6 +700,23 @@
           "properties": {
             "type": {
               "const": "resume"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "retryPlanReview"
             },
             "sessionId": {
               "type": "string",
@@ -3271,6 +3322,16 @@
       ],
       "additionalProperties": true
     },
+    "PlanAssignmentKind": {
+      "anyOf": [
+        {
+          "const": "implementation"
+        },
+        {
+          "const": "research"
+        }
+      ]
+    },
     "PlanItemInput": {
       "type": "object",
       "properties": {
@@ -3312,6 +3373,28 @@
           "const": "abandoned"
         }
       ]
+    },
+    "PlanReview": {
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "contentDigest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ownerId",
+        "planId",
+        "contentDigest"
+      ],
+      "additionalProperties": true
     },
     "ProviderKind": {
       "anyOf": [
@@ -3460,6 +3543,42 @@
     },
     "BossResult": {
       "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "planRejected"
+            },
+            "error": {
+              "protocolType": "PlanContractError"
+            }
+          },
+          "required": [
+            "type",
+            "error"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "planPreview"
+            },
+            "reviewed": {
+              "$ref": "#/definitions/PlanReview"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reviewed",
+            "content"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {

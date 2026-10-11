@@ -54,6 +54,8 @@ export type { BossPersonaUpsert } from "./BossPersonaUpsert";
 export type { BossPlan } from "./BossPlan";
 export type { BossResourcePolicy } from "./BossResourcePolicy";
 export type { BossResult } from "./BossResult";
+export type { BossRotationPhase } from "./BossRotationPhase";
+export type { BossRotationStatus } from "./BossRotationStatus";
 export type { BossState } from "./BossState";
 export type { BossWave } from "./BossWave";
 export type { BranchDeleteFailure } from "./BranchDeleteFailure";

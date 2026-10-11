@@ -656,6 +656,18 @@ impl BossService {
         })
     }
 
+    /// Publish the Boss chat's live rotation position. The reconciler is
+    /// the only writer; `update` skips the write when nothing moved.
+    pub fn set_rotation_status(
+        &self,
+        status: Option<waku_protocol::boss::BossRotationStatus>,
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            state.rotation = status;
+            Ok(())
+        })
+    }
+
     /// Publish a staged chat only if the session it replaces is still active.
     pub fn replace_session_id(&self, old: Uuid, next: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
@@ -4172,6 +4184,7 @@ impl BossService {
             | BossOperation::Control { .. }
             | BossOperation::Resume { .. }
             | BossOperation::RetryPlanReview { .. }
+            | BossOperation::RetryRotation
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::HistorySearch { .. }
@@ -7312,6 +7325,7 @@ fn fresh_state() -> BossState {
         persona_defaults,
         persona_default_notice: None,
         session_id: None,
+        rotation: None,
         personas,
         employees: Vec::new(),
         retired_employees: Vec::new(),
@@ -7345,6 +7359,7 @@ fn disabled_state() -> BossState {
         persona_defaults: PersonaDefaultsState::default(),
         persona_default_notice: None,
         session_id: None,
+        rotation: None,
         personas: Vec::new(),
         employees: Vec::new(),
         retired_employees: Vec::new(),

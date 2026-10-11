@@ -640,6 +640,7 @@ mod tests {
             persona_defaults: Default::default(),
             persona_default_notice: None,
             session_id: Some(Uuid::new_v4()),
+            rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
             retired_employees: Vec::new(),
