@@ -84,6 +84,37 @@ pub(super) fn boss_notification_waiting(
                 }))
 }
 
+pub(super) fn automation_prompt_waiting(
+    target: Uuid,
+    message_id: Option<Uuid>,
+    agent: &crate::agent::AgentState,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    automations: &AutomationService,
+) -> bool {
+    if !message_id.is_some_and(|id| automations.is_run_message(id)) {
+        return false;
+    }
+    if agent.has_open_turn(target) {
+        return true;
+    }
+    // A submitted human prompt already owns a turn even before the provider
+    // emits TurnStarted. An automation must not adopt that turn's identity.
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == target)
+    else {
+        return false;
+    };
+    if let Err(error) = task_store.hydrate(session) {
+        eprintln!("could not check automation target {target}: {error:#}");
+        return true;
+    }
+    session.active_turn_id().is_some()
+}
+
 /// Only finalized plans bypass Boss notification and sender-settlement holds.
 /// Providers without steering finish cancellation before opening the handoff.
 pub(super) fn agent_prompt_waiting(
@@ -93,7 +124,19 @@ pub(super) fn agent_prompt_waiting(
     agent: &crate::agent::AgentState,
     boss: &crate::boss::BossService,
     task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    automations: &AutomationService,
 ) -> bool {
+    if automation_prompt_waiting(
+        target,
+        entry.queued_id,
+        agent,
+        task_state,
+        task_store,
+        automations,
+    ) {
+        return true;
+    }
     if entry.is_plan_finalization() {
         return agent.has_open_turn(target) && !driver.supports_steer();
     }
@@ -133,6 +176,9 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
+    let automation_prompt = entry
+        .queued_id
+        .is_some_and(|id| automations.is_run_message(id));
     if (!entry.is_plan_finalization()
         && boss_notification_waiting(session_id, agent, boss, task_state))
         || (entry.is_plan_finalization()
@@ -142,7 +188,8 @@ pub(super) fn deliver_agent_prompt(
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
-    if driver.supports_steer()
+    if !automation_prompt
+        && driver.supports_steer()
         && (agent.has_parked_turn(session_id)
             || (employee_report_interrupts(&entry) && agent.has_open_turn(session_id)))
     {
@@ -205,6 +252,7 @@ pub(super) fn deliver_agent_prompt(
         entry.report_trigger.clone(),
         reference_context.clone(),
         boss.is_boss(session_id),
+        automation_prompt,
     )? {
         PromptPersistence::Submitted => {}
         PromptPersistence::Waiting => {
@@ -212,6 +260,12 @@ pub(super) fn deliver_agent_prompt(
             return Ok(());
         }
         PromptPersistence::Duplicate => return Ok(()),
+    }
+    automations.note_prompt_delivered(session_id, message_id, turn_id)?;
+    if automation_prompt {
+        // Reserve the turn before the provider emits TurnStarted, so a queue
+        // drain cannot deliver a second automation into the same runtime.
+        agent.note_driver_event(session_id, &DriverEvent::TurnStarted);
     }
     sink.send(event_to_wire(DriverEvent::PromptSubmitted {
         message: entry.prompt.clone(),
@@ -299,6 +353,7 @@ pub(super) fn persist_agent_prompt(
     report_trigger: Option<crate::model::ReportTrigger>,
     reference_context: Option<crate::model::ReferenceContext>,
     boss_notification: bool,
+    automation_prompt: bool,
 ) -> anyhow::Result<PromptPersistence> {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -310,7 +365,7 @@ pub(super) fn persist_agent_prompt(
     };
     task_store.hydrate(session)?;
     anyhow::ensure!(session.archived_at.is_none(), "task is archived");
-    if boss_notification {
+    if boss_notification || automation_prompt {
         // Claim the durable id under the same lock as the user queue and
         // active turn. A competing settlement/scheduler delivery may have
         // rehydrated this entry before the first delivery removed its mirror.
@@ -322,12 +377,13 @@ pub(super) fn persist_agent_prompt(
             return Ok(PromptPersistence::Duplicate);
         }
         if session.active_turn_id().is_some()
-            || (!report_trigger.as_ref().is_some_and(|trigger| {
-                trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
-            }) && session
-                .queued_messages
-                .iter()
-                .any(|message| matches!(message.source, crate::model::QueuedMessageSource::User)))
+            || (boss_notification
+                && !report_trigger.as_ref().is_some_and(|trigger| {
+                    trigger.kind == crate::model::ReportTriggerKind::PlanFinalized
+                })
+                && session.queued_messages.iter().any(|message| {
+                    matches!(message.source, crate::model::QueuedMessageSource::User)
+                }))
         {
             return Ok(PromptPersistence::Waiting);
         }

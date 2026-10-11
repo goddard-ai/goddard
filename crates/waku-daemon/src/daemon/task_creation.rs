@@ -57,6 +57,31 @@ impl WakuBackend {
             events,
             None,
             None,
+            None,
+        )
+    }
+
+    pub(crate) fn create_automation_task(
+        &self,
+        run_id: Uuid,
+        selection: AgentCreateSelection,
+        project: PathBuf,
+        workspace: AgentWorkspace,
+        base_branch: Option<String>,
+        prompt: String,
+        events: &EventSink,
+    ) -> anyhow::Result<Uuid> {
+        self.create_agent_task_inner(
+            None,
+            selection,
+            project,
+            workspace,
+            base_branch,
+            AgentTaskPrompt::Fixed(prompt),
+            events,
+            None,
+            None,
+            Some(run_id),
         )
     }
 
@@ -71,6 +96,7 @@ impl WakuBackend {
         events: &EventSink,
         employee: Option<waku_protocol::boss::BossEmployee>,
         planning: Option<waku_protocol::boss::BossPlan>,
+        automation_run: Option<Uuid>,
     ) -> anyhow::Result<Uuid> {
         if prompt.is_blank() {
             bail!("agent sessions require a prompt");
@@ -162,6 +188,10 @@ impl WakuBackend {
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
+        if let Some(run_id) = automation_run {
+            self.automations
+                .bind_message(run_id, session_id, message_id)?;
+        }
         session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender, false, None);
         {
             let mut state = self.task_state.lock();
@@ -203,6 +233,12 @@ impl WakuBackend {
     ) -> anyhow::Result<()> {
         let (runtime_id, driver) = self.ensure_agent_runtime(session_id, events)?;
         let sink = events.for_session(session_id, runtime_id);
+        self.automations
+            .note_prompt_delivered(session_id, message_id, turn_id)?;
+        if self.automations.is_run_message(message_id) {
+            self.agent
+                .note_driver_event(session_id, &DriverEvent::TurnStarted);
+        }
         sink.send(event_to_wire(DriverEvent::PromptSubmitted {
             message: prompt.clone(),
             turn_id,

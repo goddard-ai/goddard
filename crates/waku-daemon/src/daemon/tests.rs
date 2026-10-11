@@ -14330,3 +14330,204 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
     assert!(state.employees.is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+
+#[test]
+fn automation_runs_wait_for_their_own_delivered_turns() {
+    use waku_protocol::automations::{
+        AutomationRun, AutomationRunStatus, AutomationTrigger, AutomationsState,
+    };
+    let root = std::env::temp_dir().join(format!("automation-turns-{}", Uuid::new_v4()));
+    let store = StateStore::daemon(root.join("app.db"));
+    let mut state = PersistedState::fresh(root.join("repo"));
+    let session_id = state.sessions[0].id;
+    let unrelated_turn = state.sessions[0].begin_turn("unrelated human prompt");
+    store.save(&mut state).unwrap();
+    let messages = [Uuid::new_v4(), Uuid::new_v4()];
+    let run_ids = [Uuid::new_v4(), Uuid::new_v4()];
+    let mut document = AutomationsState::default();
+    for index in 0..2 {
+        document.runs.push(AutomationRun {
+            id: run_ids[index],
+            automation_id: Uuid::new_v4(),
+            trigger: AutomationTrigger::Manual,
+            status: AutomationRunStatus::Pending,
+            scheduled_for: 123,
+            started_at: None,
+            finished_at: None,
+            session_id: Some(session_id),
+            message_id: Some(messages[index]),
+            turn_id: None,
+            error: None,
+            precheck: None,
+            refusal_key: None,
+            refusal_count: 0,
+            created_at: 123,
+            updated_at: 123,
+        });
+    }
+    std::fs::write(
+        root.join("automations.json"),
+        serde_json::to_vec(&document).unwrap(),
+    )
+    .unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        store,
+    )
+    .unwrap();
+    let capture = Arc::new(CaptureDriver::default());
+    let driver = DriverHandle::from_control(capture.clone());
+    let runtime_id = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            runtime_id,
+            driver: driver.clone(),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Claude,
+            cwd: root.join("repo"),
+        },
+    );
+    let sink = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+    for (index, message_id) in messages.iter().enumerate() {
+        backend
+            .queue_agent_prompt_with_id(
+                session_id,
+                format!("automation {index}"),
+                None,
+                false,
+                Some(*message_id),
+                None,
+                &sink,
+            )
+            .unwrap();
+    }
+    assert!(capture.prompts.lock().is_empty());
+    assert!(
+        backend
+            .automations
+            .document()
+            .runs
+            .iter()
+            .all(|run| run.status == AutomationRunStatus::Pending)
+    );
+    // Recheck under the persistence lock if a human prompt raced a drain.
+    assert!(matches!(
+        persist_agent_prompt(
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+            "automation 0",
+            Uuid::new_v4(),
+            messages[0],
+            None,
+            Some(messages[0]),
+            false,
+            None,
+            None,
+            false,
+            true
+        )
+        .unwrap(),
+        PromptPersistence::Waiting
+    ));
+    // A persisted prompt holds the queue before the provider's first event.
+    backend
+        .drain_agent_queue(session_id, &driver, &sink)
+        .unwrap();
+    assert!(capture.prompts.lock().is_empty());
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnStarted);
+    // Parking does not let the automation join or supersede the unrelated turn.
+    backend
+        .agent
+        .note_driver_event(session_id, &DriverEvent::TurnParked);
+    backend
+        .drain_agent_queue(session_id, &driver, &sink)
+        .unwrap();
+    assert!(capture.prompts.lock().is_empty());
+    assert!(capture.steers.lock().is_empty());
+
+    // Drive the real forwarder synchronously, one finished turn at a time.
+    let settle = || {
+        let (wake, _wakes) = smol::channel::bounded(1);
+        let (sender, receiver) = driver::event_channel(wake);
+        sender
+            .send(DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            })
+            .unwrap();
+        drop(sender);
+        forward_driver_events(
+            session_id,
+            runtime_id,
+            receiver,
+            sink.clone(),
+            driver.clone(),
+            backend.agent.clone(),
+            backend.task_state.clone(),
+            backend.task_store.clone(),
+            backend.sessions.clone(),
+            backend.automations.clone(),
+            backend.boss.clone(),
+            backend.auto_prompts.clone(),
+            backend.repo_maps.clone(),
+        );
+    };
+    settle();
+    let runs = backend.automations.document().runs;
+    assert_eq!(runs[0].status, AutomationRunStatus::Running);
+    assert_eq!(runs[1].status, AutomationRunStatus::Pending);
+    assert_ne!(runs[0].turn_id, Some(unrelated_turn));
+    assert_eq!(capture.prompts.lock().len(), 1);
+    backend.automations.note_driver_event(
+        session_id,
+        Some(unrelated_turn),
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    );
+    assert_eq!(
+        backend.automations.document().runs[0].status,
+        AutomationRunStatus::Running
+    );
+    // The queue reserves the first turn before any provider TurnStarted.
+    backend
+        .drain_agent_queue(session_id, &driver, &sink)
+        .unwrap();
+    assert_eq!(capture.prompts.lock().len(), 1);
+    settle();
+    let runs = backend.automations.document().runs;
+    assert_eq!(runs[0].status, AutomationRunStatus::Completed);
+    assert_eq!(runs[1].status, AutomationRunStatus::Running);
+    assert_ne!(runs[0].turn_id, runs[1].turn_id);
+    assert_eq!(capture.prompts.lock().len(), 2);
+    settle();
+    let reopened = AutomationService::open(root.join("automations.json"))
+        .unwrap()
+        .document();
+    assert!(
+        reopened
+            .runs
+            .iter()
+            .all(|run| run.status == AutomationRunStatus::Completed)
+    );
+    let detail = backend
+        .task_store
+        .load_session_detail(session_id)
+        .unwrap()
+        .unwrap();
+    assert!(detail.queued_messages.is_empty());
+    for run in reopened.runs {
+        assert!(detail.messages.iter().any(|message| Some(message.id) == run.message_id && message.turn_id == run.turn_id));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

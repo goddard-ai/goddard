@@ -169,11 +169,43 @@ impl AutomationService {
         }
     }
 
-    /// Persist then publish — every mutation funnels here.
-    fn commit(&self) -> anyhow::Result<()> {
-        self.store.save(&self.document.lock())?;
-        self.publish();
+    /// Save under the document lock so concurrent transitions cannot race on
+    /// the temporary file. A failed write leaves the last durable state visible.
+    fn persist_transition(
+        &self,
+        document: &mut AutomationsState,
+        previous: AutomationsState,
+    ) -> anyhow::Result<()> {
+        // The definition's badge describes its newest run, even when an older
+        // run settles while another is pending, or boot fails interrupted runs.
+        for automation in &mut document.automations {
+            if let Some(run) = document
+                .runs
+                .iter()
+                .find(|run| run.automation_id == automation.id)
+            {
+                automation.last_run_status = Some(run.status);
+            }
+        }
+        if let Err(error) = self.store.save(document) {
+            *document = previous;
+            return Err(error).context("could not persist automation transition");
+        }
         Ok(())
+    }
+
+    fn persist_background(
+        &self,
+        document: &mut AutomationsState,
+        previous: AutomationsState,
+    ) -> bool {
+        match self.persist_transition(document, previous) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("goddard-daemon automation persistence failed: {error:#}");
+                false
+            }
+        }
     }
 
     /// Create or replace one automation. Validates the schedule, timezone,
@@ -183,6 +215,7 @@ impl AutomationService {
         validate_input(&input)?;
         let now = unix_time();
         let mut document = self.document.lock();
+        let previous = document.clone();
         let automation = match input.id.and_then(|id| {
             document
                 .automations
@@ -263,8 +296,9 @@ impl AutomationService {
             .find(|entry| entry.id == automation.id)
             .cloned()
             .ok_or_else(|| anyhow!("automation vanished during upsert"))?;
+        self.persist_transition(&mut document, previous)?;
         drop(document);
-        self.commit()?;
+        self.publish();
         Ok(saved)
     }
 
@@ -272,6 +306,7 @@ impl AutomationService {
     pub fn remove(&self, automation_id: Uuid) -> anyhow::Result<()> {
         {
             let mut document = self.document.lock();
+            let previous = document.clone();
             if !document
                 .automations
                 .iter()
@@ -285,8 +320,10 @@ impl AutomationService {
             document
                 .runs
                 .retain(|run| run.automation_id != automation_id);
+            self.persist_transition(&mut document, previous)?;
         }
-        self.commit()
+        self.publish();
+        Ok(())
     }
 
     /// Queue a manual run. Returns the recorded run immediately; dispatch
@@ -301,7 +338,7 @@ impl AutomationService {
                 .cloned()
                 .ok_or_else(|| anyhow!("automation {automation_id} is unknown to the daemon"))?
         };
-        let run = self.record_run(&automation, unix_time(), AutomationTrigger::Manual);
+        let run = self.record_run(&automation, unix_time(), AutomationTrigger::Manual)?;
         self.spawn_dispatch(automation, run.id);
         Ok(run)
     }
@@ -344,7 +381,7 @@ impl AutomationService {
             );
             bail!("automation {automation_id} is disabled");
         }
-        let run = self.record_run(&automation, unix_time(), AutomationTrigger::Webhook);
+        let run = self.record_run(&automation, unix_time(), AutomationTrigger::Webhook)?;
         self.spawn_dispatch(automation, run.id);
         Ok(Some(run))
     }
@@ -464,7 +501,7 @@ impl AutomationService {
             .map(|minutes| u64::from(minutes) * 60);
         match grace_seconds {
             Some(grace) if now_s.saturating_sub(occurrence) <= grace => {
-                let run = self.record_run(automation, occurrence, AutomationTrigger::Scheduled);
+                let run = self.record_run(automation, occurrence, AutomationTrigger::Scheduled)?;
                 self.dispatch(automation, run.id);
             }
             _ => {
@@ -490,7 +527,7 @@ impl AutomationService {
         automation: &Automation,
         occurrence: u64,
         trigger: AutomationTrigger,
-    ) -> AutomationRun {
+    ) -> anyhow::Result<AutomationRun> {
         let now = unix_time();
         let run = AutomationRun {
             id: Uuid::new_v4(),
@@ -501,6 +538,8 @@ impl AutomationService {
             started_at: None,
             finished_at: None,
             session_id: None,
+            message_id: None,
+            turn_id: None,
             error: None,
             precheck: None,
             refusal_key: None,
@@ -510,6 +549,7 @@ impl AutomationService {
         };
         {
             let mut document = self.document.lock();
+            let previous = document.clone();
             document.runs.insert(0, run.clone());
             if let Some(entry) = document
                 .automations
@@ -522,9 +562,10 @@ impl AutomationService {
                 entry.updated_at = now;
             }
             Self::trim_runs(&mut document, automation.id);
+            self.persist_transition(&mut document, previous)?;
         }
         self.publish();
-        run
+        Ok(run)
     }
 
     /// A run that reached no task: identical consecutive refusals fold into
@@ -541,6 +582,7 @@ impl AutomationService {
     ) {
         let now = unix_time();
         let mut document = self.document.lock();
+        let previous = document.clone();
         let last = document
             .runs
             .iter()
@@ -559,6 +601,9 @@ impl AutomationService {
                     entry.last_run_status = Some(status);
                     entry.updated_at = now;
                 }
+                if !self.persist_background(&mut document, previous) {
+                    return;
+                }
                 drop(document);
                 self.publish();
                 return;
@@ -573,6 +618,8 @@ impl AutomationService {
             started_at: Some(now),
             finished_at: Some(now),
             session_id: None,
+            message_id: None,
+            turn_id: None,
             error,
             precheck: None,
             refusal_key: Some(refusal_key.to_owned()),
@@ -592,6 +639,9 @@ impl AutomationService {
             entry.updated_at = now;
         }
         Self::trim_runs(&mut document, automation.id);
+        if !self.persist_background(&mut document, previous) {
+            return;
+        }
         drop(document);
         self.publish();
     }
@@ -601,10 +651,18 @@ impl AutomationService {
     /// it.
     fn spawn_dispatch(self: &Arc<Self>, automation: Automation, run_id: Uuid) {
         let service = self.clone();
-        std::thread::Builder::new()
+        if let Err(error) = std::thread::Builder::new()
             .name(format!("goddard-automation-{}", automation.id))
             .spawn(move || service.dispatch(&automation, run_id))
-            .ok();
+        {
+            self.finish_run(
+                run_id,
+                AutomationRunStatus::Failed,
+                Some(format!("could not start dispatch: {error}")),
+                None,
+                "dispatch:failed",
+            );
+        }
     }
 
     /// Run precheck + dispatch for a recorded run. Called synchronously from
@@ -669,8 +727,8 @@ impl AutomationService {
                     AutomationWorkspace::Worktree => AgentWorkspace::Worktree,
                     AutomationWorkspace::Existing => unreachable!(),
                 };
-                let result = backend.create_agent_task(
-                    None,
+                let result = backend.create_automation_task(
+                    run_id,
                     AgentCreateSelection {
                         provider: Some(automation.provider),
                         model: automation.model.clone(),
@@ -689,7 +747,7 @@ impl AutomationService {
                 // either way so clients reload and the task appears.
                 self.notify_tasks_changed();
                 match result {
-                    Ok(session_id) => self.begin_run(run_id, automation.id, session_id),
+                    Ok(_) => {}
                     Err(error) => self.finish_run(
                         run_id,
                         AutomationRunStatus::Failed,
@@ -732,11 +790,21 @@ impl AutomationService {
             );
             return;
         }
-        match backend.queue_agent_prompt(target, automation.prompt.clone(), None, events) {
-            Ok(()) => {
-                self.notify_tasks_changed();
-                self.begin_run(run_id, automation.id, target)
-            }
+        let message_id = Uuid::new_v4();
+        if let Err(error) = self.bind_message(run_id, target, message_id) {
+            eprintln!("goddard-daemon could not bind automation run {run_id}: {error:#}");
+            return;
+        }
+        match backend.queue_agent_prompt_with_id(
+            target,
+            automation.prompt.clone(),
+            None,
+            false,
+            Some(message_id),
+            None,
+            events,
+        ) {
+            Ok(()) => self.notify_tasks_changed(),
             Err(error) => self.finish_run(
                 run_id,
                 AutomationRunStatus::Failed,
@@ -747,17 +815,75 @@ impl AutomationService {
         }
     }
 
-    /// The prompt reached a task: the run waits for the session's next
-    /// finished turn.
-    fn begin_run(&self, run_id: Uuid, automation_id: Uuid, session_id: Uuid) {
+    pub(crate) fn bind_message(
+        &self,
+        run_id: Uuid,
+        session_id: Uuid,
+        message_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let mut document = self.document.lock();
+        let previous = document.clone();
+        let run = document
+            .runs
+            .iter_mut()
+            .find(|run| run.id == run_id)
+            .ok_or_else(|| anyhow!("automation run {run_id} is missing"))?;
+        anyhow::ensure!(
+            run.status == AutomationRunStatus::Pending,
+            "automation run is no longer pending"
+        );
+        run.session_id = Some(session_id);
+        run.message_id = Some(message_id);
+        run.updated_at = unix_time();
+        self.persist_transition(&mut document, previous)?;
+        drop(document);
+        self.publish();
+        Ok(())
+    }
+
+    pub(crate) fn has_open_run(&self, session_id: Uuid) -> bool {
+        self.document
+            .lock()
+            .runs
+            .iter()
+            .any(|run| run.session_id == Some(session_id) && !run.status.is_terminal())
+    }
+
+    pub(crate) fn is_run_message(&self, message_id: Uuid) -> bool {
+        self.document
+            .lock()
+            .runs
+            .iter()
+            .any(|run| run.message_id == Some(message_id))
+    }
+
+    /// Called before handing this exact prompt to the provider, so even a
+    /// provider that finishes immediately cannot outrun run bookkeeping.
+    pub(crate) fn note_prompt_delivered(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        turn_id: Uuid,
+    ) -> anyhow::Result<()> {
         let now = unix_time();
         let mut document = self.document.lock();
-        if let Some(run) = document.runs.iter_mut().find(|run| run.id == run_id) {
-            run.status = AutomationRunStatus::Running;
-            run.session_id = Some(session_id);
-            run.started_at = Some(now);
-            run.updated_at = now;
-        }
+        let previous = document.clone();
+        let Some(run) = document
+            .runs
+            .iter_mut()
+            .find(|run| run.session_id == Some(session_id) && run.message_id == Some(message_id))
+        else {
+            return Ok(());
+        };
+        anyhow::ensure!(
+            run.status == AutomationRunStatus::Pending,
+            "automation run is no longer pending"
+        );
+        run.status = AutomationRunStatus::Running;
+        run.turn_id = Some(turn_id);
+        run.started_at = Some(now);
+        run.updated_at = now;
+        let automation_id = run.automation_id;
         if let Some(automation) = document
             .automations
             .iter_mut()
@@ -768,8 +894,10 @@ impl AutomationService {
             automation.last_refusal_key = None;
             automation.updated_at = now;
         }
+        self.persist_transition(&mut document, previous)?;
         drop(document);
         self.publish();
+        Ok(())
     }
 
     /// Terminal write for a run that never reached — or left — a task.
@@ -783,6 +911,7 @@ impl AutomationService {
     ) {
         let now = unix_time();
         let mut document = self.document.lock();
+        let previous = document.clone();
         let Some(automation_id) = document
             .runs
             .iter()
@@ -826,13 +955,15 @@ impl AutomationService {
             automation.last_refusal_key = Some(refusal_key.to_owned());
             automation.updated_at = now;
         }
+        if !self.persist_background(&mut document, previous) {
+            return;
+        }
         drop(document);
         self.publish();
     }
 
-    /// Runtime event hook — a finished turn settles the session's running
-    /// run; a dead runtime fails it outright.
-    pub fn note_driver_event(&self, session_id: Uuid, event: &DriverEvent) {
+    /// Settle only the run attributed to this runtime's delivered turn.
+    pub fn note_driver_event(&self, session_id: Uuid, turn_id: Option<Uuid>, event: &DriverEvent) {
         let (status, error) = match event {
             DriverEvent::TurnFinished { success: true, .. } => {
                 (AutomationRunStatus::Completed, None)
@@ -857,10 +988,14 @@ impl AutomationService {
         };
         let now = unix_time();
         let mut document = self.document.lock();
+        let previous = document.clone();
         let mut changed = false;
         let mut automation_id = None;
         if let Some(run) = document.runs.iter_mut().find(|run| {
-            run.session_id == Some(session_id) && run.status == AutomationRunStatus::Running
+            run.session_id == Some(session_id)
+                && run.status == AutomationRunStatus::Running
+                && turn_id.is_some()
+                && run.turn_id == turn_id
         }) {
             run.status = status;
             run.error = error;
@@ -879,8 +1014,9 @@ impl AutomationService {
                 automation.updated_at = now;
             }
         }
+        let saved = changed && self.persist_background(&mut document, previous);
         drop(document);
-        if changed {
+        if saved {
             self.publish();
         }
     }
@@ -891,6 +1027,7 @@ impl AutomationService {
     fn reconcile_interrupted_runs(&self) {
         let now = unix_time();
         let mut document = self.document.lock();
+        let previous = document.clone();
         let mut changed = false;
         for run in document.runs.iter_mut() {
             if !run.status.is_terminal() {
@@ -901,9 +1038,10 @@ impl AutomationService {
                 changed = true;
             }
         }
+        let saved = changed && self.persist_background(&mut document, previous);
         drop(document);
-        if changed {
-            let _ = self.commit();
+        if saved {
+            self.publish();
         }
     }
 
@@ -911,6 +1049,7 @@ impl AutomationService {
     /// bookkeeping — the daemon lost the thread that would settle it.
     fn fail_stale_runs(&self, now_s: u64) {
         let mut document = self.document.lock();
+        let previous = document.clone();
         let mut changed = false;
         for run in document.runs.iter_mut() {
             if run.status != AutomationRunStatus::Running {
@@ -927,8 +1066,9 @@ impl AutomationService {
                 changed = true;
             }
         }
+        let saved = changed && self.persist_background(&mut document, previous);
         drop(document);
-        if changed {
+        if saved {
             self.publish();
         }
     }
@@ -937,6 +1077,7 @@ impl AutomationService {
     /// the UI and read by the next evaluation's dedupe check.
     fn refresh_next_run_at(&self, now: DateTime<Utc>) {
         let mut document = self.document.lock();
+        let previous = document.clone();
         let mut changed = false;
         for automation in document.automations.iter_mut() {
             let next = automation.schedule.as_ref().and_then(|schedule| {
@@ -952,9 +1093,10 @@ impl AutomationService {
                 changed = true;
             }
         }
+        let saved = changed && self.persist_background(&mut document, previous);
         drop(document);
-        if changed {
-            let _ = self.commit();
+        if saved {
+            self.publish();
         }
     }
 
@@ -964,6 +1106,9 @@ impl AutomationService {
         let mut kept = 0usize;
         document.runs.retain(|run| {
             if run.automation_id != automation_id {
+                return true;
+            }
+            if !run.status.is_terminal() {
                 return true;
             }
             kept += 1;
@@ -1486,5 +1631,192 @@ mod tests {
             .expect("the refusal is recorded");
         assert_eq!(run.trigger, AutomationTrigger::Webhook);
         assert_eq!(run.status, AutomationRunStatus::SkippedUnavailable);
+    }
+    fn reopened(service: &AutomationService) -> AutomationService {
+        AutomationService::open(service.store.path.clone()).unwrap()
+    }
+
+    fn finished(success: bool) -> DriverEvent {
+        DriverEvent::TurnFinished {
+            success,
+            summary: None,
+            summary_i18n: None,
+        }
+    }
+
+    #[test]
+    fn run_transitions_survive_restart_without_schedule_or_definition_edits() {
+        for success in [true, false] {
+            let service = service();
+            let mut create = input("durable");
+            create.schedule = None;
+            create.webhook = true;
+            let automation = service.upsert(create).unwrap();
+            let run = service
+                .record_run(&automation, 123, AutomationTrigger::Manual)
+                .unwrap();
+            let service = reopened(&service);
+            assert_eq!(service.document().runs[0], run);
+            let session_id = Uuid::new_v4();
+            let message_id = Uuid::new_v4();
+            let turn_id = Uuid::new_v4();
+            service
+                .bind_message(run.id, session_id, message_id)
+                .unwrap();
+            let service = reopened(&service);
+            let queued = service.document().runs.remove(0);
+            assert_eq!(queued.status, AutomationRunStatus::Pending);
+            assert_eq!(queued.message_id, Some(message_id));
+            assert_eq!(queued.turn_id, None);
+            service
+                .note_prompt_delivered(session_id, message_id, turn_id)
+                .unwrap();
+            let service = reopened(&service);
+            assert_eq!(
+                service.document().runs[0].status,
+                AutomationRunStatus::Running
+            );
+            assert_eq!(service.document().runs[0].turn_id, Some(turn_id));
+            service.note_driver_event(session_id, Some(turn_id), &finished(success));
+            let terminal = reopened(&service);
+            let expected = if success {
+                AutomationRunStatus::Completed
+            } else {
+                AutomationRunStatus::Failed
+            };
+            assert_eq!(terminal.document().runs[0].status, expected);
+            terminal.reconcile_interrupted_runs();
+            assert_eq!(reopened(&terminal).document().runs[0].status, expected);
+            fs::remove_dir_all(service.store.path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_pending_and_running_runs_fail_durably_at_boot() {
+        for delivered in [false, true] {
+            let service = service();
+            let automation = service.upsert(input("interrupted")).unwrap();
+            let run = service
+                .record_run(&automation, 123, AutomationTrigger::Manual)
+                .unwrap();
+            if delivered {
+                let session = Uuid::new_v4();
+                let message = Uuid::new_v4();
+                service.bind_message(run.id, session, message).unwrap();
+                service
+                    .note_prompt_delivered(session, message, Uuid::new_v4())
+                    .unwrap();
+            }
+            let restored = reopened(&service);
+            restored.reconcile_interrupted_runs();
+            let document = reopened(&restored).document();
+            assert_eq!(
+                document.automations[0].last_run_status,
+                Some(AutomationRunStatus::Failed)
+            );
+            let run = document.runs[0].clone();
+            assert_eq!(run.status, AutomationRunStatus::Failed);
+            assert_eq!(
+                run.error.as_deref(),
+                Some("the daemon restarted before the run finished")
+            );
+            fs::remove_dir_all(service.store.path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_persistence_rejects_dispatch_and_does_not_publish_a_transition() {
+        use std::sync::atomic::AtomicUsize;
+        let service = service();
+        let automation = service.upsert(input("write failure")).unwrap();
+        let published = Arc::new(AtomicUsize::new(0));
+        let count = published.clone();
+        service.set_sink(Arc::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        // A directory at the atomic-write temporary path fails even as root.
+        let temporary = service.store.path.with_extension("json.tmp");
+        fs::create_dir(&temporary).unwrap();
+        assert!(
+            service
+                .run_now(automation.id)
+                .unwrap_err()
+                .to_string()
+                .contains("persist")
+        );
+        assert!(service.document().runs.is_empty());
+        assert!(reopened(&service).document().runs.is_empty());
+        assert_eq!(published.load(Ordering::SeqCst), 0);
+        fs::remove_dir(&temporary).unwrap();
+        let run = service
+            .record_run(&automation, 123, AutomationTrigger::Manual)
+            .unwrap();
+        let session = Uuid::new_v4();
+        let message = Uuid::new_v4();
+        let turn = Uuid::new_v4();
+        service.bind_message(run.id, session, message).unwrap();
+        let before = service.document();
+        let broadcasts = published.load(Ordering::SeqCst);
+        fs::create_dir(&temporary).unwrap();
+        assert!(
+            service
+                .note_prompt_delivered(session, message, turn)
+                .is_err()
+        );
+        assert_eq!(service.document(), before);
+        assert_eq!(published.load(Ordering::SeqCst), broadcasts);
+        fs::remove_dir(&temporary).unwrap();
+        service
+            .note_prompt_delivered(session, message, turn)
+            .unwrap();
+        let before = service.document();
+        let broadcasts = published.load(Ordering::SeqCst);
+        fs::create_dir(&temporary).unwrap();
+        service.note_driver_event(session, Some(turn), &finished(true));
+        assert_eq!(service.document(), before);
+        assert_eq!(reopened(&service).document(), before);
+        assert_eq!(published.load(Ordering::SeqCst), broadcasts);
+        fs::remove_dir(&temporary).unwrap();
+        service.note_driver_event(session, Some(turn), &finished(true));
+        assert_eq!(
+            reopened(&service).document().runs[0].status,
+            AutomationRunStatus::Completed
+        );
+        fs::remove_dir_all(service.store.path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn dispatch_failures_and_stale_runs_are_persisted() {
+        let service = service();
+        let automation = service.upsert(input("failed dispatch")).unwrap();
+        let failed = service
+            .record_run(&automation, 123, AutomationTrigger::Manual)
+            .unwrap();
+        service.finish_run(
+            failed.id,
+            AutomationRunStatus::Failed,
+            Some("launch failed".into()),
+            None,
+            "dispatch:failed",
+        );
+        assert_eq!(
+            reopened(&service).document().runs[0].error.as_deref(),
+            Some("launch failed")
+        );
+        let stale = service
+            .record_run(&automation, 124, AutomationTrigger::Manual)
+            .unwrap();
+        let session = Uuid::new_v4();
+        let message = Uuid::new_v4();
+        service.bind_message(stale.id, session, message).unwrap();
+        service
+            .note_prompt_delivered(session, message, Uuid::new_v4())
+            .unwrap();
+        service.fail_stale_runs(unix_time() + STALE_RUN_TIMEOUT_SECONDS + 1);
+        assert_eq!(
+            reopened(&service).document().runs[0].status,
+            AutomationRunStatus::Failed
+        );
+        fs::remove_dir_all(service.store.path.parent().unwrap()).unwrap();
     }
 }

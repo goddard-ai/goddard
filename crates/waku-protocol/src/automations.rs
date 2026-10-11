@@ -156,8 +156,7 @@ pub enum AutomationTrigger {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum AutomationRunStatus {
-    /// Recorded, not yet dispatched (precheck pending, queued behind an
-    /// earlier evaluation).
+    /// Recorded, awaiting precheck or delivery of its queued prompt.
     Pending,
     /// A task accepted the prompt; waiting for the turn to finish.
     Running,
@@ -193,7 +192,7 @@ pub struct AutomationRun {
     /// The occurrence this run covers — for a manual run, when it was
     /// requested. Unix seconds.
     pub scheduled_for: u64,
-    /// When dispatch was attempted.
+    /// When the prompt was delivered.
     #[serde(default)]
     pub started_at: Option<u64>,
     #[serde(default)]
@@ -201,6 +200,12 @@ pub struct AutomationRun {
     /// Task the run dispatched to, when one was created or reused.
     #[serde(default)]
     pub session_id: Option<Uuid>,
+    /// Queued message identity, retained when the prompt is delivered.
+    #[serde(default)]
+    pub message_id: Option<Uuid>,
+    /// The specific delivered turn whose settlement completes this run.
+    #[serde(default)]
+    pub turn_id: Option<Uuid>,
     /// Rejection detail for `Failed`/`Skipped*` runs.
     #[serde(default)]
     pub error: Option<String>,

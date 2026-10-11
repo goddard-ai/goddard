@@ -4852,6 +4852,8 @@ mod tests {
                 started_at: None,
                 finished_at: None,
                 session_id: None,
+                message_id: None,
+                turn_id: None,
                 error: None,
                 precheck: None,
                 refusal_key: None,

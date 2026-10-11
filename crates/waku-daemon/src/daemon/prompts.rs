@@ -192,7 +192,7 @@ impl WakuBackend {
     /// A deterministic `queued_id` rides durable deliveries — dispatch
     /// notifications — so redelivery dedupes on it through both the parked
     /// mirror and the delivered message row.
-    pub(super) fn queue_agent_prompt_with_id(
+    pub(crate) fn queue_agent_prompt_with_id(
         &self,
         target: Uuid,
         prompt: String,
@@ -277,6 +277,14 @@ impl WakuBackend {
         }
         if boss_notification_waiting(target, &self.agent, &self.boss, &self.task_state)
             || self.agent.is_working(target)
+            || automation_prompt_waiting(
+                target,
+                Some(queued_id),
+                &self.agent,
+                &self.task_state,
+                &self.task_store,
+                &self.automations,
+            )
             || employee_update_streaming(target, sender, &self.agent, &self.boss)
         {
             // The runtime event forwarder delivers queued prompts in
@@ -371,6 +379,8 @@ impl WakuBackend {
                 &self.agent,
                 &self.boss,
                 &self.task_state,
+                &self.task_store,
+                &self.automations,
             ) {
                 self.agent.requeue_front(session_id, entry);
                 break;

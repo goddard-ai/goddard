@@ -1,0 +1,1 @@
+- Automation run history now survives daemon restarts, and queued runs wait for their own prompt to finish before being marked complete.

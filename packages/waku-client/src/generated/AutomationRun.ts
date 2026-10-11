@@ -13,13 +13,21 @@ export type AutomationRun = { id: string, automationId: string, trigger: Automat
  */
 scheduledFor: number,
 /**
- * When dispatch was attempted.
+ * When the prompt was delivered.
  */
 startedAt: number | null, finishedAt: number | null,
 /**
  * Task the run dispatched to, when one was created or reused.
  */
 sessionId: string | null,
+/**
+ * Queued message identity, retained when the prompt is delivered.
+ */
+messageId: string | null,
+/**
+ * The specific delivered turn whose settlement completes this run.
+ */
+turnId: string | null,
 /**
  * Rejection detail for `Failed`/`Skipped*` runs.
  */

@@ -417,6 +417,7 @@ impl WakuBackend {
                 events,
                 None,
                 Some(plan),
+                None,
             )?;
             let session = self
                 .task_state

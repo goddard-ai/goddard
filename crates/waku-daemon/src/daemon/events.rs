@@ -353,7 +353,37 @@ pub(super) fn forward_driver_events(
         if !stale && matches!(&event, DriverEvent::ProcessExited) {
             agent.take_daemon_interrupt(session_id);
         }
-        if managed && !stale {
+        let owns_runtime = sessions
+            .lock()
+            .get(&session_id)
+            .is_some_and(|entry| entry.runtime_id == runtime_id);
+        let automation_settle = owns_runtime
+            && !stale
+            && matches!(
+                &event,
+                DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
+            )
+            && automations.has_open_run(session_id);
+        // Capture before the transcript recorder retires the turn.
+        let automation_turn = if matches!(
+            &event,
+            DriverEvent::TurnFinished { .. } | DriverEvent::ProcessExited
+        ) {
+            let mut state = task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .and_then(|session| {
+                    task_store
+                        .hydrate(session)
+                        .ok()
+                        .and_then(|()| session.active_turn_id())
+                })
+        } else {
+            None
+        };
+        if (managed && !stale) || automation_settle {
             // A genuinely-completed turn keeps its verdict; only a
             // cancel-issued settle writes the intentional interruption.
             let interrupted =
@@ -364,7 +394,7 @@ pub(super) fn forward_driver_events(
                 record_boss_event(&task_state, &task_store, session_id, &event)
             };
             if let Err(error) = recorded {
-                eprintln!("could not record Boss session {session_id}: {error:#}");
+                eprintln!("could not record task settlement {session_id}: {error:#}");
             }
         }
         let rejected_steer = if stale {
@@ -372,7 +402,9 @@ pub(super) fn forward_driver_events(
         } else {
             agent.note_driver_event(session_id, &event)
         };
-        automations.note_driver_event(session_id, &event);
+        if !stale && owns_runtime {
+            automations.note_driver_event(session_id, automation_turn, &event);
+        }
         if let DriverEvent::TurnFinished { success, .. } = &event
             && !boss.is_managed(session_id)
         {
@@ -552,7 +584,14 @@ pub(super) fn forward_driver_events(
         {
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if agent.is_working(session_id)
+                if automation_prompt_waiting(
+                    session_id,
+                    entry.queued_id,
+                    &agent,
+                    &task_state,
+                    &task_store,
+                    &automations,
+                ) || agent.is_working(session_id)
                     || employee_update_streaming(session_id, entry.sender, &agent, &boss)
                 {
                     // A fresh turn opened while the queue drained — the
@@ -594,7 +633,14 @@ pub(super) fn forward_driver_events(
             // document's mirrored entries are the surviving record.
             rehydrate_agent_queue(&agent, &task_state, &task_store, session_id);
             while let Some(entry) = agent.pop_queued(session_id) {
-                if (entry.is_plan_finalization()
+                if automation_prompt_waiting(
+                    session_id,
+                    entry.queued_id,
+                    &agent,
+                    &task_state,
+                    &task_store,
+                    &automations,
+                ) || (entry.is_plan_finalization()
                     && agent.has_open_turn(session_id)
                     && !driver.supports_steer())
                     || (!entry.is_plan_finalization()
