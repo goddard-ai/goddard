@@ -396,6 +396,7 @@ pub(super) fn workspace_subject_for(
     selected_project: Option<Uuid>,
     new_task_project: Option<Uuid>,
     sessions: &[AgentSession],
+    is_boss_managed: impl Fn(&AgentSession) -> bool,
 ) -> (Option<Uuid>, Option<Uuid>) {
     if !big_picture_open {
         return (selected_session, selected_project);
@@ -414,6 +415,9 @@ pub(super) fn workspace_subject_for(
             Some(session.project_id) == project_id
                 && !session.has_started()
                 && !session.is_side_chat()
+                // An unstarted boss-owned session — a queued employee — is
+                // not a draft the standing destination may compose into.
+                && !is_boss_managed(session)
         })
         .map(|session| session.id);
     (session_id, project_id)
@@ -5668,6 +5672,7 @@ impl Waku {
                 .or(self.state.selected_project),
             self.big_picture.new_task_project,
             &self.state.sessions,
+            |session| self.session_is_boss_managed(session),
         )
     }
 

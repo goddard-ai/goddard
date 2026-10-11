@@ -1391,7 +1391,9 @@ impl Waku {
                 Some((project_id, false)) => {
                     if let Some(session_id) = self
                         .session_navigation
-                        .remembered_new_task(&self.state.sessions, project_id)
+                        .remembered_new_task(&self.state.sessions, project_id, |session| {
+                            self.session_is_boss_managed(session)
+                        })
                     {
                         self.select_session(session_id, cx);
                     } else {

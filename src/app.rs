@@ -1808,6 +1808,7 @@ impl SessionNavigation {
         &self,
         sessions: &[AgentSession],
         current_project_id: Uuid,
+        is_boss_managed: impl Fn(&AgentSession) -> bool,
     ) -> Option<Uuid> {
         self.new_task.filter(|session_id| {
             sessions.iter().any(|session| {
@@ -1815,6 +1816,9 @@ impl SessionNavigation {
                     && session.project_id == current_project_id
                     && !session.has_started()
                     && !session.is_side_chat()
+                    // An unstarted boss-owned session — a queued employee —
+                    // is not a draft the New task page may reopen.
+                    && !is_boss_managed(session)
             })
         })
     }
@@ -6045,10 +6049,9 @@ impl Waku {
         }
         let mut session_navigation = SessionNavigation::default();
         if let Some(session_id) = state.selected_session.filter(|session_id| {
-            state
-                .sessions
-                .iter()
-                .any(|session| session.id == *session_id && !session.has_started())
+            state.sessions.iter().any(|session| {
+                session.id == *session_id && !session.has_started() && !session.boss_managed
+            })
         }) {
             session_navigation.remember_new_task(session_id);
         }

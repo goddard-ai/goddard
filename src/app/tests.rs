@@ -7242,7 +7242,8 @@ fn workspace_subject_follows_the_overlay_composer() {
             Some(selected_id),
             Some(project_a),
             None,
-            &sessions
+            &sessions,
+            |_| false,
         ),
         (Some(selected_id), Some(project_a))
     );
@@ -7256,6 +7257,7 @@ fn workspace_subject_follows_the_overlay_composer() {
             Some(project_a),
             Some(project_a),
             &sessions,
+            |_| false,
         ),
         (Some(card_id), Some(project_b))
     );
@@ -7269,6 +7271,7 @@ fn workspace_subject_follows_the_overlay_composer() {
             Some(project_a),
             Some(project_b),
             &sessions,
+            |_| false,
         ),
         (Some(draft_id), Some(project_b))
     );
@@ -7282,6 +7285,7 @@ fn workspace_subject_follows_the_overlay_composer() {
             Some(project_a),
             Some(project_a),
             &sessions,
+            |_| false,
         ),
         (None, Some(project_a))
     );
@@ -7294,9 +7298,28 @@ fn workspace_subject_follows_the_overlay_composer() {
             Some(selected_id),
             Some(project_a),
             None,
-            &sessions
+            &sessions,
+            |_| false,
         ),
         (None, None)
+    );
+
+    // The destination's only unstarted session being boss-owned — a queued
+    // employee — leaves the subject empty rather than composing into it.
+    let mut employee = AgentSession::new(project_b, ProviderKind::Codex);
+    employee.boss_managed = true;
+    let sessions = vec![employee];
+    assert_eq!(
+        workspace_subject_for(
+            true,
+            None,
+            Some(selected_id),
+            Some(project_a),
+            Some(project_b),
+            &sessions,
+            |session| session.boss_managed,
+        ),
+        (None, Some(project_b))
     );
 }
 

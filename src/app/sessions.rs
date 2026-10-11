@@ -535,6 +535,7 @@ impl Waku {
                     session.project_id == project_id
                         && !session.has_started()
                         && !session.is_side_chat()
+                        && !self.session_is_boss_managed(session)
                 })
                 .map(|session| session.id);
             self.create_projectless_session_inner(
@@ -932,7 +933,9 @@ impl Waku {
         }
         if self
             .selected_session()
-            .is_some_and(|session| !session.has_started())
+            .is_some_and(|session| {
+                !session.has_started() && !self.session_is_boss_managed(session)
+            })
         {
             self.session_navigation.remember_new_task(session_id);
         }
@@ -1534,6 +1537,9 @@ impl Waku {
                     && session.project_id == project_id
                     && !session.has_started()
                     && !session.is_side_chat()
+                    // An unstarted boss-owned session — a queued employee —
+                    // is not a draft the New task page may reuse.
+                    && !self.session_is_boss_managed(session)
             })
             .map(|session| session.id)
         {
@@ -3137,7 +3143,9 @@ impl Waku {
             Some((project_id, false)) => {
                 if let Some(session_id) = self
                     .session_navigation
-                    .remembered_new_task(&self.state.sessions, project_id)
+                    .remembered_new_task(&self.state.sessions, project_id, |session| {
+                        self.session_is_boss_managed(session)
+                    })
                 {
                     self.select_session(session_id, cx);
                 } else {
@@ -7050,6 +7058,7 @@ impl Waku {
             .find(|session| {
                 !session.has_started()
                     && !session.is_side_chat()
+                    && !self.session_is_boss_managed(session)
                     && projectless_draft_owns_workspace(&self.state.sessions, session)
                     && self.state.projects.iter().any(|project| {
                         project.id == session.project_id
@@ -7314,8 +7323,24 @@ mod tests {
         );
 
         assert_eq!(
-            navigation.remembered_new_task(&[draft.clone(), started], project_id),
+            navigation.remembered_new_task(&[draft.clone(), started], project_id, |_| false),
             Some(draft.id)
+        );
+    }
+
+    #[test]
+    fn new_task_navigation_never_reopens_a_queued_employee() {
+        // A queued employee has no turns, so `has_started` alone cannot tell
+        // it from a draft — the boss-managed check is what keeps ⌘N from
+        // landing on the employee instead of the New task page.
+        let project_id = Uuid::new_v4();
+        let employee = AgentSession::new(project_id, ProviderKind::Codex);
+        let mut navigation = SessionNavigation::default();
+        navigation.remember_new_task(employee.id);
+
+        assert_eq!(
+            navigation.remembered_new_task(&[employee], project_id, |_| true),
+            None
         );
     }
 
@@ -7328,7 +7353,7 @@ mod tests {
         navigation.remember_new_task(draft.id);
 
         assert_eq!(
-            navigation.remembered_new_task(&[draft], current_project_id),
+            navigation.remembered_new_task(&[draft], current_project_id, |_| false),
             None
         );
     }
@@ -7357,7 +7382,7 @@ mod tests {
 
         draft.begin_turn("Start it");
         assert_eq!(
-            navigation.remembered_new_task(&[draft.clone()], project_id),
+            navigation.remembered_new_task(&[draft.clone()], project_id, |_| false),
             None
         );
 

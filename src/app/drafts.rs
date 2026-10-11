@@ -314,6 +314,9 @@ impl Waku {
                         && !session.has_started()
                         && !session.is_busy()
                         && !session.is_side_chat()
+                        // An unstarted boss-owned session — a queued employee
+                        // — is not a draft the composer may retarget.
+                        && !self.session_is_boss_managed(session)
                         && !matches!(session.workspace, SessionWorkspace::Worktree { .. })
                 })
                 .map(|session| session.id)
@@ -375,6 +378,9 @@ impl Waku {
                     && session.project_id == project_id
                     && !session.has_started()
                     && !session.is_side_chat()
+                    // An unstarted boss-owned session — a queued employee —
+                    // is not a draft the composer's text may collapse into.
+                    && !self.session_is_boss_managed(session)
             })
         });
         if let Some(draft_id) = draft_id
