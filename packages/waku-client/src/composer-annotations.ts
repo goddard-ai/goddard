@@ -66,8 +66,8 @@ function annotationSourceLine(
   if (!history) return null;
   const read =
     history.turn != null
-      ? `goddard-agent read '{"task_id":"${history.session_id}","turn":${history.turn}}'`
-      : `goddard-agent read '{"task_id":"${history.session_id}"}'`;
+      ? `goddard-agent read ${history.session_id} --turn ${history.turn}`
+      : `goddard-agent read ${history.session_id}`;
   return `Source: an earlier Boss chat — session ${history.session_id}, message ${annotation.message_id}. To pull the original turn, run \`${read}\`.`;
 }
 

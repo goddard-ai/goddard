@@ -577,10 +577,9 @@ impl WakuBackend {
         let body = body.trim_end().to_owned();
         let read_note = if self.agent.has_surface(session_id) {
             format!(
-                " — a snapshot taken now; `goddard-agent read \
-                 '{{\"task_id\":\"{}\"}}'` always returns its current text, and \
-                 `goddard-agent read '{{\"task_id\":\"{}\",\"turn\":N}}'` returns \
-                 one turn's full messages and tool output.",
+                " — a snapshot taken now; `goddard-agent read {}` always \
+                 returns its current text, and `goddard-agent read {} --turn N` \
+                 returns one turn's full messages and tool output.",
                 parent.id, parent.id
             )
         } else {

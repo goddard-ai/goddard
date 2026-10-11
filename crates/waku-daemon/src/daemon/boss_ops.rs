@@ -1505,12 +1505,12 @@ impl WakuBackend {
                 }
                 if interrupted && expiry.resumable {
                     prompt.push_str(&format!(
-                        " It is resumable — goddard-agent boss '{{\"type\":\"resume\",\"sessionId\":\"{session_id}\"}}' revives it in place with its transcript and workspace intact."
+                        " It is resumable — goddard-agent boss resume {session_id} revives it in place with its transcript and workspace intact."
                     ));
                 }
             }
             prompt.push_str(&format!(
-                " Its transcript index follows. Read relevant turns using goddard-agent boss '{{\"type\":\"transcript\",\"sessionId\":\"{session_id}\",\"turn\":N}}'.\n\n{body}"
+                " Its transcript index follows. Read relevant turns using goddard-agent boss transcript {session_id} --turn N.\n\n{body}"
             ));
             match &assignment_finish {
                 crate::boss::AssignmentFinish::Handoff { id, intent } => {
@@ -1520,7 +1520,7 @@ impl WakuBackend {
                         .map(|assignment| assignment.outcome_id)
                         .unwrap_or_default();
                     prompt.push_str(&format!(
-                        "\n\nOutcome handoff {id} is pending — the assignment served outcome {outcome_id}. Planned after success: \"{intent}\" Resolve it explicitly with goddard-agent boss '{{\"type\":\"resolveHandoff\",\"outcome\":\"{outcome_id}\",\"handoff\":\"{id}\",\"decision\":{{\"type\":\"assign\",\"assignment\":\"<employee sessionId>\"}} | {{\"type\":\"dismiss\"}} | {{\"type\":\"completeOutcome\",\"evidence\":\"...\"}}}}' — reading this report does not settle it."
+                        "\n\nOutcome handoff {id} is pending — the assignment served outcome {outcome_id}. Planned after success: \"{intent}\" Resolve it explicitly with goddard-agent boss script --text 'op(#{{type:\"resolveHandoff\", outcome:\"{outcome_id}\", handoff:\"{id}\", decision:#{{type:\"assign\", assignment:\"<employee sessionId>\"}} | #{{type:\"dismiss\"}} | #{{type:\"completeOutcome\", evidence:\"...\"}})' — reading this report does not settle it."
                     ));
                 }
                 crate::boss::AssignmentFinish::Conflict { reason } => {

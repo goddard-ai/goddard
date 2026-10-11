@@ -132,6 +132,37 @@ const VALUE_OPTIONS: &[&str] = &[
 static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 static HELP_JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 
+/// The `boss` family's dispatch actions — every advertised `boss <action> …`
+/// leaf in `schema()` must resolve through one of these. Regression guard:
+/// the tests assert every schema leaf's action is listed here.
+const BOSS_ACTIONS: &[&str] = &[
+    "summon",
+    "prompt",
+    "transcript",
+    "roster",
+    "chain",
+    "script",
+    "file",
+    "persona",
+    "memory",
+    "plan",
+    "deliverable",
+    "speak",
+    "automation",
+    "resource-policy",
+    "open",
+    "browse",
+    "terminal",
+    "rename",
+    "avatar",
+    "report-blocker",
+    "employee",
+    "context",
+    "view",
+    "stop",
+    "resume",
+];
+
 macro_rules! println {
     ($($arg:tt)*) => {{
         let value = format!($($arg)*);
@@ -245,9 +276,14 @@ fn discovery(args: &[String]) -> anyhow::Result<bool> {
                     .any(|command| command.starts_with(&format!("{prefix} ")))
             })
             .unwrap_or_else(|| "boss".to_owned());
-        bail!(
-            "unknown command `{token}`; run goddard-agent {family} --help for valid commands or goddard-agent boss --help for the complete guide"
-        );
+        let hint = if family == "boss" {
+            "run goddard-agent boss --help for valid commands and the complete guide".to_owned()
+        } else {
+            format!(
+                "run goddard-agent {family} --help for valid commands or goddard-agent boss --help for the complete guide"
+            )
+        };
+        bail!("unknown command `{token}`; {hint}");
     }
     if marker == Some("--schema") {
         let contract = if is_leaf {
@@ -1125,36 +1161,10 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         "boss"
-            if arguments.clone().next().is_some_and(|s| {
-                matches!(
-                    s.as_str(),
-                    "summon"
-                        | "prompt"
-                        | "transcript"
-                        | "roster"
-                        | "chain"
-                        | "script"
-                        | "file"
-                        | "persona"
-                        | "memory"
-                        | "plan"
-                        | "deliverable"
-                        | "speak"
-                        | "automation"
-                        | "resource-policy"
-                        | "open"
-                        | "browse"
-                        | "terminal"
-                        | "rename"
-                        | "avatar"
-                        | "report-blocker"
-                        | "employee"
-                        | "context"
-                        | "view"
-                        | "stop"
-                        | "resume"
-                )
-            }) =>
+            if arguments
+                .clone()
+                .next()
+                .is_some_and(|s| BOSS_ACTIONS.contains(&s.as_str())) =>
         {
             let action = arguments.next().unwrap();
             boss_everyday(&action, arguments.collect())
@@ -1325,8 +1335,13 @@ fn reject_retired_payloads(args: &[String]) -> anyhow::Result<()> {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(" ");
+            let hint = if path.is_empty() {
+                "goddard-agent --help".to_owned()
+            } else {
+                format!("goddard-agent {path} --help")
+            };
             bail!(
-                "whole-operation JSON invocation is retired; use command paths, positionals and flags. Run goddard-agent {path} --help for canonical usage, or goddard-agent boss --help. Structured data uses documented --json/--json-file inputs; raw content uses --text/--file"
+                "whole-operation JSON invocation is retired; use command paths, positionals and flags. Run {hint} for canonical usage. Structured data uses documented --json/--json-file inputs; raw content uses --text/--file"
             );
         }
     }
@@ -3584,5 +3599,199 @@ mod tests {
                 "{path} must not use the old generic input placeholder"
             );
         }
+    }
+
+    fn args(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|path| (*path).to_owned()).collect()
+    }
+
+    #[test]
+    fn discovery_serves_local_read_only_documentation() {
+        // Root orientation — the audited --help/-h/help and bare-command
+        // failures all resolve locally, before any daemon contact.
+        for invocation in [
+            vec![],
+            vec!["--help"],
+            vec!["-h"],
+            vec!["help"],
+            vec!["schema"],
+            vec!["schema", "--all"],
+        ] {
+            assert!(
+                discovery(&args(&invocation)).unwrap(),
+                "{invocation:?} must produce documentation"
+            );
+        }
+        // The comprehensive Boss guide: bare family, explicit help, and the
+        // machine contract.
+        for invocation in [
+            vec!["boss"],
+            vec!["boss", "--help"],
+            vec!["boss", "--schema"],
+        ] {
+            assert!(
+                discovery(&args(&invocation)).unwrap(),
+                "{invocation:?} must produce the Boss guide"
+            );
+        }
+        // Focused family and leaf help, including the previously unregistered
+        // `boss resume` and `computer run` surfaces.
+        for invocation in [
+            vec!["boss", "employee", "--help"],
+            vec!["boss", "employee", "--schema"],
+            vec!["boss", "persona", "--help"],
+            vec!["boss", "memory", "--help"],
+            vec!["boss", "resume", "--help"],
+            vec!["boss", "resume", "--schema"],
+            vec!["computer", "--help"],
+            vec!["computer", "run", "--help"],
+            vec!["computer", "run", "--schema"],
+            vec!["prompt", "--help"],
+            vec!["prompt", "--schema"],
+            vec!["read", "--help"],
+            vec!["memory", "record", "--help"],
+            vec!["merge", "submit", "--help"],
+        ] {
+            assert!(
+                discovery(&args(&invocation)).unwrap(),
+                "{invocation:?} must produce focused documentation"
+            );
+        }
+    }
+
+    #[test]
+    fn every_advertised_boss_leaf_dispatches_through_a_guarded_action() {
+        // Regression: `boss resume` was implemented and advertised yet absent
+        // from the dispatch guard. Every schema leaf's boss action must be
+        // routable; an advertised leaf with no action can never execute.
+        let commands = schema()["commands"].as_object().unwrap().clone();
+        for path in commands.keys().filter(|path| path.starts_with("boss ")) {
+            let action = path.split_whitespace().nth(1).unwrap();
+            assert!(
+                BOSS_ACTIONS.contains(&action),
+                "{path} is advertised but `boss {action}` has no dispatch"
+            );
+        }
+        // The guard stays honest: every listed action still names a real
+        // family — a renamed leaf must not leave a dead action behind.
+        for action in BOSS_ACTIONS {
+            assert!(
+                commands
+                    .keys()
+                    .any(|path| path.starts_with(&format!("boss {action} "))
+                        || *path == format!("boss {action}")),
+                "dispatch action `{action}` has no advertised leaf"
+            );
+        }
+    }
+
+    #[test]
+    fn retired_whole_operation_payloads_fail_before_side_effects() {
+        for invocation in [
+            vec!["boss", r#"{"type":"view"}"#],
+            vec!["prompt", r#"{"task_id":"x","prompt":"y"}"#],
+            vec!["read", r#"{"turn":3}"#],
+            vec![
+                "create",
+                r#"{"project":"/tmp","prompt":"secret-marker-payload"}"#,
+            ],
+            vec!["boss", "summon", r#"{"jobTitle":"secret-marker-payload"}"#],
+            vec!["ask", r#"[{"question":"x"}]"#],
+            vec!["computer", "js", "--stdin"],
+            vec!["computer", "run", r#"{"url":"https://x","goal":"g"}"#],
+        ] {
+            let arguments = args(&invocation);
+            let error = reject_retired_payloads(&arguments).unwrap_err();
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("whole-operation JSON invocation is retired"),
+                "{invocation:?} must name the retired route: {message}"
+            );
+            assert!(
+                message.contains("--help"),
+                "{invocation:?} must name a recovery path: {message}"
+            );
+            assert!(
+                !message.contains("secret-marker-payload"),
+                "{invocation:?} error must not echo the payload: {message}"
+            );
+        }
+        // Documented structured data inputs and script sources are not the
+        // retired route — they must keep working.
+        for invocation in [
+            vec![
+                "boss",
+                "memory",
+                "record",
+                "--json",
+                r#"{"kind":"fact","text":"t","retryKey":"k"}"#,
+            ],
+            vec![
+                "resource",
+                "run",
+                "--json",
+                r#"{"resources":{},"purpose":"p"}"#,
+                "--",
+                "make",
+            ],
+            vec!["boss", "script", "--text", r#"op(#{type:"view"})"#],
+            vec!["boss", "summon", "--text", r#"{"literal":"content"}"#],
+            vec![
+                "boss",
+                "plan",
+                "items",
+                "plans/x.md",
+                "--items",
+                r#"["a","b"]"#,
+            ],
+        ] {
+            assert!(
+                reject_retired_payloads(&args(&invocation)).is_ok(),
+                "{invocation:?} is documented structured input, not a payload route"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_command_errors_point_at_the_nearest_family() {
+        let error = discovery(&args(&["boss", "bogus", "--help"])).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("boss --help"), "{message}");
+        let error = discovery(&args(&["boss", "employee", "bogus", "--help"])).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("boss employee --help"), "{message}");
+        assert!(discovery(&args(&["schema", "bogus"])).is_err());
+    }
+
+    #[test]
+    fn the_machine_schema_registers_every_audited_leaf() {
+        let schema = schema();
+        let commands = schema["commands"].as_object().unwrap();
+        for path in [
+            "boss resume",
+            "computer run",
+            "computer js",
+            "computer reset",
+        ] {
+            assert!(commands.contains_key(path), "{path} must be registered");
+        }
+        // The retired routes stay retired in the machine contract as well.
+        for path in ["prompt", "read", "create", "map"] {
+            let leaf = &commands[path];
+            assert_eq!(
+                leaf["inputConventions"]["wholeOperationJson"],
+                serde_json::json!(false),
+                "{path} must not advertise whole-operation JSON"
+            );
+            assert!(
+                leaf["inputs"].get("payload").is_none(),
+                "{path} must not keep a payload input"
+            );
+        }
+        // The aggregate Boss contract stays versioned and machine-readable.
+        let aggregate = boss_contract::aggregate();
+        assert_eq!(aggregate["contractFormat"], boss_contract::FORMAT);
+        let _: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&aggregate).unwrap()).unwrap();
     }
 }

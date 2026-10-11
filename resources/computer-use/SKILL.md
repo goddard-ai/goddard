@@ -24,18 +24,18 @@ and `stopped`. The run attempts to close its browser session and reports
 `cleanup: "incomplete"` if that cannot be completed.
 
 ```sh
-goddard-agent computer run '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
+goddard-agent computer run --json '{"url":"https://example.com","goal":"Confirm the visible Example Domain heading","verify":{"textContains":["Example Domain"]}}'
 ```
 
-For longer payloads, pass the same JSON object to `computer run --stdin`.
+For longer payloads, pass the same JSON object via `computer run --json-file request.json` (`--json-file -` reads stdin).
 
-Pass one JSON object, or use `--stdin` for longer scripts:
+Pass JavaScript with `--text`, or `--file` (`--file -` reads stdin) for longer scripts:
 
 ```sh
-goddard-agent computer js '{"code":"jsRepl.write(1 + 1)","title":"Check runtime","timeout_ms":10000}'
-goddard-agent computer js --stdin <<'JSON'
-{"code":"if (!globalThis.cua) { await setupComputerUseRuntime({ globals: globalThis }); }"}
-JSON
+goddard-agent computer js --text 'jsRepl.write(1 + 1)' --timeout-ms 10000 --title 'Check runtime'
+goddard-agent computer js --file - <<'JS'
+if (!globalThis.cua) { await setupComputerUseRuntime({ globals: globalThis }); }
+JS
 ```
 
 `goddard-agent computer reset` resets this task's kernel. Results preserve text,

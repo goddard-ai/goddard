@@ -82,8 +82,8 @@ struct ContextItem {
     position: ItemPosition,
     /// User-authored text is always carried verbatim, never scored.
     always: bool,
-    /// The 1-based turn the item belongs to — `goddard-agent read`'s `turn`
-    /// argument selects by this number. Unturned content (markers, legacy
+    /// The 1-based turn the item belongs to — `goddard-agent read --turn`
+    /// selects by this number. Unturned content (markers, legacy
     /// rows) groups under `None`.
     turn: Option<usize>,
     text: String,
@@ -118,7 +118,7 @@ fn activity_text(activity: &ActivityItem) -> Option<String> {
 /// render after `after_message` messages, so a block precedes the message at
 /// that index. Hidden provider-facing nudges are not context. Each item
 /// carries its 1-based turn so the index can point at
-/// `goddard-agent read '{"turn": N}'`; unturned content (markers, legacy
+/// `goddard-agent read --turn N`; unturned content (markers, legacy
 /// rows) belongs to the turn it follows.
 fn context_items(session: &AgentSession) -> Vec<ContextItem> {
     let turn_numbers: std::collections::HashMap<Uuid, usize> = session
@@ -494,15 +494,15 @@ fn assemble_index_envelope(
     let intro = if resumed {
         format!(
             "This task ran on {} while you were away. The turns it added are indexed \
-             below — read their full text with `goddard-agent read '{{\"turn\": N}}'` \
+             below — read their full text with `goddard-agent read --turn N` \
              before relying on details; your own earlier context is still intact.",
             from.display_name()
         )
     } else {
         format!(
             "This task was migrated to you from {}. Its earlier conversation is not in \
-             your context — Goddard keeps it. `goddard-agent read '{{}}'` returns the \
-             transcript listing; `goddard-agent read '{{\"turn\": N}}'` returns one \
+             your context — Goddard keeps it. `goddard-agent read` returns the \
+             transcript listing; `goddard-agent read --turn N` returns one \
              turn's full messages and tool output. Below are the user's own words \
              verbatim and an index of verbatim excerpts by turn — read a turn before \
              relying on its details.",
@@ -1032,7 +1032,7 @@ mod tests {
         assert!(!envelope.contains("noise"));
         assert!(!envelope.contains("All green"));
         // The pull contract is named exactly.
-        assert!(envelope.contains("goddard-agent read '{\"turn\": N}'"));
+        assert!(envelope.contains("goddard-agent read --turn N"));
 
         // No evaluation is the pointer-only degradation: user text and the
         // turn map remain, nothing else is claimed.

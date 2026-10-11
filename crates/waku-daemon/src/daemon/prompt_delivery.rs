@@ -39,7 +39,7 @@ pub(super) fn agent_prompt_envelope(
         "The message below is from {origin}, sent through `goddard-agent` on \
          the user's behalf — the user can see this exchange. To send a \
          message back, run \
-         `goddard-agent prompt '{{\"task_id\":\"{sender_id}\",\"prompt\":\"<reply>\"}}'`.\n\n{prompt}"
+         `goddard-agent prompt {sender_id} --text '<reply>'`.\n\n{prompt}"
     ))
 }
 

@@ -2950,8 +2950,8 @@ fn a_side_chats_parent_index_rides_the_context_steer_once() {
     // read invocations pointed at the parent's task id.
     assert!(steer.contains("User: seed"));
     assert!(steer.contains("— Assistant: seeded answer"));
-    assert!(steer.contains(&format!("\"task_id\":\"{session_id}\"")));
-    assert!(steer.contains("\"turn\":N"));
+    assert!(steer.contains(&format!("goddard-agent read {session_id}")));
+    assert!(steer.contains("--turn N"));
 
     // An accepted carry settles the index — the next prompt's steer adds
     // nothing once every other block has also delivered.

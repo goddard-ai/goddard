@@ -865,16 +865,16 @@ pub fn write_session_shim(env: &AgentLaunchEnv) -> anyhow::Result<PathBuf> {
 pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     let mut instruction = format!(
         "<goddard-agent>\nGoddard gives this session a `{command}` CLI; \
-         `{command} --help` documents every subcommand and its JSON payload."
+         `{command} --help` documents every subcommand's flags and inputs."
     );
     instruction.push_str(&format!(
-        "\n- `computer js` / `computer reset` — when Computer Use is enabled for this task, execute JavaScript or reset its persistent kernel using `{command} computer js '<json>'` (or `--stdin`). Read the bundled Computer Use skill before the first call; open returned image paths with your image-reading tool."
+        "\n- `computer js` / `computer reset` — when Computer Use is enabled for this task, execute JavaScript or reset its persistent kernel using `{command} computer js --text 'jsRepl.write(1 + 1)'` (or `--file script.js`; `--file -` reads stdin). Read the bundled Computer Use skill before the first call; open returned image paths with your image-reading tool."
     ));
     if scope.task_tools {
         instruction.push_str(&format!(
             "\n- `create` — when the user asks you to create, start, or \
              spawn another task or session, including running work in a \
-             separate task (e.g. `{command} create '{{\"prompt\": \"...\"}}')\n\
+             separate task (e.g. `{command} create --project /abs/project --text 'Summarize the diff'`)\n\
              - `prompt` — when the user asks you to send a message to \
              another task\n\
              - `read` — to read a task's transcript\n\
@@ -894,12 +894,12 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
         // bullet appears even when the cross-task surface is off.
         instruction.push_str(&format!(
             "\n- `read` — to read this task's transcript \
-             (`{command} read '{{}}'`, or `'{{\"turn\": N}}'` for one turn)"
+             (`{command} read`, or `{command} read --turn N` for one turn)"
         ));
     }
     instruction.push_str(&format!(
         "\n- `map` — request Jev-ranked source context for a precise code question \
-         (e.g. `{command} map '{{\"query\":\"What controls session expiry?\",\"intent\":\"understand\"}}')"
+         (e.g. `{command} map --text 'What controls session expiry?' --intent understand')"
     ));
     instruction.push_str(
         "\nUse `map` when you need to locate unfamiliar code; include \
@@ -923,7 +923,7 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     }
     instruction.push_str(&format!(
         "\n- `rename` — before considering a rename, read this task's transcript with \
-             `{command} read '{{}}'` to see its current title. After the user grants \
+             `{command} read` to see its current title. After the user grants \
              rename permission in its transcript, rename this task only if it has \
              substantially changed or pivoted since the current title was set. Keep \
              the title recognizable by its unique subject; describe the task's \
@@ -974,7 +974,7 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     ));
     instruction.push_str(&format!(
         "\n- `resource` — reserve host resources before simulator/emulator, expensive native build, or shared desktop input work. \
-         Use `{command} resource run '{{\"resources\":{{\"native_builds\":1}},\"purpose\":\"native build\"}}' -- COMMAND ARGS`. \
+         Use `{command} resource run --json '{{\"resources\":{{\"native_builds\":1}},\"purpose\":\"native build\"}}' -- COMMAND ARGS`. \
          Acquire the full resource set once; nested commands reuse subsets automatically. \
          iOS uses `exclusive:[\"ios:<UDID>\"]` plus `resident_devices:1`; Android uses `android:<AVD>`. \
          Add `desktop_input:1` for shared focus/input, not for isolated app processes. \
@@ -1552,7 +1552,7 @@ mod tests {
         // The scoped read is still in the surface: every credential reads
         // its own task's transcript.
         assert!(instruction.contains("read this task's transcript"));
-        assert!(instruction.contains("\"turn\""));
+        assert!(instruction.contains("read --turn N"));
 
         // A side chat without the cross-task surface still names its parent.
         let parent = Uuid::new_v4();
@@ -1574,6 +1574,47 @@ mod tests {
         let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &env);
         assert!(!instruction.contains("`command`"));
         assert!(instruction.contains("only when the user asks"));
+    }
+
+    #[test]
+    fn the_surface_instruction_teaches_canonical_invocations() {
+        let directory = std::env::temp_dir().join(format!("goddard-agent-test-{}", Uuid::new_v4()));
+        let instruction =
+            shared_service_instruction(Path::new("/x/goddard-agent"), &launch_env(&directory));
+        // Whole-operation JSON payloads and the retired --stdin route are
+        // never advertised: examples use command paths, positionals, and flags.
+        for retired in [
+            "create '{",
+            "read '{",
+            "map '{",
+            "prompt '{",
+            "computer js '{",
+            "boss '{",
+            "--stdin",
+        ] {
+            assert!(
+                !instruction.contains(retired),
+                "{retired} advertised: {instruction}"
+            );
+        }
+        for canonical in [
+            "computer js --text",
+            "create --project",
+            "map --text",
+            "resource run --json",
+        ] {
+            assert!(
+                instruction.contains(canonical),
+                "missing {canonical}: {instruction}"
+            );
+        }
+        // The scoped read bullet names the canonical --turn form.
+        let scoped = AgentLaunchEnv {
+            task_tools: false,
+            ..launch_env(&directory)
+        };
+        let instruction = shared_service_instruction(Path::new("/x/goddard-agent"), &scoped);
+        assert!(instruction.contains("read --turn N"), "{instruction}");
     }
 
     #[test]

@@ -229,14 +229,8 @@ fn annotation_source_line(annotation: &TranscriptAnnotation) -> Option<String> {
     }
     let history = annotation.history.as_ref()?;
     let read = match history.turn {
-        Some(turn) => format!(
-            "goddard-agent read '{{\"task_id\":\"{}\",\"turn\":{}}}'",
-            history.session_id, turn
-        ),
-        None => format!(
-            "goddard-agent read '{{\"task_id\":\"{}\"}}'",
-            history.session_id
-        ),
+        Some(turn) => format!("goddard-agent read {} --turn {}", history.session_id, turn),
+        None => format!("goddard-agent read {}", history.session_id),
     };
     Some(format!(
         "Source: an earlier Boss chat — session {}, message {}. To pull the original turn, run `{read}`.",
@@ -3734,15 +3728,16 @@ mod tests {
             concat!(
                 "Annotation 1:\n> earlier answer\n\nComment: check this\n",
                 "Source: an earlier Boss chat — session 00000000-0000-0000-0000-000000000007, message 00000000-0000-0000-0000-000000000009. ",
-                "To pull the original turn, run `goddard-agent read '{\"task_id\":\"00000000-0000-0000-0000-000000000007\",\"turn\":3}'`.\n\n",
+                "To pull the original turn, run `goddard-agent read 00000000-0000-0000-0000-000000000007 --turn 3`.\n\n",
                 "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
             )
         );
         // Without a turn the read falls back to the whole transcript.
         let annotations = [history_annotation(1, session, message, None, "x", "")];
-        assert!(annotation_prompt_prefix(&annotations).contains(
-            "run `goddard-agent read '{\"task_id\":\"00000000-0000-0000-0000-000000000007\"}'`"
-        ));
+        assert!(
+            annotation_prompt_prefix(&annotations)
+                .contains("run `goddard-agent read 00000000-0000-0000-0000-000000000007`")
+        );
     }
 
     #[test]

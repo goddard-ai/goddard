@@ -2226,7 +2226,7 @@ impl AgentSession {
         );
         if read_available {
             intro.push_str(&format!(
-                " Read it with `goddard-agent read '{{\"task_id\":\"{}\"}}'` when you \
+                " Read it with `goddard-agent read {}` when you \
                  need it",
                 parent.id,
             ));
