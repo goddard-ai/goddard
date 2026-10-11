@@ -13462,6 +13462,137 @@ fn a_cancelled_outcome_stops_its_live_assignments() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Completing an outcome retires the tickets still queued behind it —
+/// readiness gates dispatch on an open outcome, so they could never
+/// start. The ticket expires cancelled like a supervisor stop.
+#[test]
+fn a_completed_outcome_stops_its_queued_tickets() {
+    use waku_protocol::boss::{BossOperation, EmployeeLifecycle, OutcomeState};
+    let root = std::env::temp_dir().join(format!("boss-outcome-complete-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let outcome = backend
+        .boss
+        .create_outcome(None, "Keep the queue honest", "criteria")
+        .unwrap()
+        .id;
+    let mut op = summon_op(
+        &backend,
+        &root,
+        "queued follow-up",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { outcome_id, .. } = &mut op {
+        *outcome_id = Some(outcome);
+    }
+    let waku_protocol::boss::BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(Some(boss), op, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::SetOutcomeState {
+                outcome,
+                state: OutcomeState::Completed,
+                evidence: Some("met".into()),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let ticket = backend.boss.employee(session_id).unwrap();
+    assert!(ticket.cancelled);
+    assert_eq!(ticket.lifecycle(), EmployeeLifecycle::Expired);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Resolving a handoff with `completeOutcome` retires the same stranded
+/// queue a direct completion does.
+#[test]
+fn a_complete_outcome_decision_stops_its_queued_tickets() {
+    use waku_protocol::boss::{
+        BossOperation, BossResult, EmployeeLifecycle, EmployeeSettle, HandoffDecision, OutcomeState,
+    };
+    let root = std::env::temp_dir().join(format!("boss-outcome-handoff-{}", Uuid::new_v4()));
+    let (backend, supervisor, worker, outcome, _parent) =
+        outcome_employee_fixture(&root, "criteria", false, Some("verify next"));
+    // A linked ticket stays queued behind the held model slot.
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let mut op = summon_op(
+        &backend,
+        &root,
+        "queued follow-up",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { outcome_id, .. } = &mut op {
+        *outcome_id = Some(outcome);
+    }
+    let BossResult::Summoned {
+        session_id: queued, ..
+    } = backend
+        .handle_boss_operation(Some(supervisor), op, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(
+        backend.boss.employee(queued).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+    // The worker's success leaves the pending handoff to decide.
+    backend
+        .finish_boss_employee(worker, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    let handoff = backend
+        .boss
+        .document()
+        .outcomes
+        .iter()
+        .find(|entry| entry.id == outcome)
+        .unwrap()
+        .handoffs[0]
+        .id;
+    backend
+        .handle_boss_operation(
+            Some(supervisor),
+            BossOperation::ResolveHandoff {
+                outcome,
+                handoff,
+                decision: HandoffDecision::CompleteOutcome {
+                    evidence: "the result already achieved the outcome".into(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(
+        backend
+            .boss
+            .document()
+            .outcomes
+            .iter()
+            .find(|entry| entry.id == outcome)
+            .unwrap()
+            .state,
+        OutcomeState::Completed
+    );
+    let ticket = backend.boss.employee(queued).unwrap();
+    assert!(ticket.cancelled);
+    assert_eq!(ticket.lifecycle(), EmployeeLifecycle::Expired);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `history search` is the boss's retained-record sweep: a natural-language
 /// question ranks a paraphrased passage, and employee, retired-employee,
 /// earlier Boss chat, planning, and archived task records each return under

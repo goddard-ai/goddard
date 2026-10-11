@@ -1229,7 +1229,9 @@ impl BossService {
     /// is resolved — a task never finishes while the boss still holds an
     /// unanswered result. Silent in every direction: transitions update
     /// the record and notify nobody. A `cancelled` transition reports the
-    /// live assignments the daemon should stop.
+    /// live assignments the daemon should stop; a `completed` one reports
+    /// only the linked tickets still queued — readiness gates dispatch on
+    /// the task staying open, so they could never start.
     pub fn set_outcome_state(
         &self,
         caller: Option<Uuid>,
@@ -1286,22 +1288,37 @@ impl BossService {
                 entry.evidence = evidence.map(str::to_owned);
                 entry.completed_at = Some(now);
             }
-            if state == OutcomeState::Cancelled {
+            match state {
                 // Parent cancelled during work — remaining work stops;
                 // late results become history that cannot revive it.
-                stop = doc
-                    .employees
-                    .iter()
-                    .filter(|employee| {
-                        !employee.expired
-                            && !employee.cancelled
-                            && employee
-                                .assignment
-                                .as_ref()
-                                .is_some_and(|assignment| assignment.outcome_id == outcome)
-                    })
-                    .map(|employee| employee.session_id)
-                    .collect();
+                OutcomeState::Cancelled => {
+                    stop = doc
+                        .employees
+                        .iter()
+                        .filter(|employee| {
+                            !employee.expired
+                                && !employee.cancelled
+                                && employee
+                                    .assignment
+                                    .as_ref()
+                                    .is_some_and(|assignment| assignment.outcome_id == outcome)
+                        })
+                        .map(|employee| employee.session_id)
+                        .collect();
+                }
+                // Completion strands only the queue — a linked ticket's
+                // readiness can never land under a terminal task. Working
+                // and dispatching siblings keep running; their settles
+                // land as history like a cancelled parent's do.
+                OutcomeState::Completed => {
+                    stop = doc
+                        .employees
+                        .iter()
+                        .filter(|employee| linked_queued_ticket(employee, outcome))
+                        .map(|employee| employee.session_id)
+                        .collect();
+                }
+                OutcomeState::Open => {}
             }
             entry.state = state;
             entry.completion_conflict = None;
@@ -1328,18 +1345,20 @@ impl BossService {
     /// decision: an assigned follow-up assignment, a dismissal, or a silent
     /// outcome completion with evidence. `completeOutcome` enforces the
     /// same bar `setOutcomeState` does — every other handoff resolved
-    /// first.
+    /// first — and reports the same stop list: the linked tickets still
+    /// queued under the now-terminal task.
     pub fn resolve_handoff(
         &self,
         caller: Option<Uuid>,
         outcome: Uuid,
         handoff: Uuid,
         decision: waku_protocol::boss::HandoffDecision,
-    ) -> anyhow::Result<BossOutcome> {
+    ) -> anyhow::Result<(BossOutcome, Vec<Uuid>)> {
         use waku_protocol::boss::HandoffDecision;
         self.require_owner(caller)?;
         let now = waku_protocol::model::unix_time();
         let mut updated = None;
+        let mut stop = Vec::new();
         self.update(|state| {
             let entry = state
                 .outcomes
@@ -1405,11 +1424,20 @@ impl BossService {
                     at: now,
                     actor: self.plan_actor(caller),
                 });
+                // The same retirement a direct `completed` transition
+                // performs — a linked ticket's readiness can never land
+                // under a terminal task.
+                stop = state
+                    .employees
+                    .iter()
+                    .filter(|employee| linked_queued_ticket(employee, outcome))
+                    .map(|employee| employee.session_id)
+                    .collect();
             }
             updated = Some(entry.clone());
             Ok(())
         })?;
-        Ok(updated.unwrap())
+        Ok((updated.unwrap(), stop))
     }
 
     /// `setOutcomeWaiting` — record a tracked wait or snooze so unattended
@@ -5980,6 +6008,21 @@ fn restart_interrupted(employee: &BossEmployee) -> bool {
         return false;
     }
     employee.lifecycle() != EmployeeLifecycle::Queued || employee.ticket.is_none()
+}
+
+/// A still-queued ticket assigned to `outcome` — the only linked work a
+/// terminal task strands, since admission readiness gates dispatch on the
+/// task staying open. `queued` records without tickets are legacy working
+/// rows, and running siblings settle on their own.
+fn linked_queued_ticket(employee: &BossEmployee, outcome: Uuid) -> bool {
+    !employee.expired
+        && !employee.cancelled
+        && employee.lifecycle() == EmployeeLifecycle::Queued
+        && employee.ticket.is_some()
+        && employee
+            .assignment
+            .as_ref()
+            .is_some_and(|assignment| assignment.outcome_id == outcome)
 }
 
 /// Admit the employee under its ticket's wave id — first admission
@@ -12010,6 +12053,75 @@ mod memory_op_tests {
             task.evidence.as_deref(),
             Some("the result already achieved the outcome")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Completing a task retires the tickets still queued behind it —
+    /// readiness gates dispatch on the task staying open, so they could
+    /// never start — while a working sibling and another task's queue
+    /// stay untouched.
+    #[test]
+    fn completing_an_outcome_stops_only_its_queued_tickets() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-queue-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        let other = service
+            .create_outcome(None, "Keep the queue durable", "criteria")
+            .unwrap();
+        let queued = admit_ticketed(&service, boss, task.id, "Follow-up once open");
+        let working = admit_on(&service, boss, task.id, false, None);
+        let elsewhere = admit_ticketed(&service, boss, other.id, "Unrelated ticket");
+        let (closed, stop) = service
+            .set_outcome_state(
+                None,
+                task.id,
+                OutcomeState::Completed,
+                Some("verified in the QA app".into()),
+            )
+            .unwrap();
+        assert_eq!(closed.state, OutcomeState::Completed);
+        assert_eq!(stop, vec![queued.session_id]);
+        let sibling = service.employee(working.session_id).unwrap();
+        assert!(
+            !sibling.expired && !sibling.cancelled,
+            "a working sibling keeps running"
+        );
+        let untouched = service.employee(elsewhere.session_id).unwrap();
+        assert_eq!(untouched.lifecycle(), EmployeeLifecycle::Queued);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A `completeOutcome` handoff decision retires the same stranded
+    /// queue a direct completion reports.
+    #[test]
+    fn a_complete_outcome_decision_stops_its_queued_tickets() {
+        let root = std::env::temp_dir().join(format!("boss-outcome-handoff-queue-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Make transfers fail cleanly", "criteria")
+            .unwrap();
+        let worker = admit_on(&service, boss, task.id, false, Some("verify next"));
+        let queued = admit_ticketed(&service, boss, task.id, "Follow-up once open");
+        let worker = settle_ok(&service, worker.session_id);
+        let AssignmentFinish::Handoff { id, .. } =
+            service.assignment_finished(&worker).unwrap()
+        else {
+            panic!("expected a handoff")
+        };
+        let (closed, stop) = service
+            .resolve_handoff(
+                None,
+                task.id,
+                id,
+                waku_protocol::boss::HandoffDecision::CompleteOutcome {
+                    evidence: "the result already achieved the outcome".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(closed.state, OutcomeState::Completed);
+        assert_eq!(stop, vec![queued.session_id]);
         fs::remove_dir_all(root).unwrap();
     }
 

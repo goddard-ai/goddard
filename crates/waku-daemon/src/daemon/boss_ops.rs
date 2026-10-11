@@ -973,24 +973,18 @@ impl WakuBackend {
                 let (record, stop) = self
                     .boss
                     .set_outcome_state(caller, outcome, state, evidence)?;
-                // A cancelled outcome stops its remaining work — the
-                // cancel mark lands before teardown so the settles
-                // classify as intentional, and late results stay
-                // history that cannot revive the record.
-                for session_id in stop {
-                    self.boss.mark_cancelled(session_id)?;
-                    record_daemon_interrupt(
-                        &self.task_state,
-                        &self.task_store,
-                        session_id,
-                        Some("Outcome cancelled"),
-                    )?;
-                    self.finish_boss_employee(
-                        session_id,
-                        false,
-                        waku_protocol::boss::EmployeeSettle::Stopped,
-                    )?;
-                }
+                // A closed outcome retires the assignments it reports —
+                // a cancelled parent's whole roster, a completed one's
+                // stranded queue. The cancel mark lands before teardown
+                // so the settles classify as intentional, and late
+                // results stay history that cannot revive the record.
+                self.stop_outcome_assignments(
+                    stop,
+                    match state {
+                        waku_protocol::boss::OutcomeState::Completed => "Outcome completed",
+                        _ => "Outcome cancelled",
+                    },
+                )?;
                 // A reopened outcome can un-gate a waiting finishing
                 // assignment — re-run dispatch either way.
                 self.wake_summon_queue();
@@ -999,13 +993,25 @@ impl WakuBackend {
                     state: self.boss.document(),
                 })
             }),
-            // A settled handoff can unblock a waiting finishing
-            // assignment — re-run the dispatch pass after the decision.
-            op @ BossOperation::ResolveHandoff { .. } => {
-                let result = self.boss.handle(caller, op)?;
+            BossOperation::ResolveHandoff {
+                outcome,
+                handoff,
+                decision,
+            } => self.boss.with_operation_lock(|| {
+                let (record, stop) =
+                    self.boss
+                        .resolve_handoff(caller, outcome, handoff, decision)?;
+                // A `completeOutcome` decision retires the same stranded
+                // queue a direct completion reports.
+                self.stop_outcome_assignments(stop, "Outcome completed")?;
+                // A settled handoff can unblock a waiting finishing
+                // assignment — re-run the dispatch pass after the decision.
                 self.wake_summon_queue();
-                Ok(result)
-            }
+                let _ = record;
+                Ok(BossResult::State {
+                    state: self.boss.document(),
+                })
+            }),
             BossOperation::SetProjectSubmissions { project, enabled } => {
                 if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
                     bail!("only the boss or a human can configure project submissions");
@@ -1205,6 +1211,32 @@ impl WakuBackend {
             session: Box::new(session),
             project: Box::new(project),
         })
+    }
+
+    /// The teardown an outcome transition's stop list drives: the durable
+    /// cancel mark lands before the interrupt row and the finish so a
+    /// racing settle classifies as the intentional stop it is, and late
+    /// results stay history that cannot revive the record.
+    pub(super) fn stop_outcome_assignments(
+        &self,
+        stop: Vec<Uuid>,
+        notice: &'static str,
+    ) -> anyhow::Result<()> {
+        for session_id in stop {
+            self.boss.mark_cancelled(session_id)?;
+            record_daemon_interrupt(
+                &self.task_state,
+                &self.task_store,
+                session_id,
+                Some(notice),
+            )?;
+            self.finish_boss_employee(
+                session_id,
+                false,
+                waku_protocol::boss::EmployeeSettle::Stopped,
+            )?;
+        }
+        Ok(())
     }
 
     /// `drain` yields while the session's provider turn is still open —

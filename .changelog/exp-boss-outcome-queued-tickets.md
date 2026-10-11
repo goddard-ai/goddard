@@ -1,0 +1,1 @@
+- Completing a Boss outcome now stops its assignments still queued to start — they previously stayed queued forever.
