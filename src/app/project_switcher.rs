@@ -43,6 +43,23 @@ enum ProjectSwitcherTarget {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BossChatPickerLanding {
+    NewTask,
+    NoProject,
+    BossChat,
+}
+
+fn boss_chat_picker_landing(is_boss: bool, is_projectless: bool) -> BossChatPickerLanding {
+    if is_boss {
+        BossChatPickerLanding::BossChat
+    } else if is_projectless {
+        BossChatPickerLanding::NoProject
+    } else {
+        BossChatPickerLanding::NewTask
+    }
+}
+
 /// Runtime-only switcher state, like its task counterpart: recency lives in
 /// the task switcher's session history, so restoration seeds nothing here.
 pub(super) struct ProjectSwitcherUi {
@@ -846,6 +863,7 @@ impl Waku {
         // page: the picked project's remembered draft, or a fresh one —
         // the same landing ⌘N makes anywhere else.
         if target == ProjectSwitcherTarget::BossChat {
+            self.settings_page = None;
             if let Some(project_id) = selected
                 && self
                     .state
@@ -853,20 +871,30 @@ impl Waku {
                     .iter()
                     .any(|project| project.id == project_id)
             {
-                if self
-                    .state
-                    .projects
-                    .iter()
-                    .any(|project| project.id == project_id && project.is_projectless())
-                {
-                    self.create_projectless_session(cx);
-                } else if let Some(session_id) = self
-                    .session_navigation
-                    .remembered_new_task(&self.state.sessions, project_id)
-                {
-                    self.select_session(session_id, cx);
-                } else {
-                    self.create_session_for(project_id, self.state.last_provider, cx);
+                let landing = boss_chat_picker_landing(
+                    self.boss_key_for_project(project_id).is_some(),
+                    self.state
+                        .projects
+                        .iter()
+                        .any(|project| project.id == project_id && project.is_projectless()),
+                );
+                match landing {
+                    BossChatPickerLanding::BossChat => {
+                        if let Some(key) = self.boss_key_for_project(project_id) {
+                            self.chat_with_boss(key, cx);
+                        }
+                    }
+                    BossChatPickerLanding::NoProject => self.create_projectless_session(cx),
+                    BossChatPickerLanding::NewTask => {
+                        if let Some(session_id) = self
+                            .session_navigation
+                            .remembered_new_task(&self.state.sessions, project_id)
+                        {
+                            self.select_session(session_id, cx);
+                        } else {
+                            self.create_session_for(project_id, self.state.last_provider, cx);
+                        }
+                    }
                 }
             }
             if let Some(previous_focus) = previous_focus {
@@ -1205,6 +1233,22 @@ impl Waku {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boss_chat_picker_routes_project_no_project_and_boss_selections() {
+        assert_eq!(
+            boss_chat_picker_landing(false, false),
+            BossChatPickerLanding::NewTask
+        );
+        assert_eq!(
+            boss_chat_picker_landing(false, true),
+            BossChatPickerLanding::NoProject
+        );
+        assert_eq!(
+            boss_chat_picker_landing(true, false),
+            BossChatPickerLanding::BossChat
+        );
+    }
 
     #[test]
     fn search_finds_projects_outside_recents_by_fuzzy_name_or_path() {
