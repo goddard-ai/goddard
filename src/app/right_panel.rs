@@ -1506,8 +1506,8 @@ fn tab_scroll_fade(
 }
 
 /// The Goals panel's compact row geometry: uniform two-line rows and a
-/// finished-history viewport bounded to five complete rows while ongoing
-/// work exists. Show more expands history into the panel's flexible share.
+/// finished-history preview bounded to five complete rows. Show more adds
+/// the remaining history to the same scroll surface as active work.
 const GOALS_PANEL_ROW_HEIGHT: f32 = 50.0;
 const GOALS_PANEL_RECENT_LIMIT: usize = 5;
 const GOALS_PANEL_AVATAR: f32 = 16.0;
@@ -2076,6 +2076,10 @@ enum BossOutcomeItem {
     /// A row nested under its expanded outcome — the item's own height
     /// keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
+    HistoryToggle {
+        older_count: usize,
+        expanded: bool,
+    },
 }
 
 /// Replace a Goals list's items like `reset_with_uniform_height`, also
@@ -2090,6 +2094,7 @@ fn reset_boss_goals_list(list_state: &ListState, items: &[BossOutcomeItem], row_
             BossOutcomeItem::Row(row) => Some(row.focus.clone()),
             BossOutcomeItem::Entry(entry) => entry.focus.clone(),
             BossOutcomeItem::Header { focus, .. } => Some(focus.clone()),
+            BossOutcomeItem::HistoryToggle { .. } => None,
         }),
     );
     list_state.set_size_hints(
@@ -2104,9 +2109,8 @@ fn boss_goals_item_focus_key(item: &BossOutcomeItem) -> Option<String> {
     match item {
         BossOutcomeItem::Header { section, .. } => Some(format!("header:{section:?}")),
         BossOutcomeItem::Row(row) => Some(format!("row:{}", row.outcome)),
-        BossOutcomeItem::Entry(entry) => {
-            entry.destination.then(|| format!("entry:{}", entry.key))
-        }
+        BossOutcomeItem::Entry(entry) => entry.destination.then(|| format!("entry:{}", entry.key)),
+        BossOutcomeItem::HistoryToggle { .. } => None,
     }
 }
 
@@ -2654,7 +2658,7 @@ mod tests {
         /// them is the section transition the panel performs.
         finished: Vec<Uuid>,
         ongoing: Vec<Uuid>,
-        /// How many rows each list's viewport paints; zero overdraw on
+        /// How many rows the list viewport paints; zero overdraw on
         /// the states keeps anything past it genuinely unmounted.
         viewport_rows: usize,
         fallback_focus: FocusHandle,
@@ -2666,6 +2670,7 @@ mod tests {
             window: &mut Window,
             cx: &mut Context<Self>,
             viewport_rows: usize,
+            finished: Vec<Uuid>,
             ongoing: Vec<Uuid>,
         ) -> Self {
             let fallback_focus = cx.focus_handle();
@@ -2678,12 +2683,11 @@ mod tests {
             // One row of overdraw keeps the painted range nearly the
             // viewport so a row beyond it is genuinely unmounted.
             let overdraw = px(GOALS_PANEL_ROW_HEIGHT);
-            boss_ui.goals_finished_list = ListState::new(0, ListAlignment::Top, overdraw);
-            boss_ui.goals_ongoing_list = ListState::new(0, ListAlignment::Top, overdraw);
+            boss_ui.goals_list = ListState::new(0, ListAlignment::Top, overdraw);
             Self {
                 boss_ui,
                 key: waku_client::DaemonKey::Local,
-                finished: Vec::new(),
+                finished,
                 ongoing,
                 viewport_rows,
                 fallback_focus,
@@ -2714,11 +2718,9 @@ mod tests {
                 .chain(ongoing.iter())
                 .map(|id| format!("row:{id}"))
                 .collect();
-            boss_ui
-                .goals_focus_handles
-                .retain(|(daemon, item_key), _| {
-                    *daemon != key || live_focus_keys.contains(item_key)
-                });
+            boss_ui.goals_focus_handles.retain(|(daemon, item_key), _| {
+                *daemon != key || live_focus_keys.contains(item_key)
+            });
             let mut build = |ids: &[Uuid], cx: &mut Context<Self>| -> Vec<BossOutcomeItem> {
                 ids.iter()
                     .map(|id| {
@@ -2751,8 +2753,15 @@ mod tests {
                     })
                     .collect()
             };
-            let finished_items = Arc::new(build(finished, cx));
-            let ongoing_items = Arc::new(build(ongoing, cx));
+            let mut all_items = build(finished, cx);
+            if finished.len() > GOALS_PANEL_RECENT_LIMIT {
+                all_items.push(BossOutcomeItem::HistoryToggle {
+                    older_count: 0,
+                    expanded: true,
+                });
+            }
+            all_items.extend(build(ongoing, cx));
+            let all_items = Arc::new(all_items);
             let items_signature = {
                 let mut hasher = DefaultHasher::new();
                 finished.hash(&mut hasher);
@@ -2761,29 +2770,19 @@ mod tests {
             };
             if items_signature != *signature {
                 *signature = items_signature;
-                reset_boss_goals_list(
-                    &boss_ui.goals_finished_list,
-                    &finished_items,
-                    GOALS_PANEL_ROW_HEIGHT,
-                );
-                reset_boss_goals_list(
-                    &boss_ui.goals_ongoing_list,
-                    &ongoing_items,
-                    GOALS_PANEL_ROW_HEIGHT,
-                );
+                reset_boss_goals_list(&boss_ui.goals_list, &all_items, GOALS_PANEL_ROW_HEIGHT);
             }
             let viewport = px(GOALS_PANEL_ROW_HEIGHT * (*viewport_rows).max(1) as f32);
-            let finished_list = boss_ui.goals_finished_list.clone();
-            let ongoing_list = boss_ui.goals_ongoing_list.clone();
+            let goals_list = boss_ui.goals_list.clone();
             let weak = WeakEntity::new_invalid();
-            let weak_ongoing = weak.clone();
-            let render_items = |items: Arc<Vec<BossOutcomeItem>>,
-                                weak: WeakEntity<Waku>|
-             -> Arc<dyn Fn(usize, &mut Window, &mut App) -> AnyElement> {
-                Arc::new(move |index, _window, cx| {
-                    items.get(index).map_or_else(
-                        || div().into_any_element(),
-                        |item| match item {
+            let render_items =
+                |items: Arc<Vec<BossOutcomeItem>>,
+                 weak: WeakEntity<Waku>|
+                 -> Arc<dyn Fn(usize, &mut Window, &mut App) -> AnyElement> {
+                    Arc::new(move |index, _window, cx| {
+                        items.get(index).map_or_else(
+                            || div().into_any_element(),
+                            |item| match item {
                             BossOutcomeItem::Row(row) => {
                                 let tracked = row.outcome;
                                 boss_goal_panel_row_element(row, key, &weak, cx)
@@ -2791,61 +2790,51 @@ mod tests {
                                         if tracked == TRACKED_OUTCOME {
                                             "tracked-goal-row".into()
                                         } else {
-                                            "goal-row".into()
+                                            format!("goals-row-{tracked}")
                                         }
                                     })
                                     .into_any_element()
                             }
+                            BossOutcomeItem::HistoryToggle { .. } => div()
+                                .h(px(28.0))
+                                .debug_selector(|| "goals-history-toggle".into())
+                                .child("Show more")
+                                .into_any_element(),
                             _ => div().into_any_element(),
-                        },
-                    )
-                })
-            };
-            let finished_render = render_items(finished_items, weak);
-            let ongoing_render = render_items(ongoing_items, weak_ongoing);
+                            },
+                        )
+                    })
+                };
+            let render = render_items(all_items, weak);
             div()
                 .id("goals-harness")
                 .w(px(320.0))
+                .h(px(400.0))
                 .flex()
                 .flex_col()
                 .child(
-                    div()
-                        .h(viewport)
-                        .flex_none()
-                        .child(
-                            list(finished_list, move |index, window, cx| {
-                                finished_render(index, window, cx)
-                            })
-                            .size_full(),
-                        ),
-                )
-                .child(
-                    div()
-                        .h(viewport)
-                        .flex_none()
-                        .child(
-                            list(ongoing_list, move |index, window, cx| {
-                                ongoing_render(index, window, cx)
-                            })
-                            .size_full(),
-                        ),
+                    div().h(viewport).flex_none().child(
+                        list(goals_list, move |index, window, cx| {
+                            render(index, window, cx)
+                        })
+                        .size_full(),
+                    ),
                 )
         }
     }
 
     const TRACKED_OUTCOME: Uuid = Uuid::from_u128(7);
 
-    /// A focused outcome row keeps focus through the remount a section
-    /// move forces, even when it lands outside the destination list's
-    /// painted range; losing the row entirely sends focus to the app's
-    /// focus-lost fallback.
+    /// A focused outcome row keeps focus as it moves within the combined
+    /// list and while it sits outside the painted range; losing the row
+    /// entirely sends focus to the app's focus-lost fallback.
     #[gpui::test]
     fn focused_goals_row_survives_section_moves(cx: &mut gpui::TestAppContext) {
         let others: Vec<Uuid> = (0..6).map(|i| Uuid::from_u128(i + 100)).collect();
         let mut ongoing = vec![TRACKED_OUTCOME];
         ongoing.extend(others.iter().copied());
         let (view, cx) = cx.add_window_view(|window, cx| {
-            GoalsRowFocusHarness::new(window, cx, 2, ongoing)
+            GoalsRowFocusHarness::new(window, cx, 2, Vec::new(), ongoing)
         });
         cx.run_until_parked();
 
@@ -2855,9 +2844,8 @@ mod tests {
         assert!(cx.update(|window, _| tracked.is_focused(window)));
         assert!(cx.debug_bounds("tracked-goal-row").is_some());
 
-        // The row's outcome finishes: it leaves the ongoing list and
-        // mounts inside Finished's viewport — one state change, one
-        // remount.
+        // The row's outcome finishes: its section move preserves focus in
+        // the combined list.
         let _ = view.update(cx, |this, cx| {
             this.ongoing.retain(|id| *id != TRACKED_OUTCOME);
             this.finished.insert(0, TRACKED_OUTCOME);
@@ -2870,9 +2858,8 @@ mod tests {
         );
         assert!(cx.debug_bounds("tracked-goal-row").is_some());
 
-        // A settled row that is still focused and lands below the new
-        // scroll position keeps rendering — the list renders the focused
-        // item outside the viewport rather than dropping it.
+        // A settled row that is still focused below the new scroll position
+        // keeps rendering rather than dropping its focusable item.
         let _ = view.update(cx, |this, cx| {
             this.finished.clear();
             this.finished.extend(others.iter().copied());
@@ -2900,6 +2887,32 @@ mod tests {
         assert!(cx.update(|window, cx| {
             view.read(cx).fallback_focus.is_focused(window)
         }));
+    }
+
+    #[gpui::test]
+    fn expanded_history_and_active_tasks_share_the_goals_scroll_surface(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let finished = (0..6).map(|i| Uuid::from_u128(i + 200)).collect();
+        let ongoing = vec![Uuid::from_u128(300), Uuid::from_u128(301)];
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            GoalsRowFocusHarness::new(window, cx, 2, finished, ongoing)
+        });
+        cx.run_until_parked();
+
+        // The harness inserts the Show more/less item after history and
+        // before active tasks. Seeking the single list to that index proves
+        // the expanded section and following task share its scroll state.
+        let list = cx.read(|app| view.read(app).boss_ui.goals_list.clone());
+        list.scroll_to(gpui::ListOffset {
+            item_ix: 6,
+            offset_in_item: px(0.0),
+        });
+        cx.run_until_parked();
+
+        assert!(
+            cx.read(|app| view.read(app).boss_ui.goals_list.logical_scroll_top().item_ix) >= 6
+        );
     }
 
     #[test]
@@ -11845,9 +11858,7 @@ impl Waku {
                 .entry((key, format!("row:{}", row.outcome.id)))
                 .or_insert_with(|| cx.focus_handle().tab_stop(true))
                 .clone();
-            let prepared = Arc::new(self.prepare_boss_outcome_row(
-                row, key, &sessions, now, focus,
-            ));
+            let prepared = Arc::new(self.prepare_boss_outcome_row(row, key, &sessions, now, focus));
             if prepared.expanded {
                 entries.insert(
                     row.outcome.id,
@@ -11860,9 +11871,7 @@ impl Waku {
                                     self.boss_ui
                                         .goals_focus_handles
                                         .entry((key, format!("entry:{}", entry.key)))
-                                        .or_insert_with(|| {
-                                            cx.focus_handle().tab_stop(true)
-                                        })
+                                        .or_insert_with(|| cx.focus_handle().tab_stop(true))
                                         .clone(),
                                 );
                             }
@@ -11914,9 +11923,8 @@ impl Waku {
         } else {
             GOALS_PANEL_RECENT_LIMIT.min(finished.len())
         };
-        // A row and its expanded entries travel together — the finished
-        // viewport and the ongoing sections share the item shape so both
-        // lists paint the same disclosure content.
+        // A row and its expanded entries travel together through the single
+        // list that also contains section headers and the history toggle.
         let expand = |row: &Arc<BossOutcomePanelRow>,
                       entries: &HashMap<Uuid, Vec<Arc<BossOutcomeEntry>>>| {
             let mut items = Vec::with_capacity(1 + entries.get(&row.outcome).map_or(0, Vec::len));
@@ -11932,7 +11940,31 @@ impl Waku {
             .flat_map(|row| expand(row, &entries))
             .collect();
         let older_count = finished.len().saturating_sub(recent_limit);
-        let mut ongoing_items: Vec<BossOutcomeItem> = Vec::new();
+        let mut items: Vec<BossOutcomeItem> = Vec::new();
+        if !finished.is_empty() {
+            items.push(BossOutcomeItem::Header {
+                section: boss::BossGoalSection::Finished,
+                label: tr!("boss.goals_section_finished"),
+                attention: 0,
+                collapsed: finished_collapsed,
+                top_gap: false,
+                focus: self
+                    .boss_ui
+                    .goals_focus_handles
+                    .entry((key, format!("header:{:?}", boss::BossGoalSection::Finished)))
+                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                    .clone(),
+            });
+            if !finished_collapsed {
+                items.extend(visible_finished);
+                if finished.len() > GOALS_PANEL_RECENT_LIMIT {
+                    items.push(BossOutcomeItem::HistoryToggle {
+                        older_count,
+                        expanded: history_expanded,
+                    });
+                }
+            }
+        }
         for (section, label, section_rows, collapsed) in [
             (
                 boss::BossGoalSection::InProgress,
@@ -11950,12 +11982,12 @@ impl Waku {
             if section_rows.is_empty() {
                 continue;
             }
-            ongoing_items.push(BossOutcomeItem::Header {
+            items.push(BossOutcomeItem::Header {
                 section,
                 label,
                 attention: section_rows.iter().filter(|row| row.attention).count(),
                 collapsed,
-                top_gap: !ongoing_items.is_empty(),
+                top_gap: !items.is_empty(),
                 focus: self
                     .boss_ui
                     .goals_focus_handles
@@ -11964,22 +11996,14 @@ impl Waku {
                     .clone(),
             });
             if !collapsed {
-                ongoing_items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
+                items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
             }
         }
         // Focus handles live only while their item renders — a removed
         // outcome, a collapsed section's rows, or an entry line that
         // stopped navigating drop out and cannot hold a dead focus.
-        let mut live_focus_keys: HashSet<String> = visible_finished
-            .iter()
-            .chain(ongoing_items.iter())
-            .filter_map(boss_goals_item_focus_key)
-            .collect();
-        // The Finished header mounts beside its list rather than inside
-        // it — account for it by hand.
-        if !finished.is_empty() {
-            live_focus_keys.insert(format!("header:{:?}", boss::BossGoalSection::Finished));
-        }
+        let live_focus_keys: HashSet<String> =
+            items.iter().filter_map(boss_goals_item_focus_key).collect();
         self.boss_ui
             .goals_focus_handles
             .retain(|(daemon, item_key), _| *daemon != key || live_focus_keys.contains(item_key));
@@ -12010,33 +12034,28 @@ impl Waku {
                 2u8.hash(hasher);
                 entry.key.hash(hasher);
             }
-        };
-        let finished_signature = {
-            let mut hasher = DefaultHasher::new();
-            row_height.to_bits().hash(&mut hasher);
-            for item in &visible_finished {
-                item_signature(&mut hasher, item);
+            BossOutcomeItem::HistoryToggle {
+                older_count,
+                expanded,
+            } => {
+                3u8.hash(hasher);
+                older_count.hash(hasher);
+                expanded.hash(hasher);
             }
-            hasher.finish()
         };
-        let ongoing_signature = {
+        let signature = {
             let mut hasher = DefaultHasher::new();
             row_height.to_bits().hash(&mut hasher);
-            for item in &ongoing_items {
+            for item in &items {
                 item_signature(&mut hasher, item);
             }
             hasher.finish()
         };
         let owner_changed = self.boss_ui.goals_list_owner != Some(key);
-        let finished_list = self.boss_ui.goals_finished_list.clone();
-        let ongoing_list = self.boss_ui.goals_ongoing_list.clone();
-        if owner_changed || self.boss_ui.goals_finished_signature != Some(finished_signature) {
-            self.boss_ui.goals_finished_signature = Some(finished_signature);
-            reset_boss_goals_list(&finished_list, &visible_finished, row_height);
-        }
-        if owner_changed || self.boss_ui.goals_ongoing_signature != Some(ongoing_signature) {
-            self.boss_ui.goals_ongoing_signature = Some(ongoing_signature);
-            reset_boss_goals_list(&ongoing_list, &ongoing_items, row_height);
+        let goals_list = self.boss_ui.goals_list.clone();
+        if owner_changed || self.boss_ui.goals_signature != Some(signature) {
+            self.boss_ui.goals_signature = Some(signature);
+            reset_boss_goals_list(&goals_list, &items, row_height);
         }
         self.boss_ui.goals_list_owner = Some(key);
         let offline = matches!(key, waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
@@ -12058,163 +12077,91 @@ impl Waku {
                     .child(tr!("boss.goals_offline")),
             );
         }
-        if !finished.is_empty() {
-            let finished_header_focus = self
-                .boss_ui
-                .goals_focus_handles
-                .entry((key, format!("header:{:?}", boss::BossGoalSection::Finished)))
-                .or_insert_with(|| cx.focus_handle().tab_stop(true))
-                .clone();
-            panel = panel.child(boss_goal_section_header(
-                boss::BossGoalSection::Finished,
-                &tr!("boss.goals_section_finished"),
-                0,
-                finished_collapsed,
-                false,
-                &finished_header_focus,
-                key,
-                &waku,
-                &theme,
-            ));
-            if !finished_collapsed {
-                // The preview reserves five complete rows while ongoing
-                // work exists; expanding hands history the
-                // larger flex share, bounded by its real height, so Show
-                // more visibly reveals older rows instead of only
-                // lengthening a hidden scroll area.
-                let estimate = visible_finished.len() as f32 * row_height;
-                let ongoing_exists = !ongoing_items.is_empty();
-                let scrollbar = self.boss_ui.goals_finished_scrollbar.clone();
-                let list_state = finished_list.clone();
-                let items = Arc::new(visible_finished);
-                let weak = waku.clone();
-                panel = panel.child(
-                    div()
-                        .relative()
-                        .when(ongoing_exists && !history_expanded, |element| {
-                            element.flex_none().h(px(estimate))
-                        })
-                        .when(ongoing_exists && history_expanded, |element| {
-                            element
-                                .flex_1()
-                                .flex_grow(2.0)
-                                .min_h_0()
-                                .max_h(px(estimate))
-                        })
-                        .when(!ongoing_exists, |element| {
-                            // Let long history scroll, but keep the toggle
-                            // directly below short lists instead of consuming
-                            // all unused panel space.
-                            element.flex_1().min_h_0().max_h(px(estimate))
-                        })
-                        .child(
-                            list(list_state.clone(), move |index, _window, cx| {
-                                items.get(index).map_or_else(
-                                    || div().into_any_element(),
-                                    |item| match item {
-                                        BossOutcomeItem::Row(row) => {
-                                            boss_goal_panel_row_element(row, key, &weak, cx)
-                                                .into_any_element()
-                                        }
-                                        BossOutcomeItem::Entry(entry) => {
-                                            boss_goal_entry_element(entry, &weak, cx)
-                                                .into_any_element()
-                                        }
-                                        BossOutcomeItem::Header { .. } => {
-                                            div().into_any_element()
-                                        }
-                                    },
+        let items = Arc::new(items);
+        let list_state = goals_list;
+        let scrollbar = self.boss_ui.goals_scrollbar.clone();
+        let weak = waku.clone();
+        panel = panel.child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .child(
+                    list(list_state.clone(), move |index, _window, cx| {
+                        items.get(index).map_or_else(
+                            || div().into_any_element(),
+                            |item| match item {
+                                BossOutcomeItem::Header {
+                                    section,
+                                    label,
+                                    attention,
+                                    collapsed,
+                                    top_gap,
+                                    focus,
+                                } => boss_goal_section_header(
+                                    *section,
+                                    label,
+                                    *attention,
+                                    *collapsed,
+                                    *top_gap,
+                                    focus,
+                                    key,
+                                    &weak,
+                                    &Theme::current(cx),
                                 )
-                            })
-                            .size_full(),
-                        )
-                        .child(scrollbar::vertical(&list_state, &scrollbar)),
-                );
-                if finished.len() > GOALS_PANEL_RECENT_LIMIT {
-                    let weak = waku.clone();
-                    panel = panel.child(
-                        div()
-                            .id("boss-goals-history-toggle")
-                            .tab_index(0)
-                            .flex_none()
-                            .h(px(28.0))
-                            .mt(px(4.0))
-                            // Align with the rows' text column — the row's
-                            // inset plus the status-icon indent.
-                            .pl(px(26.0))
-                            .flex()
-                            .items_center()
-                            .cursor_default()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_tertiary)
-                            .focus_visible(|style| style.bg(theme.focus_highlight()))
-                            .hover(|style| style.text_color(theme.text))
-                            .child(if history_expanded {
-                                tr!("boss.goals_show_less")
-                            } else {
-                                tr!("boss.goals_show_older", count = older_count)
-                            })
-                            .on_activation_app(move |_, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    if !this.boss_ui.goals_history_expanded.remove(&key) {
-                                        this.boss_ui.goals_history_expanded.insert(key);
-                                    }
-                                    cx.notify();
-                                });
-                            }),
-                    );
-                }
-            }
-        }
-        if !ongoing_items.is_empty() {
-            let scrollbar = self.boss_ui.goals_ongoing_scrollbar.clone();
-            let list_state = ongoing_list.clone();
-            let items = Arc::new(ongoing_items);
-            let weak = waku.clone();
-            panel = panel.child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .when(!finished.is_empty(), |element| {
-                        element.mt(px(GOALS_PANEL_SECTION_GAP))
-                    })
-                    .child(
-                        list(list_state.clone(), move |index, _window, cx| {
-                            items.get(index).map_or_else(
-                                || div().into_any_element(),
-                                |item| match item {
-                                    BossOutcomeItem::Header {
-                                        section,
-                                        label,
-                                        attention,
-                                        collapsed,
-                                        top_gap,
-                                        focus,
-                                    } => {
-                                        let theme = Theme::current(cx);
-                                        boss_goal_section_header(
-                                            *section, label, *attention, *collapsed, *top_gap,
-                                            focus, key, &weak, &theme,
-                                        )
+                                .into_any_element(),
+                                BossOutcomeItem::Row(row) => {
+                                    boss_goal_panel_row_element(row, key, &weak, cx)
                                         .into_any_element()
-                                    }
-                                    BossOutcomeItem::Row(row) => {
-                                        boss_goal_panel_row_element(row, key, &weak, cx)
-                                            .into_any_element()
-                                    }
-                                    BossOutcomeItem::Entry(entry) => {
-                                        boss_goal_entry_element(entry, &weak, cx)
-                                            .into_any_element()
-                                    }
-                                },
-                            )
-                        })
-                        .size_full(),
-                    )
-                    .child(scrollbar::vertical(&list_state, &scrollbar)),
-            );
-        }
+                                }
+                                BossOutcomeItem::Entry(entry) => {
+                                    boss_goal_entry_element(entry, &weak, cx).into_any_element()
+                                }
+                                BossOutcomeItem::HistoryToggle {
+                                    older_count,
+                                    expanded,
+                                } => {
+                                    let toggle_waku = weak.clone();
+                                    let theme = Theme::current(cx);
+                                    div()
+                                        .id("boss-goals-history-toggle")
+                                        .tab_index(0)
+                                        .flex_none()
+                                        .h(px(28.0))
+                                        .mt(px(4.0))
+                                        .pl(px(26.0))
+                                        .flex()
+                                        .items_center()
+                                        .cursor_default()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .focus_visible(move |style| {
+                                            style.bg(theme.focus_highlight())
+                                        })
+                                        .hover(move |style| style.text_color(theme.text))
+                                        .child(if *expanded {
+                                            tr!("boss.goals_show_less")
+                                        } else {
+                                            tr!("boss.goals_show_older", count = *older_count)
+                                        })
+                                        .on_activation_app(move |_, cx| {
+                                            let _ = toggle_waku.update(cx, |this, cx| {
+                                                if !this.boss_ui.goals_history_expanded.remove(&key)
+                                                {
+                                                    this.boss_ui.goals_history_expanded.insert(key);
+                                                }
+                                                cx.notify();
+                                            });
+                                        })
+                                        .into_any_element()
+                                }
+                            },
+                        )
+                    })
+                    .size_full(),
+                )
+                .child(scrollbar::vertical(&list_state, &scrollbar)),
+        );
         panel
     }
 

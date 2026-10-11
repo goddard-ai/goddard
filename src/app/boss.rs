@@ -559,16 +559,12 @@ pub(super) struct BossUi {
     /// Scoped to building one archived row; composer and callbacks keep the live owner.
     pub history_render_session: Cell<Option<Uuid>>,
     pub(super) outcome_rows: HashMap<DaemonKey, Arc<Vec<BossOutcomeRow>>>,
-    /// The Goals panel's two scroll regions: a bounded Finished history on
-    /// top and the In progress/Pending sections below. Fold and history
+    /// The Goals panel's single virtualized scroll surface. Fold and history
     /// choices are honored per Boss daemon across snapshots.
-    pub(super) goals_finished_list: ListState,
-    pub(super) goals_finished_scrollbar: Rc<ScrollbarState>,
-    pub(super) goals_ongoing_list: ListState,
-    pub(super) goals_ongoing_scrollbar: Rc<ScrollbarState>,
+    pub(super) goals_list: ListState,
+    pub(super) goals_scrollbar: Rc<ScrollbarState>,
     pub(super) goals_list_owner: Option<DaemonKey>,
-    pub(super) goals_finished_signature: Option<u64>,
-    pub(super) goals_ongoing_signature: Option<u64>,
+    pub(super) goals_signature: Option<u64>,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
     pub(super) goals_history_expanded: HashSet<DaemonKey>,
     /// Outcome rows the user opened for assignment detail — honored per
@@ -740,13 +736,10 @@ impl Default for BossUi {
             chat_history: HashMap::new(),
             history_render_session: Cell::new(None),
             outcome_rows: HashMap::new(),
-            goals_finished_list: ListState::new(0, ListAlignment::Top, px(240.0)),
-            goals_finished_scrollbar: ScrollbarState::new(),
-            goals_ongoing_list: ListState::new(0, ListAlignment::Top, px(640.0)),
-            goals_ongoing_scrollbar: ScrollbarState::new(),
+            goals_list: ListState::new(0, ListAlignment::Top, px(640.0)),
+            goals_scrollbar: ScrollbarState::new(),
             goals_list_owner: None,
-            goals_finished_signature: None,
-            goals_ongoing_signature: None,
+            goals_signature: None,
             goals_collapsed: HashSet::new(),
             goals_history_expanded: HashSet::new(),
             goals_row_expanded: HashSet::new(),

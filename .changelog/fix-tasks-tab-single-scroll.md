@@ -1,0 +1,1 @@
+- The Tasks tab now scrolls its expanded history and active task sections together, instead of trapping the pointer in separate section scroll areas.
