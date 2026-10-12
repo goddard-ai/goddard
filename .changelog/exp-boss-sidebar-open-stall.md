@@ -1,0 +1,1 @@
+- **Boss sidebar open:** Fixed clicking the Boss in the sidebar sometimes doing nothing during a chat refresh — a click mid-refresh now waits for the daemon's answer or lands on the replacement chat, instead of dying on the retired session or being dropped because the selection moved underneath it.
