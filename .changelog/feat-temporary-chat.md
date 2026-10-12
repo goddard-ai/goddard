@@ -1,1 +1,1 @@
-- Choose **New chat** in the project picker to start a regular chat without a project, or **Temporary chat** to start a temporary conversation. The picker marks Temporary chat with a ghost icon.
+- In the Cmd+N project picker, choose **New chat** for a regular projectless conversation or **Temporary chat** for an incognito one. Both appear above **Recently used**; the first recent project remains selected when the picker opens.

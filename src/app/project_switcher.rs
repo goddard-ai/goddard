@@ -29,6 +29,7 @@ const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
 const TEMPORARY_CHAT_PICKER_ID: Uuid = Uuid::from_u128(u128::MAX);
+const NEW_CHAT_PICKER_ID: Uuid = Uuid::from_u128(u128::MAX - 1);
 
 /// What a commit retargets: the draft the ⌘N gesture was opened on, the
 /// open Projects page's own project — the ⌘⇧P gesture's — Big Picture's
@@ -155,19 +156,12 @@ pub(super) fn ordered_project_ids(
         .map(|project| (project.id, project))
         .collect::<HashMap<_, _>>();
     let mut seen = HashSet::with_capacity(projects.len());
-    // Every projectless workspace displays as "No project" and hides its
-    // ephemeral path, so the first one reached stands in for all of them.
-    let mut projectless_seen = false;
     let mut ordered = Vec::with_capacity(projects.len().min(MAX_PROJECTS));
     let mut push = |id| {
         let Some(project) = by_id.get(&id) else {
             return;
         };
-        if ordered.len() < MAX_PROJECTS
-            && !(project.is_projectless() && projectless_seen)
-            && seen.insert(id)
-        {
-            projectless_seen |= project.is_projectless();
+        if ordered.len() < MAX_PROJECTS && !project.is_projectless() && seen.insert(id) {
             ordered.push(id);
         }
     };
@@ -188,6 +182,78 @@ pub(super) fn ordered_project_ids(
     ordered
 }
 
+fn action_ids_for_target(target: ProjectSwitcherTarget) -> &'static [Uuid] {
+    match target {
+        ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat => {
+            &[NEW_CHAT_PICKER_ID, TEMPORARY_CHAT_PICKER_ID]
+        }
+        _ => &[],
+    }
+}
+
+fn picker_ids(project_ids: &[Uuid], target: ProjectSwitcherTarget) -> Vec<Uuid> {
+    action_ids_for_target(target)
+        .iter()
+        .copied()
+        .chain(project_ids.iter().copied())
+        .collect()
+}
+
+fn initial_picker_highlight(project_ids: &[Uuid], target: ProjectSwitcherTarget) -> Option<Uuid> {
+    project_ids
+        .first()
+        .copied()
+        .or_else(|| action_ids_for_target(target).first().copied())
+}
+
+fn highlight_after_filter(current: Option<Uuid>, rows: &[Uuid], query: &str) -> Option<Uuid> {
+    if query.trim().is_empty() {
+        current
+            .filter(|id| rows.contains(id))
+            .or_else(|| rows.first().copied())
+    } else {
+        rows.first().copied()
+    }
+}
+
+fn is_picker_action_id(id: Uuid) -> bool {
+    id == NEW_CHAT_PICKER_ID || id == TEMPORARY_CHAT_PICKER_ID
+}
+
+fn next_project_switcher_index(current: usize, len: usize, reverse: bool) -> Option<usize> {
+    (len > 0).then(|| {
+        if reverse {
+            (current + len - 1) % len
+        } else {
+            (current + 1) % len
+        }
+    })
+}
+
+fn matching_action_ids(query: &str, target: ProjectSwitcherTarget) -> Vec<Uuid> {
+    let query = query.trim();
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+    let mut utf32 = Vec::new();
+    action_ids_for_target(target)
+        .iter()
+        .copied()
+        .filter(|id| {
+            if query.is_empty() {
+                return true;
+            }
+            let label = if *id == NEW_CHAT_PICKER_ID {
+                tr!("project.new_chat")
+            } else {
+                tr!("project.temporary_chat")
+            };
+            pattern
+                .score(Utf32Str::new(&label, &mut utf32), &mut matcher)
+                .is_some()
+        })
+        .collect()
+}
+
 // Empty search keeps the cycling snapshot; a query searches every known project
 // with the same fuzzy name/path matching as “New task in…”.
 fn filtered_project_ids(
@@ -203,23 +269,14 @@ fn filtered_project_ids(
     let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
     let mut utf32 = Vec::new();
-    let mut projectless_seen = false;
     let mut scored = projects
         .iter()
         .filter_map(|project| {
-            if project.is_projectless() && std::mem::replace(&mut projectless_seen, true) {
+            if project.is_projectless() {
                 return None;
             }
-            let path = if project.is_projectless() {
-                String::new()
-            } else {
-                settings::abbreviate_home_path(&project.path, home)
-            };
-            let name = if project.is_projectless() {
-                tr!("project.new_chat")
-            } else {
-                project.display_name()
-            };
+            let path = settings::abbreviate_home_path(&project.path, home);
+            let name = project.display_name();
             let text = format!("{name} {path} directory folder project");
             pattern
                 .score(Utf32Str::new(&text, &mut utf32), &mut matcher)
@@ -320,10 +377,16 @@ impl Waku {
                 && window.modifiers().secondary()
             {
                 self.project_switcher.cycling = true;
-                self.project_switcher.ordered_project_ids =
-                    self.project_switcher.recent_project_ids.clone();
-                self.project_switcher.highlighted_project_id =
-                    self.project_switcher.ordered_project_ids.first().copied();
+                self.project_switcher.ordered_project_ids = picker_ids(
+                    &self.project_switcher.recent_project_ids,
+                    self.project_switcher.target,
+                );
+                self.project_switcher.highlighted_project_id = self
+                    .project_switcher
+                    .recent_project_ids
+                    .first()
+                    .copied()
+                    .or_else(|| self.project_switcher.ordered_project_ids.first().copied());
                 window.focus(&self.project_switcher.focus, cx);
             }
             self.advance_project_switcher(reverse, window, cx);
@@ -422,10 +485,9 @@ impl Waku {
             self.cancel_project_switcher(window, cx);
             return;
         }
-        let next = if reverse {
-            (current_index + len - 1) % len
-        } else {
-            (current_index + 1) % len
+        let Some(next) = next_project_switcher_index(current_index, len, reverse) else {
+            self.cancel_project_switcher(window, cx);
+            return;
         };
         self.set_project_switcher_highlight(next, cx);
     }
@@ -523,8 +585,13 @@ impl Waku {
     /// ⌘T's terminal pick reuses the same searching overlay.
     fn begin_project_switcher_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.project_switcher.searching = true;
-        self.project_switcher.recent_project_ids =
-            self.project_switcher.ordered_project_ids.clone();
+        self.project_switcher.recent_project_ids = self
+            .project_switcher
+            .ordered_project_ids
+            .iter()
+            .copied()
+            .filter(|id| !is_picker_action_id(*id))
+            .collect();
         let terminal_target = self.project_switcher.target == ProjectSwitcherTarget::Terminal;
         let search = self
             .project_switcher
@@ -648,22 +715,15 @@ impl Waku {
         target: ProjectSwitcherTarget,
         // The page has no projectless scope; its cycling list excludes them.
         exclude_projectless: bool,
-        reverse: bool,
+        _reverse: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
         let projects = self.project_switcher_pool(target, exclude_projectless);
-        let mut ordered = ordered_project_ids(current_project, &recent, &projects);
-        if matches!(
-            target,
-            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
-        ) {
-            ordered.push(TEMPORARY_CHAT_PICKER_ID);
-        }
-        let Some(highlighted_index) =
-            task_switcher::initial_highlight_index(&ordered, current_project, reverse)
-        else {
+        let project_ids = ordered_project_ids(current_project, &recent, &projects);
+        let ordered = picker_ids(&project_ids, target);
+        let Some(highlighted) = initial_picker_highlight(&project_ids, target) else {
             return false;
         };
 
@@ -695,11 +755,7 @@ impl Waku {
         self.project_switcher.open = true;
         self.project_switcher.cycling = false;
         self.project_switcher.ordered_project_ids = ordered;
-        self.project_switcher.highlighted_project_id = self
-            .project_switcher
-            .ordered_project_ids
-            .get(highlighted_index)
-            .copied();
+        self.project_switcher.highlighted_project_id = Some(highlighted);
         self.project_switcher.original_session_id = original_session_id;
         self.project_switcher.target = target;
         self.project_switcher.reveal_highlight();
@@ -751,31 +807,22 @@ impl Waku {
 
     fn filter_project_switcher(&mut self, query: &str, cx: &mut Context<Self>) {
         let projects = self.project_switcher_pool(self.project_switcher.target, false);
-        let mut ordered = filtered_project_ids(
+        let project_ids = filtered_project_ids(
             &self.project_switcher.recent_project_ids,
             &projects,
             self.home_directory.as_deref(),
             query,
         );
-        if matches!(
-            self.project_switcher.target,
-            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
-        ) {
-            let label = tr!("project.temporary_chat");
-            let pattern = Pattern::parse(query.trim(), CaseMatching::Ignore, Normalization::Smart);
-            let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
-            let mut utf32 = Vec::new();
-            if !query.trim().is_empty()
-                && pattern
-                    .score(Utf32Str::new(&label, &mut utf32), &mut matcher)
-                    .is_some()
-            {
-                ordered.push(TEMPORARY_CHAT_PICKER_ID);
-            }
-        }
+        let ordered = matching_action_ids(query, self.project_switcher.target)
+            .into_iter()
+            .chain(project_ids)
+            .collect();
         self.project_switcher.ordered_project_ids = ordered;
-        self.project_switcher.highlighted_project_id =
-            self.project_switcher.ordered_project_ids.first().copied();
+        self.project_switcher.highlighted_project_id = highlight_after_filter(
+            self.project_switcher.highlighted_project_id,
+            &self.project_switcher.ordered_project_ids,
+            query,
+        );
         self.project_switcher.reveal_highlight();
         cx.notify();
     }
@@ -817,6 +864,24 @@ impl Waku {
             && !pointer_selection
             && self.state.selected_session != original
         {
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
+        if selected == Some(NEW_CHAT_PICKER_ID)
+            && matches!(
+                target,
+                ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+            )
+        {
+            self.settings_page = None;
+            if target == ProjectSwitcherTarget::BossChat {
+                self.create_projectless_session(cx);
+            } else {
+                self.create_projectless_session_from_composer(cx);
+            }
             if let Some(previous_focus) = previous_focus {
                 window.focus(&previous_focus, cx);
             }
@@ -939,11 +1004,11 @@ impl Waku {
                     }
                     BossChatPickerLanding::NoProject => self.create_projectless_session(cx),
                     BossChatPickerLanding::NewTask => {
-                        if let Some(session_id) = self
-                            .session_navigation
-                            .remembered_new_task(&self.state.sessions, project_id, |session| {
-                                self.session_is_boss_managed(session)
-                            })
+                        if let Some(session_id) = self.session_navigation.remembered_new_task(
+                            &self.state.sessions,
+                            project_id,
+                            |session| self.session_is_boss_managed(session),
+                        )
                         {
                             self.select_session(session_id, cx);
                         } else {
@@ -1203,6 +1268,57 @@ impl Waku {
             .into_any_element()
     }
 
+    fn render_new_chat_entry(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let highlighted = self.project_switcher.highlighted_project_id == Some(NEW_CHAT_PICKER_ID);
+        div()
+            .id("project-switcher-new-chat")
+            .h(px(ROW_HEIGHT))
+            .w_full()
+            .flex_none()
+            .px(px(ROW_INSET_X))
+            .rounded(px(ROW_RADIUS))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .cursor_default()
+            .when(highlighted, |entry| entry.bg(theme.overlay_strong))
+            .hover(|entry| entry.bg(theme.overlay))
+            .on_mouse_move(cx.listener(|this, _, _, cx| {
+                if let Some(index) = this
+                    .project_switcher
+                    .ordered_project_ids
+                    .iter()
+                    .position(|candidate| *candidate == NEW_CHAT_PICKER_ID)
+                {
+                    this.set_project_switcher_highlight(index, cx);
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.project_switcher.open {
+                    this.project_switcher.highlighted_project_id = Some(NEW_CHAT_PICKER_ID);
+                    this.finish_project_switcher(true, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(crate::ui::icon(
+                "icons/plus.svg",
+                14.0,
+                theme.text_secondary,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text)
+                    .child(tr!("project.new_chat")),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_project_switcher(
         &mut self,
         window: &Window,
@@ -1214,11 +1330,25 @@ impl Waku {
         let theme = Theme::current(cx);
         let scroll = self.project_switcher.scroll.clone();
         let focus = self.project_switcher.focus.clone();
-        let entries = self
+        let group_label = if self.project_switcher.searching
+            && self
+                .project_switcher
+                .search
+                .as_ref()
+                .is_some_and(|search| !search.read(cx).content().trim().is_empty())
+        {
+            tr!("command_palette.project")
+        } else {
+            tr!("project_switcher.recently_used")
+        };
+        let mut entries = self
             .project_switcher
             .ordered_project_ids
             .iter()
             .filter_map(|project_id| {
+                if *project_id == NEW_CHAT_PICKER_ID {
+                    return Some(self.render_new_chat_entry(cx));
+                }
                 if let Some(project) = self
                     .state
                     .projects
@@ -1234,6 +1364,28 @@ impl Waku {
                     .map(|key| self.render_project_switcher_boss_entry(key, *project_id, cx))
             })
             .collect::<Vec<_>>();
+        let action_count = self
+            .project_switcher
+            .ordered_project_ids
+            .iter()
+            .take_while(|id| is_picker_action_id(**id))
+            .count();
+        if entries.len() > action_count {
+            entries.insert(
+                action_count,
+                div()
+                    .h(px(TITLE_HEIGHT))
+                    .flex_none()
+                    .px(px(TITLE_INSET_X))
+                    .flex()
+                    .items_center()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child(group_label.clone())
+                    .into_any_element(),
+            );
+        }
         let viewport_height = f32::from(window.viewport_size().height);
         // Padding below the card pushes the centered layout up by half the
         // padding, so the switcher sits slightly above center like Spotlight.
@@ -1242,17 +1394,6 @@ impl Waku {
             44.0
         } else {
             0.0
-        };
-        let title = if self.project_switcher.searching
-            && self
-                .project_switcher
-                .search
-                .as_ref()
-                .is_some_and(|search| !search.read(cx).content().trim().is_empty())
-        {
-            tr!("command_palette.project")
-        } else {
-            tr!("project_switcher.recently_used")
         };
         let list_max_height = (viewport_height
             - WINDOW_MARGIN * 2.0
@@ -1288,18 +1429,6 @@ impl Waku {
                         .child(self.project_switcher.search.as_ref().unwrap().clone()),
                 )
             })
-            .child(
-                div()
-                    .h(px(TITLE_HEIGHT))
-                    .flex_none()
-                    .px(px(TITLE_INSET_X))
-                    .flex()
-                    .items_center()
-                    .text_size(sp(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_tertiary)
-                    .child(title),
-            )
             .child(
                 div()
                     .id("project-switcher-list")
@@ -1484,7 +1613,7 @@ mod tests {
     }
 
     #[test]
-    fn switcher_order_collapses_projectless_projects_to_a_single_entry() {
+    fn projectless_workspaces_never_enter_the_recent_project_list() {
         let root = crate::projectless::workspace_root().expect("default projectless root");
         let projectless = |name, created_at| Project {
             id: Uuid::new_v4(),
@@ -1518,15 +1647,64 @@ mod tests {
         };
         let projects = vec![first.clone(), second.clone(), ordinary.clone()];
 
-        // The most recently added projectless project keeps the one row.
-        assert_eq!(
-            ordered_project_ids(None, &[], &projects),
-            vec![ordinary.id, second.id]
-        );
-        // A projectless draft's own project wins the slot instead.
+        assert_eq!(ordered_project_ids(None, &[], &projects), vec![ordinary.id]);
         assert_eq!(
             ordered_project_ids(Some(first.id), &[second.id], &projects),
-            vec![first.id, ordinary.id]
+            vec![ordinary.id]
         );
+        assert_eq!(
+            filtered_project_ids(
+                &[first.id, second.id, ordinary.id],
+                &projects,
+                None,
+                "new chat"
+            ),
+            Vec::<Uuid>::new()
+        );
+    }
+
+    #[test]
+    fn projectless_actions_precede_recents_but_default_to_first_recent() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let projects = [first, second];
+        let rows = picker_ids(&projects, ProjectSwitcherTarget::Draft);
+        assert_eq!(
+            rows,
+            [NEW_CHAT_PICKER_ID, TEMPORARY_CHAT_PICKER_ID, first, second]
+        );
+        assert_eq!(
+            initial_picker_highlight(&projects, ProjectSwitcherTarget::Draft),
+            Some(first)
+        );
+        assert_eq!(highlight_after_filter(Some(first), &rows, ""), Some(first));
+        assert_eq!(
+            highlight_after_filter(Some(first), &[TEMPORARY_CHAT_PICKER_ID], "temporary"),
+            Some(TEMPORARY_CHAT_PICKER_ID)
+        );
+        let first_recent_index = rows.iter().position(|id| *id == first).unwrap();
+        let temporary_index =
+            next_project_switcher_index(first_recent_index, rows.len(), true).unwrap();
+        let new_chat_index =
+            next_project_switcher_index(temporary_index, rows.len(), true).unwrap();
+        assert_eq!(rows[temporary_index], TEMPORARY_CHAT_PICKER_ID);
+        assert_eq!(rows[new_chat_index], NEW_CHAT_PICKER_ID);
+    }
+
+    #[test]
+    fn projectless_action_labels_match_the_picker_query() {
+        assert_eq!(
+            matching_action_ids("New chat", ProjectSwitcherTarget::Draft),
+            [NEW_CHAT_PICKER_ID]
+        );
+        assert_eq!(
+            matching_action_ids("Temporary chat", ProjectSwitcherTarget::Draft),
+            [TEMPORARY_CHAT_PICKER_ID]
+        );
+        assert_eq!(
+            matching_action_ids("", ProjectSwitcherTarget::Draft),
+            [NEW_CHAT_PICKER_ID, TEMPORARY_CHAT_PICKER_ID]
+        );
+        assert!(matching_action_ids("Temporary chat", ProjectSwitcherTarget::Terminal).is_empty());
     }
 }
