@@ -116,7 +116,6 @@ provider check above establishes child-exit evidence, not a fully reconciled
 stopped projection. The shared host owner must repair that boundary and qualify
 the final inventory/one-terminal invariant before production acceptance.
 
-Root workspace registration belongs to the shared host owner. Adapter checks
-were run with temporary local `members`/`default-members` and lockfile
-registration, then those root edits were removed from the Devin-only commit.
-Without registration this crate is not selected by ordinary workspace checks.
+The adapter is registered in root workspace members/default-members and the
+lockfile. The shared executable owner must still register its factory;
+workspace membership alone does not enable production admission.

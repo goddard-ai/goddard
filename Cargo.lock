@@ -11702,6 +11702,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-runtime-devin"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "futures",
+ "libc",
+ "serde",
+ "serde_json",
+ "smol",
+ "uuid",
+ "waku-runtime",
+]
+
+[[package]]
 name = "waku-server"
 version = "0.1.0"
 dependencies = [
