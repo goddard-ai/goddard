@@ -5,8 +5,9 @@
 //! which project to sync and a pick re-enters this picker rooted there.
 //!
 //! The chord still belongs to SaveFile — a focused, non-empty composer parks
-//! its payload as a saved draft; otherwise the handler falls through to
-//! `open_sync_branch` when no file-editor surface is active. The list is the
+//! its payload as a saved draft; the handler falls through to
+//! `open_sync_branch` when the focused composer is empty or, with focus
+//! elsewhere, no file-editor surface is active. The list is the
 //! repository's own checkouts:
 //! `ListRepoBranches` reports each local branch's upstream and the worktree
 //! holding it, and only rows with both can take a `git pull`. The session's

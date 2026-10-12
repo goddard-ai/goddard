@@ -11478,16 +11478,20 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A focused, non-empty composer gets the chord first. Otherwise ⌘S
-        // saves a visible file, or opens "Sync branch…" when no file editor
-        // is active (plan documents keep their existing no-op behavior).
-        if self.composer_mounted()
-            && should_park_composer_on_save_shortcut(
-                self.composer_focus(cx).contains_focused(window, cx),
-                self.composer_is_empty(cx),
-            )
-        {
+        // A focused composer gets the chord first: non-empty parks its
+        // payload as a saved draft, empty opens "Sync branch…" — a stale
+        // file or plan surface must not swallow it. With focus elsewhere,
+        // ⌘S saves a visible file, or opens "Sync branch…" when no file
+        // editor is active (plan documents keep their existing no-op
+        // behavior).
+        let composer_focused = self.composer_mounted()
+            && self.composer_focus(cx).contains_focused(window, cx);
+        if should_park_composer_on_save_shortcut(composer_focused, self.composer_is_empty(cx)) {
             self.create_saved_draft(window, cx);
+            return;
+        }
+        if composer_focused {
+            self.open_sync_branch(window, cx);
             return;
         }
         let Some(relative_path) = self.visible_right_panel_file_path() else {
