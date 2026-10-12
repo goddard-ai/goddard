@@ -555,6 +555,22 @@ impl AgentState {
         removed
     }
 
+    /// Re-home a parked queue onto a replacement session — a Boss rotation
+    /// swaps the coordinating id while the parked work still belongs to the
+    /// chat the pointer names. Carried entries keep submission order ahead
+    /// of anything already parked for the destination.
+    pub fn migrate_queue(&self, from: Uuid, to: Uuid) {
+        if from == to {
+            return;
+        }
+        let mut queues = self.queues.lock();
+        let Some(mut carried) = queues.remove(&from) else {
+            return;
+        };
+        carried.append(queues.entry(to).or_default());
+        queues.insert(to, carried);
+    }
+
     /// Rebuild the in-memory queue from prompts the session document still
     /// mirrors as parked — a restart dropped the memory copy but not the
     /// persisted chips. The document lists parked prompts in submission

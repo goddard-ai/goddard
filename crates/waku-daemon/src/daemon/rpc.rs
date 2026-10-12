@@ -1939,6 +1939,14 @@ impl Backend for WakuBackend {
                     // knew the provider's `turnStarted` used to persist a
                     // projection without it, erasing the message for everyone.
                     self.boss.require_active(session_id)?;
+                    // A fenced Boss session would record this turn and
+                    // then drop the provider call at the ownership fence —
+                    // a turn no provider can ever confirm. Refuse the
+                    // submission instead of orphaning it.
+                    anyhow::ensure!(
+                        !self.boss_incident_fenced(session_id),
+                        "Boss session is fenced while a provider-compaction refresh is pending"
+                    );
                     let submitted_message_id = message_id.unwrap_or_else(Uuid::new_v4);
                     let submitted = DriverEvent::PromptSubmitted {
                         message: prompt.clone(),

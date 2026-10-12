@@ -433,8 +433,15 @@ impl WakuBackend {
         // A requested refresh (manual compact or a compaction incident)
         // triggers independently of the occupancy opt-out — both are
         // prevention requests, not threshold preferences.
+        let fenced_at = ledger
+            .compaction_incidents
+            .iter()
+            .filter(|entry| entry.session_id == active)
+            .map(|entry| entry.detected_at)
+            .min();
+        let incident = fenced_at.is_some();
         let requested = ledger.rotation_request.as_ref().map(|request| {
-            if ledger.has_incident(active) {
+            if incident {
                 format!(
                     "provider compaction detected on session {active}: {}",
                     request.reason
@@ -448,11 +455,14 @@ impl WakuBackend {
         }
         let mut state = self.task_state.lock();
         if journal.intent.is_none() {
+            if let Some(fenced_at) = fenced_at {
+                self.unwind_fence_orphaned_turn(&mut state, active, fenced_at)?;
+            }
             let Some(old) = state.session_mut(active) else {
                 return Ok(());
             };
             self.task_store.hydrate(old)?;
-            if !boss_chat_settled(old, &self.agent) {
+            if !boss_chat_settled(old, &self.agent, incident) {
                 return Ok(());
             }
             let policy = BossRotationConfig::from_settings(settings);
@@ -554,13 +564,16 @@ impl WakuBackend {
         );
         let predecessor = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if active == intent.old_session_id {
+            if let Some(fenced_at) = fenced_at {
+                self.unwind_fence_orphaned_turn(&mut state, active, fenced_at)?;
+            }
             let old = state
                 .session_mut(active)
                 .ok_or_else(|| anyhow!("rotation source session is missing"))?;
             self.task_store.hydrate(old)?;
             // Hold the task lease through publication: prompt recording
             // cannot open a turn between this check and the archive flag.
-            if !boss_chat_settled(old, &self.agent) {
+            if !boss_chat_settled(old, &self.agent, incident) {
                 return Ok(());
             }
             if !state
@@ -742,6 +755,20 @@ impl WakuBackend {
         }
         old.archived_at.get_or_insert(now);
         old.updated_at = now;
+        // Parked follow-ups belong to the chat, not the retiring id — an
+        // incident fence held this queue, and the successor's drain now
+        // owns it. Entries keep their ids so delivery dedupe still holds.
+        let carried = std::mem::take(&mut old.queued_messages);
+        if !carried.is_empty() {
+            let next = state
+                .session_mut(intent.new_session_id)
+                .ok_or_else(|| anyhow!("rotation destination is missing"))?;
+            for queued in carried {
+                if !next.queued_messages.iter().any(|held| held.id == queued.id) {
+                    next.queued_messages.push(queued);
+                }
+            }
+        }
         self.task_store.save(&mut state)?;
         drop(state);
         // Same runtime/credential retirement as ordinary archival. The
@@ -805,11 +832,49 @@ impl WakuBackend {
         {
             eprintln!("Boss session rotation: composer draft carry failed: {error}");
         }
+        // The in-memory queue follows the same re-key the document took —
+        // the successor's drain delivers what the incident fence held.
+        self.agent
+            .migrate_queue(intent.old_session_id, intent.new_session_id);
         self.boss.router_defer_context(intent.new_session_id);
         if let Some(notifier) = self.task_notifier.lock().clone() {
             notifier();
         }
         Ok(())
+    }
+
+    /// Close the provider-unconfirmed turn a fence-denied prompt left open.
+    /// Only a turn opened after the fence rose is certainly orphaned — an
+    /// earlier unconfirmed turn's prompt may still be in flight and its
+    /// `TurnStarted` can still arrive; the fence denies sends, not
+    /// receipts. A provider-confirmed running turn still blocks the
+    /// refresh — it holds live work the transcript must finish first.
+    fn unwind_fence_orphaned_turn(
+        &self,
+        state: &mut PersistedState,
+        session_id: Uuid,
+        fenced_at: u64,
+    ) -> anyhow::Result<bool> {
+        let Some(session) = state.session_mut(session_id) else {
+            return Ok(false);
+        };
+        self.task_store.hydrate(session)?;
+        let orphaned = session.turns.last().is_some_and(|turn| {
+            turn.status == crate::model::TurnStatus::Running
+                && !turn.provider_turn_started
+                && turn.started_at > fenced_at
+        });
+        if !orphaned {
+            return Ok(false);
+        }
+        session.interrupt_active_turn(crate::model::TurnInterruption::Daemon);
+        if session.active_turn_id().is_none() {
+            session.status = crate::model::SessionStatus::Idle;
+        }
+        session.updated_at = crate::model::unix_time();
+        state.mark_session_dirty(session_id);
+        self.task_store.save(state)?;
+        Ok(true)
     }
 }
 
@@ -1280,13 +1345,22 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
     }
 }
 
-fn boss_chat_settled(session: &AgentSession, agent: &crate::agent::AgentState) -> bool {
+/// Whether the Boss chat may hand coordination to a successor right now.
+/// `queued_work_carried` is `true` when a compaction incident fences the
+/// session: the fence itself holds the parked queue, so it can never
+/// drain — the committed swap re-homes it onto the successor instead of
+/// waiting for it to empty.
+fn boss_chat_settled(
+    session: &AgentSession,
+    agent: &crate::agent::AgentState,
+    queued_work_carried: bool,
+) -> bool {
     session.archived_at.is_none()
         && !session.status.is_busy()
         && session.active_turn_id().is_none()
-        && session.queued_messages.is_empty()
+        && (queued_work_carried || session.queued_messages.is_empty())
         && !agent.has_open_turn(session.id)
-        && !agent.has_queued(session.id)
+        && (queued_work_carried || !agent.has_queued(session.id))
 }
 
 /// Bound the fresh context independently of the old transcript's size. The

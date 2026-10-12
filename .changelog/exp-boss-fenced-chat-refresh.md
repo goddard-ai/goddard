@@ -1,0 +1,1 @@
+- **Boss fenced refresh:** Fixed a hang where Boss chat stopped accepting messages after the provider compacted its context mid-conversation. The chat now completes its session refresh and carries queued follow-ups to the new session, and a message sent during the refresh reports an error instead of disappearing into a stuck turn.

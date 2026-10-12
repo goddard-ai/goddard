@@ -246,6 +246,121 @@ fn detected_compaction_marks_an_incident_and_refreshes_on_the_next_tick() {
 }
 
 #[test]
+fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
+    let root = std::env::temp_dir().join(format!("boss-incident-carry-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    busy_boss_chat(&backend, old, Uuid::new_v4());
+    let now = crate::model::unix_time();
+    // The incident fences the generation while its turn still runs —
+    // backdated so the orphan prompt below provably post-dates the fence.
+    let fenced_at = now - 10;
+    crate::daemon::boss_rotation::record_boss_compaction_signal(
+        &backend.data_dir,
+        old,
+        Some(Uuid::new_v4()),
+        CompactionStage::Completed,
+        crate::boss_rotation::CompactionOrigin::ProviderAutonomous,
+        fenced_at,
+    );
+    let continuity_path = backend.boss_continuity_path();
+    let mut ledger = waku_boss::rotation_continuity::ContinuityLedger::load(&continuity_path)
+        .expect("continuity ledger");
+    ledger.record_compaction_incident(old, fenced_at, "compaction activity observed");
+    ledger.persist(&continuity_path).unwrap();
+    // Parked work the fence holds — mirrored into the document and the
+    // in-memory queue exactly like the production park path.
+    let queued_id = Uuid::new_v4();
+    backend.agent.enqueue(
+        old,
+        crate::agent::AgentPrompt {
+            prompt: "parked report".into(),
+            transport: None,
+            sender: None,
+            queued_id: Some(queued_id),
+            context: None,
+            hidden: false,
+            report_trigger: None,
+        },
+    );
+    mirror_agent_queued_prompt(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        queued_id,
+        "parked report",
+        None,
+        false,
+        None,
+    )
+    .unwrap();
+    // The live turn finishes; the parked queue the fence holds cannot
+    // drain, so the refresh must carry it rather than wait for it.
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    // A prompt submitted under the fence recorded a turn no provider can
+    // ever confirm — settlement unwinds it rather than wait on it.
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::PromptSubmitted {
+            message: "are you there".into(),
+            turn_id: Uuid::new_v4(),
+            message_id: Uuid::new_v4(),
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+            reference_context: None,
+        },
+    )
+    .unwrap();
+    backend.reconcile_boss_rotation(now + 1).unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    {
+        let state = backend.task_state.lock();
+        let successor = state
+            .sessions
+            .iter()
+            .find(|session| session.id == next)
+            .unwrap();
+        assert!(
+            successor
+                .queued_messages
+                .iter()
+                .any(|queued| queued.id == queued_id)
+        );
+        let retired = state
+            .sessions
+            .iter()
+            .find(|session| session.id == old)
+            .unwrap();
+        assert!(retired.queued_messages.is_empty());
+        assert!(retired.archived_at.is_some());
+        assert_eq!(
+            retired.turns.last().map(|turn| turn.status),
+            Some(crate::model::TurnStatus::Interrupted)
+        );
+    }
+    assert!(backend.agent.has_queued(next));
+    assert!(!backend.agent.has_queued(old));
+    let ledger = waku_boss::rotation_continuity::ContinuityLedger::load(&continuity_path).unwrap();
+    assert!(ledger.rotation_request.is_none());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn manual_compact_attempt_is_journal_telemetry_and_retry_is_human_only() {
     let root = std::env::temp_dir().join(format!("boss-compact-telemetry-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);

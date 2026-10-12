@@ -182,6 +182,12 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
+    // An incident-fenced Boss chat holds its queued work: delivering now
+    // would record a turn the fence-denied provider can never confirm.
+    if boss_incident_fenced(boss, session_id) {
+        agent.requeue_front(session_id, entry);
+        return Ok(());
+    }
     let automation_prompt = entry
         .queued_id
         .is_some_and(|id| automations.is_run_message(id));
@@ -336,6 +342,16 @@ pub(super) fn deliver_agent_prompt(
 /// the human transcript while sending the complete text to the provider.
 pub(super) fn provider_context_block(context: &str) -> String {
     format!("<goddard-provider-context>\n{context}\n</goddard-provider-context>")
+}
+
+/// Whether the continuity ledger fences this session. An incident-fenced
+/// Boss chat must hold parked deliveries — anything sent now drops at the
+/// ownership fence after opening a turn the provider never confirms.
+pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    ContinuityLedger::load(&boss.root().join("continuity.json"))
+        .map(|ledger| ledger.has_incident(session_id))
+        .unwrap_or(false)
 }
 
 /// The bound package just went out over provider transport. Submission is
