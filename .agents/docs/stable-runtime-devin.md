@@ -106,3 +106,17 @@ acknowledgement handling across daemon replacement, and rebuilt-daemon/app
 routed-tool reloads remain unverified. Keep new admission/cutover disabled until
 those provider-specific gates pass. Do not mark the overall runtime outcome or
 the full Stage 2B gate complete from these narrower results.
+
+Shared-host prerequisite at stage-1 baseline: `RuntimeHost::pump_session`
+synthesizes `Terminated(Interrupted)` after sender disconnect even when
+`Terminated(Requested)` was already applied. `apply_event` clears the adapter
+but leaves the receiver installed; `ingest` accepts another terminal event.
+This can overwrite a confirmed stopped projection on the next pump. The actual
+provider check above establishes child-exit evidence, not a fully reconciled
+stopped projection. The shared host owner must repair that boundary and qualify
+the final inventory/one-terminal invariant before production acceptance.
+
+Root workspace registration belongs to the shared host owner. Adapter checks
+were run with temporary local `members`/`default-members` and lockfile
+registration, then those root edits were removed from the Devin-only commit.
+Without registration this crate is not selected by ordinary workspace checks.
