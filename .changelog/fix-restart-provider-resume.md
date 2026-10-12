@@ -1,0 +1,1 @@
+- Fixed tasks failing to resume after an app restart with "Could not start the agent" while the provider CLI was still being detected — the resume now waits for the CLI to be found and only reports it missing if it still cannot be found.

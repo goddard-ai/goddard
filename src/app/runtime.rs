@@ -130,24 +130,84 @@ fn transfer_is_terminal(status: waku_client::friends::TransferStatus) -> bool {
     )
 }
 
+/// How long a deferred binary resolution waits on the daemon's probe before
+/// reporting the provider missing. A restart auto-resume submits while the
+/// app's own detection pass is still in flight; the daemon resolves the CLI
+/// live on each ask, so the budget only has to outlast its own startup and
+/// PATH work — not the app's whole detection queue.
+const PROVIDER_BINARY_WAIT: Duration = Duration::from_secs(15);
+const PROVIDER_BINARY_WAIT_POLL: Duration = Duration::from_millis(250);
+
 pub(super) fn start_driver(
-    mut request: DriverStartRequest,
+    request: DriverStartRequest,
     cwd: PathBuf,
 ) -> anyhow::Result<PreparedDriver> {
-    request.options.cwd = cwd;
-    let (event_tx, events) = driver::event_channel(request.event_wake);
-    let handle = driver::start_remote(
-        request.daemon,
-        request.session_id,
-        request.provider,
-        request.options,
-        event_tx,
-    )?;
+    let DriverStartRequest {
+        session_id,
+        provider,
+        binary,
+        mut options,
+        event_wake,
+        daemon,
+    } = request;
+    options.binary = match binary {
+        ProviderBinary::Resolved(binary) => binary,
+        ProviderBinary::Probe { binary_override } => {
+            probe_provider_binary(&daemon, provider, binary_override)?
+        }
+    };
+    options.cwd = cwd;
+    let (event_tx, events) = driver::event_channel(event_wake);
+    let handle = driver::start_remote(daemon, session_id, provider, options, event_tx)?;
     Ok(PreparedDriver {
         handle,
         events,
         hydrated_session: None,
     })
+}
+
+/// Resolve the provider CLI by asking the daemon's own probe until it
+/// answers with a path or [`PROVIDER_BINARY_WAIT`] runs out. The daemon
+/// resolves live on every call — the model catalog is the only cached half —
+/// so an RPC failure or a CLI still being installed simply retries; a
+/// provider that is still absent when the budget expires fails with the same
+/// not-installed error an accept-time resolution produced.
+fn probe_provider_binary(
+    daemon: &waku_client::DaemonSupervisor,
+    provider: ProviderKind,
+    binary_override: Option<String>,
+) -> anyhow::Result<PathBuf> {
+    let deadline = Instant::now() + PROVIDER_BINARY_WAIT;
+    loop {
+        let resolved = daemon
+            .client()
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                waku_client::Command::ProbeProvider {
+                    provider,
+                    binary_override: binary_override.clone(),
+                    discover_models: false,
+                    probe_version: false,
+                },
+            )
+            .ok()
+            .and_then(|payload| match payload {
+                waku_client::ResponsePayload::ProviderProbe { probe, .. } => probe.path,
+                _ => None,
+            });
+        if let Some(path) = resolved {
+            return Ok(path);
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(PROVIDER_BINARY_WAIT_POLL);
+    }
+    Err(anyhow::anyhow!(tr!(
+        "errors.provider_not_found",
+        provider = provider.display_name()
+    )))
 }
 
 /// What a remote connect attempt produced: the supervisor plus, for ssh
@@ -6155,18 +6215,24 @@ impl Waku {
         session: &AgentSession,
         cwd: PathBuf,
     ) -> anyhow::Result<DriverStartRequest> {
+        let key = self.daemons.session_owner(session.id);
         let daemon = self
             .daemons
             .daemon_for_session(session.id)
             .ok_or_else(|| anyhow::anyhow!("the task's daemon is not connected"))?;
-        let binary = self
-            .provider_binary_for_session(session.id, session.provider)
-            .ok_or_else(|| {
-                anyhow::anyhow!(tr!(
-                    "errors.provider_not_found",
-                    provider = session.provider.display_name()
-                ))
-            })?;
+        // A resolved probe answers now; an unanswered one — detection still
+        // in flight after a restart, or a CLI not yet installed — defers to
+        // `start_driver`, which waits on the daemon's own probe rather than
+        // failing the submission outright.
+        let binary = match self.provider_binary_for_session(session.id, session.provider) {
+            Some(path) => ProviderBinary::Resolved(path),
+            None => ProviderBinary::Probe {
+                binary_override: self
+                    .provider_overrides_for_key(key)
+                    .get(&session.provider)
+                    .cloned(),
+            },
+        };
         let agent_preset = self.agent_preset_for_session(session);
         let SessionOptions {
             mode,
@@ -6178,8 +6244,10 @@ impl Waku {
         Ok(DriverStartRequest {
             session_id: session.id,
             provider: session.provider,
+            binary,
             options: DriverStartOptions {
-                binary,
+                // Filled by `start_driver` once `binary` resolves.
+                binary: PathBuf::new(),
                 cwd,
                 mode,
                 model,

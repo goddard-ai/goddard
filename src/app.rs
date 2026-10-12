@@ -1160,9 +1160,20 @@ impl SubmissionStage {
 struct DriverStartRequest {
     session_id: Uuid,
     provider: ProviderKind,
+    binary: ProviderBinary,
     options: DriverStartOptions,
     event_wake: smol::channel::Sender<()>,
     daemon: waku_client::DaemonSupervisor,
+}
+
+/// Where the provider CLI path comes from. Detection may still be probing
+/// when a restart auto-resume submits — `Probe` defers resolution to a
+/// bounded daemon query inside `start_driver`, so a provider that is merely
+/// not yet detected still starts while a genuinely absent CLI fails there,
+/// once the wait has run, with the same not-installed notice.
+enum ProviderBinary {
+    Resolved(PathBuf),
+    Probe { binary_override: Option<String> },
 }
 
 /// A provider process that has started off-thread but is not installed into

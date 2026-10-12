@@ -167,8 +167,10 @@ impl RouteStartPlan {
         Ok(DriverStartRequest {
             session_id: self.session_id,
             provider,
+            binary: ProviderBinary::Resolved(binary),
             options: DriverStartOptions {
-                binary,
+                // Filled by `start_driver` once `binary` resolves.
+                binary: PathBuf::new(),
                 cwd: PathBuf::new(),
                 mode: self.mode,
                 model,
