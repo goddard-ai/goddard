@@ -5375,7 +5375,7 @@ impl Waku {
                         )
                 });
             let shown = sidebar_employee_idle_shown(visible, no_active);
-            let next = self
+            let mut idle = self
                 .boss_ui
                 .recent
                 .get(&key)
@@ -5389,8 +5389,9 @@ impl Waku {
                         &self.state.sessions,
                         &self.state.sidebar_archived_employees,
                     )
-                })
-                .nth(shown);
+                });
+            let next = idle.nth(shown);
+            let remaining = idle.count();
             next.and_then(|id| {
                 let name = self.boss_ui.identities.get(&id)?.name.clone();
                 let updated = self
@@ -5400,7 +5401,7 @@ impl Waku {
                     .find(|session| session.id == *id)?
                     .updated_at;
                 let elapsed = unix_time().saturating_sub(updated);
-                Some(if elapsed < 60 {
+                let label = if elapsed < 60 {
                     tr!("boss.finished_now", name = name)
                 } else {
                     tr!(
@@ -5408,6 +5409,11 @@ impl Waku {
                         name = name,
                         ago = format_time_ago(elapsed)
                     )
+                };
+                Some(if remaining > 0 {
+                    tr!("boss.finished_more", label = label, count = remaining)
+                } else {
+                    label
                 })
             })
             .unwrap_or_else(|| tr!("sidebar.show_more"))
