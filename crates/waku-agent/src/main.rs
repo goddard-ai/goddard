@@ -332,9 +332,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent create --project /abs/project --file prompt.md".to_owned(),
         ),
         "search" => (
-            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"literal UTF-8 query"},"--last-turns":{"type":"positive integer","optional":true}}),
+            json!({"QUERY":{"positional":true,"optional":true,"type":"literal UTF-8 query","notes":"supply one query either positionally or with --text; mutually exclusive with --text and --file"},"--text|--file":{"optional":true,"exactlyOne":true,"type":"literal UTF-8 query","notes":"required unless a positional query is supplied"},"--last-turns":{"type":"positive integer","optional":true}}),
             json!({"json":{"results":"matching task/message records","session_link_hint":"how to format Goddard task links"}}),
-            "goddard-agent search --text 'status:idle retry logic'".to_owned(),
+            "goddard-agent search 'status:idle retry logic'".to_owned(),
         ),
         "history search" => (
             json!({
@@ -2708,15 +2708,7 @@ fn history_send(command: Command) -> anyhow::Result<()> {
 }
 
 fn task_search(args: Vec<String>) -> anyhow::Result<()> {
-    let (_, opts) = flags(args, &["text", "file", "last-turns"], false)?;
-    let query = raw_input(&opts)?;
-    if query.trim().is_empty() {
-        bail!("search query must not be empty");
-    }
-    let last_turns = opts
-        .get("last-turns")
-        .map(|v| v.parse().context("--last-turns must be a positive integer"))
-        .transpose()?;
+    let (query, last_turns) = search_arguments(args)?;
     match connect()?.request(
         request_session_id(),
         Uuid::nil(),
@@ -2733,6 +2725,28 @@ fn task_search(args: Vec<String>) -> anyhow::Result<()> {
         }
         other => bail!("unexpected response: {other:?}"),
     }
+}
+
+fn search_arguments(args: Vec<String>) -> anyhow::Result<(String, Option<usize>)> {
+    let (positionals, mut opts) = flags(args, &["text", "file", "last-turns"], true)?;
+    if positionals.len() > 1 {
+        bail!("search accepts at most one positional query");
+    }
+    if !positionals.is_empty() && (opts.contains_key("text") || opts.contains_key("file")) {
+        bail!("provide a positional query or --text/--file, not both");
+    }
+    if let Some(query) = positionals.into_iter().next() {
+        opts.insert("text".to_owned(), query);
+    }
+    let query = raw_input(&opts)?;
+    if query.trim().is_empty() {
+        bail!("search query must not be empty");
+    }
+    let last_turns = opts
+        .get("last-turns")
+        .map(|v| v.parse().context("--last-turns must be a positive integer"))
+        .transpose()?;
+    Ok((query, last_turns))
 }
 
 /// `goddard-agent memory` — the session-scoped bucket surface for ordinary
@@ -3327,6 +3341,36 @@ mod tests {
             other => panic!("expected AgentSearchSessions, got {other:?}"),
         }
         assert!(build_command("search", "{}").is_err());
+    }
+
+    #[test]
+    fn search_accepts_one_positional_query_and_rejects_ambiguous_queries() {
+        assert_eq!(
+            search_arguments(vec!["jsxImportSource".into()]).unwrap(),
+            ("jsxImportSource".into(), None)
+        );
+        assert_eq!(
+            search_arguments(vec!["--text".into(), "jsxImportSource".into()]).unwrap(),
+            ("jsxImportSource".into(), None)
+        );
+        assert!(
+            search_arguments(vec!["one".into(), "two".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("at most one positional query")
+        );
+        assert!(
+            search_arguments(vec!["one".into(), "--text".into(), "two".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("positional query or --text/--file")
+        );
+        assert!(
+            search_arguments(vec!["one".into(), "--file".into(), "query.txt".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("positional query or --text/--file")
+        );
     }
 
     #[test]
