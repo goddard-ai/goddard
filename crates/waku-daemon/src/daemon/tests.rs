@@ -9627,6 +9627,288 @@ fn setmodel_on_a_queued_ticket_moves_its_admission_key() {
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
+/// Exercise the real RPC/save/broadcast boundary; only the external provider
+/// process is replaced. A stale client must never undo the admitted selection.
+#[cfg(unix)]
+#[test]
+fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
+    use crate::server::ServerOptions;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+    use waku_client::DaemonClient;
+    use waku_protocol::boss::{EmployeeControl, EmployeeLifecycle};
+
+    let root = std::env::temp_dir().join(format!("selection-roundtrip-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 1);
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "selection",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected queued employee")
+    };
+    let stale = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .clone();
+    let target = crate::model_catalog::cached_models(ProviderKind::Claude)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(ProviderKind::Claude))
+        .into_iter()
+        .find(|model| !model.reasoning_efforts.is_empty())
+        .unwrap();
+    let effort = target.reasoning_efforts.last().unwrap().id.clone();
+    set_model_policy(&backend, ProviderKind::Claude, &target.id, 0, 1);
+    // Keep local launch preparation real, replacing only the provider process.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    let mut settings = backend.settings.get();
+    settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Claude, "/usr/bin/true".into());
+    backend.settings.replace(settings).unwrap();
+    let capture = Arc::new(CaptureDriver::default());
+    let launched = Arc::new(Mutex::new(Vec::new()));
+    let observed = launched.clone();
+    let driver = capture.clone();
+    backend.runtime_test_start = Some(Arc::new(move |provider, options, _| {
+        observed
+            .lock()
+            .push((provider, options.model, options.reasoning_effort));
+        Ok(DriverHandle::from_control(driver.clone()))
+    }));
+    let backend = Arc::new(backend);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let server_backend = backend.clone();
+    let server_shutdown = shutdown.clone();
+    let server = std::thread::spawn(move || {
+        crate::serve(
+            listener,
+            "selection-test".into(),
+            server_backend,
+            server_shutdown,
+            ServerOptions {
+                allow_shutdown: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    });
+    let writer = DaemonClient::connect(&address, "selection-test".into()).unwrap();
+    let reader = DaemonClient::connect(&address, "selection-test".into()).unwrap();
+    let broadcasts = reader.subscribe_task_state();
+    // A barrier request ensures both clients are registered before mutation.
+    reader
+        .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+        .unwrap();
+    let request = |command| writer.request(Uuid::nil(), Uuid::nil(), command).unwrap();
+    request(Command::Boss {
+        operation: BossOperation::Control {
+            session_id,
+            action: EmployeeControl::SetModel {
+                provider: ProviderKind::Claude,
+                model: target.id.clone(),
+                reasoning_effort: Some(effort.clone()),
+            },
+        },
+    });
+    broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
+    let assert_selection = |session: &AgentSession| {
+        assert_eq!(session.provider, ProviderKind::Claude);
+        assert_eq!(session.model.as_deref(), Some(target.id.as_str()));
+        assert_eq!(session.reasoning_effort.as_deref(), Some(effort.as_str()));
+    };
+    let catalog = |client: &DaemonClient| {
+        let ResponsePayload::TaskState { sessions, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected catalog")
+        };
+        sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+    };
+    let detail = |client: &DaemonClient| {
+        let ResponsePayload::Session {
+            session: Some(session),
+        } = client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::HydrateSession { session_id },
+            )
+            .unwrap()
+        else {
+            panic!("expected hydrated employee")
+        };
+        assert!(session.detail_loaded);
+        session
+    };
+    // A client clock ahead of the daemon reproduces the timestamp overwrite.
+    // Full, list-only and incremental saves all cross the generic RPC fence.
+    for (index, (skeleton, incremental)) in [(false, false), (true, false), (false, true)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut incoming = if skeleton {
+            stale.list_projection()
+        } else {
+            stale.clone()
+        };
+        incoming.updated_at += (index as u64 + 1) * 10_000;
+        incoming.title = format!("Stale client metadata edit {index}");
+        let mut tails = Vec::new();
+        if incremental {
+            tails.push(SessionDetailTail {
+                session_id,
+                messages_from: 0,
+                transcript_blocks_from: 0,
+                prefix_signature: crate::model::detail_prefix_signature(&[], &[]),
+            });
+        }
+        let ResponsePayload::TaskStateSaved { sessions } = request(Command::SaveTaskState {
+            projects: Vec::new(),
+            live_session_ids: Vec::new(),
+            sessions: vec![incoming],
+            session_tails: tails,
+        }) else {
+            panic!("expected save acknowledgement")
+        };
+        assert_selection(&sessions[0]);
+        broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_selection(&catalog(&reader));
+        assert_selection(&detail(&reader));
+    }
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+    // Open capacity and dispatch with a controlled provider runtime. The
+    // production dispatcher copies the ticket, sends its prompt, and persists.
+    set_model_policy(&backend, ProviderKind::Claude, &target.id, 1, 1);
+    backend
+        .dispatch_queued_head(&backend.boss.employee(session_id).unwrap())
+        .unwrap();
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Working
+    );
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert_eq!(
+        *launched.lock(),
+        vec![(
+            ProviderKind::Claude,
+            Some(target.id.clone()),
+            Some(effort.clone())
+        )]
+    );
+    assert_selection(&detail(&reader));
+    // Now the transcript is hydrated: its stale full save still cannot change
+    // selection or erase the daemon's prompt while it is working.
+    let mut incoming = stale.clone();
+    incoming.updated_at += 40_000;
+    incoming.title = "Stale working client metadata edit".into();
+    incoming.reasoning_effort = None;
+    request(Command::SaveTaskState {
+        projects: Vec::new(),
+        live_session_ids: Vec::new(),
+        sessions: vec![incoming],
+        session_tails: Vec::new(),
+    });
+    broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_selection(&catalog(&reader));
+    let hydrated = detail(&reader);
+    assert_selection(&hydrated);
+    assert!(!hydrated.messages.is_empty());
+    let mut reloaded = backend.task_store.load().unwrap();
+    let stored = reloaded
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+        .unwrap();
+    assert!(!stored.detail_loaded);
+    assert_selection(stored);
+    backend.task_store.hydrate(stored).unwrap();
+    assert_selection(stored);
+    assert!(!stored.messages.is_empty());
+    // A newly connected client sees the same selection without old UI state.
+    let reconnected = DaemonClient::connect(&address, "selection-test".into()).unwrap();
+    assert_selection(&catalog(&reconnected));
+    assert_selection(&detail(&reconnected));
+    // Human Boss-chat picker saves remain authoritative on this managed path.
+    let mut chat = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == boss)
+        .unwrap()
+        .clone();
+    chat.provider = ProviderKind::Claude;
+    chat.model = Some(target.id.clone());
+    chat.reasoning_effort = Some(effort.clone());
+    chat.updated_at += 30_000;
+    let ResponsePayload::TaskStateSaved { sessions } = request(Command::SaveTaskState {
+        projects: Vec::new(),
+        live_session_ids: Vec::new(),
+        sessions: vec![chat],
+        session_tails: Vec::new(),
+    }) else {
+        panic!("expected Boss chat save")
+    };
+    assert_selection(&sessions[0]);
+    broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
+    for _ in broadcasts.try_iter() {}
+    let mut chat = sessions[0].clone();
+    chat.reasoning_effort = None;
+    chat.updated_at += 1;
+    request(Command::SaveTaskState {
+        projects: Vec::new(),
+        live_session_ids: Vec::new(),
+        sessions: vec![chat],
+        session_tails: Vec::new(),
+    });
+    // Effort alone is a catalog change, even without a model/title edit.
+    broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
+    let ResponsePayload::TaskState { sessions, .. } = reader
+        .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+        .unwrap()
+    else {
+        panic!("expected catalog")
+    };
+    assert_eq!(
+        sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap()
+            .reasoning_effort,
+        None
+    );
+    reader.force_disconnect();
+    reconnected.force_disconnect();
+    writer.shutdown();
+    server.join().unwrap();
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `setModel` on a working employee is one atomic reconfigure: the open
 /// turn closes as an intentional interruption — never a failure — the
 /// ticket re-enters admission on the new pair carrying a "verify and

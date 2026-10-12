@@ -856,7 +856,16 @@ impl Backend for WakuBackend {
                         .sessions
                         .iter()
                         .filter(|session| session.has_started() || managed(session.id))
-                        .map(AgentSession::list_projection)
+                        .map(|session| {
+                            let mut projection = session.list_projection();
+                            project_employee_selection(
+                                &mut projection,
+                                boss.employees
+                                    .iter()
+                                    .find(|employee| employee.session_id == session.id),
+                            );
+                            projection
+                        })
                         .collect(),
                     default_cwd: self.default_cwd.clone(),
                     projectless_root: crate::projectless::workspace_root(),
@@ -938,7 +947,17 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == session_id)
                     {
-                        if self.boss.is_managed(session_id) {
+                        // Employee launch selection belongs to the daemon, including
+                        // retired employees. Boss chats still accept human picker edits.
+                        let employee = self.boss.employee_including_retired(session_id);
+                        if employee.is_some() {
+                            session.provider = existing.provider;
+                            session.model.clone_from(&existing.model);
+                            session
+                                .reasoning_effort
+                                .clone_from(&existing.reasoning_effort);
+                        }
+                        if employee.is_some() || self.boss.is_managed(session_id) {
                             merge_stale_session_metadata(existing, session);
                             true
                         } else if !session.detail_loaded {
@@ -1073,6 +1092,14 @@ impl Backend for WakuBackend {
                 // the client touched. Keep only the recent window resident;
                 // the echoed clones above still carry the saved detail.
                 trim_resident_transcripts(&mut state, &active_runtimes.keys().copied().collect());
+                let sessions = sessions
+                    .into_iter()
+                    .map(|mut session| {
+                        let employee = self.boss.employee(session.id);
+                        project_employee_selection(&mut session, employee.as_ref());
+                        session
+                    })
+                    .collect();
                 Ok(ResponsePayload::TaskStateSaved { sessions })
             }
             Command::RemoveSession => {
@@ -1134,6 +1161,11 @@ impl Backend for WakuBackend {
                     None => Some(session),
                 };
                 trim_resident_transcripts(&mut state, &pinned);
+                let session = session.map(|mut session| {
+                    let employee = self.boss.employee(session.id);
+                    project_employee_selection(&mut session, employee.as_ref());
+                    session
+                });
                 Ok(ResponsePayload::Session { session })
             }
             Command::IndexSession => Ok(ResponsePayload::Ack),

@@ -2100,7 +2100,7 @@ impl AgentSession {
             runtime_mode: RuntimeMode::default(),
             environment: self.environment(),
             sandboxed: false,
-            reasoning_effort: None,
+            reasoning_effort: self.reasoning_effort.clone(),
             service_tier: None,
             context_window: None,
             agent_preset: None,

@@ -164,6 +164,34 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
 }
 
 #[test]
+fn employee_catalog_selection_updates_hydrated_live_and_reconnected_clients() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+    session.boss_managed = true;
+    session.begin_turn("Keep the employee transcript");
+    let mut client = vec![session.clone()];
+    session.provider = ProviderKind::Codex;
+    session.model = Some("gpt-6-luna".into());
+    session.reasoning_effort = Some("max".into());
+    for (fresh, live, effort) in [(false, true, Some("max")), (true, false, None)] {
+        session.reasoning_effort = effort.map(str::to_owned);
+        merge_remote_session_catalog(
+            &mut client,
+            vec![session.list_projection()],
+            |_| true,
+            |_| live,
+            fresh,
+        );
+        let reflected = &client[0];
+        assert_eq!(reflected.provider, session.provider);
+        assert_eq!(reflected.model, session.model);
+        assert_eq!(reflected.reasoning_effort, session.reasoning_effort);
+        assert!(reflected.detail_loaded);
+        assert_eq!(reflected.messages.len(), session.messages.len());
+        assert_eq!(reflected.messages[0].content, session.messages[0].content);
+    }
+}
+
+#[test]
 fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
     let project_id = Uuid::new_v4();
     let worktree = SessionWorkspace::Worktree {

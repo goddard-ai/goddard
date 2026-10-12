@@ -444,6 +444,7 @@ pub(super) fn merge_remote_session_catalog(
             local.project_id = remote.project_id;
             local.provider = remote.provider;
             local.model = remote.model;
+            local.reasoning_effort = remote.reasoning_effort;
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
             local.archived_at = remote.archived_at;

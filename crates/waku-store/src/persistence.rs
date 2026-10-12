@@ -1795,7 +1795,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name
+                        friend_peer_id, friend_peer_name, reasoning_effort
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1826,6 +1826,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(20)?,
                     row.get::<_, Option<String>>(21)?,
                     row.get::<_, Option<String>>(22)?,
+                    row.get::<_, Option<String>>(23)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2514,6 +2515,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2546,6 +2548,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         runtime_event_cursor,
         friend_peer_id,
         friend_peer_name,
+        reasoning_effort,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2585,7 +2588,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         runtime_mode: RuntimeMode::default(),
         environment: crate::model::SessionEnvironment::Local,
         sandboxed: false,
-        reasoning_effort: None,
+        reasoning_effort,
         service_tier: None,
         context_window: None,
         agent_preset: None,
@@ -2644,7 +2647,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     session.side_chat_of = stored.side_chat_of;
     session.provider_cursor = stored.provider_cursor;
     session.runtime_mode = stored.runtime_mode;
-    session.reasoning_effort = stored.reasoning_effort;
+    // Effort is a list column; a column-only save may be ahead of the blob.
     session.service_tier = stored.service_tier;
     session.context_window = stored.context_window;
     session.context_usage = stored.context_usage;
@@ -3266,8 +3269,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+         friend_peer_id, friend_peer_name, reasoning_effort
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -3290,7 +3293,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          planning = excluded.planning,
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
-         friend_peer_name = excluded.friend_peer_name";
+         friend_peer_name = excluded.friend_peer_name,
+         reasoning_effort = excluded.reasoning_effort";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3384,6 +3388,10 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, Value::Text),
         session
             .friend_peer_name
+            .clone()
+            .map_or(Value::Null, Value::Text),
+        session
+            .reasoning_effort
             .clone()
             .map_or(Value::Null, Value::Text),
     ]
@@ -5136,6 +5144,57 @@ mod tests {
             .unwrap();
         assert_eq!(title, AgentSession::DEFAULT_TITLE);
         assert_eq!(auto_title.as_deref(), Some("Investigate the parser"));
+    }
+
+    #[test]
+    fn effort_migration_backfills_and_column_saves_survive_hydration() {
+        let root = std::env::temp_dir().join(format!("effort-migration-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let connection = Connection::open(store.path()).unwrap();
+        connection.execute_batch(MIGRATIONS_TABLE).unwrap();
+        let migration = MIGRATIONS
+            .iter()
+            .position(|(_, sql)| sql.contains("ADD `reasoning_effort`"))
+            .unwrap();
+        for (tag, sql) in &MIGRATIONS[..migration] {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO migrations(tag, applied_at) VALUES(?1, 0)",
+                    params![tag],
+                )
+                .unwrap();
+        }
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Preserve transcript");
+        session.reasoning_effort = Some("max".into());
+        let data = serde_json::to_string(&session).unwrap();
+        connection.execute("INSERT INTO sessions(id, project_id, title, provider, status, created_at, updated_at) VALUES(?1, ?2, 'Task', 'codex', 'working', 1, 1)", params![session.id.to_string(), session.project_id.to_string()]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_details(session_id, data) VALUES(?1, ?2)",
+                params![session.id.to_string(), data],
+            )
+            .unwrap();
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            MIGRATIONS.len() - migration
+        );
+        drop(connection);
+        let mut state = store.load().unwrap();
+        assert_eq!(state.sessions[0].reasoning_effort.as_deref(), Some("max"));
+        assert!(!state.sessions[0].detail_loaded);
+        // A list-only edit clears effort without rewriting the older blob.
+        state.sessions[0].reasoning_effort = None;
+        state.mark_session_dirty(session.id);
+        store.save(&mut state).unwrap();
+        let mut reloaded = store.load().unwrap();
+        assert_eq!(reloaded.sessions[0].reasoning_effort, None);
+        store.hydrate(&mut reloaded.sessions[0]).unwrap();
+        assert_eq!(reloaded.sessions[0].reasoning_effort, None);
+        assert!(reloaded.sessions[0].detail_loaded);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

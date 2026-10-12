@@ -49,6 +49,8 @@ export const sessions = sqliteTable(
     autoTitle: text("auto_title"),
     provider: text("provider").notNull(),
     model: text("model"),
+    /** Selected effort, carried with provider/model through catalog refreshes. */
+    reasoningEffort: text("reasoning_effort"),
     status: text("status").notNull(),
     /** Session creation time, unix seconds. */
     createdAt: integer("created_at").notNull(),

@@ -1,5 +1,27 @@
 use super::*;
 
+/// Queued tickets carry the requested selection before dispatch moves provider
+/// cursors. Project it to clients without changing the runtime's stored pair.
+pub(super) fn project_employee_selection(
+    session: &mut AgentSession,
+    employee: Option<&waku_protocol::boss::BossEmployee>,
+) {
+    use waku_protocol::boss::EmployeeLifecycle;
+    if let Some(employee) = employee
+        && matches!(
+            employee.lifecycle(),
+            EmployeeLifecycle::Queued | EmployeeLifecycle::Dispatching
+        )
+        && let Some(ticket) = &employee.ticket
+    {
+        session.provider = ticket.provider;
+        session.model = Some(ticket.model.clone());
+        session
+            .reasoning_effort
+            .clone_from(&ticket.reasoning_effort);
+    }
+}
+
 pub(super) fn session_projection_precedes(
     existing: &AgentSession,
     incoming: &AgentSession,
@@ -132,6 +154,7 @@ pub(super) fn merge_session_list_columns(
     existing.project_id = incoming.project_id;
     existing.provider = incoming.provider;
     existing.model = incoming.model;
+    existing.reasoning_effort = incoming.reasoning_effort;
     if !has_active_runtime {
         existing.status = incoming.status;
     }
