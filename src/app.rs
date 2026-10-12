@@ -3994,6 +3994,8 @@ pub struct Waku {
     /// a directory outside any checkout — resolved together on a
     /// background executor so sidebar rows only read memory.
     sidebar_terminal_repo_roots: RefCell<HashMap<PathBuf, Option<PathBuf>>>,
+    /// Package and linked-worktree names per cwd, discovered with the repo scan.
+    sidebar_terminal_locations: RefCell<HashMap<PathBuf, terminals::TerminalLocation>>,
     sidebar_terminal_repo_scan_fingerprint: Cell<Option<u64>>,
     sidebar_terminal_repo_scan_generation: Cell<u64>,
     /// Dirty flag + unpushed commit count per session checkout or worktree
@@ -7800,6 +7802,7 @@ impl Waku {
                 sidebar_branch_scan_generation: Cell::new(0),
                 friends_probe_generation: Cell::new(0),
                 sidebar_terminal_repo_roots: RefCell::new(HashMap::new()),
+                sidebar_terminal_locations: RefCell::new(HashMap::new()),
                 sidebar_terminal_repo_scan_fingerprint: Cell::new(None),
                 sidebar_terminal_repo_scan_generation: Cell::new(0),
                 sidebar_checkout_statuses: RefCell::new(HashMap::new()),

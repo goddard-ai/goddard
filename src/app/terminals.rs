@@ -41,6 +41,103 @@ pub(super) fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+#[derive(Clone, Default)]
+pub(super) struct TerminalLocation {
+    package: Option<String>,
+    worktree: Option<String>,
+}
+
+fn nonempty_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+fn nearest_package_name(directory: &Path) -> Option<String> {
+    for ancestor in directory.ancestors() {
+        if let Ok(contents) = std::fs::read_to_string(ancestor.join("package.json"))
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents)
+            && let Some(name) = json.get("name").and_then(serde_json::Value::as_str)
+            && let Some(name) = nonempty_name(name)
+        {
+            return Some(name);
+        }
+        if let Ok(contents) = std::fs::read_to_string(ancestor.join("Cargo.toml"))
+            && let Ok(manifest) = contents.parse::<toml::Value>()
+            && let Some(name) = manifest
+                .get("package")
+                .and_then(|package| package.get("name"))
+                .and_then(toml::Value::as_str)
+                .and_then(nonempty_name)
+        {
+            return Some(name);
+        }
+        if let Ok(contents) = std::fs::read_to_string(ancestor.join("pubspec.yaml"))
+            && let Some(name) = pubspec_package_name(&contents)
+        {
+            return Some(name);
+        }
+    }
+    None
+}
+
+// Dart package names are top-level YAML scalars. Ignore nested dependency
+// names; quotes and trailing comments are common in generated manifests.
+fn pubspec_package_name(contents: &str) -> Option<String> {
+    contents.lines().find_map(|line| {
+        let value = line.strip_prefix("name:")?.trim();
+        if let Some(quote) = value.chars().next().filter(|c| matches!(c, '\"' | '\'')) {
+            let value = &value[quote.len_utf8()..];
+            nonempty_name(value.split_once(quote)?.0)
+        } else {
+            nonempty_name(value.split('#').next()?)
+        }
+    })
+}
+
+fn terminal_worktree_name(root: &Path) -> Option<String> {
+    let pointer = std::fs::read_to_string(root.join(".git")).ok()?;
+    let git_dir = root.join(pointer.trim().strip_prefix("gitdir:")?.trim());
+    // Submodules also have a .git file, but only linked worktrees share a
+    // common directory through this marker.
+    if !git_dir.join("commondir").is_file() {
+        return None;
+    }
+    // Daemon checkouts repeat the repository leaf beneath their named
+    // directory: worktrees/<repository>/<name>/<repository>.
+    let parent = root.parent()?;
+    let namespace = parent.parent()?;
+    let managed = namespace.file_name() == root.file_name()
+        && namespace
+            .parent()?
+            .file_name()
+            .is_some_and(|name| name == "worktrees");
+    let name = if managed {
+        parent.file_name()?
+    } else {
+        root.file_name()?
+    };
+    name.to_str().and_then(nonempty_name)
+}
+
+fn terminal_location_names(cwd: &Path, location: &TerminalLocation) -> Vec<(&'static str, String)> {
+    let inferred = cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let mut names = Vec::new();
+    if let Some(package) = location.package.as_deref().filter(|name| *name != inferred) {
+        names.push(("icons/package.svg", package.to_owned()));
+    }
+    if let Some(worktree) = location
+        .worktree
+        .as_deref()
+        .filter(|name| *name != inferred)
+    {
+        names.push(("icons/git-branch.svg", worktree.to_owned()));
+    }
+    names
+}
+
 /// Character budget for a row's location label before ancestors fold
 /// under `…/` — beyond it a layout-level tail clip would saw through a
 /// component's middle.
@@ -110,6 +207,64 @@ fn sidebar_terminal_order<'a>(
 }
 
 impl Waku {
+    #[track_caller]
+    pub(super) fn render_terminal_location_for_id(
+        &self,
+        terminal_id: Uuid,
+        cx: &App,
+    ) -> AnyElement {
+        let cwd = self
+            .terminal_cwd(terminal_id, cx)
+            .map(|cwd| settings::abbreviate_home_path(&cwd, self.home_directory.as_deref()))
+            .unwrap_or_default();
+        self.render_terminal_location(terminal_id, "icons/folder.svg", cwd, cx)
+    }
+
+    #[track_caller]
+    fn render_terminal_location(
+        &self,
+        terminal_id: Uuid,
+        cwd_icon: &'static str,
+        cwd_label: String,
+        cx: &App,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let names = self
+            .terminal_cwd(terminal_id, cx)
+            .map(|cwd| {
+                let locations = self.sidebar_terminal_locations.borrow();
+                locations
+                    .get(&cwd)
+                    .map(|location| terminal_location_names(&cwd, location))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let mut row = div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .text_size(sp(12.0))
+            .text_color(theme.text_tertiary);
+        for (glyph, name) in names {
+            row = row.child(icon(glyph, 12.0, theme.text_tertiary)).child(
+                div()
+                    .min_w_0()
+                    .max_w(px(140.0))
+                    .truncate()
+                    .child(single_line_label(&name)),
+            );
+        }
+        row.child(icon(cwd_icon, 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .child(SharedString::from(cwd_label)),
+            )
+            .into_any_element()
+    }
+
     /// Terminal ids in sidebar order — pinned rows lead the group.
     pub(super) fn sidebar_terminal_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
         sidebar_terminal_order(&self.terminal_order, &self.terminal_records)
@@ -176,6 +331,7 @@ impl Waku {
 
         if directories.is_empty() {
             self.sidebar_terminal_repo_roots.borrow_mut().clear();
+            self.sidebar_terminal_locations.borrow_mut().clear();
             return;
         }
         cx.spawn(async move |waku, cx| {
@@ -184,7 +340,14 @@ impl Waku {
                 .spawn(async move {
                     directories
                         .into_iter()
-                        .map(|cwd| (cwd.clone(), nearest_repo_root(&cwd)))
+                        .map(|cwd| {
+                            let root = nearest_repo_root(&cwd);
+                            let location = TerminalLocation {
+                                package: nearest_package_name(&cwd),
+                                worktree: root.as_deref().and_then(terminal_worktree_name),
+                            };
+                            (cwd, (root, location))
+                        })
                         .collect::<HashMap<_, _>>()
                 })
                 .await;
@@ -192,7 +355,14 @@ impl Waku {
                 if waku.sidebar_terminal_repo_scan_generation.get() != generation {
                     return;
                 }
-                *waku.sidebar_terminal_repo_roots.borrow_mut() = roots;
+                *waku.sidebar_terminal_repo_roots.borrow_mut() = roots
+                    .iter()
+                    .map(|(cwd, (root, _))| (cwd.clone(), root.clone()))
+                    .collect();
+                *waku.sidebar_terminal_locations.borrow_mut() = roots
+                    .into_iter()
+                    .map(|(cwd, (_, location))| (cwd, location))
+                    .collect();
                 waku.sync_standalone_terminal_git_panel(cx);
                 cx.notify();
             });
@@ -1765,6 +1935,7 @@ impl Waku {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.ensure_sidebar_terminal_repo_roots(cx);
         let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
             return div().into_any_element();
         };
@@ -1772,9 +1943,17 @@ impl Waku {
             terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
         }
         div()
+            .flex()
+            .flex_col()
             .flex_1()
             .min_h_0()
             .w_full()
+            .child(
+                div()
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .child(self.render_terminal_location_for_id(terminal_id, cx)),
+            )
             .child(terminal)
             .into_any_element()
     }
@@ -1791,6 +1970,7 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.ensure_sidebar_terminal_repo_roots(cx);
         let theme = Theme::current(cx);
         let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
             return div().into_any_element();
@@ -1810,9 +1990,7 @@ impl Waku {
             .or_else(|| Some(single_line_label(terminal.read(cx).title())))
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| tr!("right_panel.terminal"));
-        let cwd = self.terminal_cwd(terminal_id, cx).map(|cwd| {
-            settings::abbreviate_home_path(&cwd, self.home_directory.as_deref())
-        });
+        let location = self.render_terminal_location_for_id(terminal_id, cx);
         let expand_focus =
             self.transcript_control_focus(format!("docked-terminal-expand-{terminal_id}"), cx);
         let close_focus =
@@ -1916,17 +2094,7 @@ impl Waku {
                                     .text_color(theme.text)
                                     .child(SharedString::from(title)),
                             )
-                            .when_some(cwd, |element, cwd| {
-                                element.child(
-                                    div()
-                                        .flex_none()
-                                        .max_w(px(240.0))
-                                        .truncate()
-                                        .text_size(sp(12.0))
-                                        .text_color(theme.text_tertiary)
-                                        .child(SharedString::from(cwd)),
-                                )
-                            })
+                            .child(location)
                             .child(div().flex_1())
                             .child(expand_button)
                             .child(close_button),
@@ -2269,16 +2437,7 @@ impl Waku {
                     .gap(px(5.0))
                     .text_size(sp(13.0))
                     .line_height(sp(15.0))
-                    .child(icon(detail_icon, 12.5, theme.text_tertiary))
-                    // The char budget folds ancestors first; this clip is
-                    // only the last resort for a single oversized leaf.
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_color(theme.text_tertiary)
-                            .child(SharedString::from(detail)),
-                    )
+                    .child(self.render_terminal_location(terminal_id, detail_icon, detail, cx))
                     .child(div().flex_1())
                     .child(
                         div()
@@ -2535,6 +2694,115 @@ mod tests {
         let root = std::env::temp_dir().join(format!("goddard-code-run-{tag}-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn terminal_location_selects_nearest_named_manifest() {
+        let root = temp_root("package-labels");
+        let nested = root.join("crates/child/src");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"name":"@scope/parent"}"#).unwrap();
+        assert_eq!(
+            nearest_package_name(&nested).as_deref(),
+            Some("@scope/parent")
+        );
+        std::fs::write(
+            root.join("crates/child/Cargo.toml"),
+            "[package]\nname = 'child' # comment\n",
+        )
+        .unwrap();
+        assert_eq!(nearest_package_name(&nested).as_deref(), Some("child"));
+        std::fs::write(
+            nested.join("pubspec.yaml"),
+            "dependencies:\n  nested:\n    name: wrong\nname: 'dart_child' # comment\n",
+        )
+        .unwrap();
+        assert_eq!(nearest_package_name(&nested).as_deref(), Some("dart_child"));
+        // Empty and malformed names do not hide a valid enclosing package.
+        std::fs::write(nested.join("pubspec.yaml"), "name: ''\n").unwrap();
+        std::fs::write(nested.join("package.json"), "not json").unwrap();
+        assert_eq!(nearest_package_name(&nested).as_deref(), Some("child"));
+        std::fs::write(
+            root.join("crates/child/Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )
+        .unwrap();
+        assert_eq!(
+            nearest_package_name(&nested).as_deref(),
+            Some("@scope/parent")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_location_names_distinguish_package_worktree_and_cwd() {
+        let cwd = Path::new("/repo/src");
+        for (package, worktree, expected) in [
+            (None, None, vec![]),
+            (Some("src"), None, vec![]),
+            (Some("app"), None, vec![("icons/package.svg", "app")]),
+            (
+                None,
+                Some("feature"),
+                vec![("icons/git-branch.svg", "feature")],
+            ),
+            (
+                Some("src"),
+                Some("feature"),
+                vec![("icons/git-branch.svg", "feature")],
+            ),
+            (Some("app"), Some("src"), vec![("icons/package.svg", "app")]),
+            (
+                Some("app"),
+                Some("feature"),
+                vec![
+                    ("icons/package.svg", "app"),
+                    ("icons/git-branch.svg", "feature"),
+                ],
+            ),
+        ] {
+            let location = TerminalLocation {
+                package: package.map(str::to_owned),
+                worktree: worktree.map(str::to_owned),
+            };
+            assert_eq!(
+                terminal_location_names(cwd, &location),
+                expected
+                    .into_iter()
+                    .map(|(icon, name)| (icon, name.to_owned()))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_location_names_managed_and_ordinary_linked_worktrees() {
+        let root = temp_root("worktree-labels");
+        let managed = root.join("worktrees/repo/feature/repo");
+        let ordinary = root.join("ordinary-feature");
+        let main = root.join("main");
+        for checkout in [&managed, &ordinary, &main] {
+            std::fs::create_dir_all(checkout).unwrap();
+        }
+        let metadata = root.join("git-metadata");
+        std::fs::create_dir_all(&metadata).unwrap();
+        std::fs::write(metadata.join("commondir"), "../..").unwrap();
+        for checkout in [&managed, &ordinary] {
+            std::fs::write(checkout.join(".git"), format!("gitdir: {}", metadata.display())).unwrap();
+        }
+        std::fs::create_dir(main.join(".git")).unwrap();
+        assert_eq!(terminal_worktree_name(&managed).as_deref(), Some("feature"));
+        assert_eq!(
+            terminal_worktree_name(&ordinary).as_deref(),
+            Some("ordinary-feature")
+        );
+        assert_eq!(terminal_worktree_name(&main), None);
+        let submodule = root.join("submodule");
+        std::fs::create_dir(&submodule).unwrap();
+        std::fs::write(submodule.join(".git"), "gitdir: ../non-worktree-metadata").unwrap();
+        assert_eq!(terminal_worktree_name(&submodule), None);
+        assert_eq!(nearest_repo_root(&managed.join("src")), Some(managed));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

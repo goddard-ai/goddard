@@ -6052,6 +6052,7 @@ impl Waku {
                 self.pending_boss_browse.push_back((session_id, url, title));
             }
         }
+        self.ensure_sidebar_terminal_repo_roots(cx);
         let theme = Theme::current(cx);
         // The open-time fallback for surfaces with nothing focusable of
         // their own — held until a frame actually shows the panel so a
@@ -6103,22 +6104,35 @@ impl Waku {
             Some(RightPanelSurface::Diff) => self
                 .render_right_panel_diff(width, window, cx)
                 .into_any_element(),
-            Some(RightPanelSurface::Terminal(terminal_id)) => self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .cloned()
-                .inspect(|terminal| {
-                    terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
-                })
-                .map(IntoElement::into_any_element)
-                .unwrap_or_else(|| {
-                    self.render_right_panel_empty_message(
-                        tr!("right_panel.terminal_unavailable"),
-                        tr!("right_panel.terminal_unavailable_description"),
-                        cx,
-                    )
-                    .into_any_element()
-                }),
+            Some(RightPanelSurface::Terminal(terminal_id)) => div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .child(
+                    div()
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                )
+                .child(
+                    self.right_panel_terminals
+                        .get(&terminal_id)
+                        .cloned()
+                        .inspect(|terminal| {
+                            terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
+                        })
+                        .map(IntoElement::into_any_element)
+                        .unwrap_or_else(|| {
+                            self.render_right_panel_empty_message(
+                                tr!("right_panel.terminal_unavailable"),
+                                tr!("right_panel.terminal_unavailable_description"),
+                                cx,
+                            )
+                            .into_any_element()
+                        }),
+                )
+                .into_any_element(),
             Some(RightPanelSurface::File(path)) => self
                 .render_right_panel_file(path, width, true, None, window, cx)
                 .into_any_element(),

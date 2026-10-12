@@ -11409,6 +11409,7 @@ dependencies = [
  "smol",
  "tar",
  "tokio",
+ "toml 0.8.23",
  "tungstenite 0.30.0",
  "unicode-segmentation",
  "url",
