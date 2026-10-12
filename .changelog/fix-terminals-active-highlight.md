@@ -1,0 +1,1 @@
+- The sidebar's Terminals group highlights only the active standalone terminal, not terminals associated with tasks.

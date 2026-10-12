@@ -2072,8 +2072,9 @@ impl Waku {
             .and_then(|terminal| terminal.read(cx).last_command_started_at())
             .unwrap_or(record.opened_at);
         let time_label = format_time_ago(unix_time().saturating_sub(started_at));
-        let selected = self.selected_terminal == Some(terminal_id)
-            || self.docked_terminal_visible(terminal_id);
+        // Only a standalone terminal owns selection in the Terminals group;
+        // session terminals stay associated with their task even when active.
+        let selected = record.session.is_none() && self.terminal_is_active_surface(terminal_id);
         let renaming = self.terminal_rename == Some(terminal_id);
         let menu = self.menu_handle(format!("terminal-{terminal_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
