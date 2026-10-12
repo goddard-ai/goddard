@@ -5291,6 +5291,35 @@ impl Waku {
         )
     }
 
+    fn queued_messages_visible(&self) -> bool {
+        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
+            return false;
+        }
+        self.selected_session()
+            .is_some_and(|session| self.has_visible_queued_messages(session))
+    }
+
+    fn has_visible_queued_messages(&self, session: &AgentSession) -> bool {
+        let session_id = session.id;
+        let boss_chat = self.is_boss_chat_session(session_id);
+        session.queued_messages.iter().any(|message| {
+            // A steer parked mid-turn renders at the transcript's end, not
+            // in this card.
+            // Employee notifications stay in the durable queue, where the
+            // daemon waits behind user prompts; they are not Boss chat drafts.
+            (!boss_chat || !message.is_agent_owned())
+                && !super::runtime::queued_message_is_pending_steer(session, message)
+                && (!message.hidden || queued_message_is_continue(message))
+        })
+    }
+
+    fn is_boss_chat_session(&self, session_id: Uuid) -> bool {
+        self.boss_ui
+            .states
+            .values()
+            .any(|state| state.session_id == Some(session_id))
+    }
+
     /// `session`'s queue card — the bordered, top-rounded sheet of parked
     /// follow-ups a lane insets above its composer card. Shared by the
     /// session column and a side chat's lane.
@@ -5300,22 +5329,10 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let session_id = session.id;
-        let boss_chat = self
-            .boss_ui
-            .states
-            .values()
-            .any(|state| state.session_id == Some(session_id));
-        if !session.queued_messages.iter().any(|message| {
-            // A steer parked mid-turn renders at the transcript's end, not
-            // in this card.
-            // Employee notifications stay in the durable queue, where the
-            // daemon waits behind user prompts; they are not Boss chat drafts.
-            (!boss_chat || !message.is_agent_owned())
-                && !super::runtime::queued_message_is_pending_steer(session, message)
-                && (!message.hidden || queued_message_is_continue(message))
-        }) {
+        if !self.has_visible_queued_messages(session) {
             return None;
         }
+        let boss_chat = self.is_boss_chat_session(session_id);
         let theme = Theme::current(cx);
         let steerable = self.session_can_steer(session)
             || (session.is_busy()
@@ -5997,7 +6014,7 @@ impl Waku {
     }
 
     fn render_save_draft_chip(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
-        if self.composer_is_empty(cx) {
+        if self.composer_is_empty(cx) || self.queued_messages_visible() {
             return None;
         }
         let theme = Theme::current(cx);
